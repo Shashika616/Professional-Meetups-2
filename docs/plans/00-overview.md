@@ -24,6 +24,53 @@ routes, the exact request/response shape checked against the inventory this
 plan is grounded on (`docs/decisions/adr-001-modular-monolith-architecture.md`'s
 "Grounding" section) — not just "returns 200."
 
+## Quality bar — applies to every phase, not just Phase 1
+
+Non-negotiable, per Shashika's explicit instruction. A phase is not "done"
+until all of these hold, and its completion report must address each one
+explicitly (not just claim "done" and move on):
+
+- **Completeness.** Every RPC, route, and business rule for that phase's
+  module — from `docs/decisions/adr-001-modular-monolith-architecture.md`'s
+  "Grounding" inventory — is ported. The completion report must include an
+  explicit checklist against the relevant inventory rows, so a silent gap
+  can't hide behind a general "looks complete."
+- **No client-side-only validation, anywhere.** The copied `frontend/`'s own
+  validators exist for instant UI feedback only, never as the source of
+  truth — every module re-validates every rule server-side as if the
+  frontend didn't exist. Read the source's actual validation logic; don't
+  infer a rule from a field name.
+- **Security.** Walk `docs/security-review-framework.md`'s full six-property
+  checklist against the module just built, in the completion report, not as
+  an unstructured bug hunt. That doc also names two specific,
+  currently-unfixed vulnerabilities in the source code being ported — the
+  Apple/Google `id_token` replay gap (missing `nonce` check, Phase 1 scope)
+  and the Safety Gate's missing per-participant authorization check (Phase 2
+  scope) — both must be **fixed during the port**, not carried forward
+  silently just because the source has them. Every SQL query parameterized,
+  no exceptions; every authorization decision sourced from the verified JWT
+  context, never a client-supplied field; secrets never logged.
+- **Code quality, algorithms, data structures.** Idiomatic Go; the
+  `apperror` sentinel-error pattern used consistently rather than ad hoc
+  error strings; no unbounded queries (pagination capped, same limits as the
+  source); no accidental O(n²) where an indexed lookup or a single query
+  would do; no N+1 query patterns introduced where the source used a single
+  join/batch call.
+- **Real, run tests — not claimed ones.** Unit tests for pure logic
+  (validators, pure functions) plus integration tests against a real,
+  ephemeral Postgres for anything touching the database — both actually
+  executed (`go test ./...`, real output in the report), not written and
+  assumed passing. Cover adversarial/negative cases explicitly, not just the
+  happy path: wrong-owner/IDOR attempts, expired or tampered tokens,
+  oversized input, boundary conditions on every rate limit.
+- **Design review.** Before declaring a phase done, explicitly check it
+  against ADR-001's own rules — no cross-schema foreign keys, no
+  reintroduced outbox/relay/circuit-breaker machinery, no module reaching
+  into another module's repository/SQL directly, event-bus `Publish` calls
+  in the same transaction as the business write. A phase that quietly
+  drifts from ADR-001 "because it was easier" is a finding to report and
+  fix, not a silent judgment call.
+
 ## Sequencing note
 
 Phase 1 is the only one queued right now. Phases 2-5 get their own prompt

@@ -160,6 +160,20 @@ this file). Constructs the shared `db.Pool`, the `eventbus.Bus`, and each
 module's `Service` in `main()`, wires the module's `Subscribe` calls (none
 yet this phase), starts serving.
 
+## Security fix required in this phase (not optional, not a later cleanup)
+
+Per `docs/security-review-framework.md`'s Authenticity section: the source's
+Apple/Google `id_token` verification never checks a `nonce` claim, a real
+replay exposure. Fix this as part of porting `internal/identity` — don't
+port the gap. Concretely: `internal/modules/auth`'s federated-signup/
+sign-in path needs to accept a client-generated `nonce` alongside the
+`id_token`, and `identity.Verify` needs to check it against the token's own
+`nonce` claim, the same way LinkedIn's `state`-based CSRF check already
+works in this codebase. This touches the request shape for
+`CompleteFederatedSignup`/`LinkIdentity` (an added `nonce` field) — note it
+explicitly in the completion report as a deliberate contract addition beyond
+a 1:1 port, same category as the JWT-signing relocation in Step 3.
+
 ## Explicitly not in this phase
 
 - `meetup`, `billing`, `notification` modules and their gateway routes
@@ -168,13 +182,24 @@ yet this phase), starts serving.
 
 ## When done
 
+Everything in `docs/plans/00-overview.md`'s "Quality bar" section applies
+here — walk it explicitly, don't just report the items below and call it
+done:
+
 Report: `go build ./...` / `go vet ./...` / `go test ./...` output for real
-(this environment has a working Go toolchain — use it), a list of every
-route this phase wires with its exact method+path+middleware (should match
-the auth subset of the inventory table exactly), confirmation the JWT
-signing-key relocation works end to end (sign in, get a real token back,
-call an authenticated route with it), and confirmation the copied
-`frontend/` needs zero changes to talk to this gateway for the routes this
-phase covers (point `AppConfig`'s base URL at this gateway's port and
-exercise the LinkedIn/Apple/Google sign-in + SOS flows for real, or explain
-precisely what couldn't be exercised and why).
+(this environment has a working Go toolchain — use it), including
+adversarial/negative-case tests (wrong-user access attempts, expired/
+tampered JWTs, an id_token with a missing/mismatched `nonce`, oversized
+input, rate-limit boundary behavior) — not just happy-path coverage; a list
+of every route this phase wires with its exact method+path+middleware
+(should match the auth subset of the inventory table exactly, i.e. a
+completeness checklist against it, not a general "looks complete");
+confirmation the JWT signing-key relocation works end to end (sign in, get a
+real token back, call an authenticated route with it); confirmation the
+nonce fix above actually rejects a replayed/nonce-mismatched id_token in a
+test; a walk of `docs/security-review-framework.md`'s six properties against
+what this phase built; and confirmation the copied `frontend/` needs zero
+changes to talk to this gateway for the routes this phase covers (point
+`AppConfig`'s base URL at this gateway's port and exercise the LinkedIn/
+Apple/Google sign-in + SOS flows for real, or explain precisely what
+couldn't be exercised and why).

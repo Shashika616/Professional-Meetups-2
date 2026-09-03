@@ -1,0 +1,14 @@
+# Generates into internal/proto/... to match the go_package option declared
+# in each .proto file. Generated code is committed (not gitignored) so a
+# fresh clone builds without buf — same convention as the sibling
+# microservices repo's own buf.gen.yaml, with the output directory moved
+# from shared/proto to internal/proto (this repo has no shared/ module —
+# one Go module, everything non-main under internal/).
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: internal/proto
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: internal/proto
+    opt: paths=source_relative
