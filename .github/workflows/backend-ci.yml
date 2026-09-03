@@ -1,0 +1,75 @@
+name: Backend CI
+
+# Separate from flutter-ci.yml on purpose, same reasoning as the sibling
+# microservices repo — Go and Dart/Flutter are unrelated toolchains, no
+# reason to couple their pipelines. Much simpler than that repo's
+# backend-ci.yml because this backend is one Go module (ADR-001; see
+# docs/plans/01-phase1-scaffold-gateway-auth.md Step 0), not six — one
+# build/vet/lint/test pass at the module root instead of a loop over six
+# service directories.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build-lint-test:
+    runs-on: ubuntu-latest
+
+    # Backs any integration tests that need a real Postgres (mirrors the
+    # image the sibling repo's docker-compose.yml and CI both use). No redis
+    # service — rate limiting is in-memory in this backend (ADR-001 §5), so
+    # nothing here needs it.
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: monolith_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d monolith_db"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Picked up by whatever skip-if-unreachable helper this backend's
+      # integration tests use (mirroring the sibling repo's
+      # requirePostgres-style pattern) — with this container healthy, tests
+      # run for real instead of skipping.
+      DATABASE_URL: postgres://app:app@localhost:5432/monolith_db?sslmode=disable
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned, not a floating channel — same lesson already learned and
+      # documented in the sibling repo's flutter-ci.yml: an unpinned
+      # toolchain silently drifts to whatever's current on the day CI runs.
+      # Keep this in step with backend/go.mod's own go directive.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.6"
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+
+      - name: Lint
+        working-directory: backend
+        run: golangci-lint run ./...
+
+      - name: Test
+        working-directory: backend
+        run: go test ./...

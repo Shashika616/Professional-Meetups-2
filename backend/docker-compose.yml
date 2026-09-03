@@ -1,0 +1,122 @@
+name: professional-meetups-monolith-backend
+
+# Local development stack for the modular-monolith backend (ADR-001, see
+# ../docs/decisions/adr-001-modular-monolith-architecture.md). Two backend
+# processes only — gateway and monolith — one Postgres, no Redis, no Pub/Sub
+# emulator, no per-service databases. Contrast with
+# ../../Professional-Meetups/backend/docker-compose.yml (the microservices
+# version this is a parallel, independent rewrite of): that one runs 5
+# backend containers + Postgres + Redis + a Pub/Sub emulator; this one runs
+# 2 backend containers + Postgres, nothing else (ADR-001 §§4-5).
+
+services:
+  postgres:
+    # postgis/postgis, not plain postgres — the meetup module (Phase 2) needs
+    # the PostGIS extension for its geography columns, same reasoning as the
+    # sibling microservices repo (see its own docker-compose.yml comment).
+    # One database, multiple schemas (auth, meetup, billing) — ADR-001 §3 —
+    # not one database per module.
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+      POSTGRES_DB: monolith_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1 is load-bearing on a fresh volume, not decoration — see
+      # the sibling repo's docker-compose.yml for the full explanation (a
+      # socket-based check reports "healthy" during Postgres's init-only
+      # phase, before it's actually listening on TCP, which is what every
+      # dependent below needs).
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U ${POSTGRES_USER:-app} -d monolith_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: applies every migration under backend/migrations/ against
+  # monolith_db (schema-qualified — e.g. CREATE SCHEMA IF NOT EXISTS auth;
+  # CREATE TABLE auth.users (...); — one migration history, not one per
+  # module, per ADR-001 §3's single-database decision), then exits. Re-run
+  # any time with `docker compose run --rm migrate`. This service itself
+  # doesn't change across phases — it just picks up whatever's newest under
+  # backend/migrations/ as later phases add meetup/billing schema files.
+  migrate:
+    image: migrate/migrate:v4.17.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/monolith_db?sslmode=disable"
+      - "up"
+
+  monolith:
+    build:
+      context: .
+      dockerfile: cmd/monolith/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "9090:9090" # gRPC — not exposed publicly in production, only opened here for local debugging; the gateway is the one public entry point
+    environment:
+      MONOLITH_PORT: 9090
+      DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/monolith_db?sslmode=disable
+      # --- auth module config (Phase 1) — same names/fallback behavior as
+      # the sibling repo's services/auth/internal/config/config.go. Empty
+      # Twilio/Gmail/Resend values fall back to logging senders, same as
+      # there; empty Apple/Google audience values make those identity
+      # providers fail closed rather than block startup.
+      LINKEDIN_CLIENT_ID: ${LINKEDIN_CLIENT_ID}
+      LINKEDIN_CLIENT_SECRET: ${LINKEDIN_CLIENT_SECRET}
+      LINKEDIN_REDIRECT_URI: ${LINKEDIN_REDIRECT_URI}
+      APPLE_SERVICES_ID: ${APPLE_SERVICES_ID}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      GMAIL_ADDRESS: ${GMAIL_ADDRESS}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL}
+      WORK_EMAIL_HMAC_KEY_PATH: /secrets/work_email_hmac.key
+      # --- meetup module config (Phase 2 — add here when built, don't wire early) ---
+      # --- billing module config (Phase 3 — add here when built) ---
+      # --- notification module config (Phase 4 — e.g. FIREBASE_SERVICE_ACCOUNT_JSON, add here when built) ---
+    volumes:
+      - ./secrets:/secrets:ro
+
+  gateway:
+    build:
+      context: .
+      dockerfile: cmd/gateway/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      monolith:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      MONOLITH_ADDR: monolith:9090
+      # Gateway holds BOTH JWT keys now (ADR-001 §6) — it signs new tokens
+      # (private key) and verifies bearer tokens on every subsequent request
+      # (public key). The monolith never sees the private key at all.
+      JWT_PRIVATE_KEY_PATH: /secrets/jwt_private.pem
+      JWT_PUBLIC_KEY_PATH: /secrets/jwt_public.pem
+      # No REDIS_ADDR — rate limiting is in-memory, single gateway instance
+      # (ADR-001 §5's explicit, accepted trade-off).
+    volumes:
+      - ./secrets:/secrets:ro
+
+volumes:
+  postgres-data:

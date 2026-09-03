@@ -4,6 +4,13 @@
 /backend/**/*.out
 /backend/**/vendor/
 
+# Secrets — generate your own per backend/secrets/README.md, never commit
+/backend/secrets/*.pem
+/backend/secrets/*.key
+/backend/.env
+!/backend/secrets/.gitkeep
+!/backend/secrets/README.md
+
 # Flutter/Dart (mirrors frontend/.gitignore, root-level safety net)
 frontend/.dart_tool/
 frontend/build/

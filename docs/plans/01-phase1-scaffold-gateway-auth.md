@@ -6,6 +6,21 @@ platform packages, the `cmd/gateway` binary, and the `auth` module
 §2). Ported from `backend/services/auth` and `backend/services/gateway` in
 `../Professional-Meetups`.
 
+## Step 0 — Go module layout
+
+**One Go module for the whole backend** — `backend/go.mod` (module path
+`professional-meetups-monolith/backend` — this is a private, unpublished
+module, the path just needs to be a stable import prefix, not a resolvable
+URL). `cmd/gateway` and `cmd/monolith` are two `main` packages inside this
+one module, importing `internal/...` packages directly as normal Go
+packages — **no `go.work`, no per-service `go.mod`.** The microservices repo
+needed six separate modules because its services were six independently
+versioned deployables; here there are only two binaries and they're built
+from the same source tree in lockstep, so one module is simpler and correct.
+`docker-compose.yml`, both Dockerfiles, and `.github/workflows/backend-ci.yml`
+(all already written, this repo) assume this single-module layout — don't
+restructure around a different one without updating all three.
+
 ## Step 1 — `internal/eventbus`
 
 One file, `backend/internal/eventbus/bus.go`:

@@ -1,0 +1,50 @@
+name: Flutter CI
+
+# Copied unmodified from the sibling microservices repo's
+# .github/workflows/flutter-ci.yml — frontend/ here is the same, unmodified
+# frontend (see this repo's README), so its CI doesn't need to change either.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned, not `channel: stable` — an unpinned channel drifts to whatever
+      # Dart/Flutter release is current on the day CI happens to run, which
+      # can silently change `dart format`'s output style and flip analyzer
+      # rules underneath you (this exact failure mode already hit the
+      # sibling repo once — see its own flutter-ci.yml comment). Bump this
+      # deliberately, in step with whatever Flutter SDK version developers
+      # actually run locally, not passively.
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: flutter analyze --fatal-infos
+
+      - name: Run tests
+        run: flutter test --coverage
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: frontend/coverage/lcov.info
