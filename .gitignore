@@ -1,0 +1,18 @@
+# Go
+/backend/**/*.exe
+/backend/**/bin/
+/backend/**/*.out
+/backend/**/vendor/
+
+# Flutter/Dart (mirrors frontend/.gitignore, root-level safety net)
+frontend/.dart_tool/
+frontend/build/
+frontend/coverage/
+frontend/.pub-cache/
+frontend/.pub/
+frontend/.env
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/

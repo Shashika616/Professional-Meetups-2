@@ -1,0 +1,383 @@
+import 'dart:async' show Completer;
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+
+import 'package:professional_connections_platform/features/meetups/widgets/stadia_map_location_step.dart';
+
+import 'support/fake_geolocator_platform.dart';
+
+/// A minimal GeoJSON FeatureCollection matching Stadia's real response
+/// shape (confirmed directly against a live request during this
+/// addendum's bug diagnosis — see TESTING-NOTES.md).
+String _featureCollection(List<(String label, double lat, double lon)> places) {
+  final features = places
+      .map(
+        (p) =>
+            '{"type":"Feature","geometry":{"type":"Point","coordinates":[${p.$3},${p.$2}]},'
+            '"properties":{"label":"${p.$1}"}}',
+      )
+      .join(',');
+  return '{"type":"FeatureCollection","features":[$features]}';
+}
+
+void main() {
+  setUp(() => debugStadiaApiKeyOverride = 'test-key');
+  tearDown(() => debugStadiaApiKeyOverride = null);
+
+  testWidgets(
+    'debounces: several rapid keystrokes collapse into exactly one request',
+    (tester) async {
+      var requestCount = 0;
+      final client = MockClient((request) async {
+        requestCount++;
+        return http.Response(
+          _featureCollection([('The Coffee Shop', 6.9213, 79.8756)]),
+          200,
+        );
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StadiaMapLocationStep(
+              onSubmit: (_, _, _) {},
+              httpClient: client,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final field = find.widgetWithText(
+        TextField,
+        'Search for a cafe, restaurant, or venue',
+      );
+      // Five keystrokes, each only a single frame apart — well within the
+      // 300ms debounce window, so none of them should fire their own
+      // request.
+      for (final partial in ['c', 'co', 'cof', 'coff', 'coffee']) {
+        await tester.enterText(field, partial);
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(requestCount, 0, reason: 'no request before the debounce settles');
+
+      // Let the debounce window elapse.
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+
+      expect(
+        requestCount,
+        1,
+        reason: 'one debounce-settled request, not one per keystroke',
+      );
+    },
+  );
+
+  testWidgets('selecting a suggestion fills the field, recenters, and CONTINUE '
+      'submits those coordinates', (tester) async {
+    double? submittedLat;
+    double? submittedLng;
+    String? submittedLabel;
+    final client = MockClient((request) async {
+      return http.Response(
+        _featureCollection([('The Coffee Shop', 6.9213, 79.8756)]),
+        200,
+      );
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StadiaMapLocationStep(
+            onSubmit: (lat, lng, label) {
+              submittedLat = lat;
+              submittedLng = lng;
+              submittedLabel = label;
+            },
+            httpClient: client,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search for a cafe, restaurant, or venue'),
+      'coffee',
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+
+    expect(find.text('The Coffee Shop'), findsOneWidget);
+    await tester.tap(find.text('The Coffee Shop'));
+    await tester.pump();
+    await tester.pump();
+
+    await tester.tap(find.text('CONTINUE'));
+    await tester.pump();
+
+    expect(submittedLat, closeTo(6.9213, 0.0001));
+    expect(submittedLng, closeTo(79.8756, 0.0001));
+    expect(submittedLabel, 'The Coffee Shop');
+  });
+
+  testWidgets('a stale in-flight suggestions request landing after a result is '
+      'selected does not reopen the dropdown (regression: cancelling the '
+      'debounce Timer alone does not stop a request that already fired)', (
+    tester,
+  ) async {
+    var requestCount = 0;
+    final secondResponse = Completer<http.Response>();
+    final client = MockClient((request) async {
+      requestCount++;
+      if (requestCount == 1) {
+        return http.Response(
+          _featureCollection([('The Coffee Shop', 6.9213, 79.8756)]),
+          200,
+        );
+      }
+      // Simulates a slow second request still in flight when the user
+      // taps a suggestion from the first, already-resolved list below.
+      return secondResponse.future;
+    });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StadiaMapLocationStep(
+            onSubmit: (_, _, _) {},
+            httpClient: client,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final field = find.widgetWithText(
+      TextField,
+      'Search for a cafe, restaurant, or venue',
+    );
+    await tester.enterText(field, 'coffee');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+
+    expect(find.text('The Coffee Shop'), findsOneWidget);
+
+    // A further keystroke starts a second, slow request — still
+    // in-flight (blocked on secondResponse) when the tap below fires.
+    await tester.enterText(field, 'coffee shop near me');
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.text('The Coffee Shop'));
+    await tester.pump();
+    await tester.pump();
+
+    // Now let the stale second request resolve.
+    secondResponse.complete(
+      http.Response(_featureCollection([('Stale Result', 1.0, 1.0)]), 200),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(
+      find.text('Stale Result'),
+      findsNothing,
+      reason:
+          'a request in flight before the selection must be discarded, '
+          'not repopulate the dropdown after the user already picked an '
+          'address',
+    );
+    expect(find.byType(ListTile), findsNothing);
+  });
+
+  testWidgets(
+    'typing a full query and pressing search submits directly, without '
+    'picking a suggestion, and CONTINUE submits those coordinates',
+    (tester) async {
+      double? submittedLat;
+      double? submittedLng;
+      final client = MockClient((request) async {
+        expect(request.url.path, '/geocoding/v1/search');
+        return http.Response(
+          _featureCollection([('Department of Coffee', 6.9172, 79.8634)]),
+          200,
+        );
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StadiaMapLocationStep(
+              onSubmit: (lat, lng, _) {
+                submittedLat = lat;
+                submittedLng = lng;
+              },
+              httpClient: client,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.enterText(
+        find.widgetWithText(
+          TextField,
+          'Search for a cafe, restaurant, or venue',
+        ),
+        'Department of Coffee',
+      );
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('Department of Coffee'), findsWidgets);
+
+      await tester.tap(find.text('CONTINUE'));
+      await tester.pump();
+
+      expect(submittedLat, closeTo(6.9172, 0.0001));
+      expect(submittedLng, closeTo(79.8634, 0.0001));
+    },
+  );
+
+  testWidgets(
+    'the scrim behind an open dropdown blocks taps to CONTINUE and closes '
+    'the dropdown instead of submitting',
+    (tester) async {
+      var submitted = false;
+      final client = MockClient((request) async {
+        return http.Response(
+          _featureCollection([('The Coffee Shop', 6.9213, 79.8756)]),
+          200,
+        );
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StadiaMapLocationStep(
+              onSubmit: (_, _, _) => submitted = true,
+              httpClient: client,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.enterText(
+        find.widgetWithText(
+          TextField,
+          'Search for a cafe, restaurant, or venue',
+        ),
+        'coffee',
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+
+      expect(find.text('The Coffee Shop'), findsOneWidget);
+      // CONTINUE is enabled (the field has text) but sits underneath the
+      // scrim while the dropdown is open — before the scrim, this tap
+      // reached CONTINUE directly, which is exactly the bug being fixed
+      // (submitting instead of picking a suggestion).
+      await tester.tap(find.text('CONTINUE'), warnIfMissed: false);
+      await tester.pump();
+
+      expect(
+        submitted,
+        false,
+        reason: 'the tap should hit the scrim, not CONTINUE underneath it',
+      );
+      expect(
+        find.text('The Coffee Shop'),
+        findsNothing,
+        reason: 'tapping the scrim dismisses the dropdown',
+      );
+    },
+  );
+
+  testWidgets('a non-200 response leaves the suggestions list empty', (
+    tester,
+  ) async {
+    final client = MockClient((request) async => http.Response('', 401));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StadiaMapLocationStep(
+            onSubmit: (_, _, _) {},
+            httpClient: client,
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Search for a cafe, restaurant, or venue'),
+      'coffee',
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+
+    expect(find.byType(ListTile), findsNothing);
+  });
+
+  testWidgets(
+    '"use my current location" no longer fills the field with a hardcoded '
+    'placeholder — the field stays empty and CONTINUE still submits an '
+    'empty label (ADR-029, round-8 hardening)',
+    (tester) async {
+      GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+        position: testPosition(lat: 6.9213, lng: 79.8756),
+      );
+
+      double? submittedLat;
+      double? submittedLng;
+      String? submittedLabel;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: StadiaMapLocationStep(
+              onSubmit: (lat, lng, label) {
+                submittedLat = lat;
+                submittedLng = lng;
+                submittedLabel = label;
+              },
+              httpClient: MockClient(
+                (request) async => http.Response(_featureCollection([]), 200),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('USE MY CURRENT LOCATION'));
+      await tester.pump();
+      await tester.pump();
+
+      // The old hardcoded placeholder is gone — never shown, never
+      // submitted. The field stays empty; the server reverse-geocodes it.
+      expect(find.text('Current location'), findsNothing);
+      final field = find.widgetWithText(
+        TextField,
+        'Search for a cafe, restaurant, or venue',
+      );
+      expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+
+      // CONTINUE must still be enabled even with an empty field — using
+      // current location is itself enough to unlock it.
+      await tester.tap(find.text('CONTINUE'));
+      await tester.pump();
+
+      expect(submittedLat, closeTo(6.9213, 0.0001));
+      expect(submittedLng, closeTo(79.8756, 0.0001));
+      expect(submittedLabel, isEmpty);
+    },
+  );
+}

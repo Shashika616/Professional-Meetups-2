@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- ADR-030 (round-10) — Push Notifications capability. "development"
+	     is correct for local/debug builds and Xcode-run builds; a real
+	     release/TestFlight build needs this switched to "production" (Xcode
+	     does this automatically for an Archive build once a paid team with
+	     a distribution profile is attached — not yet, see TESTING-NOTES.md,
+	     Apple Developer Program is deliberately deferred). Real delivery to
+	     any device is still blocked on the separately-deferred APNs key
+	     upload to the professional-meetups-976d2 Firebase project either
+	     way — this entitlement alone doesn't unblock that. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

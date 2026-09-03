@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "762300092898",
+    "project_id": "professional-meetups-976d2",
+    "storage_bucket": "professional-meetups-976d2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:762300092898:android:f5cbcf66dd507cdfae69bb",
+        "android_client_info": {
+          "package_name": "com.profconn.professional_connections_platform"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHXpJo26EOccLmyF39GkkcBNucg3626T8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
