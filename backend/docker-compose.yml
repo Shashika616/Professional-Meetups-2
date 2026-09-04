@@ -94,6 +94,10 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL}
       WORK_EMAIL_HMAC_KEY_PATH: /secrets/work_email_hmac.key
+      # Shared secret the monolith requires on every incoming gRPC call
+      # (ADR-001's 2026-09-04 correction). Same .env value as the gateway's
+      # MONOLITH_SHARED_SECRET below — one source, so they can't drift.
+      INTERNAL_GRPC_SHARED_SECRET: ${INTERNAL_GRPC_SHARED_SECRET:?set INTERNAL_GRPC_SHARED_SECRET in backend/.env — see .env.example}
       # --- meetup module config (Phase 2 — add here when built, don't wire early) ---
       # --- billing module config (Phase 3 — add here when built) ---
       # --- notification module config (Phase 4 — e.g. FIREBASE_SERVICE_ACCOUNT_JSON, add here when built) ---
@@ -118,6 +122,10 @@ services:
       # (public key). The monolith never sees the private key at all.
       JWT_PRIVATE_KEY_PATH: /secrets/jwt_private.pem
       JWT_PUBLIC_KEY_PATH: /secrets/jwt_public.pem
+      # The other half of the internal gRPC authentication — the same value
+      # the monolith verifies against (see its
+      # INTERNAL_GRPC_SHARED_SECRET above).
+      MONOLITH_SHARED_SECRET: ${INTERNAL_GRPC_SHARED_SECRET:?set INTERNAL_GRPC_SHARED_SECRET in backend/.env — see .env.example}
       # No REDIS_ADDR — rate limiting is in-memory, single gateway instance
       # (ADR-001 §5's explicit, accepted trade-off).
     volumes:

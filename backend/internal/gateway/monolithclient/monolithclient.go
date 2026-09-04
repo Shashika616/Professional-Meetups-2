@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"professional-meetups-monolith/backend/internal/platform/internalauth"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
 )
 
@@ -129,8 +130,17 @@ type grpcClient struct {
 
 // New connects to the monolith at addr (e.g. "monolith:9090"), blocking
 // until the connection is ready or connectTimeout elapses.
-func New(addr string) (Client, error) {
-	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+//
+// sharedSecret authenticates this process to the monolith (ADR-001's
+// 2026-09-04 correction). It is attached by a connection-level interceptor
+// rather than per call site, so a method added to this client later cannot
+// forget it — the failure mode of the alternative is a new RPC that works in
+// a test with the interceptor stubbed out and 401s in production.
+func New(addr, sharedSecret string) (Client, error) {
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithUnaryInterceptor(internalauth.UnaryClientInterceptor(sharedSecret)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("monolithclient: create grpc client for %s: %w", addr, err)
 	}

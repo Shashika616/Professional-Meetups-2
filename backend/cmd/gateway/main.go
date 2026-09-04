@@ -51,7 +51,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	monolith, err := monolithclient.New(cfg.MonolithAddr)
+	monolith, err := monolithclient.New(cfg.MonolithAddr, cfg.MonolithSharedSecret)
 	if err != nil {
 		return fmt.Errorf("connect to monolith: %w", err)
 	}

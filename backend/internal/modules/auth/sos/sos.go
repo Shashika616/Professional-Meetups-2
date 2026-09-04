@@ -5,11 +5,9 @@
 // and re-homing it here would have been a redesign, not a port.
 //
 // Ported from ../Professional-Meetups/backend/services/auth/internal/
-// service/sos.go. One deliberate behavior change, flagged at
-// sendSOSAlertWithRetry: the source wraps each send in a circuit breaker
-// (shared/breaker) as well as a bounded retry, and ADR-001 §7 does not carry
-// shared/breaker into this repo at all. The retry is kept, the breaker is
-// not — see that function's comment for the consequence.
+// service/sos.go, including its per-channel circuit breakers — see
+// sendWithResilience and ADR-001's 2026-09-04 correction, which scoped "no
+// breaker" back to the outbox/Pub/Sub use case it was actually about.
 package sos
 
 import (
@@ -24,6 +22,7 @@ import (
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/modules/auth/sms"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
+	"professional-meetups-monolith/backend/internal/platform/breaker"
 	"professional-meetups-monolith/backend/internal/platform/geo"
 )
 
@@ -102,6 +101,20 @@ type Service struct {
 	email           email.EmailSender
 	validate        Validator
 	logger          *slog.Logger
+
+	// smsBreaker/emailBreaker — one breaker per CHANNEL, not per call and not
+	// per contact. A breaker's entire purpose is remembering consecutive
+	// failures ACROSS requests, so it can notice "Twilio is down right now";
+	// one constructed per RPC (or per contact) could never do that, and would
+	// be indistinguishable from no breaker at all. They are therefore fields
+	// on the long-lived Service, built once in New, and shared by every
+	// TriggerSOS call from every user.
+	//
+	// Constructed internally with fixed thresholds rather than injected,
+	// mirroring the source: these are tuning constants of this failure-
+	// handling strategy, not a dependency a caller should be choosing.
+	smsBreaker   *breaker.Breaker
+	emailBreaker *breaker.Breaker
 }
 
 // New constructs a Service. Every dependency is passed explicitly — no
@@ -126,8 +139,20 @@ func New(
 		email:           emailSender,
 		validate:        validate,
 		logger:          logger,
+		smsBreaker:      breaker.New(sosBreakerFailureThreshold, sosBreakerResetTimeout),
+		emailBreaker:    breaker.New(sosBreakerFailureThreshold, sosBreakerResetTimeout),
 	}
 }
+
+// sosBreakerFailureThreshold/sosBreakerResetTimeout size the two per-channel
+// breakers. Same values as the source: open after 5 consecutive failures,
+// and after 30s let exactly one trial call through (half-open) — a success
+// closes it again, a failure re-opens it. 30s is short enough that a
+// recovered vendor is picked up again within one emergency's timescale.
+const (
+	sosBreakerFailureThreshold = 5
+	sosBreakerResetTimeout     = 30 * time.Second
+)
 
 // AddTrustedContact enforces the soft cap of 3 (ErrInvalidInput if exceeded)
 // and requires at least one of phone_number/email.
@@ -247,7 +272,7 @@ func (s *Service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (Trigge
 	for _, contact := range contacts {
 		sent := false
 		if contact.PhoneNumber != "" {
-			if err := s.sendWithRetry(ctx, func() error {
+			if err := s.sendWithResilience(ctx, s.smsBreaker, func() error {
 				return s.sms.SendAlert(ctx, contact.PhoneNumber, message)
 			}); err != nil {
 				// Never logs the contact's number or the message body — an
@@ -259,7 +284,7 @@ func (s *Service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (Trigge
 			}
 		}
 		if contact.Email != "" {
-			if err := s.sendWithRetry(ctx, func() error {
+			if err := s.sendWithResilience(ctx, s.emailBreaker, func() error {
 				return s.email.SendAlert(ctx, contact.Email, message)
 			}); err != nil {
 				s.logger.Error("send sos alert email", "error", err)
@@ -300,28 +325,32 @@ const (
 	sendRetryDelay  = 500 * time.Millisecond
 )
 
-// sendWithRetry runs send up to sendMaxAttempts times, giving an individual
-// send a fighting chance against a transient failure before TriggerSOS's
-// per-contact tolerance kicks in.
+// sendWithResilience runs send through br — so a channel that is currently
+// down fails fast via breaker.ErrOpen instead of eating the retry delay on
+// every subsequent contact — with up to sendMaxAttempts tries inside it.
+// Same shape as the source's sendSOSAlertWithResilience: the retry is the
+// inner layer, the breaker the outer one.
 //
-// DELIBERATE DEVIATION FROM THE SOURCE, reported rather than silent: the
-// source additionally wraps each send in a per-channel circuit breaker
-// (services/auth/internal/service/sos.go's smsBreaker/emailBreaker), so that
-// once Twilio or Resend is genuinely down, subsequent contacts fail fast
-// instead of each paying the full retry delay. ADR-001 §7 does not carry
-// shared/breaker into this repo, and the phase prompt names the
-// circuit-breaker pattern as out of scope, so it isn't rebuilt here. The
-// consequence, worth knowing: during a full channel outage this call can
-// take up to (contacts x channels x attempts x per-send timeout) instead of
-// failing fast after the first few. See the completion report's Availability
-// section.
-func (s *Service) sendWithRetry(ctx context.Context, send func() error) error {
+// The RPC's response contract is unchanged by this — still fully
+// synchronous, still a real success count; this only gives an individual
+// send a fighting chance against a transient failure before TriggerSOS's
+// existing per-contact tolerance (a failed contact doesn't fail the whole
+// call) kicks in.
+func (s *Service) sendWithResilience(ctx context.Context, br *breaker.Breaker, send func() error) error {
 	var lastErr error
 	for attempt := 1; attempt <= sendMaxAttempts; attempt++ {
-		if err := send(); err == nil {
+		err := br.Execute(send)
+		if err == nil {
 			return nil
-		} else {
-			lastErr = err
+		}
+		lastErr = err
+		if errors.Is(err, breaker.ErrOpen) {
+			// The breaker itself is refusing to even try — retrying
+			// immediately would just get ErrOpen again with no real send
+			// attempted, so stop here rather than burning the remaining
+			// attempts (and their delays) on a channel already known to be
+			// down. This is exactly the fail-fast the breaker exists for.
+			return lastErr
 		}
 		if attempt < sendMaxAttempts {
 			select {

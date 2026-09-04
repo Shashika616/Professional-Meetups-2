@@ -29,6 +29,14 @@ type Config struct {
 	MonolithAddr      string
 	JWTPrivateKeyPath string
 	JWTPublicKeyPath  string
+	// MonolithSharedSecret authenticates this process to the monolith on
+	// every gRPC call (see internal/platform/internalauth). Required, and
+	// deliberately not defaulted: a gateway that silently started without it
+	// would fail every request at the monolith instead, which is a much
+	// harder failure to read. It must equal the monolith's own
+	// INTERNAL_GRPC_SHARED_SECRET — docker-compose.yml feeds both from the
+	// same .env value so they cannot drift.
+	MonolithSharedSecret string
 }
 
 // Load reads Config from the environment, failing fast if any required
@@ -39,6 +47,8 @@ func Load() (Config, error) {
 		MonolithAddr:      os.Getenv("MONOLITH_ADDR"),
 		JWTPrivateKeyPath: os.Getenv("JWT_PRIVATE_KEY_PATH"),
 		JWTPublicKeyPath:  os.Getenv("JWT_PUBLIC_KEY_PATH"),
+
+		MonolithSharedSecret: os.Getenv("MONOLITH_SHARED_SECRET"),
 	}
 
 	required := []struct {
@@ -49,6 +59,7 @@ func Load() (Config, error) {
 		{"MONOLITH_ADDR", cfg.MonolithAddr},
 		{"JWT_PRIVATE_KEY_PATH", cfg.JWTPrivateKeyPath},
 		{"JWT_PUBLIC_KEY_PATH", cfg.JWTPublicKeyPath},
+		{"MONOLITH_SHARED_SECRET", cfg.MonolithSharedSecret},
 	}
 	for _, req := range required {
 		if req.value == "" {

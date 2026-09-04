@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/modules/auth/sos"
@@ -287,24 +288,10 @@ func TestTriggerSOS_RetriesTransientSendFailure(t *testing.T) {
 	}
 }
 
-// TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel
-// replaces the source's TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures.
-//
-// That test asserted the circuit breaker's behavior: with 3 phone-only
-// contacts and a sustained SMS failure, the source's breaker opens on the
-// 5th recorded failure, so the 6th possible real send never happens
-// (alertCallCount == 5, not 6). ADR-001 §7 does not carry shared/breaker
-// into this repo and the phase prompt names the circuit-breaker pattern as
-// out of scope, so that behavior is deliberately gone — see
-// sos.sendWithRetry's own comment and the completion report's Availability
-// section.
-//
-// What this asserts instead is what IS still true, and what actually
-// matters for the caller: the bounded retry still runs (2 attempts per
-// send, no more), a sustained failure on one channel doesn't abort the
-// whole call, and every contact is still attempted rather than the loop
-// giving up early. The full 6 attempts is the documented cost of dropping
-// the breaker, pinned here so the change is visible rather than implicit.
+// TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel: a
+// total outage on one channel must not stop the other channel reaching every
+// contact. This is the caller-visible half of the resilience story; the
+// breaker's own mechanics are the two tests below it.
 func TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel(t *testing.T) {
 	svc, users, trustedContacts, _, emailSender, smsSender := newTestServiceForSOS(t)
 	ctx := context.Background()
@@ -330,12 +317,105 @@ func TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel(t *testi
 	if len(emailSender.alertsSent) != sos.MaxTrustedContactsPerUser {
 		t.Errorf("email alerts sent = %d, want %d", len(emailSender.alertsSent), sos.MaxTrustedContactsPerUser)
 	}
-	// 3 contacts x 2 attempts. Every failed send is retried exactly once and
-	// no more; without the source's breaker there is no early exit, which is
-	// the deliberate, reported trade-off.
-	if want := sos.MaxTrustedContactsPerUser * 2; smsSender.alertCallCount != want {
-		t.Errorf("real SMS send attempts = %d, want %d (2 bounded attempts per contact, no breaker short-circuit)",
-			smsSender.alertCallCount, want)
+	// The email channel never failed, so ITS breaker must still be closed —
+	// one channel's outage must not trip the other's.
+	if len(emailSender.alertsSent) != sos.MaxTrustedContactsPerUser {
+		t.Errorf("email sends = %d, want %d — the email breaker must be unaffected by the SMS outage",
+			len(emailSender.alertsSent), sos.MaxTrustedContactsPerUser)
+	}
+}
+
+// TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures restores the
+// source's own breaker test (services/auth/internal/service/sos_test.go),
+// per ADR-001's 2026-09-04 correction.
+//
+// 3 phone-only contacts, SMS failing sustained. Each contact's send gets up
+// to sendMaxAttempts (2) real attempts, so 3 x 2 = 6 real sends if the
+// breaker never intervened. The threshold is 5, so the breaker opens exactly
+// on the 3rd contact's 1st attempt (2+2+1 = 5 recorded failures); that
+// contact's 2nd attempt must then short-circuit via breaker.ErrOpen without
+// ever reaching the real sender — asserted via the call count, not inferred
+// from the response.
+func TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures(t *testing.T) {
+	svc, users, trustedContacts, _, _, smsSender := newTestServiceForSOS(t)
+	ctx := context.Background()
+	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
+	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
+		if _, err := trustedContacts.Insert(ctx, "user-1", fmt.Sprintf("Contact %d", i), fmt.Sprintf("+9477000000%d", i), ""); err != nil {
+			t.Fatalf("seed contact %d: %v", i, err)
+		}
+	}
+	smsSender.alertErr = errAlertSendFailed // sustained failure
+
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	if err != nil {
+		t.Fatalf("TriggerSOS() error: %v", err)
+	}
+	if resp.ContactsNotified != 0 {
+		t.Errorf("contacts_notified = %d, want 0 (every send failed)", resp.ContactsNotified)
+	}
+	if smsSender.alertCallCount != 5 {
+		t.Errorf("real send attempts = %d, want exactly 5 — the breaker opening on the 5th recorded failure must prevent a 6th real attempt",
+			smsSender.alertCallCount)
+	}
+}
+
+// TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel is
+// the property the breaker exists for and that a per-call breaker could
+// never provide: the failure memory persists ACROSS TriggerSOS calls, from
+// DIFFERENT users. Once Twilio is known to be down, the next person's
+// emergency doesn't pay the retry-and-timeout cost again — and their email
+// alert still goes out.
+func TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel(t *testing.T) {
+	svc, users, trustedContacts, _, emailSender, smsSender := newTestServiceForSOS(t)
+	ctx := context.Background()
+	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
+	users.byID["user-2"] = repository.User{ID: "user-2", FullName: "Grace Hopper"}
+	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
+		if _, err := trustedContacts.Insert(ctx, "user-1", fmt.Sprintf("Contact %d", i), fmt.Sprintf("+9477000000%d", i), ""); err != nil {
+			t.Fatalf("seed user-1 contact %d: %v", i, err)
+		}
+	}
+	// A different user, with both channels.
+	if _, err := trustedContacts.Insert(ctx, "user-2", "Second user's contact", "+94779999999", "second@example.com"); err != nil {
+		t.Fatalf("seed user-2 contact: %v", err)
+	}
+	smsSender.alertErr = errAlertSendFailed
+
+	// First call trips the SMS breaker open (5 recorded failures).
+	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 6.9, Longitude: 79.8}); err != nil {
+		t.Fatalf("first TriggerSOS() error: %v", err)
+	}
+	callsAfterFirst := smsSender.alertCallCount
+	if callsAfterFirst != 5 {
+		t.Fatalf("SMS attempts after the first call = %d, want 5 (breaker should already be open)", callsAfterFirst)
+	}
+
+	// A DIFFERENT user's emergency, moments later. The SMS channel is already
+	// known to be down, so it must fail fast — zero further real sends, and
+	// no retry delay paid.
+	start := time.Now()
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-2", Latitude: 6.9, Longitude: 79.8})
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("second TriggerSOS() error: %v", err)
+	}
+
+	if smsSender.alertCallCount != callsAfterFirst {
+		t.Errorf("SMS attempts after the second call = %d, want %d — an open breaker must not reach the real sender at all",
+			smsSender.alertCallCount, callsAfterFirst)
+	}
+	// With the breaker open there is no retry delay: sendRetryDelay is 500ms,
+	// so anything near that means it retried instead of failing fast.
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("second call took %v — an open breaker must fail fast, not pay the %v retry delay", elapsed, 500*time.Millisecond)
+	}
+	// And the healthy channel still delivered, so the caller is still helped.
+	if resp.ContactsNotified != 1 {
+		t.Errorf("contacts_notified = %d, want 1 — the email channel is healthy and must still alert the contact", resp.ContactsNotified)
+	}
+	if len(emailSender.alertsSent) != 1 {
+		t.Errorf("email alerts sent = %d, want 1 — one channel's open breaker must not affect the other's", len(emailSender.alertsSent))
 	}
 }
 

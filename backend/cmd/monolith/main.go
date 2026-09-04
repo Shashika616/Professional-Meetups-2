@@ -35,6 +35,7 @@ import (
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/modules/auth/sms"
 	"professional-meetups-monolith/backend/internal/platform/db"
+	"professional-meetups-monolith/backend/internal/platform/internalauth"
 	"professional-meetups-monolith/backend/internal/platform/logging"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
 )
@@ -64,6 +65,14 @@ func run(logger *slog.Logger) error {
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		return fmt.Errorf("config: required environment variable DATABASE_URL is not set")
+	}
+	// Required, never defaulted and never empty-means-off: an empty secret
+	// with a "skip the check when unset" fallback is how this protection
+	// silently stops existing. A monolith that can't authenticate its caller
+	// should refuse to start, not accept anyone.
+	internalSecret := os.Getenv("INTERNAL_GRPC_SHARED_SECRET")
+	if internalSecret == "" {
+		return fmt.Errorf("config: required environment variable INTERNAL_GRPC_SHARED_SECRET is not set")
 	}
 
 	cfg, err := authconfig.Load()
@@ -143,8 +152,14 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("listen on port %s: %w", port, err)
 	}
 
+	// Interceptor order is load-bearing: request-id first (so a rejected
+	// call is still traceable in the logs), then the shared-secret check,
+	// then recovery closest to the handler. Authentication runs BEFORE any
+	// module code — an unauthenticated caller never reaches business logic or
+	// the database.
 	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
 		logging.UnaryServerInterceptor(),
+		internalauth.UnaryServerInterceptor(internalSecret),
 		logging.RecoveryUnaryServerInterceptor(logger),
 	))
 	authv1.RegisterAuthServiceServer(grpcServer, grpcapi.NewAuthServer(authService))
