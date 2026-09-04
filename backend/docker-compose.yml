@@ -23,7 +23,12 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
       POSTGRES_DB: monolith_db
     ports:
-      - "5432:5432"
+      # Host port is parameterized (container port is not) so this stack can
+      # run at the same time as the sibling microservices repo's own
+      # docker-compose stack, which binds the same default ports — Phase 5's
+      # side-by-side parity pass needs both up simultaneously. Defaults are
+      # unchanged; set POSTGRES_HOST_PORT in backend/.env to move it.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -67,7 +72,7 @@ services:
       migrate:
         condition: service_completed_successfully
     ports:
-      - "9090:9090" # gRPC — not exposed publicly in production, only opened here for local debugging; the gateway is the one public entry point
+      - "${MONOLITH_HOST_PORT:-9090}:9090" # gRPC — not exposed publicly in production, only opened here for local debugging; the gateway is the one public entry point
     environment:
       MONOLITH_PORT: 9090
       DATABASE_URL: postgres://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/monolith_db?sslmode=disable
@@ -104,7 +109,7 @@ services:
       monolith:
         condition: service_started
     ports:
-      - "8080:8080"
+      - "${GATEWAY_HOST_PORT:-8080}:8080"
     environment:
       PORT: 8080
       MONOLITH_ADDR: monolith:9090

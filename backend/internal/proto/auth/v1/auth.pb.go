@@ -158,8 +158,22 @@ type CompleteFederatedSignupRequest struct {
 	Provider            IdentityProviderProto  `protobuf:"varint,1,opt,name=provider,proto3,enum=auth.v1.IdentityProviderProto" json:"provider,omitempty"`
 	IdToken             string                 `protobuf:"bytes,2,opt,name=id_token,json=idToken,proto3" json:"id_token,omitempty"`
 	AgeConfirmedOver_18 bool                   `protobuf:"varint,3,opt,name=age_confirmed_over_18,json=ageConfirmedOver18,proto3" json:"age_confirmed_over_18,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// nonce is a DELIBERATE ADDITION over the sibling repo's contract, not a
+	// port: the value the client generated for this sign-in attempt and passed
+	// to Apple's/Google's own sign-in call, which the provider echoes back
+	// inside the signed id_token. The server compares the two and rejects a
+	// mismatch (internal/modules/auth/identity), closing the replay window the
+	// source leaves open by never checking this claim — see
+	// docs/security-review-framework.md's Authenticity section. Required: an
+	// empty value is rejected, never treated as "skip the check".
+	//
+	// For Sign in with Apple, where the convention is to hand Apple the
+	// SHA-256 of a locally-generated random value, send that same SHA-256 —
+	// it is what lands in the token's nonce claim; the server compares, it
+	// never derives.
+	Nonce         string `protobuf:"bytes,4,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CompleteFederatedSignupRequest) Reset() {
@@ -211,6 +225,13 @@ func (x *CompleteFederatedSignupRequest) GetAgeConfirmedOver_18() bool {
 		return x.AgeConfirmedOver_18
 	}
 	return false
+}
+
+func (x *CompleteFederatedSignupRequest) GetNonce() string {
+	if x != nil {
+		return x.Nonce
+	}
+	return ""
 }
 
 type CompleteLinkedInOnboardingRequest struct {
@@ -283,8 +304,13 @@ type LinkIdentityRequest struct {
 	// one generic message rather than a second RPC.
 	AuthorizationCode string `protobuf:"bytes,4,opt,name=authorization_code,json=authorizationCode,proto3" json:"authorization_code,omitempty"`
 	RedirectUri       string `protobuf:"bytes,5,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"` // must exactly match the URI used to start the flow
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// nonce accompanies id_token on the Apple/Google branch, exactly as on
+	// CompleteFederatedSignupRequest above (and ignored on the LinkedIn
+	// branch, which has no id_token to bind it to and is protected by its own
+	// state parameter instead).
+	Nonce         string `protobuf:"bytes,6,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LinkIdentityRequest) Reset() {
@@ -348,6 +374,13 @@ func (x *LinkIdentityRequest) GetAuthorizationCode() string {
 func (x *LinkIdentityRequest) GetRedirectUri() string {
 	if x != nil {
 		return x.RedirectUri
+	}
+	return ""
+}
+
+func (x *LinkIdentityRequest) GetNonce() string {
+	if x != nil {
+		return x.Nonce
 	}
 	return ""
 }
@@ -1746,21 +1779,23 @@ var File_auth_v1_auth_proto protoreflect.FileDescriptor
 
 const file_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x12auth/v1/auth.proto\x12\aauth.v1\"\xaa\x01\n" +
+	"\x12auth/v1/auth.proto\x12\aauth.v1\"\xc0\x01\n" +
 	"\x1eCompleteFederatedSignupRequest\x12:\n" +
 	"\bprovider\x18\x01 \x01(\x0e2\x1e.auth.v1.IdentityProviderProtoR\bprovider\x12\x19\n" +
 	"\bid_token\x18\x02 \x01(\tR\aidToken\x121\n" +
-	"\x15age_confirmed_over_18\x18\x03 \x01(\bR\x12ageConfirmedOver18\"\xbd\x01\n" +
+	"\x15age_confirmed_over_18\x18\x03 \x01(\bR\x12ageConfirmedOver18\x12\x14\n" +
+	"\x05nonce\x18\x04 \x01(\tR\x05nonce\"\xbd\x01\n" +
 	"!CompleteLinkedInOnboardingRequest\x12-\n" +
 	"\x12authorization_code\x18\x01 \x01(\tR\x11authorizationCode\x12!\n" +
 	"\fredirect_uri\x18\x02 \x01(\tR\vredirectUri\x121\n" +
-	"\x15age_confirmed_over_18\x18\x03 \x01(\bR\x12ageConfirmedOver18J\x04\b\x04\x10\x05R\rpkce_verifier\"\xd7\x01\n" +
+	"\x15age_confirmed_over_18\x18\x03 \x01(\bR\x12ageConfirmedOver18J\x04\b\x04\x10\x05R\rpkce_verifier\"\xed\x01\n" +
 	"\x13LinkIdentityRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12:\n" +
 	"\bprovider\x18\x02 \x01(\x0e2\x1e.auth.v1.IdentityProviderProtoR\bprovider\x12\x19\n" +
 	"\bid_token\x18\x03 \x01(\tR\aidToken\x12-\n" +
 	"\x12authorization_code\x18\x04 \x01(\tR\x11authorizationCode\x12!\n" +
-	"\fredirect_uri\x18\x05 \x01(\tR\vredirectUri\"\x89\x01\n" +
+	"\fredirect_uri\x18\x05 \x01(\tR\vredirectUri\x12\x14\n" +
+	"\x05nonce\x18\x06 \x01(\tR\x05nonce\"\x89\x01\n" +
 	"\x1aCompleteEmailSignupRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x121\n" +

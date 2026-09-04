@@ -176,6 +176,20 @@ message CompleteFederatedSignupRequest {
   IdentityProviderProto provider = 1;
   string id_token = 2;
   bool age_confirmed_over_18 = 3;
+  // nonce is a DELIBERATE ADDITION over the sibling repo's contract, not a
+  // port: the value the client generated for this sign-in attempt and passed
+  // to Apple's/Google's own sign-in call, which the provider echoes back
+  // inside the signed id_token. The server compares the two and rejects a
+  // mismatch (internal/modules/auth/identity), closing the replay window the
+  // source leaves open by never checking this claim — see
+  // docs/security-review-framework.md's Authenticity section. Required: an
+  // empty value is rejected, never treated as "skip the check".
+  //
+  // For Sign in with Apple, where the convention is to hand Apple the
+  // SHA-256 of a locally-generated random value, send that same SHA-256 —
+  // it is what lands in the token's nonce claim; the server compares, it
+  // never derives.
+  string nonce = 4;
 }
 
 message CompleteLinkedInOnboardingRequest {
@@ -195,6 +209,11 @@ message LinkIdentityRequest {
   // one generic message rather than a second RPC.
   string authorization_code = 4;
   string redirect_uri = 5;         // must exactly match the URI used to start the flow
+  // nonce accompanies id_token on the Apple/Google branch, exactly as on
+  // CompleteFederatedSignupRequest above (and ignored on the LinkedIn
+  // branch, which has no id_token to bind it to and is protected by its own
+  // state parameter instead).
+  string nonce = 6;
 }
 
 message CompleteEmailSignupRequest {

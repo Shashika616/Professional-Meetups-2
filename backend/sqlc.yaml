@@ -1,0 +1,25 @@
+# Generates the query layer from backend/migrations + each module's own
+# queries/ directory, instead of hand-writing query code or reaching for an
+# ORM — every generated query is parameterized by construction, which is the
+# whole reason this project uses sqlc (see the sibling repo's
+# services/auth/sqlc.yaml, which this mirrors).
+#
+# One config for the whole backend, one `sql:` entry per module (meetup and
+# billing add their own in Phases 2/3). `schema` points at the shared
+# migration history rather than a per-module subset: there is one database
+# now, and sqlc needs the full picture to type-check a query.
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "internal/modules/auth/repository/queries"
+    schema: "migrations"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/modules/auth/repository/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"

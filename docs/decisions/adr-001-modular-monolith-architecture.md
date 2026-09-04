@@ -239,6 +239,70 @@ field removal above).
   swapping its event-bus `Subscribe` calls for real Pub/Sub consumers. The
   business logic inside the module doesn't need to change.
 
+## Corrections (2026-09-04, after Phase 1 review)
+
+Phase 1 surfaced two places where this ADR's own wording was imprecise
+enough to cause a real ambiguity, plus one gap this ADR never addressed at
+all. All three are corrected here rather than silently rewritten above, per
+this project's own convention (see the sibling repo's ADR correction
+sections) — the original reasoning stays visible, the correction is
+additive.
+
+**§6 overstated what the gateway signs.** "The gateway itself calls
+`jwt.Sign()` to produce the access/refresh tokens" was wrong for the refresh
+token specifically. Only the **access token** is a signed JWT — that's the
+only thing that needed relocating to the gateway, because it's the only
+thing that's a stateless credential mintable from a signing key alone. The
+**refresh token** was never a JWT in this system, source or monolith: it's
+32 random bytes, hex-encoded, with only its SHA-256 hash persisted — an
+opaque, revocable, DB-backed credential (`auth.refresh_tokens`, rotation via
+`replaced_by`). Generating and persisting it has to happen wherever the
+database lives, which is the monolith, not the gateway (the gateway has no
+DB connection anywhere in this design). The monolith returns the raw
+refresh-token value to the gateway over gRPC; the gateway passes it through
+to the client unchanged, alongside the access token it just signed itself.
+This is what Phase 1 actually built, and it's correct — the ADR's own prose
+was the thing that needed fixing, not the code.
+
+**§7's breaker removal was scoped too broadly.** The source's `shared/
+breaker` has (at least) two independent call sites, and this ADR's reasoning
+only actually applies to one of them. The outbox relay's use of it
+(protecting a Pub/Sub publish call that could fail independently of the
+paired DB commit) is correctly gone — that failure mode doesn't exist for
+an in-process event bus, per §4. But the SOS-alert send path's per-channel
+breaker (`sosBreakerFailureThreshold`/`sosBreakerResetTimeout` in the
+source) protects against something completely unrelated to events or
+outboxes: a slow or down third-party vendor (Twilio, Resend), called
+synchronously, on an **emergency** path. That failure mode is identical in
+this repo — Twilio/Resend are still real external HTTP calls here, made
+exactly the same way. Phase 1 dropped this breaker too, reading "no
+breaker" as a blanket rule; it wasn't meant to be one. **Correction: the
+per-channel SOS-alert breaker should be ported**, using the same
+threshold/reset-timeout values as the source, so a sustained Twilio or
+Resend outage degrades gracefully (fail fast after repeated failures)
+instead of every single `TriggerSOS` call paying full retry-and-timeout cost
+against a channel that's already known to be down. See
+`docs/plans/phase1-fixes-breaker-timeout-grpc-auth.md` for the concrete
+fix.
+
+**New: the gateway-to-monolith gRPC surface has no authentication of its
+own.** Not something this ADR considered originally. Every method on the
+monolith's gRPC service trusts its caller's identity fields (`user_id`,
+etc.) without independently verifying them — safe only because, today,
+nothing but the gateway can reach the monolith's gRPC port, which is a
+Docker-network-isolation assumption, not something the code itself enforces.
+This exact gap exists in the source system too (its services trust their
+callers' identity fields the same way, protected by the same kind of
+network-topology assumption) — so this isn't a regression the port
+introduced, but it's also not something to carry forward silently now that
+it's been named. **Decision: add a lightweight shared-secret check** (a
+static token in gRPC metadata, verified by a unary interceptor on the
+monolith side, attached by the gateway's client) — not full mutual TLS,
+which is more infrastructure than a two-process, single-tenant system
+needs right now, but enough that a misconfigured network or a future
+second caller can't silently act as any user just by reaching the port. See
+`docs/plans/phase1-fixes-breaker-timeout-grpc-auth.md`.
+
 ## Grounding
 
 This ADR is based on a full inventory of the microservices repo's actual
