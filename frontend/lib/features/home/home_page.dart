@@ -1,31 +1,105 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
-import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
+import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/home_header.dart';
-import 'package:professional_connections_platform/features/home/widgets/intent_grid.dart';
-import 'package:professional_connections_platform/features/home/widgets/network_insights_row.dart';
+import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/safety_tip_card.dart';
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart';
+import 'package:professional_connections_platform/features/verification/hosting_unlock_page.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 
-class HomePage extends ConsumerWidget {
+/// # WHAT CHANGED HERE, AND WHY
+///
+/// Home became the browsing surface. Before, it was a launchpad: a grid of
+/// intent tiles, a stats row, and a FIND MATCHES button whose only job was to
+/// switch to a separate "Matches" tab that did the actual browsing. That tab
+/// is gone and its list is inline here, which removes a whole navigation
+/// step from the app's primary action.
+///
+/// Consequences visible in this file:
+///
+///   * FIND MATCHES is REMOVED, not hidden — with browsing on this page
+///     there is nowhere for it to navigate to. Its handler went with it.
+///   * The intent grid became a one-row [IntentFilterBar] with an "All"
+///     option, sitting directly above the list it filters.
+///   * "Your Stats" (NetworkInsightsRow) is deleted outright.
+///   * HOST YOUR OWN MEETUP is now the only bottom CTA and takes the full
+///     primary-button treatment, rather than remaining the smaller outlined
+///     sibling of a button that no longer exists.
+///   * The header's two "Your Meetings"/"Requested Meetups" chips are gone —
+///     that is the Events tab now.
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final selectedIntent = ref.watch(selectedIntentProvider);
+  ConsumerState<HomePage> createState() => _HomePageState();
+}
 
-    // Same pattern ProfilePage already uses (frontend/PLAN.md Step 13) —
-    // fullName/profilePhotoUrl come from the cached session, "Member" is
-    // the fallback while it's still loading or genuinely absent, and an
-    // empty (not just null) photo URL is treated as "no photo" so
-    // ProfessionalAvatar doesn't try to load an empty Image.network src.
+/// # WHY THIS STATE IS KEPT ALIVE
+///
+/// AppShell puts the four tabs in a `PageView`, whose default cache window is
+/// narrower than one screen. A full swipe therefore does not merely scroll
+/// this page off — it DISPOSES the whole Element/State subtree. Every
+/// provider this page watches is `.autoDispose` and this page is their only
+/// subscriber, so the cached data went out with it, and swiping back
+/// remounted from `AsyncLoading` and rendered a flat grey skeleton until the
+/// refetch landed. That sequence was the reported "gets all grey and then
+/// loads".
+///
+/// `AutomaticKeepAliveClientMixin` is the standard fix for exactly this
+/// (a PageView/TabBarView child losing state on scroll), not a workaround.
+/// AppShell's own class comment already claimed the pages were "kept alive
+/// by PageView" — nothing enforced that until this mixin.
+///
+/// NOTE the deliberate non-fix: `.autoDispose` stays on the providers. It is
+/// doing a second, correct job — freeing the previous intent-filtered
+/// `openMeetupsProvider.family` instance when the filter changes — which has
+/// nothing to do with this bug. Removing it would paper over page disposal
+/// while leaking a provider instance per filter change.
+class _HomePageState extends ConsumerState<HomePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  /// This page's own scroll position, and the thing that drives "Happening
+  /// Soon"'s infinite scroll.
+  ///
+  /// # WHY IT IS EXPLICIT NOW
+  ///
+  /// It used to be the ListView's implicit default controller, which nothing
+  /// could reach. The browse list nested below is shrink-wrapped and does
+  /// not scroll itself, so it has no scroll position of its own to watch —
+  /// it has to watch THIS one. Without the controller being nameable, there
+  /// was nothing to hand it, and the list silently never loaded past page
+  /// one (docs/plans/07-happening-soon-pagination-fix.md).
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Required by AutomaticKeepAliveClientMixin — it is what registers the
+    // keep-alive with the enclosing sliver. Omitting it makes the mixin a
+    // silent no-op.
+    super.build(context);
+
+    // Null = "All" (every intent). See homeIntentFilterProvider.
+    final intentFilter = ref.watch(homeIntentFilterProvider);
+
+    // Same pattern ProfilePage uses — fullName/profilePhotoUrl come from the
+    // cached session, "Member" is the fallback while loading or genuinely
+    // absent, and an empty (not just null) photo URL counts as no photo.
     final profile = ref.watch(authSessionProvider).value?.profile;
     final fullName = profile?.fullName;
     final displayName = (fullName == null || fullName.isEmpty)
@@ -34,24 +108,18 @@ class HomePage extends ConsumerWidget {
     final imageUrl = (profile?.profilePhotoUrl.isNotEmpty ?? false)
         ? profile!.profilePhotoUrl
         : null;
-    // Level 0 (no profile resolved yet) is the safe default while loading —
-    // ADR-014 made Level 0 (Apple/Google/email, no LinkedIn) a real,
-    // reachable account state, not just "still loading," so this must never
-    // assume a higher level than what's actually confirmed.
+    // Level 0 is the safe default while the profile resolves — a guest is a
+    // real, reachable account state, not just "still loading", so this must
+    // never assume more than is confirmed.
     final trustLevel = profile?.trustLevel ?? 0;
 
-    // ADR-032 Step 4 — the FIND MATCHES / HOST YOUR OWN MEETUP CTAs used to
-    // scroll with everything else; they now live in a fixed, non-scrolling
-    // block anchored above AppShell's persistent nav bar (mirrors how
-    // Uber/most consumer apps anchor the primary action), while everything
-    // else on this page keeps scrolling in the Expanded ListView above it.
-    // Both buttons' onPressed bodies (trust-gate check, toast, navigation,
-    // provider invalidation) are unchanged — this is a position change only.
-    void onFindMatches() {
-      if (!selectedIntent.isUnlockedFor(trustLevel)) {
+    void onIntentSelected(IntentType? picked) {
+      // A locked intent still explains itself rather than doing nothing.
+      // Only a NAMED intent can be locked; "All" never is.
+      if (picked != null && !picked.canJoin(trustLevel)) {
         showSnack(
           context,
-          '${selectedIntent.label} requires Level ${selectedIntent.requiredTrustLevel} trust, Verify your phone, personal email, and details in Profile to unlock it.',
+          '${picked.label} requires Level ${picked.requiredTrustLevelToJoin} trust. Verify your phone, personal email, and details in Profile to unlock it.',
           type: ToastType.locked,
         );
         Navigator.of(context).push(
@@ -59,32 +127,46 @@ class HomePage extends ConsumerWidget {
         );
         return;
       }
-      // Browse open meetups for the selected intent — the Matches tab
-      // (index 1) is the real surface for this now (ADR-013 § 7), not a
-      // toast.
-      ref.read(currentTabIndexProvider.notifier).state = 1;
+      ref.read(homeIntentFilterProvider.notifier).state = picked;
     }
 
     Future<void> onHostMeetup() async {
-      if (!selectedIntent.isUnlockedFor(trustLevel)) {
+      // HOST-side gate (ADR-002 § 4) — Level 3 for ordinary intents, one
+      // above joining, with its own destination: someone short of the HOST
+      // bar may already be Level 2 and able to join, so the "unlock joining"
+      // checklist would list things they finished long ago.
+      //
+      // With "All" selected there is no single intent to gate on, so the
+      // question becomes "can this user host ANYTHING". If they can, the
+      // scheduling flow's own per-intent step (which gates and redirects
+      // identically) handles the rest; if they cannot host anything, there
+      // is no point letting them in to discover that six times over.
+      final canHostSomething = intentFilter == null
+          ? IntentType.values.any((i) => i.canHost(trustLevel))
+          : intentFilter.canHost(trustLevel);
+
+      if (!canHostSomething) {
+        final requiredLevel =
+            intentFilter?.requiredTrustLevelToHost ??
+            IntentType.coffee.requiredTrustLevelToHost;
         showSnack(
           context,
-          '${selectedIntent.label} requires Level ${selectedIntent.requiredTrustLevel} trust, Verify your phone, personal email, and details in Profile to unlock it.',
+          'Hosting a meetup requires Level $requiredLevel trust. Add your company details to unlock it.',
           type: ToastType.locked,
         );
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
-        );
+        Navigator.of(
+          context,
+        ).push(MaterialPageRoute(builder: (_) => const HostingUnlockPage()));
         return;
       }
+
       await Navigator.of(
         context,
       ).push(MaterialPageRoute(builder: (_) => const ScheduleFlowPage()));
-      // Invalidates every cached (intent, viewerLat, viewerLng) instance of
-      // this family, not just one — this screen doesn't know the browse
-      // screen's last-used coordinate (ADR-021 §2 made that part of the
-      // provider's own key), and a freshly-hosted meetup should invalidate
-      // whatever the browse screen shows next regardless.
+      // Invalidates every cached (intent, coordinate, window) instance of
+      // this family, not just one — this screen doesn't know which key the
+      // list last used, and a freshly-hosted meetup should invalidate
+      // whatever it shows next regardless.
       ref.invalidate(openMeetupsProvider);
       ref.invalidate(myMeetupsProvider);
       ref.invalidate(activeMeetupsProvider);
@@ -96,30 +178,58 @@ class HomePage extends ConsumerWidget {
         child: Column(
           children: [
             Expanded(
-              // ADR-030 (round-9) — the other real (not cosmetic) refetch
-              // path for the active-meetups list, alongside AppShell's
-              // app-resume hook. Same RefreshIndicator pattern
-              // matches_page.dart's browse list already uses. Scoped to
-              // activeMeetupsProvider specifically — this page has nothing
-              // else worth a network refetch on pull.
+              // Pull-to-refresh for the whole page. Scoped to
+              // activeMeetupsProvider plus every open-meetups instance —
+              // the two things on this page backed by a network read.
               child: RefreshIndicator(
-                onRefresh: () => ref.refresh(activeMeetupsProvider.future),
+                onRefresh: () async {
+                  ref.invalidate(openMeetupsProvider);
+                  // The awaited value is discarded on purpose: awaiting is
+                  // what makes RefreshIndicator hold its spinner until the
+                  // refetch lands, and the data itself reaches the UI
+                  // through the provider's own watchers.
+                  await ref.refresh(activeMeetupsProvider.future).then((_) {});
+                },
                 child: ListView(
+                  controller: _scrollController,
+                  // A RefreshIndicator can only fire on an overscroll, and a
+                  // list shorter than its viewport does not scroll at all
+                  // under the default physics — so pull-to-refresh silently
+                  // did nothing whenever Home was short: a new account with
+                  // no active meetups and nothing nearby, or one whose
+                  // location is blocked. Exactly the state in which a user
+                  // is most likely to pull.
+                  //
+                  // It was masked until now by the loading skeleton, which
+                  // padded the page tall enough to scroll on the way in.
+                  // Delaying the skeleton removed that accident and exposed
+                  // the bug underneath; same fix, and same reasoning, as
+                  // PaginatedMeetupList's own physics.
+                  physics: const AlwaysScrollableScrollPhysics(),
                   padding: EdgeInsets.zero,
                   addAutomaticKeepAlives: true,
                   addRepaintBoundaries: true,
                   children: [
                     HomeHeader(userName: displayName, imageUrl: imageUrl),
-                    const SizedBox(height: 8),
-                    IntentGrid(trustLevel: trustLevel),
+                    const SizedBox(height: 4),
                     const ActiveMeetupsSection(),
-                    const NetworkInsightsRow(),
+                    // The intent filter lives INSIDE this section now, not
+                    // at the top of the page. It only ever filtered this
+                    // list, so sitting above ActiveMeetupsSection — which it
+                    // does not filter — read as a page-wide control and
+                    // implied the active-meetups strip was being filtered
+                    // too.
+                    HappeningSoonSection(
+                      intent: intentFilter,
+                      trustLevel: trustLevel,
+                      onSelectIntent: onIntentSelected,
+                      // The bridge: this page scrolls, that section's list
+                      // does not, so the section watches this controller to
+                      // know when to fetch the next page.
+                      outerScrollController: _scrollController,
+                    ),
                     const SafetyTipCard(),
-                    // Clearance above the fixed CTA block below, not the old
-                    // 96 — that was clearance for the buttons' previous
-                    // floating position in the scrolling list, which no
-                    // longer applies now that they render in their own
-                    // fixed block underneath this list.
+                    // Clearance above the fixed CTA block below.
                     const SizedBox(height: 16),
                   ],
                 ),
@@ -127,56 +237,30 @@ class HomePage extends ConsumerWidget {
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-              child: Column(
-                children: [
-                  PrimaryButton(
-                    label: 'FIND MATCHES',
-                    onPressed: onFindMatches,
-                  ),
-                  const SizedBox(height: 8),
-                  // A separate entry point from FIND MATCHES, not a "+" icon
-                  // buried in the browse page's AppBar (where it used to
-                  // live) — someone opening the browse list wants to see
-                  // other people's open meetups, not stumble into hosting
-                  // one.
-                  //
-                  // round-7 hardening: this button used to have no trust
-                  // gate of its own at all — it unconditionally pushed
-                  // ScheduleFlowPage, deferring entirely to that flow's own
-                  // nested intent step (toast-only, no redirect). Added a
-                  // real gate here, same isUnlockedFor check FIND MATCHES
-                  // above already does, so a trust-level-0 user can no
-                  // longer tap straight into the scheduling UI before ever
-                  // hitting a lock check. ScheduleFlowPage's own intent step
-                  // gate stays too — a backstop for a user changing intent
-                  // mid-flow, not removed by adding this outer gate.
-                  OutlinedButton.icon(
-                    onPressed: onHostMeetup,
-                    icon: Icon(
-                      Icons.add_circle_outline,
-                      size: 16,
-                      color: AppPalette.verified,
-                    ),
-                    label: Text(
-                      'HOST YOUR OWN MEETUP',
-                      style: TextStyle(
-                        color: AppPalette.verified,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.0,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(46),
-                      backgroundColor: AppPalette.verified.withValues(
-                        alpha: 0.08,
-                      ),
-                      side: BorderSide(
-                        color: AppPalette.verified.withValues(alpha: 0.55),
-                      ),
+              // The sole primary action now. It was an outlined secondary
+              // button when it shared this block with FIND MATCHES; with
+              // that gone, leaving it outlined would read as the leftover
+              // half of a removed pair rather than the page's main action.
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  key: const Key('hostYourOwnMeetup'),
+                  onPressed: onHostMeetup,
+                  icon: const Icon(Icons.add_circle_outline, size: 18),
+                  label: const Text(
+                    'HOST YOUR OWN MEETUP',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
                     ),
                   ),
-                ],
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(50),
+                    backgroundColor: AppPalette.verified,
+                    foregroundColor: Colors.black,
+                  ),
+                ),
               ),
             ),
           ],

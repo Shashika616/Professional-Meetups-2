@@ -13,11 +13,13 @@ import 'package:professional_connections_platform/core/widgets/primary_button.da
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
-import 'package:professional_connections_platform/features/matches/matches_page.dart'
+import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
+import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart'
     show LockedCardHeader;
 import 'package:professional_connections_platform/features/meetups/location_view_page.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/host_meetup_controls.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/share_with_contacts_sheet.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 
 /// Replaces `UpcomingMeetupCard`'s hardcoded "Coffee with Sachini Fernando"
@@ -157,11 +159,11 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
 
   /// Redirects a Level-0 (or otherwise under-trust) tap to the ADR-028
   /// checklist instead of letting it reach the server just to bounce off
-  /// its 403 — mirrors `matches_page.dart`'s `_MeetupCard` (ADR-014's Level
+  /// its 403 — mirrors the browse card's own gate (ADR-014's Level
   /// 0 read-only audit, Step 6, updated by ADR-028 § 2). Checks both
   /// signals: `meetup.lockedForViewer` (server-authoritative — `GetMeetup`
   /// redacts too as of round-5 hardening) and the client-side
-  /// `isUnlockedFor` fallback, since a directly-fetched meetup this page's
+  /// `canJoin` fallback, since a directly-fetched meetup this page's
   /// own viewer legitimately unlocked will have `lockedForViewer: false`
   /// either way, but the client check stays as defense-in-depth for
   /// anything that ever reaches this page without going through a real
@@ -175,7 +177,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   Widget _buildJoinAction(BuildContext context, Meetup meetup) {
     final trustLevel =
         ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
-    if (!meetup.lockedForViewer && meetup.intent.isUnlockedFor(trustLevel)) {
+    if (!meetup.lockedForViewer && meetup.intent.canJoin(trustLevel)) {
       return PrimaryButton(label: 'REQUEST TO JOIN', onPressed: _requestToJoin);
     }
     return PrimaryButton(
@@ -183,7 +185,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       onPressed: () {
         showSnack(
           context,
-          '${meetup.intent.label} requires Level ${meetup.intent.requiredTrustLevel} trust. Verify your phone, personal email, and details to unlock it.',
+          '${meetup.intent.label} requires Level ${meetup.intent.requiredTrustLevelToJoin} trust. Verify your phone, personal email, and details to unlock it.',
           type: ToastType.locked,
         );
         Navigator.of(context).push(
@@ -213,13 +215,35 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     }
   }
 
-  Future<void> _setLiveLocationOptIn(bool optIn) async {
+  /// Opens the contact picker and, if the user confirms, tells the chosen
+  /// contacts where and when this meetup is.
+  ///
+  /// REPLACES a "Share live location" switch that wrote a boolean nothing
+  /// read — it told the user their location was being shared and shared it
+  /// with nobody. The recipients are the user's own emergency contacts, not
+  /// the host: telling the person you are meeting where you are is not a
+  /// safety feature.
+  Future<void> _shareWithContacts() async {
+    final already = _safetyState?.sharedWithContactIds.toSet() ?? <String>{};
+    final picked = await showShareWithContactsSheet(
+      context,
+      alreadyShared: already,
+    );
+    if (picked == null || picked.isEmpty || !mounted) return;
+
     try {
       final state = await ref
           .read(meetupServiceProvider)
-          .setLiveLocationOptIn(widget.meetupId, optIn);
+          .shareWithContacts(widget.meetupId, picked);
       if (!mounted) return;
       setState(() => _safetyState = state);
+      showSnack(
+        context,
+        picked.length == 1
+            ? 'Your contact has been told.'
+            : '${picked.length} contacts have been told.',
+        type: ToastType.success,
+      );
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -369,7 +393,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   @override
   Widget build(BuildContext context) {
     // Pushed as its own route from Home/Matches, not one of AppShell's
-    // bottom-nav tabs — see MyMeetupsPage's matching comment for why this
+    // bottom-nav tabs — see EventsPage's matching comment for why this
     // needs its own AppBackground wrap rather than inheriting AppShell's.
     return AppBackground(
       child: Scaffold(
@@ -421,7 +445,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
               // lockedForViewer (ADR-028, round-5 hardening) — GetMeetup
               // now redacts the same way ListOpenMeetups does, so
               // hostFullName/locationLabel/the window can genuinely be
-              // absent here. Reuses matches_page.dart's LockedCardHeader
+              // absent here. Reuses the shared LockedCardHeader
               // rather than a second lock-treatment widget. Currently
               // unreachable through any in-app navigation path (a locked
               // card's tap redirects at the card level, never opening this
@@ -429,7 +453,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
               // crash the moment that stops being true (e.g. a
               // notification deep link).
               if (meetup.lockedForViewer)
-                const LockedCardHeader()
+                LockedCardHeader(locationLabel: meetup.locationLabel)
               else ...[
                 Text(
                   meetup.formattedWindow,
@@ -466,14 +490,21 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
           ),
         ),
         const SizedBox(height: 12),
-        // ADR-029 (round-8 hardening) — same lockedForViewer gate as
-        // REQUEST TO JOIN below (LocationViewPage.open handles the
-        // toast+redirect itself), shown regardless of hosting/request
-        // state.
+        // ADR-029 (round-8 hardening) — LocationViewPage.open owns the gate
+        // itself (toast + redirect), so this button is shown regardless of
+        // hosting/request state and regardless of trust level. The trust
+        // level is passed rather than re-derived there: this page already
+        // has it, and a widget that navigates should not be reaching into
+        // the session to decide whether it may.
         SecondaryButton(
           label: 'VIEW LOCATION',
           height: 40,
-          onPressed: () => LocationViewPage.open(context, meetup),
+          onPressed: () => LocationViewPage.open(
+            context,
+            meetup,
+            viewerTrustLevel:
+                ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0,
+          ),
         ),
         const SizedBox(height: 12),
         if (!meetup.isHostedByMe && meetup.myRequestStatus == null)
@@ -512,7 +543,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
             safetyState: _safetyState,
             checkInWindowOpen: _checkInWindowOpen,
             onAcknowledgeChecklist: _acknowledgeChecklist,
-            onSetLiveLocationOptIn: _setLiveLocationOptIn,
+            onShareWithContacts: _shareWithContacts,
             onCheckIn: _checkIn,
             onDecline: _confirmDecline,
             onSubmitFeedback: _submitFeedback,
@@ -543,7 +574,13 @@ class _MeetupDetailSkeleton extends StatelessWidget {
   const _MeetupDetailSkeleton();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SkeletonLoader(child: _content(context));
+
+  /// The placeholder shapes themselves. [SkeletonLoader] above adds the
+  /// delay-before-showing and the shimmer sweep, so every caller of this
+  /// widget gets both without knowing about either.
+  Widget _content(BuildContext context) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       children: [
@@ -617,7 +654,7 @@ class _SafetyGateSection extends StatelessWidget {
     required this.safetyState,
     required this.checkInWindowOpen,
     required this.onAcknowledgeChecklist,
-    required this.onSetLiveLocationOptIn,
+    required this.onShareWithContacts,
     required this.onCheckIn,
     required this.onDecline,
     required this.onSubmitFeedback,
@@ -626,7 +663,7 @@ class _SafetyGateSection extends StatelessWidget {
   final SafetyState? safetyState;
   final bool checkInWindowOpen;
   final VoidCallback onAcknowledgeChecklist;
-  final void Function(bool optIn) onSetLiveLocationOptIn;
+  final VoidCallback onShareWithContacts;
   final VoidCallback onCheckIn;
   final VoidCallback onDecline;
   final void Function({
@@ -640,6 +677,7 @@ class _SafetyGateSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final acknowledged = safetyState?.checklistAcknowledged ?? false;
+    final sharedCount = safetyState?.sharedWithContactIds.length ?? 0;
     final checkedIn = safetyState?.checkedIn ?? false;
     final declined = safetyState?.declined ?? false;
 
@@ -690,38 +728,49 @@ class _SafetyGateSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
+        // WAS a "Share live location" switch bound to a boolean nothing
+        // read — the app said it was sharing the user's location and shared
+        // it with nobody. Now a real action, and the copy says exactly what
+        // the recipient gets rather than implying tracking.
         FlatCard(
           radius: 12,
           padding: const EdgeInsets.all(16),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Share live location',
-                      style: TextStyle(
-                        color: AppPalette.textPrimary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      'Optional. Only for the duration of this meetup.',
-                      style: TextStyle(
-                        color: AppPalette.textSecondary,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+              Text(
+                'Tell a trusted contact',
+                style: TextStyle(
+                  color: AppPalette.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
                 ),
               ),
-              Switch(
-                value: safetyState?.liveLocationOptIn ?? false,
-                onChanged: onSetLiveLocationOptIn,
-                activeTrackColor: AppPalette.candyBlue,
+              const SizedBox(height: 4),
+              Text(
+                'Send someone you trust the time and place of this meetup.',
+                style: TextStyle(
+                  color: AppPalette.textSecondary,
+                  fontSize: 11,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Confirmation of what was actually done. The whole reason the
+              // share is persisted server-side is so this can be shown on a
+              // later visit.
+              if (sharedCount > 0) ...[
+                _DoneRow(
+                  sharedCount == 1
+                      ? 'Told 1 trusted contact'
+                      : 'Told $sharedCount trusted contacts',
+                ),
+                const SizedBox(height: 10),
+              ],
+              SecondaryButton(
+                label: sharedCount > 0 ? 'TELL SOMEONE ELSE' : 'TELL SOMEONE',
+                height: 42,
+                onPressed: onShareWithContacts,
               ),
             ],
           ),
@@ -1151,8 +1200,15 @@ class _DeclineReasonDialogState extends State<_DeclineReasonDialog> {
               : () => Navigator.pop(context, trimmed),
           child: Text(
             'DECLINE',
+            // Greyed while disabled. `onPressed: null` already blocks the
+            // tap, but an explicit `style:` overrides TextButton's own
+            // disabled colour, so the control looked fully active while
+            // doing nothing — the user reads that as a broken button, not
+            // as "fill the field in".
             style: TextStyle(
-              color: AppPalette.danger,
+              color: trimmed.isEmpty
+                  ? AppPalette.textSecondary.withValues(alpha: 0.45)
+                  : AppPalette.danger,
               fontWeight: FontWeight.w700,
             ),
           ),

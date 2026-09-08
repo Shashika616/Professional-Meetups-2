@@ -25,16 +25,48 @@ class LocationViewPage extends StatelessWidget {
 
   final Meetup meetup;
 
-  /// The single entry point every "View Location" tap should call —
-  /// matches_page.dart's `_MeetupCard` and meetup_detail_page.dart both
-  /// call this instead of duplicating the gate. Mirrors
-  /// `_MeetupCard._handleLockedTap`/`MeetupDetailPage._buildJoinAction`'s
-  /// existing toast-then-redirect pattern exactly.
-  static void open(BuildContext context, Meetup meetup) {
-    if (meetup.lockedForViewer) {
+  /// The single entry point every "View Location" tap should call — every
+  /// caller uses this instead of duplicating the gate.
+  ///
+  /// # THE GATE HERE HAS MOVED TWICE; THIS IS THE THIRD AND NARROWEST FORM
+  ///
+  /// Originally it keyed on [Meetup.lockedForViewer], which was right when
+  /// redaction nulled the location outright: there was nothing to show.
+  /// ADR-002 § 5 then made the location visible to guests and I removed the
+  /// gate entirely, on the reasoning that blocking a page for data the
+  /// server deliberately sends is a client-side-only gate — the pattern
+  /// ADR-028 rejects.
+  ///
+  /// That reasoning was right about the LABEL and wrong about this PAGE.
+  /// The card's coarse label ("Colombo Fort Cafe") is what ADR-002 § 5
+  /// intends a guest to see — enough to know meetups are happening nearby.
+  /// This page is a different thing: an interactive map plus exact
+  /// lat/lng plus a directions deep link. Combined with guest signup
+  /// requiring no identity verification at all, an ungated version is a
+  /// scriptable way to harvest precise meetup coordinates at scale, which
+  /// is a materially different exposure from a place name on a card.
+  ///
+  /// So the gate is back, keyed on [viewerTrustLevel] rather than
+  /// `lockedForViewer`. Those happen to coincide today (after ADR-002 § 6
+  /// only guests are locked), but they answer different questions, and this
+  /// one is explicitly "has this account done anything at all to identify
+  /// itself". Level 1+ opens unconditionally, exactly as today.
+  ///
+  /// This is UX enforcement, not the security boundary — the coordinates
+  /// are in the response the client already holds. It raises the cost of
+  /// bulk collection from "call an endpoint" to "modify the app", which is
+  /// the honest description of what a client-side gate buys. The real fix
+  /// if this is ever attacked is server-side coarsening for Level 0, which
+  /// would be an ADR-002 amendment rather than a change here.
+  static void open(
+    BuildContext context,
+    Meetup meetup, {
+    required int viewerTrustLevel,
+  }) {
+    if (viewerTrustLevel < 1) {
       showSnack(
         context,
-        '${meetup.intent.label} requires Level ${meetup.intent.requiredTrustLevel} trust. Verify your phone, personal email, and details to unlock it.',
+        'Sign up to see exactly where this meetup is happening.',
         type: ToastType.locked,
       );
       Navigator.of(context).push(

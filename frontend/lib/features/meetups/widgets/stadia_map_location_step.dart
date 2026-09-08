@@ -440,7 +440,7 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
                   ),
                   style: OutlinedButton.styleFrom(
                     minimumSize: const Size.fromHeight(42),
-                    side: BorderSide(color: AppPalette.glassBorder),
+                    side: BorderSide(color: AppPalette.hairline),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -583,7 +583,7 @@ class _ResultsDropdown extends StatelessWidget {
       shadowColor: Colors.black87,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: AppPalette.glassBorder),
+        side: BorderSide(color: AppPalette.hairline),
       ),
       clipBehavior: Clip.antiAlias,
       // Caps the list to roughly 5 visible rows and scrolls internally

@@ -284,8 +284,15 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
               : () => Navigator.pop(context, trimmed),
           child: Text(
             'CANCEL MEETUP',
+            // Greyed while disabled. `onPressed: null` already blocks the
+            // tap, but an explicit `style:` overrides TextButton's own
+            // disabled colour, so the control looked fully active while
+            // doing nothing — the user reads that as a broken button, not
+            // as "fill the field in".
             style: TextStyle(
-              color: AppPalette.danger,
+              color: trimmed.isEmpty
+                  ? AppPalette.textSecondary.withValues(alpha: 0.45)
+                  : AppPalette.danger,
               fontWeight: FontWeight.w700,
             ),
           ),

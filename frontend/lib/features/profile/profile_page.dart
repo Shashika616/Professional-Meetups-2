@@ -11,6 +11,8 @@ import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
+import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
+import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/core/widgets/verification_badges.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
@@ -21,11 +23,30 @@ import 'package:professional_connections_platform/features/verification/personal
 import 'package:professional_connections_platform/features/verification/personal_email_verification_page.dart';
 import 'package:professional_connections_platform/features/verification/phone_verification_page.dart';
 
-class ProfilePage extends ConsumerWidget {
+class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfilePage> createState() => _ProfilePageState();
+}
+
+/// # WHY THIS STATE IS KEPT ALIVE
+///
+/// Same reason as the other three tabs — AppShell's `PageView` disposes the
+/// tab you swipe away from. This page reads `subscriptionStatusProvider`,
+/// so a round trip re-runs that fetch and flickers the Premium row's
+/// subtitle between its loading and resolved text; it also loses scroll
+/// position on a page long enough for that to be noticeable.
+class _ProfilePageState extends ConsumerState<ProfilePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    // Required by the mixin — see [_HomePageState] for the full reasoning.
+    super.build(context);
+
     // The one real verification step this slice has (LinkedIn) — fullName/
     // profilePhotoUrl/trustLevel come from the one-time linkedin/callback
     // response, cached in AuthSessionState (see backend/PLAN.md Step 3 /
@@ -410,8 +431,21 @@ class ProfilePage extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Row(
         children: [
-          const Expanded(
-            child: _StatChip(value: '12', label: 'MEETUPS'),
+          Expanded(
+            // WAS A HARDCODED '12'. Every account saw a dozen completed
+            // meetups, including one created seconds earlier, which is what
+            // made the whole stats row untrustworthy rather than just this
+            // chip. Now server-sourced (auth.users.meetups_completed, kept
+            // current by the meetup module — auth/0005).
+            //
+            // Shown as a real 0 rather than the '—' the RATING chip uses:
+            // "you have completed no meetups yet" is a true, meaningful
+            // statement about a new account, whereas an average of zero
+            // ratings is not a rating of 0.
+            child: _StatChip(
+              value: '${profile?.meetupsCompleted ?? 0}',
+              label: 'MEETUPS',
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -441,15 +475,25 @@ class ProfilePage extends ConsumerWidget {
   Widget _premiumRow(BuildContext context, WidgetRef ref) {
     final statusAsync = ref.watch(subscriptionStatusProvider);
     final entitled = statusAsync.value?.isEntitled ?? false;
+    // CHANGED: this used to resolve to the literal string 'Loading…', the
+    // only place in the app using a third loading convention alongside
+    // skeletons and spinners. A short placeholder bar says the same thing
+    // without pretending to be the value, and it inherits the same
+    // delay-then-shimmer every other placeholder now has — so a status that
+    // resolves quickly shows no placeholder at all.
+    final loading = statusAsync.isLoading && !statusAsync.hasValue;
     final subtitle = statusAsync.when(
       data: (status) => entitled ? 'Premium active' : 'Upgrade for more',
-      loading: () => 'Loading…',
+      loading: () => '',
       error: (_, _) => 'Upgrade for more',
     );
     return _Row(
       icon: Icons.workspace_premium_rounded,
       title: 'Premium',
       subtitle: subtitle,
+      subtitleOverride: loading
+          ? const SkeletonLoader(child: SkeletonBox(width: 90, height: 9))
+          : null,
       trailing: entitled
           ? Icon(Icons.check_circle_rounded, size: 18, color: AppPalette.gold)
           : Icon(
@@ -706,6 +750,11 @@ class _Row extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.subtitle,
+    // Renders in place of [subtitle] when given. Exists for the one row
+    // whose subtitle is genuinely still loading — a placeholder bar reads
+    // as "a value is coming here" where the literal word "Loading…" reads
+    // as the value itself.
+    this.subtitleOverride,
     required this.trailing,
     // Optional (2026-08-31 review hardening) — every pre-existing caller
     // omits this and stays a purely visual row, same as before. Only rows
@@ -716,6 +765,7 @@ class _Row extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
+  final Widget? subtitleOverride;
   final Widget trailing;
   final VoidCallback? onTap;
 
@@ -728,7 +778,13 @@ class _Row extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              // Theme-derived, and composited onto the card it sits on. Was a
+              // hardcoded `Colors.white` at 5%: a faint chip in dark mode and
+              // literally invisible in light mode, where it was white on a
+              // white card.
+              color: AppPalette.tintedSurface(
+                AppPalette.textPrimary.withValues(alpha: 0.05),
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, size: 18, color: AppPalette.candyBlue),
@@ -747,13 +803,14 @@ class _Row extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: AppPalette.textSecondary,
-                    fontSize: 11,
-                  ),
-                ),
+                subtitleOverride ??
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: AppPalette.textSecondary,
+                        fontSize: 11,
+                      ),
+                    ),
               ],
             ),
           ),
@@ -773,7 +830,7 @@ class _Divider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 1,
-      color: AppPalette.glassBorder,
+      color: AppPalette.hairline,
       margin: const EdgeInsets.symmetric(vertical: 2),
     );
   }

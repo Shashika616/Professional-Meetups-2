@@ -33,8 +33,12 @@ class IntentTile extends StatelessWidget {
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: selected
-                    ? AppPalette.candyBlue.withValues(alpha: 0.2)
-                    : Colors.white.withValues(alpha: 0.05),
+                    ? AppPalette.tintedSurface(
+                        AppPalette.candyBlue.withValues(alpha: 0.2),
+                      )
+                    : AppPalette.tintedSurface(
+                        AppPalette.textPrimary.withValues(alpha: 0.05),
+                      ),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(

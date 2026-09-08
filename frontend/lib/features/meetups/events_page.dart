@@ -9,11 +9,13 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
+import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/core/widgets/star_rating.dart';
 import 'package:professional_connections_platform/core/widgets/trust_level_badge.dart';
 import 'package:professional_connections_platform/core/widgets/verification_badges.dart';
@@ -25,36 +27,116 @@ import 'package:professional_connections_platform/features/meetups/widgets/ratin
 /// one tap from Home (frontend/meetup-scheduling-PLAN.md Step 8). Tapping a
 /// hosted meetup opens its request-management view; tapping a requested
 /// meetup opens the ordinary detail page.
-class MyMeetupsPage extends ConsumerWidget {
-  /// [initialTab] deep-links straight to HOSTING (0, the default) or
-  /// REQUESTED (1) — the two entry points in `home_header.dart` route here
-  /// directly instead of opening on HOSTING and leaving the user to find
-  /// the right tab themselves (ADR-020 §1).
-  const MyMeetupsPage({super.key, this.initialTab = 0});
+/// The Events tab — the signed-in user's own meetups, hosted and requested.
+///
+/// RENAMED from `MyMeetupsPage`, and promoted from a pushed route to one of
+/// AppShell's five bottom-nav destinations. The data layer is untouched by
+/// that move: same `myMeetupsProvider`, same independent hosted/requested
+/// cursors, same `_RequestManagementPage`, same rating-prompt-on-reject flow.
+///
+/// Two levels of navigation, drawn deliberately differently so they read as
+/// two levels rather than one four-item control:
+///
+///   My Meetings        -> Open meetups | History   (TabBar)
+///   Requested Meetings -> Open meetups | History   (segmented pills)
+///
+/// The second level is a [_SubTabSelector] — a pair of icon+label pills that
+/// drive a real [TabController], so the list beside it still swipes and
+/// animates. See that widget's own comment for why it is not a second
+/// TabBar.
+///
+/// The open/history split is still computed client-side from the already
+/// fetched list (status open/full vs. completed/cancelled), exactly as it
+/// was before either control existed — only the control has ever changed,
+/// never the filter.
+/// Why both of this page's TabBarViews refuse horizontal drags.
+///
+/// This page is one of AppShell's bottom-nav destinations, and AppShell puts
+/// those in a `PageView` so the user can swipe Home <-> Events <-> Safety.
+/// That stacks THREE horizontal gesture consumers on top of each other here:
+/// AppShell's PageView, this page's tab TabBarView, and each list's
+/// Open/History TabBarView.
+///
+/// Flutter hands a horizontal drag to the INNERMOST scrollable and never
+/// passes it back to an ancestor mid-gesture, so exactly one of the three
+/// can ever respond — and it was the innermost, which is why swiping on
+/// Events could not reach Home or Safety at all.
+///
+/// The rule chosen (Shashika, 2026-09-07): a horizontal swipe means the same
+/// thing everywhere in the app — move between main pages. Switching tabs
+/// here is a tap, on controls that are permanently on screen a few
+/// millimetres away. This is what Instagram and LinkedIn do with tabs inside
+/// a bottom-nav destination, and it avoids a swipe that means something
+/// different depending on which page you happen to be on.
+///
+/// NOT applied to `_RequestManagementPage`'s tabs: that screen is a PUSHED
+/// route, so it sits outside AppShell's PageView entirely and has no
+/// competing ancestor to yield to. Its tabs still swipe.
+const _noSwipeInsideAppShell = NeverScrollableScrollPhysics();
+
+class EventsPage extends ConsumerStatefulWidget {
+  /// [initialTab] deep-links straight to My Meetings (0, the default) or
+  /// Requested Meetings (1). Kept through the rename because
+  /// `meetup_detail_page.dart` still deep-links here.
+  const EventsPage({super.key, this.initialTab = 0});
 
   final int initialTab;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<EventsPage> createState() => _EventsPageState();
+}
+
+/// # WHY THIS STATE IS KEPT ALIVE
+///
+/// AppShell puts the four tabs in a `PageView` whose default cache window is
+/// narrower than one screen, so a full swipe DISPOSES the tab you left
+/// rather than merely scrolling it off. This page's `myMeetupsProvider` is
+/// `.autoDispose` and this page is its only subscriber, so the cached data
+/// went with it and swiping back remounted from `AsyncLoading` — the flat
+/// grey skeleton behind the reported "gets all grey and then loads".
+///
+/// `AutomaticKeepAliveClientMixin` is the standard fix for a PageView child
+/// losing state on scroll. It needs a `State`, which is the only reason this
+/// page became a `ConsumerStatefulWidget`; nothing else about it changed.
+class _EventsPageState extends ConsumerState<EventsPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    // Required by the mixin — it is what registers the keep-alive with the
+    // enclosing sliver. Omitting it makes the mixin a silent no-op.
+    super.build(context);
+
     final myMeetupsAsync = ref.watch(myMeetupsProvider);
 
-    // Pushed as its own route from Home, not one of AppShell's bottom-nav
-    // tabs — AppShell's own AppBackground wrap (app_shell.dart) only
-    // covers pages[currentIndex], so a page reached via Navigator.push
-    // needs this itself or it renders on a plain black canvas instead of
-    // the rest of the app's glassmorphism background.
+    // AppBackground is kept even though AppShell now wraps this page as one
+    // of its bottom-nav destinations: meetup_detail_page.dart still PUSHES
+    // this page as a route for its deep link, a pushed route is built under
+    // the Navigator (which sits above AppShell), and without this the page
+    // would render on plain black down that entry path.
+    //
+    // CORRECTED: this comment used to say nesting was "harmless — it paints
+    // the same background twice". It was not. Two full-screen Image.asset
+    // layers, each under its own Opacity and ColorFiltered, meant two
+    // saveLayers composited on every frame of a page transition and two
+    // image streams that each show a flat grey fill until they resolve —
+    // on the only one of the four tabs that did it. AppBackground now
+    // detects the nesting and passes through, so this line costs nothing
+    // when EventsPage is a tab and still works when it is a pushed route.
     return AppBackground(
       child: DefaultTabController(
         length: 2,
-        initialIndex: initialTab,
+        initialIndex: widget.initialTab,
         child: Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
-            title: const Text('MY MEETUPS'),
+            title: const Text('EVENTS'),
             bottom: const TabBar(
               tabs: [
-                Tab(text: 'HOSTING'),
-                Tab(text: 'REQUESTED'),
+                Tab(text: 'My Meetings'),
+                Tab(text: 'Requested Meetings'),
               ],
             ),
           ),
@@ -91,6 +173,9 @@ class MyMeetupsPage extends ConsumerWidget {
               ),
             ),
             data: (result) => TabBarView(
+              // See _noSwipeInsideAppShell — this page is a bottom-nav
+              // destination, so a horizontal drag here belongs to AppShell.
+              physics: _noSwipeInsideAppShell,
               children: [
                 _MeetupList(
                   isHosted: true,
@@ -139,7 +224,13 @@ class _MyMeetupsSkeleton extends StatelessWidget {
   const _MyMeetupsSkeleton();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SkeletonLoader(child: _content(context));
+
+  /// The placeholder shapes themselves. [SkeletonLoader] above adds the
+  /// delay-before-showing and the shimmer sweep, so every caller of this
+  /// widget gets both without knowing about either.
+  Widget _content(BuildContext context) {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
       itemCount: 3,
@@ -180,11 +271,11 @@ class _MyMeetupsSkeleton extends StatelessWidget {
 ///
 /// 2026-08-31 round-4 hardening: also owns real cursor pagination for its
 /// side (hosted or requested — [isHosted] picks which), reusing
-/// `matches_page.dart`'s `_MeetupList` scroll-load pattern exactly (a
+/// the shared PaginatedMeetupList's scroll-load pattern exactly (a
 /// [ScrollController] with a near-bottom listener, a `_loadingMore` guard,
 /// disposed in [dispose]) rather than a second implementation of the same
 /// mechanism. [initialItems]/[initialNextCursor]/[initialHasMore] are
-/// [MyMeetupsPage]'s first page from `myMeetupsProvider`; this widget
+/// [EventsPage]'s first page from `myMeetupsProvider`; this widget
 /// accumulates further pages itself via direct `listMyMeetups` calls.
 class _MeetupList extends ConsumerStatefulWidget {
   const _MeetupList({
@@ -207,13 +298,9 @@ class _MeetupList extends ConsumerStatefulWidget {
   ConsumerState<_MeetupList> createState() => _MeetupListState();
 }
 
-class _MeetupListState extends ConsumerState<_MeetupList> {
-  bool _showHistory = false;
-  late List<Meetup> _items;
-  String? _nextCursor;
-  bool _hasMore = false;
-  bool _loadingMore = false;
-  final _scrollController = ScrollController();
+class _MeetupListState extends ConsumerState<_MeetupList>
+    with SingleTickerProviderStateMixin {
+  late final TabController _subTabs;
 
   static bool _isOpen(Meetup m) =>
       m.status == MeetupStatus.open || m.status == MeetupStatus.full;
@@ -223,157 +310,249 @@ class _MeetupListState extends ConsumerState<_MeetupList> {
   @override
   void initState() {
     super.initState();
-    _resetFromWidget();
-    _scrollController.addListener(_maybeLoadNextPage);
-  }
-
-  @override
-  void didUpdateWidget(covariant _MeetupList oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!identical(widget.initialItems, oldWidget.initialItems)) {
-      _resetFromWidget();
-    }
-  }
-
-  void _resetFromWidget() {
-    _items = List.of(widget.initialItems);
-    _nextCursor = widget.initialNextCursor;
-    _hasMore = widget.initialHasMore;
-    _loadingMore = false;
+    // Index 0 = "Open meetups", the default view (matches the previous
+    // toggle's own default of _showHistory = false).
+    _subTabs = TabController(length: 2, vsync: this);
   }
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _subTabs.dispose();
     super.dispose();
   }
 
-  void _maybeLoadNextPage() {
-    if (!_hasMore || _loadingMore) return;
-    const nearBottomThreshold = 400.0;
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - nearBottomThreshold) {
-      _loadNextPage();
-    }
+  /// Fetches the next page of whichever side this list is showing.
+  ///
+  /// Handed to BOTH sub-tabs: paging is a property of the underlying
+  /// hosted/requested list, not of the open/history filter, which is applied
+  /// client-side over whatever has been fetched. Two tabs paging the same
+  /// source is correct — the alternative (per-tab cursors) would ask the
+  /// server to filter by a status split it does not model.
+  Future<({List<Meetup> items, String? nextCursor, bool hasMore})> _loadMore(
+    String cursor,
+  ) async {
+    final result = await ref
+        .read(meetupServiceProvider)
+        .listMyMeetups(
+          hostedCursor: widget.isHosted ? cursor : null,
+          requestedCursor: widget.isHosted ? null : cursor,
+        );
+    return (
+      items: widget.isHosted ? result.hosted : result.requested,
+      nextCursor: widget.isHosted
+          ? result.hostedNextCursor
+          : result.requestedNextCursor,
+      hasMore: widget.isHosted ? result.hostedHasMore : result.requestedHasMore,
+    );
   }
 
-  Future<void> _loadNextPage() async {
-    if (!_hasMore || _loadingMore || _nextCursor == null) return;
-    setState(() => _loadingMore = true);
-    try {
-      final result = await ref
-          .read(meetupServiceProvider)
-          .listMyMeetups(
-            hostedCursor: widget.isHosted ? _nextCursor : null,
-            requestedCursor: widget.isHosted ? null : _nextCursor,
-          );
-      if (!mounted) return;
-      final newItems = widget.isHosted ? result.hosted : result.requested;
-      final newNextCursor = widget.isHosted
-          ? result.hostedNextCursor
-          : result.requestedNextCursor;
-      final newHasMore = widget.isHosted
-          ? result.hostedHasMore
-          : result.requestedHasMore;
-      setState(() {
-        _items = [..._items, ...newItems];
-        _nextCursor = newNextCursor;
-        _hasMore = newHasMore;
-        _loadingMore = false;
-      });
-    } catch (error) {
-      // Best-effort, same as matches_page.dart's `_MeetupList` — the
-      // current page stays visible, scrolling again retries.
-      if (!mounted) return;
-      setState(() => _loadingMore = false);
-    }
+  Future<void> _refresh() async {
+    ref.invalidate(myMeetupsProvider);
+    await ref.read(myMeetupsProvider.future).then((_) {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _items.where(_showHistory ? _isHistory : _isOpen).toList();
-
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-          child: Row(
+        _SubTabSelector(controller: _subTabs),
+        Expanded(
+          child: TabBarView(
+            controller: _subTabs,
+            physics: _noSwipeInsideAppShell,
             children: [
-              Expanded(
-                child: _OpenHistoryToggle(
-                  label: 'OPEN',
-                  selected: !_showHistory,
-                  onTap: () => setState(() => _showHistory = false),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _OpenHistoryToggle(
-                  label: 'HISTORY',
-                  selected: _showHistory,
-                  onTap: () => setState(() => _showHistory = true),
-                ),
-              ),
+              _buildList(_isOpen, widget.emptyMessage),
+              _buildList(_isHistory, 'Nothing here yet.'),
             ],
           ),
-        ),
-        Expanded(
-          child: filtered.isEmpty
-              ? Center(
-                  child: Text(
-                    _showHistory ? 'Nothing here yet.' : widget.emptyMessage,
-                    style: TextStyle(
-                      color: AppPalette.textSecondary,
-                      fontSize: 13,
-                    ),
-                  ),
-                )
-              : _MeetupListView(
-                  meetups: filtered,
-                  hasMore: _hasMore,
-                  scrollController: _scrollController,
-                  onTap: widget.onTap,
-                ),
         ),
       ],
     );
   }
+
+  Widget _buildList(bool Function(Meetup) filter, String emptyMessage) {
+    return PaginatedMeetupList(
+      items: widget.initialItems.where(filter).toList(),
+      nextCursor: widget.initialNextCursor,
+      hasMore: widget.initialHasMore,
+      loadMore: (cursor) async {
+        final next = await _loadMore(cursor);
+        // The filter is applied to appended pages too — without this, a
+        // page-2 fetch would append history rows into the open tab.
+        return (
+          items: next.items.where(filter).toList(),
+          nextCursor: next.nextCursor,
+          hasMore: next.hasMore,
+        );
+      },
+      onRefresh: _refresh,
+      emptyMessage: emptyMessage,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+      // `previous` is unused here: Events lists are already split by tab and
+      // by open/history, so a third level of grouping inside them would be
+      // noise.
+      itemBuilder: (context, meetup, _) =>
+          _MyMeetupTile(meetup: meetup, onTap: () => widget.onTap(meetup)),
+    );
+  }
 }
 
-class _OpenHistoryToggle extends StatelessWidget {
-  const _OpenHistoryToggle({
+/// The Open/History control.
+///
+/// # WHY THIS IS NOT A SECOND TabBar
+///
+/// It was one, briefly. Two underlined tab bars stacked directly on top of
+/// each other — the page's own My Meetings/Requested Meetings bar and this
+/// one — read as one confusing four-item control rather than two levels,
+/// because they were drawn identically and the only cue separating them was
+/// a hairline. A segmented pill is visually subordinate to the tab bar above
+/// it, which is what the hierarchy actually is.
+///
+/// What it deliberately KEEPS from the TabBar it replaces, and what the pair
+/// of plain GestureDetectors that came before that never had:
+///
+///   * it drives a real [TabController], so the [TabBarView] beside it still
+///     swipes between the two lists, animates, and stays in sync whichever
+///     way the user drives it;
+///   * it rebuilds from the controller rather than from local state, so a
+///     swipe moves the selection here too;
+///   * each half is a [Semantics] tab with a selected state, so the
+///     accessibility layer still sees a two-tab control.
+class _SubTabSelector extends StatefulWidget {
+  const _SubTabSelector({required this.controller});
+
+  final TabController controller;
+
+  @override
+  State<_SubTabSelector> createState() => _SubTabSelectorState();
+}
+
+class _SubTabSelectorState extends State<_SubTabSelector> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  // Fires on a tap AND partway through a swipe, which is the point: the
+  // selection must follow the TabBarView rather than only leading it.
+  void _onControllerChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final index = widget.controller.index;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: _SubTabButton(
+              icon: Icons.event_available_outlined,
+              label: 'Open meetups',
+              selected: index == 0,
+              onTap: () => widget.controller.animateTo(0),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _SubTabButton(
+              icon: Icons.history_rounded,
+              label: 'History',
+              selected: index == 1,
+              onTap: () => widget.controller.animateTo(1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One half of the segmented control. Flat by design — a thin border and a
+/// faint tint for the selected state, matching `IntentFilterBar`'s chips on
+/// Home rather than introducing a third button style to the app.
+class _SubTabButton extends StatelessWidget {
+  const _SubTabButton({
+    required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
   });
 
+  final IconData icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          color: selected
-              ? AppPalette.candyBlue.withValues(alpha: 0.15)
-              : Colors.transparent,
-          border: Border.all(
-            color: selected ? AppPalette.candyBlue : AppPalette.glassBorder,
+    final foreground = selected
+        ? AppPalette.candyBlue
+        : AppPalette.textSecondary;
+
+    return Semantics(
+      // Still a tab to the accessibility layer, exactly as the TabBar was.
+      button: true,
+      selected: selected,
+      label: label,
+      child: GestureDetector(
+        onTap: onTap,
+        // Without this the gaps inside the pill (and the pill itself when
+        // unselected, which paints an almost-transparent fill) would not
+        // register a tap at all.
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          curve: Curves.easeOut,
+          height: 38,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            // Opaque, matching IntentFilterBar's chips — see that widget for
+            // why a low-alpha fill over AppBackground reads as a smear
+            // rather than a control. This was the last use of the old
+            // `glassTint` token, which is now deleted.
+            color: selected
+                ? AppPalette.tintedSurface(
+                    AppPalette.candyBlue.withValues(alpha: 0.12),
+                  )
+                : AppPalette.card,
+            border: Border.all(
+              color: selected
+                  ? AppPalette.candyBlue.withValues(alpha: 0.55)
+                  : AppPalette.hairline,
+            ),
           ),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: selected ? AppPalette.candyBlue : AppPalette.textSecondary,
-            fontWeight: FontWeight.w800,
-            fontSize: 12,
-            letterSpacing: 0.8,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 15, color: foreground),
+              const SizedBox(width: 7),
+              // Flexible, not a bare Text: "Open meetups" is the longer of
+              // the two and the pills are equal width, so on a narrow
+              // device it must ellipsize rather than overflow.
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: 12.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -381,102 +560,84 @@ class _OpenHistoryToggle extends StatelessWidget {
   }
 }
 
-class _MeetupListView extends StatelessWidget {
-  const _MeetupListView({
-    required this.meetups,
-    required this.hasMore,
-    required this.scrollController,
-    required this.onTap,
-  });
+/// One row on the Events list.
+///
+/// Was the itemBuilder body of `_MeetupListView`, which also owned the
+/// ListView, the load-more spinner and the ScrollController. Those three are
+/// [PaginatedMeetupList]'s job now, so what is left here is exactly the card
+/// — which is all this widget was ever really about.
+///
+/// Distinct from `MeetupCard` (the browse card) on purpose: this one shows a
+/// meetup the viewer already belongs to, so it needs no join button, no
+/// locked/redacted variant (listMyMeetups never redacts) and no host
+/// identity block — the host is either the viewer or someone they have
+/// already been accepted by.
+class _MyMeetupTile extends StatelessWidget {
+  const _MyMeetupTile({required this.meetup, required this.onTap});
 
-  final List<Meetup> meetups;
-  final bool hasMore;
-  final ScrollController scrollController;
-  final void Function(Meetup meetup) onTap;
+  final Meetup meetup;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      controller: scrollController,
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
-      itemCount: meetups.length + (hasMore ? 1 : 0),
-      itemBuilder: (context, index) {
-        if (index >= meetups.length) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-            ),
-          );
-        }
-        final meetup = meetups[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 14),
-          child: GestureDetector(
-            onTap: () => onTap(meetup),
-            child: FlatCard(
-              radius: 12,
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: GestureDetector(
+        onTap: onTap,
+        child: FlatCard(
+          radius: 12,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          meetup.intent.label,
-                          style: TextStyle(
-                            color: AppPalette.candyBlue,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
+                  Expanded(
+                    child: Text(
+                      meetup.intent.label,
+                      style: TextStyle(
+                        color: AppPalette.candyBlue,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.2,
                       ),
-                      MeetupStatusBadge(status: meetup.status),
-                      const SizedBox(width: 6),
-                      TrustLevelBadge(trustLevel: meetup.hostTrustLevel),
-                      const SizedBox(width: 6),
-                      StarRating(
-                        average: meetup.hostRatingAverage,
-                        count: meetup.hostRatingCount,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  VerificationBadges(trustLevel: meetup.hostTrustLevel),
-                  const SizedBox(height: 6),
-                  Text(
-                    meetup.formattedWindow,
-                    style: TextStyle(
-                      color: AppPalette.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  // locationLabel is only ever null for a locked
-                  // ListOpenMeetups result (ADR-028) — this page loads via
-                  // listMyMeetups, which never redacts, so `!` is safe.
-                  Text(
-                    meetup.locationLabel!,
-                    style: TextStyle(
-                      color: AppPalette.textSecondary,
-                      fontSize: 12,
-                    ),
+                  MeetupStatusBadge(status: meetup.status),
+                  const SizedBox(width: 6),
+                  TrustLevelBadge(trustLevel: meetup.hostTrustLevel),
+                  const SizedBox(width: 6),
+                  StarRating(
+                    average: meetup.hostRatingAverage,
+                    count: meetup.hostRatingCount,
                   ),
-                  const SizedBox(height: 10),
-                  _statusRow(meetup),
                 ],
               ),
-            ),
+              const SizedBox(height: 6),
+              VerificationBadges(trustLevel: meetup.hostTrustLevel),
+              const SizedBox(height: 6),
+              Text(
+                meetup.formattedWindow,
+                style: TextStyle(
+                  color: AppPalette.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              // locationLabel is only ever null for a locked
+              // ListOpenMeetups result (ADR-028) — this page loads via
+              // listMyMeetups, which never redacts, so `!` is safe.
+              Text(
+                meetup.locationLabel!,
+                style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+              ),
+              const SizedBox(height: 10),
+              _statusRow(meetup),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -933,7 +1094,13 @@ class _RequestsSkeleton extends StatelessWidget {
   const _RequestsSkeleton();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SkeletonLoader(child: _content(context));
+
+  /// The placeholder shapes themselves. [SkeletonLoader] above adds the
+  /// delay-before-showing and the shimmer sweep, so every caller of this
+  /// widget gets both without knowing about either.
+  Widget _content(BuildContext context) {
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
       itemCount: 3,

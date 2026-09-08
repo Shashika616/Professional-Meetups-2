@@ -14,7 +14,7 @@ import 'package:professional_connections_platform/core/widgets/primary_button.da
 import 'package:professional_connections_platform/features/home/widgets/intent_tile.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/map_location_step.dart';
-import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
+import 'package:professional_connections_platform/features/verification/hosting_unlock_page.dart';
 
 /// Accumulates the host's choices across the Schedule flow's steps — a
 /// plain mutable holder passed down to each step, not persisted anywhere
@@ -333,17 +333,27 @@ class _IntentStep extends StatelessWidget {
               IntentTile(
                 intent: intent,
                 selected: intent == selected,
-                locked: !intent.isUnlockedFor(trustLevel),
+                locked: !intent.canHost(trustLevel),
                 onTap: () {
-                  if (!intent.isUnlockedFor(trustLevel)) {
+                  // HOST-side gate (ADR-002 § 4) — this is the scheduling
+                  // flow, so every intent here is being chosen to host.
+                  //
+                  // The destination is HostingUnlockPage, not the Level 2
+                  // checklist. ADR-002 § 4 split the two gates but this call
+                  // site kept the old redirect, so a Level 2 user — who can
+                  // already join meetups — was sent to a page listing four
+                  // things they finished long ago, with nothing on it that
+                  // would actually unlock hosting. home_page.dart's
+                  // onHostMeetup already routed correctly; this now matches.
+                  if (!intent.canHost(trustLevel)) {
                     showSnack(
                       context,
-                      '${intent.label} requires Level ${intent.requiredTrustLevel} trust. Verify  your phone, personal email, and details in Profile to unlock it.',
+                      'Hosting a ${intent.label} meetup requires Level ${intent.requiredTrustLevelToHost} trust. Add your company details to unlock it.',
                       type: ToastType.locked,
                     );
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => const VerificationChecklistPage(),
+                        builder: (_) => const HostingUnlockPage(),
                       ),
                     );
                     return;
@@ -385,7 +395,7 @@ Future<TimeOfDay?> _pickMeetupTime(
               backgroundColor: AppPalette.card,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
-                side: BorderSide(color: AppPalette.glassBorder),
+                side: BorderSide(color: AppPalette.hairline),
               ),
               helpTextStyle: TextStyle(
                 color: AppPalette.textSecondary,
@@ -412,7 +422,7 @@ Future<TimeOfDay?> _pickMeetupTime(
               ),
               hourMinuteShape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: AppPalette.glassBorder),
+                side: BorderSide(color: AppPalette.hairline),
               ),
               entryModeIconColor: AppPalette.candyBlue,
               cancelButtonStyle: TextButton.styleFrom(
@@ -778,8 +788,12 @@ class _StepperButton extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: enabled
-              ? AppPalette.candyBlue.withValues(alpha: 0.15)
-              : Colors.white.withValues(alpha: 0.05),
+              ? AppPalette.tintedSurface(
+                  AppPalette.candyBlue.withValues(alpha: 0.15),
+                )
+              : AppPalette.tintedSurface(
+                  AppPalette.textPrimary.withValues(alpha: 0.05),
+                ),
         ),
         child: Icon(
           icon,
@@ -886,6 +900,6 @@ class _ReviewDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(height: 1, color: AppPalette.glassBorder);
+    return Container(height: 1, color: AppPalette.hairline);
   }
 }

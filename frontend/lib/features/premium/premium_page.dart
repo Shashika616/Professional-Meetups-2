@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
+import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/features/premium/purchase_flow_controller.dart';
 
 /// The one Premium subscription product this slice sells — a monthly
@@ -104,8 +105,9 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
           children: [
             statusAsync.when(
               data: (status) => _statusCard(status),
-              loading: () =>
-                  const SkeletonBox(width: double.infinity, height: 88),
+              loading: () => const SkeletonLoader(
+                child: SkeletonBox(width: double.infinity, height: 88),
+              ),
               error: (_, _) => const SizedBox.shrink(),
             ),
             const SizedBox(height: 24),

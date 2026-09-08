@@ -18,7 +18,7 @@ import 'package:professional_connections_platform/features/verification/phone_ve
 /// **not** corporate/work email, that's Level 3 and out of scope here).
 ///
 /// Reached from tapping a trust-locked meetup card or its join button
-/// (`matches_page.dart`'s `_MeetupCard`, `meetup_detail_page.dart`'s join
+/// (the shared `MeetupCard`, `meetup_detail_page.dart`'s join
 /// action). Distinct from two things that already exist and aren't reused
 /// here: `onboarding_flow.dart`'s `runVerificationSequence` (auto-advances
 /// through every incomplete step in one sequential wizard, no per-item
@@ -178,7 +178,9 @@ class _ChecklistRow extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              color: AppPalette.tintedSurface(
+                AppPalette.textPrimary.withValues(alpha: 0.05),
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, size: 18, color: AppPalette.candyBlue),
@@ -232,7 +234,7 @@ class _ChecklistDivider extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       height: 1,
-      color: AppPalette.glassBorder,
+      color: AppPalette.hairline,
       margin: const EdgeInsets.symmetric(vertical: 2),
     );
   }

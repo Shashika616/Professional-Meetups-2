@@ -19,11 +19,35 @@ import 'package:professional_connections_platform/features/safety/manage_trusted
 /// reasoning as `PhoneVerificationPage`'s fixed `+94` prefix).
 const String _emergencyServicesNumber = '119';
 
-class SafetyPage extends ConsumerWidget {
+class SafetyPage extends ConsumerStatefulWidget {
   const SafetyPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SafetyPage> createState() => _SafetyPageState();
+}
+
+/// # WHY THIS STATE IS KEPT ALIVE
+///
+/// Same reason as the other three tabs: AppShell's `PageView` disposes the
+/// tab you swipe away from, and remounting re-runs everything the page reads.
+/// This page has no network fetch of its own, so it never showed the grey
+/// skeleton — but it does hold scroll position and the trusted-contacts
+/// sheet's state, and a tab that silently jumps back to the top when you
+/// return is the same class of bug with a quieter symptom.
+///
+/// Kept consistent with its three siblings deliberately: one tab behaving
+/// differently from the rest is worse than the small cost of holding a
+/// stateless-ish page alive.
+class _SafetyPageState extends ConsumerState<SafetyPage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    // Required by the mixin — see [_HomePageState] for the full reasoning.
+    super.build(context);
+
     final checklist = [
       'Meet in a public place',
       'Tell a trusted contact where you are going',

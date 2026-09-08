@@ -98,7 +98,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
           .signInWithLinkedIn(ageConfirmedOver18: true);
       if (!mounted) return;
       // The Level 2/3 phone/personal-email/personal-details/corporate-email
-      // sequence no longer runs during initial onboarding — straight to the
+      // sequence no longer runs during initial onboarding straight to the
       // mandatory profile-setup screen instead, same as every other path.
       // Those steps are still reachable later from ProfilePage (which
       // reuses the exact same pendingVerificationSteps/runVerificationSequence
@@ -119,7 +119,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
           .read(authSessionProvider.notifier)
           .signInWithApple(ageConfirmedOver18: true);
       if (!mounted) return;
-      // Level 0 (Apple alone never grants trust, ADR-014 §1) — straight to
+      // Level 0 (Apple alone never grants trust, ADR-014 §1) straight to
       // AppShell, no verification sequence attempted (every step in it
       // requires LinkedIn server-side and would just 403).
       await _goToAppShell();
@@ -146,6 +146,31 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     }
   }
 
+  /// The guest path (ADR-002 § 6). Age confirmation has already happened —
+  /// this button only exists on the chooseMethod step, which is only
+  /// reachable after it.
+  ///
+  /// Goes STRAIGHT to AppShell, bypassing _goToAppShell's ProfileSetupScreen
+  /// detour: that screen asks a user to confirm their full name and
+  /// optionally register a company, and a guest has neither. Their display
+  /// name is a handle the server just generated, and there is nothing to
+  /// confirm about it.
+  Future<void> _continueAsGuest() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref
+          .read(authSessionProvider.notifier)
+          .guestSignup(ageConfirmedOver18: true);
+      if (!mounted) return;
+      _navigateToAppShell();
+    } catch (error, stackTrace) {
+      _handleSignInError('guestSignup', error, stackTrace);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _openEmailSignup() async {
     final success = await Navigator.push<bool>(
       context,
@@ -156,11 +181,29 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     if (success == true && mounted) await _goToAppShell();
   }
 
+  /// [stackTrace] is accepted and deliberately NOT logged — see below. It
+  /// stays in the signature because every call site's `catch (error,
+  /// stackTrace)` already has it and dropping it would only make the next
+  /// person add a `print` back to recover it.
   void _handleSignInError(String source, Object error, StackTrace stackTrace) {
-    // Logged so the underlying cause is visible in the console — the
-    // toast itself only ever shows a user-safe message, never raw
-    // exception detail.
-    debugPrint('$source failed: $error\n$stackTrace');
+    // TYPE PLUS A SANITIZED MESSAGE, never the raw error object and never
+    // the stack trace (which names internal file paths and, for a plugin
+    // failure, the plugin's own internals).
+    //
+    // debugPrint is NOT stripped from release builds. The typed exceptions
+    // this codebase throws (AuthException and friends) carry only
+    // user-safe messages, so printing those was harmless — but this handler
+    // catches every sign-in path, including guestSignup and the OAuth
+    // plugins, and an untyped failure here is a raw PlatformException from
+    // google_sign_in / sign_in_with_apple or an HTTP client exception. Those
+    // put whatever they like in toString(): endpoint URLs, tokens in a
+    // request echo, account identifiers. The type name plus our own message
+    // is enough to debug from and carries none of it.
+    //
+    // AuthException.message is safe by construction and worth keeping —
+    // it is the same string the toast below shows the user.
+    final safeMessage = error is AuthException ? error.message : '';
+    debugPrint('$source failed: ${error.runtimeType} $safeMessage');
     if (!mounted) return;
     // A cancellation (backed out of the provider's picker, or closed the
     // browser without finishing LinkedIn) isn't really an "error" — a
@@ -318,6 +361,38 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
                 ),
               ),
             ),
+            const SizedBox(height: 4),
+            // Visually subordinate to the three real signup paths, on
+            // purpose: a guest account is a genuine entry point but the
+            // weakest one, and the product intent (ADR-033 § 1) is that a
+            // guest's view is deliberately reduced precisely so signing up
+            // properly is the attractive option.
+            //
+            // No caption of its own — what a guest gives up is stated once,
+            // in _trustMicrocopy below, rather than in a second block of
+            // prose. This section is fixed-height above the fold, and
+            // stacking another paragraph here overflowed it.
+            Center(
+              child: GestureDetector(
+                key: const Key('continueAsGuest'),
+                onTap: _busy ? null : _continueAsGuest,
+                child: Padding(
+                  // Matches the "Sign up with email" link directly above,
+                  // rather than a TextButton: same visual weight for the same
+                  // kind of secondary action, and TextButton's 48px minimum
+                  // tap target overflowed this fixed-height section.
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'Continue as Guest',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppPalette.textSecondary,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -325,64 +400,77 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   }
 
   Widget _welcomeStep() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: AppPalette.candyBlue.withValues(alpha: 0.3),
-                width: 2,
+    // Scrollable so it SHRINKS rather than overflows when the fixed block
+    // beneath it (buttons + microcopy) is tall relative to the viewport.
+    // Before ADR-002 § 6 added the guest entry point this had just enough
+    // slack to get away with a plain Center; it no longer does, and a short
+    // phone would have hit the same overflow eventually regardless. At normal
+    // sizes nothing scrolls and it renders identically.
+    return SingleChildScrollView(
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppPalette.candyBlue.withValues(alpha: 0.3),
+                  width: 2,
+                ),
+              ),
+              child: Icon(
+                Icons.handshake_outlined,
+                size: 64,
+                color: AppPalette.candyBlue,
               ),
             ),
-            child: Icon(
-              Icons.handshake_outlined,
-              size: 64,
-              color: AppPalette.candyBlue,
+            const SizedBox(height: 32),
+            Text(
+              'Connect Beyond\nThe Office.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.w800,
+                color: AppPalette.textPrimary,
+                height: 1.2,
+                letterSpacing: -0.5,
+              ),
             ),
-          ),
-          const SizedBox(height: 32),
-          Text(
-            'Connect Beyond\nThe Office.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.w800,
-              color: AppPalette.textPrimary,
-              height: 1.2,
-              letterSpacing: -0.5,
+            const SizedBox(height: 16),
+            Text(
+              'Meet verified professionals in real life.\nYour next coffee, mentor, or co-founder is nearby.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: AppPalette.textSecondary,
+                height: 1.5,
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Meet verified professionals in real life.\nYour next coffee, mentor, or co-founder is nearby.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14,
-              color: AppPalette.textSecondary,
-              height: 1.5,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   /// ADR-014's microcopy — replaces the old LinkedIn-only trust copy, since
   /// LinkedIn is now optional-at-signup rather than mandatory. States
-  /// plainly that skipping LinkedIn keeps the account read-only, and that
+  /// plainly that skipping LinkedIn keeps the account restricted, and that
   /// it can be connected later from Profile (`ProfilePage`'s "Connect
   /// LinkedIn" banner, Step 7) — not a dead end.
+  ///
+  /// Extended by ADR-002 § 6 to cover the guest option in the same
+  /// paragraph, rather than giving that button a caption of its own: this
+  /// whole block sits in a fixed-height section above the nav bar, and the
+  /// two explanations are the same explanation at different strengths.
   Widget _trustMicrocopy() {
     return SizedBox(
       width: double.infinity,
       child: Text(
-        'Signing in without LinkedIn keeps your account more restricted. We do this to ensure a private and secure experience. Connect '
-        'LinkedIn anytime during setup or later from your profile to '
-        'unlock matching, messaging, and meetups.',
+        'Signing in without LinkedIn keeps your account more restricted, connect it '
+        'anytime from your profile to unlock matching and meetups. Continuing as a '
+        'guest lets you browse, but host names and times stay hidden.',
         textAlign: TextAlign.center,
         style: TextStyle(
           fontSize: 11,

@@ -14,6 +14,7 @@ import 'package:professional_connections_platform/core/widgets/glass_text_field.
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
+import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 
 const int maxTrustedContacts = 3;
 
@@ -433,7 +434,13 @@ class _ContactsSkeleton extends StatelessWidget {
   const _ContactsSkeleton();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SkeletonLoader(child: _content(context));
+
+  /// The placeholder shapes themselves. [SkeletonLoader] above adds the
+  /// delay-before-showing and the shimmer sweep, so every caller of this
+  /// widget gets both without knowing about either.
+  Widget _content(BuildContext context) {
     return Column(
       children: List.generate(
         3,

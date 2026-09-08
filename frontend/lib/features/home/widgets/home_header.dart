@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
-import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
-import 'package:professional_connections_platform/features/meetups/my_meetups_page.dart';
 
 class HomeHeader extends StatelessWidget {
   const HomeHeader({super.key, required this.userName, this.imageUrl});
@@ -58,39 +56,10 @@ class HomeHeader extends StatelessWidget {
               ProfessionalAvatar(size: 44, name: userName, imageUrl: imageUrl),
             ],
           ),
-          const SizedBox(height: 14),
-          // Two visible, clearly labeled entry points into MyMeetupsPage
-          // (ADR-020 §1) — replaces the single small `_MyMeetupsButton`
-          // icon that made hosting/requested meetups hard to discover,
-          // deep-linking directly to the relevant tab instead of leaving
-          // the user to find it themselves.
-          Row(
-            children: [
-              Expanded(
-                child: _MyMeetupsEntryChip(
-                  icon: Icons.event_available_outlined,
-                  label: 'Your Meetings',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const MyMeetupsPage(initialTab: 0),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _MyMeetupsEntryChip(
-                  icon: Icons.how_to_reg_outlined,
-                  label: 'Requested Meetups',
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const MyMeetupsPage(initialTab: 1),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
+          // The two "Your Meetings"/"Requested Meetups" chips that used to
+          // sit here are gone: that navigation is the Events bottom-nav tab
+          // now, and a persistent tab is a better home for it than two
+          // chips competing for space at the top of the browse feed.
         ],
       ),
     );
@@ -101,48 +70,6 @@ class HomeHeader extends StatelessWidget {
     if (hour < 12) return 'Good morning,';
     if (hour < 17) return 'Good afternoon,';
     return 'Good evening,';
-  }
-}
-
-class _MyMeetupsEntryChip extends StatelessWidget {
-  const _MyMeetupsEntryChip({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: FlatCard(
-        radius: 10,
-        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 16, color: AppPalette.candyBlue),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

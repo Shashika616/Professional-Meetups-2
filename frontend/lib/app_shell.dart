@@ -4,13 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/services/push_notification_service.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/app_bottom_bar.dart';
-import 'package:professional_connections_platform/features/chats/chats_page.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
-import 'package:professional_connections_platform/features/matches/matches_page.dart';
+import 'package:professional_connections_platform/features/meetups/events_page.dart';
 import 'package:professional_connections_platform/features/profile/profile_page.dart';
 import 'package:professional_connections_platform/features/safety/safety_page.dart';
 
@@ -32,9 +33,15 @@ class _AppShellState extends ConsumerState<AppShell>
     with WidgetsBindingObserver {
   final List<Widget> pages = const [
     HomePage(),
-    MatchesPage(),
+    // Tab 1 was MatchesPage (browse open meetups). That page is gone —
+    // browsing is inline on Home now — and this slot is the user's own
+    // meetups, which previously had no persistent home at all and was
+    // reachable only through two chips on Home's header.
+    EventsPage(),
     SafetyPage(),
-    ChatsPage(),
+    // Chats removed for now (2026-09-08) — see app_bottom_bar.dart's comment.
+    // features/chats/chats_page.dart is untouched on disk; re-add the import
+    // and this entry (and app_bottom_bar.dart's item) when it's real.
     ProfilePage(),
   ];
 
@@ -81,17 +88,84 @@ class _AppShellState extends ConsumerState<AppShell>
     }
   }
 
-  /// ADR-030 (round-9 scaffolding) — never fires today
-  /// (NoOpPushNotificationService.messages never emits), wired so a real
-  /// push implementation makes it live immediately. `meetup_closed` is the
-  /// one type this round's backend actually sends (ADR-025's
-  /// `notifyMeetupClosed`); invalidating both providers here mirrors
-  /// exactly what the pull-to-refresh/app-resume paths already invalidate,
-  /// not a new refresh concept.
+  /// What happens when a push arrives.
+  ///
+  /// # THE FOREGROUND IS THE CASE THAT NEEDED FIXING
+  ///
+  /// FCM shows no system banner while the app is open, on either platform —
+  /// so a user actively using the app was the ONE audience that learned
+  /// nothing when something happened. This is where they get told.
+  ///
+  /// It also used to do nothing at all: the branch below was
+  /// `message.type == 'meetup_closed'`, and the backend never set a `type`
+  /// on any notification, so it was always comparing against `''`. No
+  /// banner, no notice, and no refresh. The types are now sent (see the
+  /// meetup module's Type* constants) and every one of them is handled here.
+  ///
+  /// A TAPPED notification is deliberately not toasted — the user has just
+  /// read it, and echoing it over the screen they were taken to is noise.
+  /// The refresh still runs, because the data behind that screen has moved
+  /// either way.
   void _onPushMessage(PushMessage message) {
-    if (message.type == 'meetup_closed') {
-      ref.invalidate(activeMeetupsProvider);
-      ref.invalidate(myMeetupsProvider);
+    _refreshFor(message.type);
+
+    if (message.source != PushMessageSource.foreground) return;
+    if (!mounted) return;
+
+    // The server already wrote copy fit for a notification tray; re-writing
+    // it here would mean two places to keep in sync and a client that lies
+    // about what the server said. Falls back to the type only if a message
+    // somehow arrives with no notification payload (data-only push).
+    final text = message.body.isNotEmpty
+        ? message.body
+        : (message.title.isNotEmpty ? message.title : null);
+    if (text == null) return;
+
+    showSnack(context, text, type: _toastTypeFor(message.type));
+  }
+
+  /// Refetches whatever this notification's subject touched.
+  ///
+  /// Deliberately the same providers the pull-to-refresh and app-resume
+  /// paths already invalidate — this is not a new refresh concept, just a
+  /// third trigger for it.
+  void _refreshFor(String type) {
+    switch (type) {
+      // Anything that changes a meetup's own lifecycle or membership shows
+      // up in both the active-meetups strip and the user's own lists.
+      case 'meetup_closed':
+      case 'meetup_cancelled':
+      case 'meetup_full':
+      case 'request_accepted':
+      case 'request_declined':
+        ref.invalidate(activeMeetupsProvider);
+        ref.invalidate(myMeetupsProvider);
+      // Host-side request activity changes only the requests the host sees.
+      case 'join_request':
+      case 'request_withdrawn':
+      case 'participant_declined':
+        ref.invalidate(myMeetupsProvider);
+      // A new meetup nearby changes what Home can browse.
+      case 'meetup_nearby':
+        ref.invalidate(openMeetupsProvider);
+      // safety_checklist points at a meetup the user already has; nothing
+      // listed changes, so nothing is refetched.
+    }
+  }
+
+  /// Colour-codes the toast by what the news actually is, rather than
+  /// showing everything as neutral information.
+  ToastType _toastTypeFor(String type) {
+    switch (type) {
+      case 'request_accepted':
+        return ToastType.success;
+      case 'request_declined':
+      case 'meetup_cancelled':
+      case 'meetup_full':
+      case 'participant_declined':
+        return ToastType.error;
+      default:
+        return ToastType.info;
     }
   }
 
@@ -100,8 +174,10 @@ class _AppShellState extends ConsumerState<AppShell>
     final currentIndex = ref.watch(currentTabIndexProvider);
 
     // Keeps the PageView in sync with tab changes that didn't come from a
-    // swipe (the bottom nav bar, or HomePage's FIND MATCHES button jumping
-    // straight to the Matches tab) — a swipe's own onPageChanged below
+    // swipe — the bottom nav bar, or a page that sets the provider itself.
+    // (It used to say "or HomePage's FIND MATCHES button jumping straight
+    // to the Matches tab"; both that button and that tab are gone, and the
+    // bar is the only such source today.) A swipe's own onPageChanged below
     // already updates the provider directly, so this only needs to act
     // when the provider changed out from under the PageView, not the
     // other way around (the page?.round() guard is what prevents those

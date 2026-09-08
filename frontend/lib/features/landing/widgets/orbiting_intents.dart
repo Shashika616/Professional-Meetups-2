@@ -121,7 +121,7 @@ class _ChipContent extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppPalette.surface.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppPalette.glassBorder),
+        border: Border.all(color: AppPalette.hairline),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
