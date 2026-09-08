@@ -33,6 +33,15 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func main() {
+	// `gateway -healthcheck` probes an already-running instance and exits
+	// rather than starting a server (§D1) — see healthcheck.go.
+	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
+		if err := runHealthcheck(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	logger := logging.New()
 	slog.SetDefault(logger)
 
@@ -68,7 +77,7 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load jwt signing key: %w", err)
 	}
-	verifier, err := jwt.NewVerifier(cfg.JWTPublicKeyPath)
+	verifier, err := jwt.NewVerifier(cfg.JWTPublicKeyPath, cfg.JWTPreviousPublicKeyPaths...)
 	if err != nil {
 		return fmt.Errorf("load jwt public key: %w", err)
 	}
@@ -86,6 +95,15 @@ func run(logger *slog.Logger) error {
 		handlers.WithLogger(logger),
 	).Register(mux)
 
+	// Operator endpoints (§D3): /healthz (liveness — process only),
+	// /readyz (readiness — checks it can actually reach the monolith), and
+	// /metrics. Mounted on the same mux but outside the /v1 API surface and
+	// outside authentication: a probe that needs a bearer token is a probe
+	// that cannot run.
+	handlers.RegisterObservability(mux, monolith)
+
+	logger.Info("jwt signing key in use", "kid", signer.KeyID(), "accepted_kids", verifier.KeyIDs())
+
 	// middleware.RateLimit keys its fixed window on (IP, route path), so
 	// wrapping the whole mux gives every route its own independent
 	// 20-req/min-per-IP limit, not one shared budget across all of them.
@@ -96,6 +114,9 @@ func run(logger *slog.Logger) error {
 	// then rate limiting, then the body cap.
 	var handler http.Handler = mux
 	handler = middleware.MaxBytes(handler)
+	// Metrics sit inside rate limiting so a 429 is still counted — knowing
+	// that a route is shedding load is the whole reason to have the metric.
+	handler = middleware.Metrics(handler)
 	handler = middleware.RateLimit(limiter)(handler)
 	handler = middleware.RequestLogging(logger)(handler)
 	handler = logging.HTTPMiddleware(handler)
