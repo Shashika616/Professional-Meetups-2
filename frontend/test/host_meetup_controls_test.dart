@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/host_meetup_controls.dart';
 
@@ -338,4 +339,43 @@ void main() {
       await tester.pump(const Duration(seconds: 3));
     });
   });
+
+  testWidgets(
+    'the cancel dialog\'s confirm button LOOKS disabled until a reason is '
+    'typed, not just behaves that way — an active-looking button that does '
+    'nothing reads as broken rather than as "fill this in"',
+    (tester) async {
+      await tester.pumpWidget(_wrap(_meetup()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('CANCEL MEETUP'));
+      await tester.pumpAndSettle();
+
+      Color confirmColour() {
+        final texts = tester
+            .widgetList<Text>(find.text('CANCEL MEETUP'))
+            .toList();
+        // The dialog's confirm is the last one in the tree.
+        return texts.last.style!.color!;
+      }
+
+      final disabled = confirmColour();
+
+      await tester.enterText(find.byType(TextField), 'Something came up');
+      await tester.pump();
+
+      final enabled = confirmColour();
+
+      expect(
+        disabled,
+        isNot(enabled),
+        reason: 'the label must visibly change once the reason is filled in',
+      );
+      expect(
+        enabled,
+        AppPalette.danger,
+        reason: 'and land on the real destructive colour once usable',
+      );
+    },
+  );
 }

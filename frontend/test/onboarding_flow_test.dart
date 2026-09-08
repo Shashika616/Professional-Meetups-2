@@ -21,6 +21,18 @@ import 'support/fake_meetup_service.dart';
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  /// ADR-002 § 3's guest path. Records its own call count separately from
+  /// [callCount] so a test can prove the guest button hit THIS method and
+  /// not one of the three real signup paths.
+  int guestCallCount = 0;
+
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) async {
+    guestCallCount++;
+    if (_error != null) throw _error;
+    return _session!;
+  }
+
   _FakeAuthService.success(AuthSession session, {UserProfile? profile})
     : _session = session,
       _error = null,
@@ -231,6 +243,8 @@ void main() {
   setUp(() {
     FlutterSecureStoragePlatform.instance = FakeSecureStoragePlatform();
   });
+
+  group('guest entry point (ADR-002 § 6)', _guestGroup);
 
   testWidgets(
     'success path goes straight from LinkedIn sign-in to the profile-setup '
@@ -450,5 +464,100 @@ void main() {
         expect(appleSize, linkedInSize);
       },
     );
+  });
+}
+
+// --- ADR-002 § 6: the guest entry point --------------------------------
+
+/// A guest session: trust level 0, a generated handle, brand new.
+final _guestSession = AuthSession(
+  userId: 'guest-1',
+  accessToken: 'guest-access-token',
+  refreshToken: 'guest-refresh-token',
+  trustLevel: 0,
+  isNewUser: true,
+  accessTokenExpiresAt: DateTime.now().add(const Duration(minutes: 15)),
+  fullName: 'Guest-CleverOtter4821',
+  profilePhotoUrl: '',
+);
+
+void _guestGroup() {
+  testWidgets(
+    'Continue as Guest reaches AppShell directly, skipping profile setup',
+    (tester) async {
+      final auth = _FakeAuthService.success(
+        _guestSession,
+        profile: const UserProfile(
+          id: 'guest-1',
+          fullName: 'Guest-CleverOtter4821',
+          trustLevel: 0,
+          isGuest: true,
+        ),
+      );
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      expect(
+        find.byKey(const Key('continueAsGuest')),
+        findsOneWidget,
+        reason: 'the guest entry point is missing from the sign-in step',
+      );
+
+      await tester.tap(find.byKey(const Key('continueAsGuest')));
+      await tester.pumpAndSettle();
+
+      expect(auth.guestCallCount, 1, reason: 'guestSignup was not called');
+      expect(
+        auth.callCount,
+        0,
+        reason: 'the guest button called a real signup path instead',
+      );
+
+      // The assertion ADR-002 § 6 is specifically about: no
+      // ProfileSetupScreen detour. A guest has no name to confirm — theirs
+      // was generated a moment ago — so being asked to review it would be
+      // asking about something they did not choose and cannot meaningfully
+      // change here.
+      expect(
+        find.text('COMPLETE YOUR PROFILE'),
+        findsNothing,
+        reason: 'a guest was routed through the profile-setup screen',
+      );
+      expect(find.byType(AppShell), findsOneWidget);
+      expect(find.byType(OnboardingFlow), findsNothing);
+    },
+  );
+
+  testWidgets('the guest button is only reachable after age confirmation', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_appWith(_FakeAuthService.success(_guestSession)));
+    await tester.pumpAndSettle();
+
+    // The 18+ attestation is an eligibility gate that applies uniformly
+    // (ADR-033 § 1) — the guest path must not be a way around it.
+    expect(find.byKey(const Key('continueAsGuest')), findsNothing);
+
+    await _confirmAge(tester);
+    expect(find.byKey(const Key('continueAsGuest')), findsOneWidget);
+  });
+
+  testWidgets('a failed guest signup surfaces an error and stays put', (
+    tester,
+  ) async {
+    final auth = _FakeAuthService.failure(Exception('network is down'));
+    await tester.pumpWidget(_appWith(auth));
+    await tester.pumpAndSettle();
+    await _confirmAge(tester);
+
+    await tester.tap(find.byKey(const Key('continueAsGuest')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AppShell), findsNothing);
+    expect(find.byType(OnboardingFlow), findsOneWidget);
+    // The button must be usable again — a stalled spinner with no feedback
+    // is the failure mode _handleSignInError exists to prevent.
+    expect(find.byKey(const Key('continueAsGuest')), findsOneWidget);
   });
 }

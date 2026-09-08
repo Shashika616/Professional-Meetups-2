@@ -76,4 +76,86 @@ void main() {
       );
     });
   });
+
+  /// # WHY THIS GROUP EXISTS
+  ///
+  /// `SafetyState` had NO fromJson coverage at all, and that is precisely how
+  /// a shipped feature ended up doing nothing: `shared_with_contact_ids` was
+  /// added to the model, the constructor, the backend response and the UI —
+  /// but never to `fromJson`. It fell back to its `const []` default on every
+  /// real HTTP response, so "Told N trusted contacts" and the picker's
+  /// "Already told" state could never appear in production.
+  ///
+  /// Every widget test built `SafetyState` objects directly through
+  /// `ScriptedMeetupService`, so none of them ever exercised the decode path.
+  /// These do.
+  group('SafetyState.fromJson', () {
+    test('parses a full safety-state response', () {
+      final state = SafetyState.fromJson({
+        'meetup_id': 'meetup-1',
+        'checklist_ack_at_unix_seconds': 1757000000,
+        'live_location_opt_in': true,
+        'checked_in_at_unix_seconds': 1757003600,
+        'shared_with_contact_ids': ['contact-1', 'contact-2'],
+      });
+
+      expect(state.meetupId, 'meetup-1');
+      expect(state.checklistAcknowledged, isTrue);
+      expect(state.liveLocationOptIn, isTrue);
+      expect(state.checkedIn, isTrue);
+      expect(state.sharedWithContactIds, ['contact-1', 'contact-2']);
+      expect(state.sharedWithAnyContact, isTrue);
+    });
+
+    test('reads shared_with_contact_ids — the field whose absence made the '
+        'whole share-confirmation mechanism dead on arrival', () {
+      final state = SafetyState.fromJson({
+        'meetup_id': 'meetup-1',
+        'shared_with_contact_ids': ['contact-1'],
+      });
+
+      expect(
+        state.sharedWithContactIds,
+        ['contact-1'],
+        reason:
+            'without this the UI can never show that a share happened, and '
+            'a safety action you cannot verify is one you cannot rely on',
+      );
+    });
+
+    test('a declined state carries its reason', () {
+      final state = SafetyState.fromJson({
+        'meetup_id': 'meetup-1',
+        'declined_at_unix_seconds': 1757000000,
+        'decline_reason': 'Something came up',
+        'shared_with_contact_ids': <String>[],
+      });
+
+      expect(state.declined, isTrue);
+      expect(state.declineReason, 'Something came up');
+      expect(state.checkedIn, isFalse);
+    });
+
+    test('defaults sensibly when optional fields are absent', () {
+      final state = SafetyState.fromJson({'meetup_id': 'meetup-1'});
+
+      expect(state.checklistAcknowledged, isFalse);
+      expect(state.checkedIn, isFalse);
+      expect(state.declined, isFalse);
+      expect(state.liveLocationOptIn, isFalse);
+      // An older server that omits the key entirely must read as "told
+      // nobody", not crash.
+      expect(state.sharedWithContactIds, isEmpty);
+      expect(state.sharedWithAnyContact, isFalse);
+    });
+
+    test('an explicitly empty list means told nobody, and does not throw', () {
+      final state = SafetyState.fromJson({
+        'meetup_id': 'meetup-1',
+        'shared_with_contact_ids': <dynamic>[],
+      });
+
+      expect(state.sharedWithContactIds, isEmpty);
+    });
+  });
 }

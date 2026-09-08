@@ -41,6 +41,13 @@ class _TrackingNoOpPushNotificationService implements PushNotificationService {
 /// under test never needs the others, and UnimplementedError makes it
 /// obvious if that assumption ever stops holding.
 class _FakeAuthService implements AuthService {
+  // ADR-002 § 3. Unused by this test — every fake in test/ implements the
+  // full AuthService surface, so a new method lands here even when the test
+  // never calls it.
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
+      throw UnimplementedError();
+
   _FakeAuthService(this._profile);
 
   final UserProfile _profile;

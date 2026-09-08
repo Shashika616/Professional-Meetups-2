@@ -6,6 +6,7 @@ import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
+import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
 
@@ -208,4 +209,112 @@ void main() {
       );
     },
   );
+
+  /// # THE "HAPPENING NOW" CARD
+  ///
+  /// It is the one thing on Home that is happening right now, so it is the
+  /// page's single elevated surface. Two things were wrong before: a second
+  /// concurrent meetup was reachable only by swiping a card that gave no
+  /// sign it could be swiped, and the card's accent was a full-bleed
+  /// `candyBlue @ 10%` wash that on the light theme reads as a flat grey —
+  /// disabled rather than urgent.
+  group('happening-now card presentation', () {
+    Meetup nowMeetup(String id, String host) => _meetup(
+      id: id,
+      hostFullName: host,
+      windowStart: DateTime.now().subtract(const Duration(minutes: 5)),
+      windowEnd: DateTime.now().add(const Duration(hours: 1)),
+    );
+
+    testWidgets('a single concurrent meetup shows no page dots', (
+      tester,
+    ) async {
+      final service = ScriptedMeetupService(
+        activeMeetups: [nowMeetup('m-1', 'Grace Hopper')],
+      );
+
+      await tester.pumpWidget(_appWith(service));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Grace Hopper'), findsWidgets);
+      expect(
+        find.byType(PageView),
+        findsNothing,
+        reason: 'one card needs no pager',
+      );
+    });
+
+    testWidgets(
+      'two concurrent meetups get page dots — without them a second meetup '
+      'is reachable only by a user who guesses the card is swipeable',
+      (tester) async {
+        final service = ScriptedMeetupService(
+          activeMeetups: [
+            nowMeetup('m-1', 'Grace Hopper'),
+            nowMeetup('m-2', 'Ada Lovelace'),
+          ],
+        );
+
+        await tester.pumpWidget(_appWith(service));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(PageView), findsOneWidget);
+        expect(
+          find.bySemanticsLabel('Meetup 1 of 2'),
+          findsOneWidget,
+          reason:
+              'the count is the information the dots carry, and it must reach '
+              'a screen reader too',
+        );
+      },
+    );
+
+    testWidgets('swiping the card set advances the dots', (tester) async {
+      final service = ScriptedMeetupService(
+        activeMeetups: [
+          nowMeetup('m-1', 'Grace Hopper'),
+          nowMeetup('m-2', 'Ada Lovelace'),
+        ],
+      );
+
+      await tester.pumpWidget(_appWith(service));
+      await tester.pumpAndSettle();
+
+      await tester.fling(find.byType(PageView), const Offset(-400, 0), 1000);
+      await tester.pumpAndSettle();
+
+      expect(find.bySemanticsLabel('Meetup 2 of 2'), findsOneWidget);
+      expect(find.text('Ada Lovelace'), findsWidgets);
+    });
+
+    testWidgets(
+      'the card is the page\'s one elevated surface, and its fill is the '
+      'plain card colour — not the grey-blue wash it used to be',
+      (tester) async {
+        final service = ScriptedMeetupService(
+          activeMeetups: [nowMeetup('m-1', 'Grace Hopper')],
+        );
+
+        await tester.pumpWidget(_appWith(service));
+        await tester.pumpAndSettle();
+
+        final elevated = tester
+            .widgetList<FlatCard>(find.byType(FlatCard))
+            .where((c) => c.elevated)
+            .toList();
+        expect(
+          elevated.length,
+          1,
+          reason: 'exactly one — if everything is elevated, nothing is',
+        );
+        expect(
+          elevated.single.tint,
+          isNull,
+          reason:
+              'the accent is a solid left bar now; a low-alpha tint over the '
+              'whole card was what made it read as disabled',
+        );
+      },
+    );
+  });
 }

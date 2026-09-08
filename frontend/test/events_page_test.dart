@@ -7,7 +7,7 @@ import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
-import 'package:professional_connections_platform/features/meetups/my_meetups_page.dart';
+import 'package:professional_connections_platform/features/meetups/events_page.dart';
 
 import 'support/scripted_meetup_service.dart';
 
@@ -83,6 +83,79 @@ MeetupRequestModel _request({
   declineReason: declineReason,
 );
 
+/// A meetup on either side of the open/history split, identifiable by its
+/// location label alone — the tile shows intent, status, window and label,
+/// and the label is the only one of those a test can make unique per row
+/// without also changing what the row means.
+Meetup _tabFixture({
+  required String id,
+  required String label,
+  required MeetupStatus status,
+  required bool hosted,
+}) => Meetup(
+  id: id,
+  hostUserId: hosted ? 'me' : 'host-1',
+  hostFullName: hosted ? 'Me' : 'Grace Hopper',
+  hostTrustLevel: 3,
+  intent: IntentType.coffee,
+  windowStart: DateTime(2026, 9, 7, 10),
+  windowEnd: DateTime(2026, 9, 7, 12),
+  locationLat: 6.9271,
+  locationLng: 79.8612,
+  locationLabel: label,
+  capacity: 4,
+  acceptedCount: 0,
+  status: status,
+  createdAt: DateTime(2026, 9, 1),
+  isHostedByMe: hosted,
+);
+
+/// One fixture covering all four (top tab x sub-tab) cells at once, so a
+/// wrong tab shows the wrong row rather than an empty list that would pass
+/// a weaker assertion.
+ScriptedMeetupService _fourCellService() => ScriptedMeetupService(
+  myMeetups: (
+    hosted: [
+      _tabFixture(
+        id: 'h-open',
+        label: 'Hosted Open Cafe',
+        status: MeetupStatus.open,
+        hosted: true,
+      ),
+      _tabFixture(
+        id: 'h-done',
+        label: 'Hosted History Cafe',
+        status: MeetupStatus.completed,
+        hosted: true,
+      ),
+    ],
+    requested: [
+      _tabFixture(
+        id: 'r-open',
+        label: 'Requested Open Cafe',
+        status: MeetupStatus.open,
+        hosted: false,
+      ),
+      _tabFixture(
+        id: 'r-done',
+        label: 'Requested History Cafe',
+        status: MeetupStatus.cancelled,
+        hosted: false,
+      ),
+    ],
+  ),
+);
+
+Widget _eventsApp(ScriptedMeetupService service, {int? initialTab}) =>
+    ProviderScope(
+      overrides: [meetupServiceProvider.overrideWithValue(service)],
+      child: MaterialApp(
+        home: initialTab == null
+            ? const EventsPage()
+            : EventsPage(initialTab: initialTab),
+      ),
+    );
+
 void main() {
   testWidgets(
     'tapping a hosted meetup opens request management, rendering Accept/Reject',
@@ -96,7 +169,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -126,7 +199,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -136,7 +209,7 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      // The previous route (MyMeetupsPage) stays built underneath by
+      // The previous route (EventsPage) stays built underneath by
       // default (PageRoute.maintainState), so this is >=1, not exactly
       // one — the point is _RequestManagementPage contributes its own
       // AppBackground rather than rendering with none at all.
@@ -157,7 +230,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -185,7 +258,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -211,7 +284,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [meetupServiceProvider.overrideWithValue(service)],
-        child: const MaterialApp(home: MyMeetupsPage()),
+        child: const MaterialApp(home: EventsPage()),
       ),
     );
     await tester.pumpAndSettle();
@@ -236,12 +309,12 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
 
-      // The normal path: calendar icon (MyMeetupsPage itself, already
+      // The normal path: calendar icon (EventsPage itself, already
       // reached) → HOSTING (the default-selected tab) → a hosted meetup.
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
@@ -270,7 +343,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -317,12 +390,13 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('REQUESTED'));
+      // RENAMED by the Home/Events restructure: the tab was 'REQUESTED'.
+      await tester.tap(find.text('Requested Meetings'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('NOT SELECTED'), findsOneWidget);
@@ -367,7 +441,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -407,7 +481,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -451,7 +525,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -501,7 +575,7 @@ void main() {
         await tester.pumpWidget(
           ProviderScope(
             overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(home: MyMeetupsPage()),
+            child: const MaterialApp(home: EventsPage()),
           ),
         );
         await tester.pumpAndSettle();
@@ -552,7 +626,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -587,7 +661,7 @@ void main() {
         await tester.pumpWidget(
           ProviderScope(
             overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(home: MyMeetupsPage()),
+            child: const MaterialApp(home: EventsPage()),
           ),
         );
         await tester.pumpAndSettle();
@@ -622,7 +696,7 @@ void main() {
           await tester.pumpWidget(
             ProviderScope(
               overrides: [meetupServiceProvider.overrideWithValue(service)],
-              child: const MaterialApp(home: MyMeetupsPage()),
+              child: const MaterialApp(home: EventsPage()),
             ),
           );
           await tester.pumpAndSettle();
@@ -660,7 +734,7 @@ void main() {
           await tester.pumpWidget(
             ProviderScope(
               overrides: [meetupServiceProvider.overrideWithValue(service)],
-              child: const MaterialApp(home: MyMeetupsPage()),
+              child: const MaterialApp(home: EventsPage()),
             ),
           );
           await tester.pumpAndSettle();
@@ -695,7 +769,7 @@ void main() {
           await tester.pumpWidget(
             ProviderScope(
               overrides: [meetupServiceProvider.overrideWithValue(service)],
-              child: const MaterialApp(home: MyMeetupsPage()),
+              child: const MaterialApp(home: EventsPage()),
             ),
           );
           await tester.pumpAndSettle();
@@ -728,7 +802,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(home: MyMeetupsPage()),
+          child: const MaterialApp(home: EventsPage()),
         ),
       );
       await tester.pumpAndSettle();
@@ -770,12 +844,13 @@ void main() {
         await tester.pumpWidget(
           ProviderScope(
             overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(home: MyMeetupsPage()),
+            child: const MaterialApp(home: EventsPage()),
           ),
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('REQUESTED'));
+        // RENAMED by the Home/Events restructure: the tab was 'REQUESTED'.
+        await tester.tap(find.text('Requested Meetings'));
         await tester.pumpAndSettle();
 
         expect(service.listMyMeetupsCallCount, 1);
@@ -791,6 +866,186 @@ void main() {
         expect(service.listMyMeetupsCalls.last.hostedCursor, isNull);
       },
     );
+  });
+
+  /// # NEW IN THE HOME/EVENTS RESTRUCTURE
+  ///
+  /// The page went from one level of tabs (HOSTING | REQUESTED) plus a pair
+  /// of custom toggle buttons standing in for a second level, to two levels
+  /// of real tabs:
+  ///
+  ///   My Meetings        -> Open meetups | History
+  ///   Requested Meetings -> Open meetups | History
+  ///
+  /// The open/history filter itself is unchanged — still computed
+  /// client-side over the already-fetched list. What is new is that there
+  /// are four addressable cells, so all four are asserted, each with a
+  /// fixture in every other cell to prove the filter is actually filtering
+  /// rather than every cell happening to be empty.
+  group('two levels of tabs', () {
+    testWidgets(
+      'defaults to My Meetings / Open meetups, and shows only that cell',
+      (tester) async {
+        await tester.pumpWidget(_eventsApp(_fourCellService()));
+        await tester.pumpAndSettle();
+
+        expect(find.text('EVENTS'), findsOneWidget);
+        expect(find.text('My Meetings'), findsOneWidget);
+        expect(find.text('Requested Meetings'), findsOneWidget);
+
+        expect(find.text('Hosted Open Cafe'), findsOneWidget);
+        expect(find.text('Hosted History Cafe'), findsNothing);
+        expect(find.text('Requested Open Cafe'), findsNothing);
+        expect(find.text('Requested History Cafe'), findsNothing);
+      },
+    );
+
+    testWidgets('My Meetings / History shows the completed hosted meetup', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_eventsApp(_fourCellService()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Hosted History Cafe'), findsOneWidget);
+      expect(find.text('Hosted Open Cafe'), findsNothing);
+    });
+
+    testWidgets(
+      'Requested Meetings / Open meetups shows the requested open meetup — '
+      'and the sub-tab resets to Open on the freshly built second list, '
+      'rather than inheriting the first list\'s position',
+      (tester) async {
+        await tester.pumpWidget(_eventsApp(_fourCellService()));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Requested Meetings'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Requested Open Cafe'), findsOneWidget);
+        expect(find.text('Requested History Cafe'), findsNothing);
+        expect(find.text('Hosted Open Cafe'), findsNothing);
+      },
+    );
+
+    testWidgets('Requested Meetings / History shows the cancelled requested '
+        'meetup — cancelled counts as history alongside completed', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_eventsApp(_fourCellService()));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Requested Meetings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Requested History Cafe'), findsOneWidget);
+      expect(find.text('Requested Open Cafe'), findsNothing);
+    });
+
+    testWidgets(
+      'each sub-tab has its own empty message — History says "Nothing here '
+      'yet." rather than repeating the top-level tab\'s copy',
+      (tester) async {
+        await tester.pumpWidget(
+          _eventsApp(
+            ScriptedMeetupService(
+              myMeetups: (hosted: const [], requested: const []),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('You aren\'t hosting any meetups yet.'),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.text('History'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Nothing here yet.'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'initialTab: 1 deep-links straight to Requested Meetings — kept '
+      'through the rename because meetup_detail_page.dart still pushes this '
+      'page that way',
+      (tester) async {
+        await tester.pumpWidget(_eventsApp(_fourCellService(), initialTab: 1));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Requested Open Cafe'), findsOneWidget);
+        expect(find.text('Hosted Open Cafe'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'the Open/History control is a pair of icon buttons, not a second '
+      'TabBar — the page has exactly ONE TabBar (the top level), so the two '
+      'levels cannot read as one four-item control',
+      (tester) async {
+        await tester.pumpWidget(_eventsApp(_fourCellService()));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TabBar), findsOneWidget);
+        expect(find.byIcon(Icons.event_available_outlined), findsOneWidget);
+        expect(find.byIcon(Icons.history_rounded), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'NEITHER tab level swipes — this page sits inside AppShell\'s PageView, '
+      'and the innermost horizontal scrollable would swallow the drag, '
+      'making Events the one page you could not swipe out of',
+      (tester) async {
+        await tester.pumpWidget(_eventsApp(_fourCellService()));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Hosted Open Cafe'), findsOneWidget);
+
+        // A fling that WOULD have changed sub-tab before this fix.
+        await tester.fling(
+          find.byType(TabBarView).last,
+          const Offset(-400, 0),
+          1000,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Hosted Open Cafe'), findsOneWidget);
+        expect(find.text('Hosted History Cafe'), findsNothing);
+
+        // ...and the same at the top level.
+        await tester.fling(
+          find.byType(TabBarView).first,
+          const Offset(-400, 0),
+          1000,
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Requested Open Cafe'), findsNothing);
+
+        // Tapping still works — that is the intended way to switch now, and
+        // both controls are permanently on screen.
+        await tester.tap(find.text('History'));
+        await tester.pumpAndSettle();
+        expect(find.text('Hosted History Cafe'), findsOneWidget);
+      },
+    );
+
+    testWidgets('initialTab: 0 is the default and lands on My Meetings', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_eventsApp(_fourCellService(), initialTab: 0));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Hosted Open Cafe'), findsOneWidget);
+      expect(find.text('Requested Open Cafe'), findsNothing);
+    });
   });
 }
 

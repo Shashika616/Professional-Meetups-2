@@ -32,6 +32,13 @@ class ScriptedMeetupService implements MeetupService {
     // delay to land the race deterministically).
     Object? openMeetupsPage2Error,
     Future<void>? openMeetupsPage2Gate,
+    // Thrown from the FIRST-page call, so a test can script the provider
+    // into its error state. Distinct from openMeetupsPage2Error, which only
+    // fails a scroll-triggered continuation.
+    Object? openMeetupsError,
+    // Awaited before the FIRST page returns, so a test can hold a fetch open
+    // and observe what the UI does while a real network would be slow.
+    Future<void>? openMeetupsGate,
     ({List<Meetup> hosted, List<Meetup> requested}) myMeetups = const (
       hosted: <Meetup>[],
       requested: <Meetup>[],
@@ -57,6 +64,8 @@ class ScriptedMeetupService implements MeetupService {
        _openMeetupsPage2 = openMeetupsPage2,
        _openMeetupsPage2Error = openMeetupsPage2Error,
        _openMeetupsPage2Gate = openMeetupsPage2Gate,
+       _openMeetupsError = openMeetupsError,
+       _openMeetupsGate = openMeetupsGate,
        _myMeetups = myMeetups,
        _myMeetupsHostedNextCursor = myMeetupsHostedNextCursor,
        _myMeetupsHostedHasMore = myMeetupsHostedHasMore,
@@ -76,6 +85,8 @@ class ScriptedMeetupService implements MeetupService {
   final List<Meetup> _openMeetupsPage2;
   final Object? _openMeetupsPage2Error;
   final Future<void>? _openMeetupsPage2Gate;
+  final Object? _openMeetupsError;
+  final Future<void>? _openMeetupsGate;
   final ({List<Meetup> hosted, List<Meetup> requested}) _myMeetups;
   final String? _myMeetupsHostedNextCursor;
   final bool _myMeetupsHostedHasMore;
@@ -108,6 +119,12 @@ class ScriptedMeetupService implements MeetupService {
   MeetupException? declineCheckInError;
   double? lastListOpenMeetupsViewerLat;
   double? lastListOpenMeetupsViewerLng;
+  // Nullable-and-recorded rather than just nullable: `null` is now a
+  // meaningful VALUE on the wire ("every intent", the home filter's "All"),
+  // not an absent argument, so a test asserting the All case has to be able
+  // to tell "passed null" apart from "never called".
+  IntentType? lastListOpenMeetupsIntent;
+  int? lastListOpenMeetupsWithinDays;
   int listOpenMeetupsCallCount = 0;
   final List<String?> listOpenMeetupsCursors = [];
 
@@ -124,15 +141,24 @@ class ScriptedMeetupService implements MeetupService {
 
   @override
   Future<PagedResult<Meetup>> listOpenMeetups({
-    required IntentType intent,
+    IntentType? intent,
     required double viewerLat,
     required double viewerLng,
     String? cursor,
+    int withinDays = 0,
   }) async {
     listOpenMeetupsCallCount++;
     lastListOpenMeetupsViewerLat = viewerLat;
     lastListOpenMeetupsViewerLng = viewerLng;
+    lastListOpenMeetupsIntent = intent;
+    lastListOpenMeetupsWithinDays = withinDays;
     listOpenMeetupsCursors.add(cursor);
+    if (_openMeetupsGate != null) {
+      await _openMeetupsGate;
+    }
+    if (_openMeetupsError != null) {
+      throw _openMeetupsError;
+    }
     if (cursor == null) {
       return PagedResult(
         items: _openMeetups,
@@ -280,6 +306,30 @@ class ScriptedMeetupService implements MeetupService {
   @override
   Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn) async =>
       SafetyState(meetupId: meetupId, liveLocationOptIn: optIn);
+
+  /// Recorded so a test can assert WHICH contacts were shared with, not just
+  /// that the call happened.
+  final List<String> sharedContactIds = [];
+  MeetupException? shareWithContactsError;
+
+  @override
+  Future<SafetyState> shareWithContacts(
+    String meetupId,
+    List<String> contactIds,
+  ) async {
+    if (shareWithContactsError != null) {
+      throw shareWithContactsError!;
+    }
+    sharedContactIds.addAll(contactIds);
+    return SafetyState(
+      meetupId: meetupId,
+      checklistAckAt: _safetyState?.checklistAckAt,
+      checkedInAt: _safetyState?.checkedInAt,
+      declinedAt: _safetyState?.declinedAt,
+      declineReason: _safetyState?.declineReason,
+      sharedWithContactIds: List.of(sharedContactIds),
+    );
+  }
 
   @override
   Future<SafetyState> checkIn(String meetupId) async =>

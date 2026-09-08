@@ -22,6 +22,13 @@ import 'support/fake_secure_storage_platform.dart';
 /// entered, and a domain-mismatch rejection renders the backend's exact
 /// message, not a generic fallback.
 class _FakeAuthService implements AuthService {
+  // ADR-002 § 3. Unused by this test — every fake in test/ implements the
+  // full AuthService surface, so a new method lands here even when the test
+  // never calls it.
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
+      throw UnimplementedError();
+
   _FakeAuthService({this.verifyError});
 
   final Object? verifyError;

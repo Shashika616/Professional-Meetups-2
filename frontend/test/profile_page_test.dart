@@ -20,21 +20,34 @@ import 'package:professional_connections_platform/features/verification/phone_ve
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  // ADR-002 § 3. Unused by this test — every fake in test/ implements the
+  // full AuthService surface, so a new method lands here even when the test
+  // never calls it.
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
+      throw UnimplementedError();
+
   _FakeAuthService({
     this.logoutShouldThrow = false,
     UserProfile? profile,
     this.completeProfileSetupError,
   }) : _profile =
            profile ??
-           // trustLevel: 1 (LinkedIn connected) is this fake's default —
+           // An already-LinkedIn-connected user is this fake's default —
            // most tests in this file are about sign-out/verification-row
-           // behavior for an already-LinkedIn-connected user, not about
-           // Level 0 specifically (see the dedicated Level 0 group below for
-           // that case, ADR-014's Level 0 read-only audit).
+           // behavior for such a user, not about Level 0 specifically (see
+           // the dedicated Level 0 group below for that case).
+           //
+           // linkedInConnectedFlag must now be set EXPLICITLY. Before ADR-002
+           // §2, trustLevel: 1 implied it, because Level 1 was reachable only
+           // via LinkedIn. It no longer does — Level 1 is now what every real
+           // signup path grants — so a fixture that sets only trustLevel now
+           // describes an Apple/Google/email account with no LinkedIn.
            const UserProfile(
              id: 'user-1',
              fullName: 'Ada Lovelace',
              trustLevel: 1,
+             linkedInConnectedFlag: true,
            );
 
   final bool logoutShouldThrow;
@@ -452,6 +465,7 @@ void main() {
             id: 'user-1',
             fullName: 'Ada Lovelace',
             trustLevel: 1,
+            linkedInConnectedFlag: true,
             phoneVerified: true,
             personalEmailVerified: true,
             personalDetailsComplete: true,
@@ -527,6 +541,7 @@ void main() {
           id: 'user-1',
           fullName: 'Ada Lovelace',
           trustLevel: 1,
+          linkedInConnectedFlag: true,
           phoneVerified: true,
           personalEmailVerified: true,
           personalDetailsComplete: true,
@@ -654,5 +669,71 @@ void main() {
         expect(find.text('Something went wrong.'), findsOneWidget);
       },
     );
+  });
+
+  /// # THE STATS ROW SHOWS REAL DATA
+  ///
+  /// All three chips were reviewed together after MEETUPS was found
+  /// hardcoded to '12' — shown identically to an account created seconds
+  /// earlier. Two of the three were wrong:
+  ///
+  ///   * MEETUPS was the literal '12';
+  ///   * RATING could only ever render its "no ratings" dash, because the
+  ///     gateway's profile JSON dropped rating_average/rating_count entirely
+  ///     (they were populated all the way up to it and then not serialized).
+  ///
+  /// Both are fixed, so both are pinned here.
+  group('profile stats row', () {
+    testWidgets('a brand-new account shows 0 meetups and no rating — never a '
+        'fabricated number', (tester) async {
+      await tester.pumpWidget(
+        _appWith(
+          _FakeAuthService(
+            profile: const UserProfile(
+              id: 'user-1',
+              fullName: 'Ada Lovelace',
+              trustLevel: 1,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('MEETUPS'), findsOneWidget);
+      expect(find.text('0'), findsOneWidget);
+      expect(
+        find.text('12'),
+        findsNothing,
+        reason: 'the old hardcoded literal must never reappear',
+      );
+
+      // No ratings yet is a dash, not a score of 0 — an average over zero
+      // ratings is not a rating.
+      expect(find.text('RATING'), findsOneWidget);
+      expect(find.text('—'), findsOneWidget);
+    });
+
+    testWidgets('a user with history shows their real counts', (tester) async {
+      await tester.pumpWidget(
+        _appWith(
+          _FakeAuthService(
+            profile: const UserProfile(
+              id: 'user-1',
+              fullName: 'Ada Lovelace',
+              trustLevel: 2,
+              meetupsCompleted: 7,
+              ratingAverage: 4.75,
+              ratingCount: 4,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('7'), findsOneWidget);
+      // One decimal place, from the real average rather than a placeholder.
+      expect(find.text('4.8'), findsOneWidget);
+      expect(find.text('L2'), findsOneWidget);
+    });
   });
 }

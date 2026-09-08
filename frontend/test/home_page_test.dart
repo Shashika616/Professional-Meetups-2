@@ -8,7 +8,7 @@ import 'package:professional_connections_platform/core/widgets/professional_avat
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/features/home/widgets/home_header.dart';
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart';
-import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
+import 'package:professional_connections_platform/features/verification/hosting_unlock_page.dart';
 
 import 'support/fake_meetup_service.dart';
 import 'support/scripted_meetup_service.dart';
@@ -104,10 +104,10 @@ void main() {
                   const AuthSessionState(profile: profile),
                 ),
               ),
-              // UpcomingMeetupCard and NetworkInsightsRow both read
-              // myMeetupsProvider (backed by this) — without an override
-              // it defaults to the real HttpMeetupService and attempts a
-              // live network call.
+              // ActiveMeetupsSection reads activeMeetupsProvider and
+              // HappeningSoonSection reads openMeetupsProvider (both backed
+              // by this) — without an override they default to the real
+              // HttpMeetupService and attempt live network calls.
               meetupServiceProvider.overrideWithValue(ImmediateMeetupService()),
             ],
             child: const MaterialApp(home: HomePage()),
@@ -146,11 +146,10 @@ void main() {
     testWidgets('HOST YOUR OWN MEETUP opens ScheduleFlowPage directly for an '
         'unlocked user — hosting used to be reachable only via a "+" icon '
         'on the browse/Matches page, which this button replaces as the '
-        'primary entry point. Level 2 (round-7 hardening added a real gate '
-        'here — coffee, the default selected intent, requires 2) so this '
-        'is the regression guard for the still-working unlocked case.', (
-      tester,
-    ) async {
+        'primary entry point. CHANGED VALUE (ADR-002 § 4): the fixture was '
+        'Level 2, which used to be enough to host coffee; hosting now needs '
+        'Level 3, so this regression guard for the still-working unlocked '
+        'case had to move up with it.', (tester) async {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
@@ -160,7 +159,9 @@ void main() {
                   profile: UserProfile(
                     id: 'user-1',
                     fullName: 'Ada',
-                    trustLevel: 2,
+                    // CHANGED (ADR-002 § 4): was 2. Hosting an ordinary
+                    // intent needs Level 3 now.
+                    trustLevel: 3,
                   ),
                 ),
               ),
@@ -172,18 +173,13 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // A real profile here (vs. the null-profile fixture the pre-existing
-      // sibling test below uses) renders slightly more content earlier in
-      // the list, pushing this button just past the outer ListView's
-      // sliver cache extent in the default test viewport — drag that
-      // specific ListView (IntentGrid's own internal GridView is also a
-      // Scrollable, so scrollUntilVisible's automatic detection isn't
-      // reliable here) to bring it into view before tapping.
-      await tester.drag(find.byType(ListView).first, const Offset(0, -400));
-      await tester.pumpAndSettle();
-
-      expect(find.text('HOST YOUR OWN MEETUP'), findsOneWidget);
-      await tester.tap(find.text('HOST YOUR OWN MEETUP'));
+      // HOST YOUR OWN MEETUP sits in a fixed block below the scrolling
+      // area, so it is on screen without scrolling — but the page's own
+      // ListView is still what a stray drag would hit, and there are now
+      // several nested Scrollables (the intent filter row, the browse
+      // list), so the button is targeted by key rather than by position.
+      expect(find.byKey(const Key('hostYourOwnMeetup')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('hostYourOwnMeetup')));
       await tester.pumpAndSettle();
 
       expect(find.byType(ScheduleFlowPage), findsOneWidget);
@@ -193,7 +189,10 @@ void main() {
       'round-7 hardening: HOST YOUR OWN MEETUP now has a real trust gate '
       'of its own — a locked (Level 0) user\'s tap does not push '
       'ScheduleFlowPage at all, shows the locked toast, and redirects to '
-      'VerificationChecklistPage instead',
+      'HostingUnlockPage (CHANGED by ADR-002 § 4: the destination was '
+      'VerificationChecklistPage, which is the wrong page for this gap — a '
+      'user short of the HOST bar may already be Level 2 and would be shown '
+      'a checklist of things they finished long ago)',
       (tester) async {
         await tester.pumpWidget(
           ProviderScope(
@@ -208,12 +207,13 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('HOST YOUR OWN MEETUP'));
+        await tester.tap(find.byKey(const Key('hostYourOwnMeetup')));
         await tester.pumpAndSettle();
 
         expect(find.byType(ScheduleFlowPage), findsNothing);
-        expect(find.textContaining('requires Level 2 trust'), findsOneWidget);
-        expect(find.byType(VerificationChecklistPage), findsOneWidget);
+        // CHANGED (ADR-002 § 4): was 'requires Level 2 trust'.
+        expect(find.textContaining('requires Level 3 trust'), findsOneWidget);
+        expect(find.byType(HostingUnlockPage), findsOneWidget);
       },
     );
 
@@ -247,7 +247,7 @@ void main() {
 
       expect(service.listActiveMeetupsCallCount, 1);
 
-      // Same drag-the-outer-ListView target as the sibling test above.
+      // The page's own outer ListView, which owns the RefreshIndicator.
       await tester.fling(
         find.byType(ListView).first,
         const Offset(0, 300),
@@ -265,5 +265,74 @@ void main() {
             'not just recompute local state',
       );
     });
+  });
+
+  /// # WHAT THE HOME/EVENTS RESTRUCTURE REMOVED
+  ///
+  /// These are removal guards, not styling assertions. FIND MATCHES existed
+  /// only to navigate to a separate browse tab; that tab is gone and its
+  /// list is inline on this page, so the button has nowhere to go. A
+  /// hidden-but-present button would be a dead control, and "Your Stats"
+  /// (NetworkInsightsRow) was deleted outright — both must stay gone rather
+  /// than quietly returning in a later edit.
+  group('removed controls stay removed', () {
+    Widget app() => ProviderScope(
+      overrides: [
+        authSessionProvider.overrideWith(
+          () => _FakeAuthSessionNotifier(
+            const AuthSessionState(
+              profile: UserProfile(
+                id: 'user-1',
+                fullName: 'Ada',
+                trustLevel: 2,
+              ),
+            ),
+          ),
+        ),
+        meetupServiceProvider.overrideWithValue(ImmediateMeetupService()),
+      ],
+      child: const MaterialApp(home: HomePage()),
+    );
+
+    testWidgets('FIND MATCHES is gone entirely, not merely hidden', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('FIND MATCHES'), findsNothing);
+      expect(find.textContaining('FIND MATCH'), findsNothing);
+    });
+
+    testWidgets('"Your Stats" / NetworkInsightsRow is gone', (tester) async {
+      await tester.pumpWidget(app());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Your Stats'), findsNothing);
+    });
+
+    testWidgets(
+      'the header\'s two Events entry chips are gone — that is a bottom-nav '
+      'destination now, not a chip on Home',
+      (tester) async {
+        await tester.pumpWidget(app());
+        await tester.pumpAndSettle();
+
+        expect(find.text('Your Meetings'), findsNothing);
+        expect(find.text('Requested Meetups'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'HOST YOUR OWN MEETUP is the page\'s only bottom CTA, and it is the '
+      'primary (filled) one now that it no longer shares the block',
+      (tester) async {
+        await tester.pumpWidget(app());
+        await tester.pumpAndSettle();
+
+        expect(find.byType(FilledButton), findsOneWidget);
+        expect(find.byKey(const Key('hostYourOwnMeetup')), findsOneWidget);
+      },
+    );
   });
 }

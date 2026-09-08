@@ -25,10 +25,11 @@ class ImmediateMeetupService implements MeetupService {
 
   @override
   Future<PagedResult<Meetup>> listOpenMeetups({
-    required IntentType intent,
+    IntentType? intent,
     required double viewerLat,
     required double viewerLng,
     String? cursor,
+    int withinDays = 0,
   }) async => const PagedResult(items: []);
 
   @override
@@ -90,6 +91,12 @@ class ImmediateMeetupService implements MeetupService {
   @override
   Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn) =>
       throw UnimplementedError();
+
+  @override
+  Future<SafetyState> shareWithContacts(
+    String meetupId,
+    List<String> contactIds,
+  ) => throw UnimplementedError();
 
   @override
   Future<SafetyState> checkIn(String meetupId) => throw UnimplementedError();

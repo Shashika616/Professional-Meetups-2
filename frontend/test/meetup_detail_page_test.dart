@@ -5,6 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/services/meetup_service.dart';
+import 'package:professional_connections_platform/features/safety/manage_trusted_contacts_page.dart';
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
@@ -901,5 +905,202 @@ void main() {
         );
       },
     );
+  });
+
+  /// # TELL A TRUSTED CONTACT
+  ///
+  /// Replaces a "Share live location" switch bound to a boolean nothing
+  /// read — the app said it was sharing the user's location and shared it
+  /// with nobody. These tests are about the two things that made the old
+  /// version untrustworthy: that something is actually sent, and that the
+  /// user can see afterwards that it was.
+  group('tell a trusted contact', () {
+    Widget app(
+      ScriptedMeetupService service, {
+      required List<TrustedContact> contacts,
+    }) => ProviderScope(
+      overrides: [
+        meetupServiceProvider.overrideWithValue(service),
+        trustedContactsProvider.overrideWith((ref) async => contacts),
+      ],
+      child: const MaterialApp(home: MeetupDetailPage(meetupId: 'meetup-1')),
+    );
+
+    const amma = TrustedContact(
+      id: 'contact-1',
+      name: 'Amma',
+      phoneNumber: '+94771111111',
+      email: '',
+    );
+    const friend = TrustedContact(
+      id: 'contact-2',
+      name: 'Friend',
+      phoneNumber: '+94772222222',
+      email: '',
+    );
+
+    testWidgets('the old live-location switch is gone', (tester) async {
+      final service = ScriptedMeetupService(
+        meetupDetail: _acceptedMeetup(),
+        safetyState: const SafetyState(meetupId: 'meetup-1'),
+      );
+
+      await tester.pumpWidget(app(service, contacts: const [amma]));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Share live location'),
+        findsNothing,
+        reason: 'it promised tracking the app never did',
+      );
+      expect(find.byType(Switch), findsNothing);
+      expect(find.text('Tell a trusted contact'), findsWidgets);
+    });
+
+    testWidgets(
+      'picking contacts sends exactly those ids, and the screen then shows '
+      'that it happened',
+      (tester) async {
+        final service = ScriptedMeetupService(
+          meetupDetail: _acceptedMeetup(),
+          safetyState: const SafetyState(meetupId: 'meetup-1'),
+        );
+
+        await tester.pumpWidget(app(service, contacts: const [amma, friend]));
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(find.text('TELL SOMEONE'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('TELL SOMEONE'));
+        await tester.pumpAndSettle();
+
+        // Nothing selected yet — the confirm must not be usable.
+        final button = tester.widget<PrimaryButton>(
+          find.widgetWithText(PrimaryButton, 'SHARE THIS MEETUP'),
+        );
+        expect(button.onPressed, isNull);
+
+        await tester.tap(find.text('Amma'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('SHARE THIS MEETUP'));
+        await tester.pumpAndSettle();
+
+        expect(service.sharedContactIds, [
+          'contact-1',
+        ], reason: 'only the picked contact, and by id');
+        expect(find.text('Told 1 trusted contact'), findsOneWidget);
+      },
+    );
+
+    testWidgets('SELECT ALL picks every contact', (tester) async {
+      final service = ScriptedMeetupService(
+        meetupDetail: _acceptedMeetup(),
+        safetyState: const SafetyState(meetupId: 'meetup-1'),
+      );
+
+      await tester.pumpWidget(app(service, contacts: const [amma, friend]));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('TELL SOMEONE'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('TELL SOMEONE'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SELECT ALL'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SHARE THIS MEETUP'));
+      await tester.pumpAndSettle();
+
+      expect(service.sharedContactIds, containsAll(['contact-1', 'contact-2']));
+      expect(find.text('Told 2 trusted contacts'), findsOneWidget);
+    });
+
+    testWidgets(
+      'a contact who already knows is shown as told and cannot be re-picked '
+      '— pressing share again must not text them twice',
+      (tester) async {
+        final service = ScriptedMeetupService(
+          meetupDetail: _acceptedMeetup(),
+          safetyState: const SafetyState(
+            meetupId: 'meetup-1',
+            sharedWithContactIds: ['contact-1'],
+          ),
+        );
+
+        await tester.pumpWidget(app(service, contacts: const [amma, friend]));
+        await tester.pumpAndSettle();
+
+        // The prior share is visible without reopening anything.
+        expect(find.text('Told 1 trusted contact'), findsOneWidget);
+
+        await tester.ensureVisible(find.text('TELL SOMEONE ELSE'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('TELL SOMEONE ELSE'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Already told'), findsOneWidget);
+
+        // Tapping the already-told row selects nothing.
+        await tester.tap(find.text('Amma'));
+        await tester.pumpAndSettle();
+        final button = tester.widget<PrimaryButton>(
+          find.widgetWithText(PrimaryButton, 'SHARE THIS MEETUP'),
+        );
+        expect(button.onPressed, isNull);
+      },
+    );
+
+    testWidgets(
+      'with no contacts at all the sheet routes to the page that fixes that, '
+      'rather than being a dead end',
+      (tester) async {
+        final service = ScriptedMeetupService(
+          meetupDetail: _acceptedMeetup(),
+          safetyState: const SafetyState(meetupId: 'meetup-1'),
+        );
+
+        await tester.pumpWidget(app(service, contacts: const []));
+        await tester.pumpAndSettle();
+
+        await tester.ensureVisible(find.text('TELL SOMEONE'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('TELL SOMEONE'));
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('not added anyone yet'), findsOneWidget);
+
+        await tester.tap(find.text('ADD A TRUSTED CONTACT'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(ManageTrustedContactsPage), findsOneWidget);
+      },
+    );
+
+    testWidgets('a failed share surfaces the error and claims nothing', (
+      tester,
+    ) async {
+      final service = ScriptedMeetupService(
+        meetupDetail: _acceptedMeetup(),
+        safetyState: const SafetyState(meetupId: 'meetup-1'),
+      )..shareWithContactsError = const MeetupNetworkException('SMS is down');
+
+      await tester.pumpWidget(app(service, contacts: const [amma]));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.text('TELL SOMEONE'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('TELL SOMEONE'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Amma'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SHARE THIS MEETUP'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SMS is down'), findsOneWidget);
+      expect(
+        find.textContaining('Told '),
+        findsNothing,
+        reason: 'a failed send must not report that anyone was told',
+      );
+    });
   });
 }

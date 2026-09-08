@@ -10,6 +10,11 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 /// (e.g. MatchesPage's fire-and-forget updateLastKnownLocation, ADR-021
 /// §3) isn't what the test is actually about.
 class ImmediateAuthService implements AuthService {
+  // ADR-002 § 3.
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
+      throw UnimplementedError();
+
   int updateLastKnownLocationCallCount = 0;
   double? lastUpdateLastKnownLocationLat;
   double? lastUpdateLastKnownLocationLng;

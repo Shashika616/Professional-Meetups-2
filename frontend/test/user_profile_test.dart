@@ -17,6 +17,7 @@ void main() {
         'work_email_verified': true,
         'rating_average': 4.8,
         'rating_count': 12,
+        'meetups_completed': 7,
       });
 
       expect(profile.id, 'user-1');
@@ -30,6 +31,7 @@ void main() {
       expect(profile.workEmailVerified, isTrue);
       expect(profile.ratingAverage, 4.8);
       expect(profile.ratingCount, 12);
+      expect(profile.meetupsCompleted, 7);
     });
 
     test('defaults the four verification booleans and trust level to '
@@ -48,6 +50,10 @@ void main() {
       // No rating yet (ADR-015) — 0/0, not a misleadingly-low real score.
       expect(profile.ratingAverage, 0);
       expect(profile.ratingCount, 0);
+      // A brand-new account has completed nothing. This defaulting is what
+      // the profile screen now renders instead of the literal 12 it used to
+      // show everyone.
+      expect(profile.meetupsCompleted, 0);
     });
   });
 }

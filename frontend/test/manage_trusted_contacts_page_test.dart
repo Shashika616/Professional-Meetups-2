@@ -15,6 +15,13 @@ import 'package:professional_connections_platform/features/safety/manage_trusted
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  // ADR-002 § 3. Unused by this test — every fake in test/ implements the
+  // full AuthService surface, so a new method lands here even when the test
+  // never calls it.
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
+      throw UnimplementedError();
+
   _FakeAuthService({List<TrustedContact>? contacts})
     : contacts = contacts ?? [];
 

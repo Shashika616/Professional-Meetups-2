@@ -18,6 +18,13 @@ import 'support/fake_secure_storage_platform.dart';
 /// everything else throws if reached, matching this suite's existing
 /// _FakeAuthService convention (app_shell_test.dart etc.).
 class _FakeAuthService implements AuthService {
+  // ADR-002 § 3. Unused by this test — every fake in test/ implements the
+  // full AuthService surface, so a new method lands here even when the test
+  // never calls it.
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
+      throw UnimplementedError();
+
   int startOtpCallCount = 0;
   String? lastSignUpEmail;
   String? lastSignUpCode;

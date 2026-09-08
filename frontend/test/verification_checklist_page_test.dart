@@ -25,9 +25,21 @@ import 'support/fake_secure_storage_platform.dart';
 /// verify) reflects the new state — the same reactive path the real app
 /// uses, not a shortcut around it.
 class _FakeAuthService implements AuthService {
+  // ADR-002 § 3. Unused by this test — every fake in test/ implements the
+  // full AuthService surface, so a new method lands here even when the test
+  // never calls it.
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
+      throw UnimplementedError();
+
   _FakeAuthService({this.linkedInConnected = true});
 
   bool linkedInConnected;
+
+  /// Lets a test model the ADR-002 state that LinkedIn-derivation cannot
+  /// express: trust level 1 with no LinkedIn. Null means "derive from
+  /// [linkedInConnected]", which is what every pre-existing test wants.
+  int? trustLevelOverride;
   bool phoneVerified = false;
   bool personalEmailVerified = false;
   bool personalDetailsComplete = false;
@@ -40,7 +52,13 @@ class _FakeAuthService implements AuthService {
   Future<UserProfile> getProfile() async => UserProfile(
     id: 'user-1',
     fullName: 'Ada Lovelace',
-    trustLevel: linkedInConnected ? 1 : 0,
+    // ADR-002 §2 decoupled these two. trustLevel 1 now means "completed any
+    // real signup path", which is true whether or not LinkedIn is involved;
+    // linkedInConnectedFlag is the server's own answer to the LinkedIn
+    // question and is what the page reads. Setting only trustLevel here (as
+    // this fake used to) modelled a server that no longer exists.
+    trustLevel: trustLevelOverride ?? (linkedInConnected ? 1 : 0),
+    linkedInConnectedFlag: linkedInConnected,
     phoneVerified: phoneVerified,
     personalEmailVerified: personalEmailVerified,
     personalDetailsComplete: personalDetailsComplete,
@@ -255,6 +273,41 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Connect LinkedIn'), findsOneWidget);
+      expect(find.text('Connect LinkedIn first'), findsNWidgets(3));
+    },
+  );
+
+  // ADR-002 § 2 CREATED A STATE THAT DID NOT EXIST BEFORE: trust level 1
+  // WITHOUT LinkedIn. Under the old ladder Level 1 was reachable only via
+  // LinkedIn, so `linkedInConnected` was derived as `trustLevel >= 1` — an
+  // inference that is now simply wrong for every Apple/Google/email account.
+  //
+  // Left unfixed it would have shown this page's LinkedIn row as done and
+  // unlocked the three rows beneath it, each of which the server then
+  // rejects (requireLinkedIn, unchanged by ADR-002). The user would have
+  // seen a checklist telling them to do things that immediately 403.
+  //
+  // This is the regression test for that. §D of the plan asks for this page
+  // to be exercised from a Level 0 AND a Level 1 email-only account; the
+  // test above is the Level 0 half, this is the Level 1 half.
+  testWidgets(
+    'a Level-1 email-only viewer (no LinkedIn) is still told to connect '
+    'LinkedIn — trust level 1 no longer implies LinkedIn (ADR-002 § 2)',
+    (tester) async {
+      final auth = _FakeAuthService(linkedInConnected: false)
+        // The distinguishing state: a real signup path was completed, so the
+        // account is Level 1, but LinkedIn was not one of them.
+        ..trustLevelOverride = 1;
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Connect LinkedIn'),
+        findsOneWidget,
+        reason:
+            'a Level 1 account with no LinkedIn was treated as already '
+            'connected — the page would unlock rows the server rejects',
+      );
       expect(find.text('Connect LinkedIn first'), findsNWidgets(3));
     },
   );

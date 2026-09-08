@@ -15,7 +15,11 @@ import 'package:professional_connections_platform/features/meetups/widgets/stadi
 class _FakeAuthSessionNotifier extends AuthSessionNotifier {
   @override
   Future<AuthSessionState> build() async => const AuthSessionState(
-    profile: UserProfile(id: 'user-1', fullName: 'Ada Lovelace', trustLevel: 2),
+    // CHANGED (ADR-002 § 4): was trustLevel 2. This is the HOSTING flow, and
+    // hosting an ordinary intent needs Level 3 now — at 2 the intent step
+    // locks and the flow cannot advance past it, which is correct behaviour
+    // and exactly what the gate test below asserts.
+    profile: UserProfile(id: 'user-1', fullName: 'Ada Lovelace', trustLevel: 3),
   );
 }
 
