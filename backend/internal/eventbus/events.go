@@ -26,11 +26,14 @@ const (
 	TopicUserProfileUpdated = "user-profile-updated"
 	TopicRatingUpdated      = "rating-updated"
 
-	// TopicPushNotificationRequested crosses the the meetup module <->
-	// the notification module boundary (ADR-022) — meetup produces
-	// it (internal/notifications.OutboxPushSender), notification-dispatch
-	// is its only consumer.
-	TopicPushNotificationRequested = "push-notification-requested"
+	// TopicMeetupsCompletedUpdated — published by the meetup module every
+	// time a meetup completes, once per participant, carrying that
+	// participant's recomputed total. Consumed by the auth module into
+	// users.meetups_completed. Exactly the rating-updated arrangement, for
+	// exactly the same reason: the count is derived from the meetup
+	// schema's own tables, and the profile read must not reach across into
+	// them.
+	TopicMeetupsCompletedUpdated = "meetups-completed-updated"
 
 	// TopicUserLocationUpdated (ADR-021 §4) — published by the auth module
 	// every time UpdateLastKnownLocation succeeds; consumed by
@@ -98,26 +101,44 @@ type RatingUpdatedPayload struct {
 	OccurredAt    time.Time `json:"occurred_at"`
 }
 
-// PushNotificationRequestedPayload is published by the meetup module
-// (internal/notifications.OutboxPushSender) and consumed only by
-// the notification module (ADR-022). Deliberately generic and
-// transport-specific rather than domain-specific — unlike every other
-// payload in this file, which carries IDs and lets the consumer decide
-// what they mean, this one carries already-resolved FCM device tokens
-// directly: notification-dispatch has no database of its own (ADR-022 §3)
-// and can't resolve "which devices does this user have" itself, so meetup
-// resolves them before publishing, the same ListForUser lookup
-// FCMPushSender used to make inline before this migration. Deliberately
-// its own type, not a reuse/generalization of the meetup module's local,
-// zero-cross-service-consumer requestEventPayload (internal/repository/
-// events.go) — different shape, different concern.
-type PushNotificationRequestedPayload struct {
-	FCMTokens  []string          `json:"fcm_tokens"`
-	Title      string            `json:"title"`
-	Body       string            `json:"body"`
-	Data       map[string]string `json:"data,omitempty"`
-	OccurredAt time.Time         `json:"occurred_at"`
+// MeetupsCompletedUpdatedPayload is published by the meetup module for each
+// participant of a meetup that just completed — the host and every accepted
+// requester.
+//
+// MeetupsCompleted is an ABSOLUTE total, not a delta, and that is the whole
+// design: the consumer's guarded UPDATE can then re-apply the same event any
+// number of times without inflating the figure, which a "+1" could not. It
+// is computed inside the same transaction that completed the meetup, so it
+// reflects exactly the state that committed.
+//
+// OccurredAt is what the consumer's ordering guard compares against the
+// stored meetups_completed_updated_at (ADR-018 Decision 2) — the event's own
+// timestamp, not the time it happens to be processed.
+type MeetupsCompletedUpdatedPayload struct {
+	UserID           string    `json:"user_id"`
+	MeetupsCompleted int       `json:"meetups_completed"`
+	OccurredAt       time.Time `json:"occurred_at"`
 }
+
+// REMOVED: TopicPushNotificationRequested / PushNotificationRequestedPayload.
+//
+// Push notifications no longer travel on this bus at all. They are written
+// into meetup.notification_outbox in the same transaction as the business
+// write that implies them, and delivered by internal/platform/outbox's poller
+// (ADR-001's "Correction (2026-09-04, durable notification delivery)",
+// docs/plans/03-hardening-pass.md §F).
+//
+// The topic and payload are deleted rather than left defined-but-unused, on
+// purpose: a topic constant that still exists is an invitation to publish to
+// it, and a publish to this one would now be silently lost — no subscriber,
+// no outbox row, no delivery, no error. Removing the name is what makes that
+// mistake fail at compile time instead of at runtime, in a system where the
+// whole point of the change was that these notifications must not be lost.
+//
+// Every OTHER topic in this file is unchanged: still this bus, still
+// synchronous, still ADR-001 §4's accepted trade-off as originally reasoned.
+// See internal/eventbus/bus.go's package doc for why this one topic was the
+// exception.
 
 // UserLocationUpdatedPayload is published by the auth module every time
 // UpdateLastKnownLocation succeeds (ADR-021 §4) — the meetup module consumes

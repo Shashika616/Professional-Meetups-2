@@ -8,6 +8,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	migratepostgres "github.com/golang-migrate/migrate/v4/database/postgres"
@@ -24,6 +26,30 @@ import (
 // explicit, reviewable number rather than a library default.
 const MaxConns = 20
 
+// StatementTimeout is the hard backstop on any single SQL statement (§B2).
+//
+// THE FAILURE THIS PREVENTS is specific to the monolith and did not exist in
+// the microservices system it replaces: one pool is shared by every module.
+// A single query that never finishes — lock contention, a missing index
+// after a data-shape change, a migration running concurrently — holds its
+// pooled connection indefinitely. Enough of those and the pool is exhausted,
+// at which point AUTH stops working because of a bug in MEETUP. Each service
+// used to have its own pool, so a stuck query could only starve its own
+// service.
+//
+// Set on the server side via the connection string rather than relying on
+// context deadlines alone, deliberately: a context cancellation asks pgx to
+// abandon the query and issue a cancel request, while statement_timeout
+// makes POSTGRES itself abort the backend. The first depends on this process
+// still being healthy enough to act; the second does not. Both are wired —
+// this one as the backstop, the per-RPC deadline in cmd/monolith as the
+// primary, more granular control.
+//
+// 10 seconds is comfortably above any legitimate query here (the slowest are
+// the PostGIS radius scans, which are indexed and bounded at 500 rows) and
+// far below anything a user would wait through.
+const StatementTimeout = 10 * time.Second
+
 // New opens a connection pool against databaseURL and verifies it is
 // actually reachable before returning — a process that can't reach its
 // database should fail at startup, not on its first request.
@@ -33,6 +59,17 @@ func New(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("db: parse database url: %w", err)
 	}
 	cfg.MaxConns = MaxConns
+
+	// Applied through RuntimeParams rather than appended to the URL string:
+	// the caller's DATABASE_URL may already carry its own query parameters
+	// (sslmode, application_name), and string-concatenating another one is
+	// how a "?" vs "&" bug gets introduced. This also means an operator
+	// CANNOT accidentally remove the timeout by editing the URL — the value
+	// is owned by this package.
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.Itoa(int(StatementTimeout.Milliseconds()))
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

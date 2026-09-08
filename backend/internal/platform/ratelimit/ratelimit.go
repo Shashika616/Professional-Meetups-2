@@ -29,6 +29,30 @@ import (
 	"time"
 )
 
+// Limiter is the one-method seam every consumer codes against (§A4).
+//
+// WHY AN INTERFACE FOR A SINGLE IMPLEMENTATION: the in-memory limiter above
+// is correct only for a SINGLE gateway instance, which is a documented,
+// accepted trade-off (ADR-001 §5) and not a permanent one. When the gateway
+// is eventually scaled out, the fix is a shared-store limiter — and the
+// difference between that being a new type satisfying this interface and it
+// being a rewrite of every call site is whether this interface exists before
+// it is needed. It costs nothing now: `*InMemory` satisfies it by
+// construction and no call site changes shape.
+//
+// Allow returns only a bool, with no error, because there is genuinely no
+// third "couldn't check" state in the in-memory implementation. A future
+// shared-store implementation that CAN fail should decide fail-open
+// vs. fail-closed inside itself and keep this signature — the source's
+// Redis-backed original made exactly that call (fail open: "rate limiting is
+// defense in depth, not the only line of defense"), and pushing an error
+// return out to every middleware would force each one to re-decide it.
+type Limiter interface {
+	// Allow records one request against key and reports whether it is
+	// within limit for the current window.
+	Allow(key string, limit int, window time.Duration) bool
+}
+
 // bucket is one key's fixed window: how many requests have landed in it, and
 // when it expires. A bucket whose resetAt has passed is indistinguishable
 // from a key that was never seen — both start a fresh window.
@@ -37,9 +61,10 @@ type bucket struct {
 	resetAt time.Time
 }
 
-// Limiter counts requests per key over a fixed window. Safe for concurrent
-// use. Construct with New, which also starts the sweeper.
-type Limiter struct {
+// InMemory counts requests per key over a fixed window, in a mutex-guarded
+// map. Safe for concurrent use. Construct with New, which also starts the
+// sweeper. This is the only Limiter implementation today.
+type InMemory struct {
 	mu      sync.Mutex
 	buckets map[string]*bucket
 
@@ -57,15 +82,15 @@ type Limiter struct {
 // housekeeping nicety. Redis handled this for the original via key TTLs.
 const sweepInterval = time.Minute
 
-// New constructs a Limiter and starts its background sweeper. Call Close to
+// New constructs an InMemory limiter and starts its background sweeper. Call Close to
 // stop that goroutine (cmd/gateway does, on shutdown; tests do via
 // t.Cleanup).
-func New() *Limiter {
+func New() *InMemory {
 	return newWithClock(time.Now)
 }
 
-func newWithClock(now func() time.Time) *Limiter {
-	l := &Limiter{
+func newWithClock(now func() time.Time) *InMemory {
+	l := &InMemory{
 		buckets: make(map[string]*bucket),
 		now:     now,
 		stop:    make(chan struct{}),
@@ -79,7 +104,7 @@ func newWithClock(now func() time.Time) *Limiter {
 // key and lasts exactly window — the same fixed-window semantics (including
 // the same burst-at-the-boundary edge effect) as the Redis original, which
 // chose fixed-window deliberately as the simplest correct algorithm.
-func (l *Limiter) Allow(key string, limit int, window time.Duration) bool {
+func (l *InMemory) Allow(key string, limit int, window time.Duration) bool {
 	now := l.now()
 
 	l.mu.Lock()
@@ -97,12 +122,18 @@ func (l *Limiter) Allow(key string, limit int, window time.Duration) bool {
 
 // Close stops the sweeper goroutine. Idempotent-unsafe by design (a second
 // call panics on the closed channel) — there is exactly one owner of a
-// Limiter, the process that constructed it.
-func (l *Limiter) Close() {
+// limiter, the process that constructed it.
+//
+// Deliberately NOT part of the Limiter interface: a shared-store
+// implementation has a connection to close, an in-memory one has a
+// goroutine, and a no-op one has neither. Lifecycle belongs to whoever
+// constructed the concrete type (cmd/gateway), not to every middleware that
+// merely calls Allow.
+func (l *InMemory) Close() {
 	close(l.stop)
 }
 
-func (l *Limiter) sweepLoop() {
+func (l *InMemory) sweepLoop() {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 	for {
@@ -115,7 +146,7 @@ func (l *Limiter) sweepLoop() {
 	}
 }
 
-func (l *Limiter) sweep() {
+func (l *InMemory) sweep() {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -125,3 +156,8 @@ func (l *Limiter) sweep() {
 		}
 	}
 }
+
+// Compile-time proof that the concrete limiter satisfies the seam. Cheap
+// insurance: a signature drift on Allow should fail here, at the definition,
+// rather than at whichever call site happens to be compiled first.
+var _ Limiter = (*InMemory)(nil)

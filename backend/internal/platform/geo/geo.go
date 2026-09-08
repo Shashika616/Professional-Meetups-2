@@ -15,12 +15,42 @@ import (
 	"math"
 )
 
-// ValidateLatLng rejects NaN and out-of-range coordinates. Callers map the
-// returned error through their own apperror.ErrInvalidInput wrapping
-// (kept out of this package so it stays dependency-free).
+// ValidateLatLng rejects NaN, infinite, out-of-range, and null-island
+// coordinates. Callers map the returned error through their own
+// apperror.ErrInvalidInput wrapping (kept out of this package so it stays
+// dependency-free).
 func ValidateLatLng(lat, lng float64) error {
 	if math.IsNaN(lat) || math.IsNaN(lng) {
 		return fmt.Errorf("latitude/longitude must not be NaN")
+	}
+	// Infinities pass every range comparison below in the wrong direction
+	// (+Inf > 90 catches it, but -Inf < -90 also catches it, so this is
+	// belt-and-braces) — named explicitly so the error says what happened
+	// rather than reporting an unhelpful "+Inf out of range".
+	if math.IsInf(lat, 0) || math.IsInf(lng, 0) {
+		return fmt.Errorf("latitude/longitude must be finite")
+	}
+	// Exactly (0, 0) is "null island" — a point in the Atlantic off the Gulf
+	// of Guinea, and in practice never a real meetup or SOS location. It is
+	// what a failed GPS read defaults to, and it passes every range check
+	// above, so before this it flowed silently through to a real geography
+	// column: a meetup created 5,000km from where its host thinks it is,
+	// invisible to the 40km nearby-notify fan-out and to every browse-radius
+	// filter, with no error surfaced anywhere to explain why. On the SOS
+	// path it would have put null island into a maps link sent to a real
+	// trusted contact during an emergency.
+	//
+	// Rejected as its own distinct error, not folded into the range checks:
+	// "latitude 0 out of range" would be actively confusing, since 0 IS in
+	// range. The message has to say what actually went wrong, because the
+	// real cause is upstream (a location permission denied, a fix not yet
+	// acquired) and the caller needs to recognise it.
+	//
+	// The precision cost of this rule is a band roughly one ten-millionth of
+	// a degree wide — around a centimetre of ocean. Anyone genuinely there
+	// can move a hand's width.
+	if lat == 0 && lng == 0 {
+		return fmt.Errorf("latitude/longitude of exactly (0, 0) is not a real location — this usually means a location fix was never acquired")
 	}
 	if lat < -90 || lat > 90 {
 		return fmt.Errorf("latitude %v out of range [-90, 90]", lat)

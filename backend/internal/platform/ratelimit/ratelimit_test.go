@@ -25,7 +25,7 @@ func (c *fakeClock) advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-func newTestLimiter(t *testing.T, clock *fakeClock) *Limiter {
+func newTestLimiter(t *testing.T, clock *fakeClock) *InMemory {
 	t.Helper()
 	l := newWithClock(clock.Now)
 	t.Cleanup(l.Close)
@@ -171,3 +171,27 @@ func TestAllow_ConcurrentCallersCountExactlyOnce(t *testing.T) {
 		t.Errorf("allowed %d of %d concurrent requests, want exactly %d", allowed, attempts, limit)
 	}
 }
+
+// TestLimiterInterface_IsSatisfiedByAnAlternativeImplementation is the
+// point of §A4: proving the seam actually admits a second implementation,
+// not just that the current one happens to compile against it. A test double
+// like this one is also what any future consumer's tests will use instead of
+// standing up real windows and clocks.
+func TestLimiterInterface_IsSatisfiedByAnAlternativeImplementation(t *testing.T) {
+	var limiter Limiter = alwaysDeny{}
+	if limiter.Allow("any-key", 1000, time.Hour) {
+		t.Error("the substituted Limiter was not the one consulted")
+	}
+
+	limiter = New()
+	defer limiter.(*InMemory).Close()
+	if !limiter.Allow("any-key", 1, time.Hour) {
+		t.Error("the in-memory limiter rejected the first request in a fresh window")
+	}
+}
+
+// alwaysDeny stands in for the shared-store implementation §A4 exists to
+// make possible — it needs nothing from this package but the interface.
+type alwaysDeny struct{}
+
+func (alwaysDeny) Allow(string, int, time.Duration) bool { return false }

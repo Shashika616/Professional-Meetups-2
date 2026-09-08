@@ -31,6 +31,11 @@ const issuer = "professional-connections-auth"
 // compromised is smaller for it: that binary can't mint a token at all.
 type Signer struct {
 	privateKey *rsa.PrivateKey
+	// kid is derived from this key's own public half (see kid.go) and
+	// stamped into every token's header, so a Verifier holding several
+	// public keys knows which one to check against without trial
+	// verification.
+	kid string
 }
 
 // NewSigner loads an RSA private key from privateKeyPath and fails fast if
@@ -48,8 +53,18 @@ func NewSigner(privateKeyPath string) (*Signer, error) {
 		return nil, fmt.Errorf("jwt: parse private key %q: %w", privateKeyPath, err)
 	}
 
-	return &Signer{privateKey: key}, nil
+	kid, err := KeyID(&key.PublicKey)
+	if err != nil {
+		return nil, fmt.Errorf("jwt: derive key id for %q: %w", privateKeyPath, err)
+	}
+
+	return &Signer{privateKey: key, kid: kid}, nil
 }
+
+// KeyID reports the `kid` this signer stamps into the tokens it issues.
+// Logged once at startup so an operator mid-rotation can confirm which key
+// is actually in use without decoding a token by hand.
+func (s *Signer) KeyID() string { return s.kid }
 
 // Sign issues a signed access token for claims. IssuedAt, ExpiresAt, and
 // Issuer are set here and override anything the caller supplied — callers
@@ -64,6 +79,13 @@ func (s *Signer) Sign(claims Claims) (string, error) {
 	}
 
 	token := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, claims)
+	// The `kid` header is what gives a key rotation an overlap window: the
+	// verifier can hold the previous public key alongside the current one
+	// and route each token to the key that actually signed it, so tokens
+	// issued before the rotation keep working until they expire on their own
+	// (§A3). Without it, the moment a new signing key deploys, every
+	// outstanding access token is unverifiable.
+	token.Header["kid"] = s.kid
 	signed, err := token.SignedString(s.privateKey)
 	if err != nil {
 		return "", fmt.Errorf("jwt: sign: %w", err)
