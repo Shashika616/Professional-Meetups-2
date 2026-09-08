@@ -5,6 +5,13 @@ Implements `01-phase1-scaffold-gateway-auth.md` against
 in `00-overview.md` and the security checklist in
 `../security-review-framework.md`.
 
+**Updated 2026-09-04** after the post-review fix pass
+(`phase1-fixes-breaker-timeout-grpc-auth.md`): the SOS circuit breaker is
+restored, the Resend client has an explicit timeout, the gateway→monolith
+gRPC hop is authenticated, the test-count claim was independently
+re-confirmed, and the frontend nonce plumbing is built — which surfaced a
+real weakness in the original nonce design, now fixed. See §9.
+
 Everything below was actually run in this environment (Go 1.26.6, Docker,
 `sqlc` v1.31.1, `buf` 1.72.0, `golangci-lint` v2.12.2). Where something was
 *not* exercised, it says so and why.
@@ -59,9 +66,9 @@ ok  .../internal/platform/ratelimit        2.327s
 
 `go test -race ./...` — same result, every package `ok`, no data races.
 
-**385 test cases pass (including subtests); 0 failures, 0 skips.** The skip
-count matters: the integration tests self-skip when Postgres is unreachable,
-so "0 skips" is the evidence they really ran.
+**407 test cases pass (including subtests); 0 failures, 0 skips** — see §9
+Fix 4 for the independently re-confirmed counts and the control run proving
+the skip path was not what fired.
 
 Two packages listed as `[no test files]` are covered indirectly and
 deliberately: `internal/grpcapi` and `internal/gateway/monolithclient` are
@@ -235,13 +242,15 @@ test (unit, integration, or both):
   the chain — an arbitrarily large body was fully buffered at any of the 5
   keyed paths. Now capped at the same 1 MiB, with the peeked prefix stitched
   back in front of the unread remainder so downstream behavior is identical.
-- **Accepted regression (deliberate, per ADR-001 §7)**: the source wraps each
-  SOS alert send in a per-channel circuit breaker so that once Twilio/Resend
-  is down, later contacts fail fast. `shared/breaker` is explicitly not
-  carried into this repo, so the breaker is gone; the bounded retry (2
-  attempts, fixed 500 ms) is kept. Consequence: during a full channel outage,
-  `TriggerSOS` can take up to (contacts × channels × 2 × per-send timeout)
-  instead of short-circuiting. This is on an emergency path — see §7, gap 1.
+- **SOS circuit breaker: restored** (§9 Fix 1). One breaker per channel, on
+  the long-lived service, so failure memory persists across `TriggerSOS`
+  calls from different users — a sustained Twilio/Resend outage fails fast
+  after 5 consecutive failures instead of every emergency paying the full
+  retry-and-timeout cost. The bounded retry sits inside it, same shape as the
+  source.
+- **Resend now has an explicit 5s timeout** (§9 Fix 2), matching Twilio.
+  resend-go's own default is 1 minute — not unbounded, but far too long for
+  an OTP send and much too long for the SOS path.
 - **Accepted trade-off (ADR-001 §5)**: the in-memory limiter is correct for a
   single gateway instance only. Behind a load balancer each replica enforces
   its own limit.
@@ -282,6 +291,13 @@ admin surface for it to cover; not built speculatively.
   no silent merge.
 - Trust level in the token can only be stale *low* (it only ever increases),
   which is the safe direction.
+- **The gateway→monolith hop is now authenticated** (§9 Fix 3). Every monolith
+  RPC trusts its caller's `user_id`; that is only sound if the gateway is the
+  sole caller, and until this fix nothing in code enforced it — it rested on
+  Docker network isolation alone. A shared secret in gRPC metadata, verified
+  constant-time by a unary interceptor that runs before any handler, closes
+  "anything that can reach the port can act as any user". Verified against the
+  running stack, not just in unit tests.
 
 ### Cross-cutting
 
@@ -401,8 +417,9 @@ returns nothing), so **Apple/Google sign-in needs a frontend change** — see
    `StartPersonalEmailVerification`, `StartCorporateEmailVerification` and
    `AddTrustedContact`, using the frontend's *exact* regexes so nothing the
    shipped UI accepts is now rejected.
-5. **SOS circuit breaker not ported** (ADR-001 §7 + the phase prompt). Retry
-   kept, breaker dropped. See Availability above and §7, gap 1.
+5. ~~**SOS circuit breaker not ported**~~ — reversed after review; the
+   breaker is now ported (§9 Fix 1). ADR-001 §7's "no breaker" turned out to
+   be scoped to the outbox use case only.
 6. **Rate-limiter body peek bounded** (Availability above).
 7. **Module returns sentinel errors, not gRPC statuses.** The source's service
    *was* the gRPC server, so it called `apperror.ToGRPCStatus` inline; here
@@ -436,17 +453,16 @@ returns nothing), so **Apple/Google sign-in needs a frontend change** — see
 
 ## 7. Known gaps for Phase 2+ (named, not implicit)
 
-1. **SOS alert resilience regressed relative to the source** — the circuit
-   breaker is gone per ADR-001 §7 (§6.5). If the intent was that the ADR's
-   "breaker not carried over" applied only to the event-delivery machinery,
-   this is a one-file change in `internal/modules/auth/sos`. Flagged for an
-   explicit decision rather than silently restored.
-2. **Apple/Google sign-in needs a frontend change for the nonce** — generate a
-   random nonce per attempt, pass it to `getAppleIDCredential` / Google's
-   authenticate call (for Apple, hand the provider the SHA-256 and send that
-   same value), and include it as `"nonce"` in the
-   `/v1/auth/federated/signup` and `/v1/auth/identities/link` bodies. Backend
-   side is done and tested; the client half is not in this phase's scope.
+1. ~~**SOS alert resilience regressed**~~ — **resolved**. ADR-001's
+   2026-09-04 correction confirmed the reading I flagged: "no breaker" was
+   scoped to the outbox/Pub/Sub publish, not the SOS vendor calls. The
+   per-channel breaker is restored (§9 Fix 1).
+2. ~~**Apple/Google sign-in needs a frontend change for the nonce**~~ —
+   **resolved** (§9 Fix 5). The client now generates the pair, hands the
+   provider the hash and sends the raw pre-image. One residual, documented at
+   the call site: Google's nonce is per-app-run rather than per-attempt,
+   because `google_sign_in` 7.x takes it on `initialize` (callable exactly
+   once) rather than on `authenticate`.
 3. **`rating-updated` has no subscriber yet** — the auth module consumes it in
    the source, but only the meetup module publishes it. Wiring a handler now
    would be a dangling subscription, so the `Subscribe` call belongs in Phase
@@ -507,3 +523,250 @@ returns nothing), so **Apple/Google sign-in needs a frontend change** — see
   `breaker` and `outbox` not carried over; event payloads ported verbatim as
   Go structs. ✅
 - **No circuit-breaker/relay machinery reintroduced.** ✅
+
+---
+
+## 9. Post-review fix pass (2026-09-04)
+
+Four findings from the independent review, all applied. Full run after the
+changes: `go build ./...` clean, `go vet ./...` clean, `golangci-lint run
+./...` **0 issues**, `gofmt -l` empty, `go test -race ./...` every package
+`ok`.
+
+### Fix 1 — SOS-alert circuit breaker restored
+
+`internal/platform/breaker` ported essentially unchanged from
+`shared/breaker` (closed/open/half-open, `Execute(fn) error`, `ErrOpen`).
+`sos.Service` gains `smsBreaker`/`emailBreaker` — **one per channel, built
+once in `New`**, because cross-call memory ("Twilio is down right now") is
+the entire point; a per-call breaker would be indistinguishable from none.
+Same constants as the source (`sosBreakerFailureThreshold = 5`,
+`sosBreakerResetTimeout = 30s`), with the existing bounded retry
+(`sendMaxAttempts = 2`, `sendRetryDelay = 500ms`) *inside* the
+breaker-wrapped call, matching `sendSOSAlertWithResilience`'s shape.
+
+Three tests, all passing:
+
+- `TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures` — the source's own
+  test, restored: 3 phone-only contacts, sustained SMS failure, **exactly 5
+  real sends, not 6** (the breaker opens on the 5th recorded failure, so the
+  3rd contact's 2nd attempt never reaches the sender).
+- `TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel` —
+  new: a *second user's* emergency, after the breaker is already open, makes
+  **zero** further real SMS sends, returns in **well under the 500 ms retry
+  delay**, and still delivers over the healthy email channel.
+- `TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel` —
+  updated: one channel's outage never trips or blocks the other.
+
+### Fix 2 — explicit HTTP timeout on the Resend sender
+
+**One correction to the finding as written**: `resend.NewClient` is not
+timeout-less — resend-go sets a package-level default of **one minute**. The
+conclusion is unchanged (a 60s stall is far too long for an OTP a user is
+waiting on, and much too long for `SendAlert`, which sits inside bounded
+retries and a breaker that both assume a send resolves fast), so the sender
+now builds its client via `resend.NewCustomClient(&http.Client{Timeout:
+defaultTimeout}, apiKey)` with the **same 5s as Twilio** — same class of call,
+no reason for a different budget.
+
+Two tests, both passing, asserting behavior rather than a field: against an
+unresponsive server, `SendVerificationCode` and `SendAlert` each fail in
+**5.00s**, not 60.
+
+### Fix 3 — shared-secret authentication on the gateway→monolith hop
+
+`internal/platform/internalauth` holds both halves in one package so the
+metadata key and comparison cannot drift: `MetadataKey = "x-internal-auth"`,
+`UnaryServerInterceptor` (constant-time `subtle.ConstantTimeCompare`,
+`codes.Unauthenticated` on mismatch/missing) and `UnaryClientInterceptor`.
+
+- Monolith: `INTERNAL_GRPC_SHARED_SECRET`, **required**, no
+  "unset means skip" fallback; the interceptor is chained after request-ID
+  and before recovery, so rejection happens before any module code or DB
+  access.
+- Gateway: `MONOLITH_SHARED_SECRET`, **required**, attached by a
+  connection-level client interceptor so a method added later cannot forget
+  it.
+- `.env.example` documents both (one value, generated with `openssl rand
+  -base64 32`); `docker-compose.yml` feeds both services from the same `.env`
+  entry using `${INTERNAL_GRPC_SHARED_SECRET:?...}`, so a missing value fails
+  the stack loudly instead of starting something half-authenticated.
+
+12 tests pass, including the 8-case interceptor table (missing key, empty
+value, wrong value, wrong case, correct-value-as-prefix, and multiple values
+with one correct — rejected, so one call can't carry several guesses) and
+three end-to-end cases over a real gRPC connection asserting the request
+**never reaches the module**.
+
+Verified against the **running stack** by calling the monolith's port
+directly, the way a network attacker or a misconfigured second caller would:
+
+```
+no secret          -> rpc error: code = Unauthenticated desc = internal authentication failed
+wrong secret       -> rpc error: code = Unauthenticated desc = internal authentication failed
+correct secret     -> rpc error: code = NotFound desc = repository: user "000...000": not found
+```
+
+The third line is the important one: with the right secret the call reaches
+the module and performs a real database lookup, so the first two are being
+stopped by authentication rather than by anything incidental.
+
+**Trade-off, stated explicitly as asked**: this is a static shared secret,
+not mTLS, and it is the right amount of mechanism here. It closes "any caller
+that reaches the port can impersonate any user". It does **not** protect
+against an attacker who can already read either process's environment (they
+have the secret), and it does not encrypt the hop. For a two-process,
+single-tenant system on a private network that is proportionate — mTLS would
+add certificate issuance, rotation and expiry monitoring for the same threat.
+Revisit if the monolith ever becomes reachable from an untrusted network, or
+gains a second caller with different privileges (both noted in the package
+doc).
+
+### Fix 4 — test count and skip count, independently re-confirmed
+
+Postgres confirmed `Up (healthy)` and queried directly (`8` tables in the
+`auth` schema) *before* running anything, then a clean `go clean -testcache`
+run:
+
+```
+PASS lines (incl. subtests): 407
+SKIP lines:                 0
+FAIL lines:                 0
+```
+
+407 rather than the earlier 385 because of the new breaker, timeout and
+internal-auth tests.
+
+And because "0 skips" is only meaningful if the skip path *can* fire, a
+control run points `DATABASE_URL` at a closed port (5999, connection refused,
+confirmed first) and runs the **whole** auth package — all **12** DB-backed
+tests report `SKIP`:
+
+```
+--- SKIP: TestEmailSignup_Integration (0.00s)
+--- SKIP: TestEmailSignup_RecoversExistingAccount (0.00s)
+--- SKIP: TestOTP_ExpiryAttemptCapAndConsumption (0.00s)
+--- SKIP: TestResendCooldown_Integration (0.00s)
+--- SKIP: TestCorporateEmailVerification_Integration (0.00s)
+--- SKIP: TestRefreshTokenRotation_Integration (0.00s)
+--- SKIP: TestTrustedContactsAndSOS_Integration (0.00s)
+--- SKIP: TestUpdateLastKnownLocation_Integration (0.00s)
+--- SKIP: TestVerifiedTargetsAreUniquePlatformWide (0.00s)
+--- SKIP: TestRequireLinkedIn_Integration (0.00s)
+--- SKIP: TestFederatedSignup_RequiresNonce_Integration (0.00s)
+--- SKIP: TestAgeGate_Integration (0.00s)
+```
+
+With Postgres up, the same 12 all `PASS`. **Correction to this report's first
+version**: an earlier control run used `-run Integration`, which matches only
+9 of the 12 — three of the DB-backed tests
+(`TestEmailSignup_RecoversExistingAccount`,
+`TestOTP_ExpiryAttemptCapAndConsumption`,
+`TestVerifiedTargetsAreUniquePlatformWide`) don't carry "Integration" in their
+names. The headline counts were never affected (the full `go test ./...` run
+always covered all 12); only the control demonstration was under-inclusive,
+and it is now run over the whole package instead of a name filter.
+
+---
+
+## 10. Second fix pass (2026-09-04) — Fix 4 correction + Fix 5
+
+### Fix 4, corrected: the control run was under-inclusive
+
+`integration_test.go` has **12** DB-backed test functions, not 9. The earlier
+control run used `-run Integration`, which matches only 9 of them — three
+(`TestEmailSignup_RecoversExistingAccount`,
+`TestOTP_ExpiryAttemptCapAndConsumption`,
+`TestVerifiedTargetsAreUniquePlatformWide`) don't carry "Integration" in
+their names.
+
+The headline counts were never affected — the full `go test ./...` run always
+covered all 12 — but the *demonstration* was, so it is now run over the whole
+package with no name filter. Control (port 5999, connection refused, verified
+first):
+
+```
+--- SKIP: TestEmailSignup_Integration (0.00s)
+--- SKIP: TestEmailSignup_RecoversExistingAccount (0.00s)
+--- SKIP: TestOTP_ExpiryAttemptCapAndConsumption (0.00s)
+--- SKIP: TestResendCooldown_Integration (0.00s)
+--- SKIP: TestCorporateEmailVerification_Integration (0.00s)
+--- SKIP: TestRefreshTokenRotation_Integration (0.00s)
+--- SKIP: TestTrustedContactsAndSOS_Integration (0.00s)
+--- SKIP: TestUpdateLastKnownLocation_Integration (0.00s)
+--- SKIP: TestVerifiedTargetsAreUniquePlatformWide (0.00s)
+--- SKIP: TestRequireLinkedIn_Integration (0.00s)
+--- SKIP: TestFederatedSignup_RequiresNonce_Integration (0.00s)
+--- SKIP: TestAgeGate_Integration (0.00s)
+```
+
+With Postgres up, the same 12 all `PASS` (12 of 12 confirmed by name).
+Whole-suite totals after every change in this pass: **410 PASS, 0 SKIP, 0
+FAIL** (410 rather than 407 because of Fix 5's new tests).
+
+### Fix 5 — frontend nonce plumbing, and a design flaw it exposed
+
+**The flaw, found while building the client half.** The original check
+compared the client-supplied nonce *literally* against the token's `nonce`
+claim. But a JWT's claims are readable by anyone holding the token — so an
+attacker who obtained an `id_token` could base64-decode it, read the nonce
+out, and send it right back. The check rejected *missing* nonces but not the
+*replays* it exists to stop. It was, in effect, decorative.
+
+**The fix** is the construction Apple documents and Firebase's
+`OAuthProvider.credential(idToken:rawNonce:)` uses: the client sends the
+**pre-image**, and the server hashes it.
+
+- Client generates a random `raw`, computes `hashed = SHA-256(raw)` (lowercase
+  hex).
+- `hashed` goes to Apple/Google, and is what they embed in the token.
+- `raw` goes to our backend, which hashes it and compares constant-time.
+
+Possession of the token is now insufficient: `raw` never appears in it.
+
+Backend (`internal/modules/auth/identity`): `Verify` takes the raw pre-image
+and compares `HashNonce(raw)` against the claim; `HashNonce` is exported as
+the single definition of that mapping. Proto and DTO comments updated to
+match — the old ones documented the weaker design.
+
+Frontend:
+
+- `lib/core/services/sign_in_nonce.dart` — `SignInNonce.generate()` returns
+  the `(raw, hashed)` pair, 32 crypto-random bytes, mirroring the existing
+  `OAuthState` helper's shape so nonce generation stays unit-testable in
+  isolation.
+- Apple: a **fresh nonce per attempt**, `nonce: nonce.hashed` passed to
+  `getAppleIDCredential`, `nonce.raw` sent to the backend.
+- Google: **per app run, not per attempt** — `google_sign_in` 7.x takes the
+  nonce on `initialize`, whose own docs say calling it more than once "will
+  result in undefined behavior", so there is no supported way to rotate it
+  per sign-in. Generated once alongside that single memoized call and reused.
+  Weaker than Apple's, and documented at the call site: it still requires a
+  pre-image only this app instance knows and that never appears in the token,
+  but it does not scope that proof to one attempt. Revisit if the package
+  moves the parameter to `authenticate`.
+- `_completeFederatedSignup` now sends `"nonce"` (the raw value).
+
+Tests — `flutter analyze` clean, **all 306 frontend tests pass**, backend
+suite green:
+
+- `frontend/test/sign_in_nonce_test.dart` (6 new): uniqueness across 100
+  generations, length/alphabet, `hashed == SHA-256(raw)` lowercase hex,
+  `hashed != raw`, and a **pinned known vector**.
+- `backend/.../identity_test.go`: the same pinned vector asserted on the Go
+  side, so the two languages are provably agreeing rather than each
+  re-implementing the hash; plus a new subtest —
+  `attacker replays the token, presenting the claim value itself as the
+  nonce` → **rejected**, which is exactly what the old design allowed.
+
+**What could not be exercised live, and why.** The stack accepts and
+transports the new field end to end, but the nonce *comparison* can't be
+demonstrated against the running system here: `APPLE_SERVICES_ID`/
+`GOOGLE_CLIENT_ID` are empty in this environment, so
+`Verify` fails closed at the audience guard before reaching the nonce check
+(confirmed from the monolith's own logs: `identity: apple: provider not
+configured (no audience set)` for both a nonce-bearing and a nonce-less
+request). Reaching the nonce comparison requires a genuinely Apple- or
+Google-signed token, which needs the real credentials named in §7 gap 6. The
+comparison itself is covered by the identity package's tests against a local
+JWKS server with a configured audience, including the replay case.

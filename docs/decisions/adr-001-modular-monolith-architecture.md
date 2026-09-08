@@ -303,6 +303,110 @@ needs right now, but enough that a misconfigured network or a future
 second caller can't silently act as any user just by reaching the port. See
 `docs/plans/phase1-fixes-breaker-timeout-grpc-auth.md`.
 
+## Correction (2026-09-04, durable notification delivery)
+
+§4 said flatly: "no outbox table, no relay poll-loop... Publish runs
+synchronously in the same request." That's still the right call for every
+topic except one, and this correction narrows it rather than reverses it.
+
+**What changed and why.** Building the notification module (pulled forward
+from Phase 4, see `docs/plans/03-hardening-pass.md` §E) surfaced that
+`push-notification-requested` is qualitatively different from every other
+event this system publishes. Every other topic (`user-onboarded`,
+`user-profile-updated`, `user-location-updated`, `rating-updated`,
+`subscription-*`) feeds an idempotent cache upsert: if the same crash-window
+loss §4 accepts as a trade-off happens to one of those, the cache is
+briefly stale, it self-heals on the next event that touches the same row,
+and a backfill CLI exists for the rare case it doesn't (§C3 in the hardening
+pass). `push-notification-requested` has no such recovery path — a lost
+"the host accepted your request" is gone forever, with no later event that
+would ever re-send it, and it's the one topic that also requires a real
+third-party network call (FCM) rather than a same-process DB write. That
+combination — user-facing, one-shot, no self-heal, network-call-coupled —
+is exactly the profile durability machinery like an outbox exists for.
+
+**Decision: add a Postgres-backed outbox for this one topic only.** Not a
+message broker, not a return to real Pub/Sub, not a separate service — a
+`meetup.notification_outbox` table (`meetup` already owns every publisher of
+this topic), written in the same transaction as the business write it
+accompanies, and a generic `internal/platform/outbox` poller package
+(reusable by `auth` or `billing` later if either ever needs this same
+guarantee for one of its own topics, without re-deriving this design) that
+claims due rows via `FOR UPDATE SKIP LOCKED`, attempts delivery, and retries
+with backoff up to a dead-letter ceiling. A same-process wake-signal (a
+non-blocking channel nudge after commit) keeps common-case latency close to
+immediate, with a periodic tick as the safety net — an option a real
+separate microservice consumer wouldn't have, since it doesn't share memory
+with the writer the way this monolith's two halves of the same process do.
+
+**Explicitly still true, unchanged**: every other topic keeps using
+`eventbus.Bus.Publish`/`Subscribe` exactly as built in Phases 1-2, still
+synchronous, still no outbox, still the §4 trade-off as originally reasoned.
+This is a scoped exception for one topic's specific risk profile, not a
+walk-back of §4's general decision.
+
+**Explicitly accepted, not solved**: this delivers at-least-once, not
+exactly-once. A crash between a successful FCM send and the outbox row's
+`processed_at` update being committed causes a retry and a duplicate
+notification. No idempotency key is being added to close this — a rare
+duplicate "your request was accepted" push is a minor annoyance, not a
+correctness bug, unlike (for example) a duplicate payment. See
+`docs/plans/03-hardening-pass.md` §F for the full build spec.
+
+## Correction (2026-09-05, what building the outbox actually required)
+
+The durable-delivery correction above described the design; building it
+surfaced three places where the described design and a working one differ.
+All three are recorded here rather than silently absorbed, per this
+project's own convention.
+
+**The outbox insert cannot be hidden inside the `Sender` implementation.**
+`docs/plans/03-hardening-pass.md` §F3 asserted that the outbox write could be
+made atomic with the business write "entirely inside the
+`notifications.Sender` implementation", with no change to the call sites in
+`requests.go`/`service.go`. That is not achievable, and the obstacle is
+structural rather than a matter of effort: a `Sender` is invoked AFTER the
+business write's repository method has already returned, and that method
+opens, commits and closes its own transaction internally. By the time any
+`Sender` runs, there is no open transaction left to join — the write is
+durably committed, and anything the sender does is a second transaction with
+exactly the crash window the outbox exists to close. Atomicity and
+"no call-site changes" were mutually exclusive; atomicity is the one that
+matters, so the call sites changed. **What was built**: each
+notification-triggering repository method takes a callback that runs inside
+its own transaction, after the write and before the commit, and receives a
+`NotifyTx` — a transaction-scoped surface for reading participants and device
+tokens and enqueueing outbox rows. Notification content is still composed
+entirely in the service layer, where it belongs; only *when* it is composed
+moved.
+
+**`ClaimBatch` writes its claim instead of holding a lock.** The generic
+poller's `Store` interface described claiming rows "locked FOR UPDATE SKIP
+LOCKED for the duration of the caller's processing". Holding that lock is not
+viable for this caller: processing means an FCM round trip, and holding a
+Postgres transaction open across a third-party HTTP call lets a degraded FCM
+exhaust the connection pool — a dependency failure escalating into a database
+failure. So the claim is an `UPDATE` that stamps `next_attempt_at` into the
+future, giving each claimed row a visibility timeout. `FOR UPDATE SKIP
+LOCKED` remains in the claiming subquery, where it still guarantees that
+concurrent claimers take disjoint sets. Crash recovery follows from the same
+stamp rather than from lock release: a claimer that dies records no outcome,
+and its rows fall due again on their own. **This was not a theoretical
+refinement** — the first implementation released the lock without the stamp,
+and the concurrency test immediately showed rows being claimed two and three
+times by four concurrent claimers, which in production is the same user
+receiving the same push two and three times.
+
+**The lifecycle sweeps became claims too.** §C2 asked for `FOR UPDATE SKIP
+LOCKED` on the poller's row selection. Adding it to the existing
+select-then-act shape would not have been enough, because the gap that
+matters is between reading the candidates and recording that they were
+handled — the notifications go out inside that gap. Both sweeps are now a
+single claiming `UPDATE ... RETURNING` that sets the de-dup guard in the same
+statement that selects the rows, with the notifications queued in that same
+transaction. A control test that runs the old algorithm under a forced
+overlap sends 24 notifications for 12 meetups; the new one sends 12.
+
 ## Grounding
 
 This ADR is based on a full inventory of the microservices repo's actual

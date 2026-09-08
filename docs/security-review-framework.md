@@ -68,17 +68,28 @@ verification (`WithValidMethods`, blocks `alg=none`/HS256-confusion
 forgery); issuer + audience checked, not just signature; LinkedIn's OAuth
 callback protected by `state`-based CSRF.
 
-**Known, currently-unfixed gap in the source — fix it during this port,
-don't carry it forward**: Apple/Google `id_token` verification checks
-signature, issuer, audience, and expiry, but never checks a `nonce` claim.
-Without one, a valid `id_token` intercepted within its short validity window
-could in principle be replayed to authenticate as that user. There's already
-a working precedent for exactly this shape of protection in the same
-codebase (LinkedIn's `state`-based CSRF check) — generate a nonce
-client-side per sign-in attempt, thread it through `getAppleIDCredential`/
-Google's authenticate call, verify it server-side against the token's
-`nonce` claim. This is auth-module scope, so it belongs in **Phase 1**, not
-a later phase — see `docs/plans/01-phase1-scaffold-gateway-auth.md`.
+**Fixed in Phase 1, then hardened further once Fix 5 exposed a second flaw
+in the first pass — kept here as a record, not an open item.** The
+original gap (no `nonce` claim check at all) was closed in Phase 1. Building
+the frontend's nonce plumbing afterward surfaced that the first backend
+implementation compared the client-supplied nonce literally against the
+token's own `nonce` claim — since JWT claims are readable by anyone holding
+the token, an attacker with a leaked/replayed `id_token` could decode it,
+read the nonce claim out, and resubmit that same value, passing trivially.
+Corrected to the standard raw/hash construction (Apple's documented pattern;
+same shape as Firebase's `credential(idToken:rawNonce:)`): the client
+generates a random raw value, hashes it (SHA-256), sends the **hash** to
+Apple/Google as the nonce parameter (embedded by the provider into the
+token's `nonce` claim), and sends the **raw** value to the backend
+separately; the backend re-hashes the raw value and compares that to the
+claim (`identity.go`'s exported `HashNonce`, `crypto/subtle.ConstantTimeCompare`
+on the hash comparison). A test constructing exactly the "replay the claim
+value itself as the nonce" attack confirms it's now rejected — that case
+passed under the original design. Google's `google_sign_in` package only
+supports setting a nonce once per app session (`initialize()`, not
+per-attempt) — a real, documented package limitation, not a regression;
+still gets the same raw/hash split, just scoped to one app session instead
+of one attempt.
 
 ## Non-repudiation — a party can't credibly deny having done something
 
@@ -99,19 +110,25 @@ every module method takes the caller's identity from the gateway's verified
 context, never from the request body; cross-account identity-linking
 collisions hard-reject rather than silently merge.
 
-**Known, currently-unfixed gap in the source — fix it during the port, don't
-carry it forward**: none of `GetSafetyState`, `AcknowledgeSafetyChecklist`,
-`SetLiveLocationOptIn`, or `CheckIn` check that the caller is actually a
-participant (host or accepted requester) of the given meetup before reading
-or mutating its safety state — any authenticated user can act on *any*
-meetup's safety state just by knowing or guessing its ID. Compounded by a
-schema gap: the source's `meetup_safety_state` is one shared row per
-*meetup*, not per participant (unlike `meetup_feedback`, which correctly
-keys on `(meetup_id, user_id)`). This is **meetup-module scope — fix it as
-part of Phase 2**, not carried over from the source schema as-is; add the
-same `IsParticipant`-style guard the ratings code already uses to all four
-methods, and make the per-participant-vs-host-only intent an explicit design
-decision in Phase 2's own plan, not left ambiguous.
+**Corrected 2026-09-04, after Phase 2's completion report — this was fixed
+in the source before Phase 2 even started, not by this port.** This section
+originally described the source as having no participant check on
+`GetSafetyState`/`AcknowledgeSafetyChecklist`/`SetLiveLocationOptIn`/
+`CheckIn`, plus a one-row-per-meetup schema. Phase 2 found both already
+resolved upstream: the source's `services/meetup/internal/service/safety.go`
+has a `requireParticipant` guard (its own ADR-024 §3, "Accepted, built and
+independently verified" 2026-08-26/31) called by all **five** safety
+methods (the four above plus `DeclineCheckIn`, added since this framework
+doc was first written), and its migration `0007_safety_state_per_participant.up.sql`
+already keys `meetup_safety_state` on `(meetup_id, user_id)`. This repo's
+own port (`backend/internal/modules/meetup/safety.go`) carries the fix
+forward via the same guard shape the ratings code uses (`IsParticipant`,
+sourced from the authoritative `meetups`/`meetup_requests` tables rather
+than a row's mere existence — a deliberately more robust mechanism than the
+source's own row-existence check, same authorization outcome), with
+`TestSafetyGate_RejectsNonParticipantOnEveryMethod` proving all five reject
+a non-participant and write zero rows. Nothing left for Phase 3+ to do here;
+kept as a record of what to verify stayed fixed, not an open item.
 
 ## Also apply, every phase, regardless of the property checklist above
 

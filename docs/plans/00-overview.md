@@ -11,7 +11,7 @@ architecture.md` for the architecture every phase below implements.
 | **1** | Repo scaffold, `internal/eventbus`, `internal/platform/{db,jwt,ratelimit}`, the gateway binary (JWT signing + in-memory rate limiting + gRPC client + REST routes wired for auth-module routes only), the `auth` module (identity, verification, sessions, profile, SOS/trusted contacts) end to end. | Nothing — first phase. |
 | **2** | `meetup` module (scheduling, lifecycle/auto-close, requests, safety gate, ratings, geo-visibility, device tokens, the three read-model caches fed via the event bus) + its gateway routes. | Phase 1 (needs the event bus, `auth`'s `user-onboarded`/`user-profile-updated`/`rating-updated`/`user-location-updated` events to exist and be published). |
 | **3** | `billing` module (subscription state, Apple/Google purchase verification, webhook handling) + its gateway routes. | Phase 1 (JWT/gateway plumbing). Independent of Phase 2's module internals, but its `subscription-activated`/`subscription-deactivated` events need a Phase-2-built `meetup` module subscriber to be meaningful end to end — buildable in parallel with Phase 2, verified together. |
-| **4** | `notification` module (FCM/logging `Sender`, the `push-notification-requested` event handler) wired to `meetup`'s `meetup-created` nearby-notify fan-out and to SOS's contact-alert path. | Phases 1-3 (needs `auth` for SOS/trusted-contacts data, `meetup` for the nearby-notify query and device tokens). |
+| **4** | `notification` module (FCM/logging `Sender`, the `push-notification-requested` event handler) wired to `meetup`'s `meetup-created` nearby-notify fan-out and every other publisher already in place. | Phase 2 only (needs `meetup`'s publishers and device-token resolution; **not** Phase 3 — see 2026-09-04 correction below). |
 | **5** | Final hardening + parity pass: run both backends side by side against the same frontend build (pointed at each gateway in turn) and diff behavior for every route in the inventory; confirm rate-limit numbers, error shapes, and response fields match; confirm the copied `frontend/` needs zero code changes; write a migration/cutover note. | Phases 1-4. |
 
 ## What "verified" means at the end of each phase
@@ -79,4 +79,20 @@ verify-before-handoff pattern used throughout the original backend's build
 (see `../Professional-Meetups/docs/00-project/action-tracker.md` for that
 project's own history of this pattern, for reference only — this repo keeps
 its own tracker once there's enough history to warrant one).
+
+**2026-09-04 correction, after Phases 1-2 shipped and were hardened**: Phase
+4 (notification) is being pulled forward, ahead of Phase 3 (billing), folded
+into the post-Phase-2 hardening pass (`docs/plans/03-hardening-pass.md`
+§E). Two things drove this: (1) the row above's own dependency note already
+only cited `auth`/`meetup`, never `billing` — the "Depends on: Phases 1-3"
+originally written there was sequential-plan ordering, not a real technical
+dependency, and was corrected in the row itself; (2) Shashika asked for
+working push notifications to test the app end to end, and there's nothing
+blocking that except this reordering. **Also corrected**: the original row
+said Phase 4 wires to "SOS's contact-alert path" — checked against the
+source, and SOS has never published `push-notification-requested` in
+`../Professional-Meetups` either (it alerts trusted contacts via SMS/email
+only). That clause was aspirational, not a description of something to
+port; removed rather than built as new, undiscussed scope. Phase 3
+(billing) resumes after this pass, unaffected by the reorder.
 
