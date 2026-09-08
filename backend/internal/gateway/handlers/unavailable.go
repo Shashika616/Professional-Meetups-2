@@ -2,9 +2,12 @@ package handlers
 
 import "net/http"
 
-// The meetup (Phase 2) and billing (Phase 3) routes. They are registered
-// now, with the same methods, paths and auth wrapping they will keep, and
-// answer 503 until their modules exist.
+// The billing (Phase 3) routes. They are registered now, with the same
+// methods, paths and auth wrapping they will keep, and answer 503 until that
+// module exists.
+//
+// The meetup routes that used to live here are real as of Phase 2 — see
+// meetups.go and Register.
 //
 // Why register them at all rather than let them 404: this mirrors what the
 // source gateway already does when BILLING_SERVICE_ADDR is unset — the
@@ -26,32 +29,6 @@ import "net/http"
 // stay unwrapped: Apple and Google don't carry this app's session JWTs, and
 // their own signature/OIDC verification is what will gate them.
 func (h *Handler) registerUnbuiltModuleRoutes(mux *http.ServeMux) {
-	meetupRoutes := []string{
-		"POST /v1/meetups",
-		"GET /v1/meetups",
-		"GET /v1/meetups/mine",
-		"GET /v1/meetups/active",
-		"GET /v1/meetups/{id}",
-		"POST /v1/meetups/{id}/close",
-		"POST /v1/meetups/{id}/cancel",
-		"GET /v1/meetups/{id}/requests",
-		"POST /v1/meetups/{id}/requests",
-		"POST /v1/meetups/requests/{id}/withdraw",
-		"POST /v1/meetups/requests/{id}/respond",
-		"POST /v1/meetups/device-token",
-		"GET /v1/meetups/{id}/safety",
-		"POST /v1/meetups/{id}/safety/checklist",
-		"POST /v1/meetups/{id}/safety/live-location",
-		"POST /v1/meetups/{id}/safety/check-in",
-		"POST /v1/meetups/{id}/safety/decline",
-		"POST /v1/meetups/{id}/feedback",
-		"GET /v1/meetups/{id}/ratings/ratable",
-		"POST /v1/meetups/{id}/ratings",
-	}
-	for _, pattern := range meetupRoutes {
-		mux.Handle(pattern, h.requireAuth(unavailable("meetups are not configured")))
-	}
-
 	billingRoutes := []string{
 		"POST /v1/billing/purchases/verify",
 		"GET /v1/billing/subscription",

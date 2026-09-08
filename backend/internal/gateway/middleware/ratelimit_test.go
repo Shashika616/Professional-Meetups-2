@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +15,7 @@ import (
 	"professional-meetups-monolith/backend/internal/platform/ratelimit"
 )
 
-func newLimiter(t *testing.T) *ratelimit.Limiter {
+func newLimiter(t *testing.T) *ratelimit.InMemory {
 	t.Helper()
 	l := ratelimit.New()
 	t.Cleanup(l.Close)
@@ -228,5 +229,105 @@ func TestUserKeyedRateLimit_BoundaryAndScoping(t *testing.T) {
 	}
 	if code := call("user-2"); code != http.StatusOK {
 		t.Errorf("a different user got %d, want 200 — the key is per-user", code)
+	}
+}
+
+// --- account creation (§A2) ------------------------------------------------
+
+// TestRateLimit_GuestSignupHasItsOwnTighterLimit is the whole point of the
+// dedicated limiter: the blanket 20/min is far too generous for the one
+// endpoint that mints a fully usable, zero-verification account.
+//
+// The assertion that matters is the boundary at 5, not at 20 — before this,
+// the 6th call through this route was accepted.
+func TestRateLimit_GuestSignupHasItsOwnTighterLimit(t *testing.T) {
+	next := &countingHandler{}
+	h := RateLimit(newLimiter(t))(next)
+
+	for i := 1; i <= accountCreationLimit; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, postJSON("/v1/auth/guest/signup", `{"age_confirmed_over_18":true}`))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("guest signup %d: status = %d, want 200", i, rec.Code)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, postJSON("/v1/auth/guest/signup", `{"age_confirmed_over_18":true}`))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("guest signup %d: status = %d, want 429 — the blanket 20/min would still be letting this through", accountCreationLimit+1, rec.Code)
+	}
+	if next.calls != accountCreationLimit {
+		t.Errorf("handler ran %d times, want %d — a rejected signup must never reach the account-creating handler", next.calls, accountCreationLimit)
+	}
+
+	// Retry-After must describe the window that was ACTUALLY exceeded. A
+	// fixed "60" here would send a well-behaved client back 1,440 times
+	// before it discovered the real answer was a day.
+	wantRetryAfter := strconv.Itoa(int(accountCreationWindow.Seconds()))
+	if got := rec.Header().Get("Retry-After"); got != wantRetryAfter {
+		t.Errorf("Retry-After = %q, want %q (the daily window, not the blanket limiter's minute)", got, wantRetryAfter)
+	}
+}
+
+// TestRateLimit_GuestSignupLimitIsPerIP bounds the blast radius: one abusive
+// source must not lock every other caller out of signing up, which would turn
+// a rate limit into a denial of service against the whole product.
+func TestRateLimit_GuestSignupLimitIsPerIP(t *testing.T) {
+	next := &countingHandler{}
+	h := RateLimit(newLimiter(t))(next)
+
+	exhaust := func(ip string) {
+		for i := 0; i <= accountCreationLimit; i++ {
+			r := postJSON("/v1/auth/guest/signup", `{"age_confirmed_over_18":true}`)
+			r.RemoteAddr = ip + ":54321"
+			h.ServeHTTP(httptest.NewRecorder(), r)
+		}
+	}
+	exhaust("198.51.100.7")
+
+	// A different IP still gets its own full budget.
+	fresh := postJSON("/v1/auth/guest/signup", `{"age_confirmed_over_18":true}`)
+	fresh.RemoteAddr = "203.0.113.99:54321"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, fresh)
+	if rec.Code != http.StatusOK {
+		t.Errorf("a second IP was rejected (status %d) because a different IP exhausted its own budget", rec.Code)
+	}
+}
+
+// TestRateLimit_AccountCreationLimitDoesNotLeakToOtherRoutes confirms the
+// tighter limit is scoped to the routes that mint accounts. Applying 5/day to
+// anything else — refresh, login — would break normal use badly.
+func TestRateLimit_AccountCreationLimitDoesNotLeakToOtherRoutes(t *testing.T) {
+	next := &countingHandler{}
+	h := RateLimit(newLimiter(t))(next)
+
+	// Well past accountCreationLimit, still under the blanket 20/min.
+	for i := 1; i <= accountCreationLimit+3; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, postJSON("/v1/auth/refresh", `{}`))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("/v1/auth/refresh request %d was rejected (status %d) — the account-creation limit leaked onto an ordinary route", i, rec.Code)
+		}
+	}
+}
+
+// TestRateLimit_AccountCreationCheckDoesNotReadTheBody pins the ordering
+// choice: this limiter keys on IP alone, so it must reject before the
+// body-peeking limiters run. Asserted by sending a body that would break a
+// JSON peek — if the request is still rejected cleanly with 429, nothing
+// tried to parse it.
+func TestRateLimit_AccountCreationCheckDoesNotReadTheBody(t *testing.T) {
+	h := RateLimit(newLimiter(t))(&countingHandler{})
+
+	for i := 0; i <= accountCreationLimit; i++ {
+		h.ServeHTTP(httptest.NewRecorder(), postJSON("/v1/auth/guest/signup", `not json at all`))
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, postJSON("/v1/auth/guest/signup", `not json at all`))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("status = %d, want 429", rec.Code)
 	}
 }

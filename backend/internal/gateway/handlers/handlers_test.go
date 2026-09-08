@@ -23,6 +23,7 @@ import (
 
 	"professional-meetups-monolith/backend/internal/gateway/monolithclient"
 	"professional-meetups-monolith/backend/internal/platform/jwt"
+	"professional-meetups-monolith/backend/internal/platform/ratelimit"
 )
 
 // --- test harness -----------------------------------------------------
@@ -36,6 +37,12 @@ type fakeMonolith struct {
 	session monolithclient.Session
 	profile monolithclient.Profile
 	err     error
+
+	// meetup records what the meetup routes forwarded (meetups_test.go);
+	// meetupResponse is what GetMeetup hands back when a test needs to
+	// assert on the REST shape.
+	meetup         meetupRecorder
+	meetupResponse monolithclient.Meetup
 
 	// captured arguments
 	gotUserID         string
@@ -159,6 +166,22 @@ func newTestServer(t *testing.T) *testServer {
 	monolith := &fakeMonolith{}
 	mux := http.NewServeMux()
 	New(monolith, signer, verifier, WithLogger(slog.New(slog.DiscardHandler))).Register(mux)
+	return &testServer{mux: mux, monolith: monolith, signer: signer, verifier: verifier}
+}
+
+// newTestServerWithLimiter is newTestServer plus the shared rate limiter, so
+// the per-user route limits (SOS trigger, CreateMeetup) are actually wired.
+func newTestServerWithLimiter(t *testing.T) *testServer {
+	t.Helper()
+	signer, verifier := newTestKeys(t)
+	monolith := &fakeMonolith{}
+	limiter := ratelimit.New()
+	t.Cleanup(limiter.Close)
+	mux := http.NewServeMux()
+	New(monolith, signer, verifier,
+		WithRateLimiter(limiter),
+		WithLogger(slog.New(slog.DiscardHandler)),
+	).Register(mux)
 	return &testServer{mux: mux, monolith: monolith, signer: signer, verifier: verifier}
 }
 
@@ -443,6 +466,71 @@ func TestGRPCErrorsMapToTheirHTTPStatus(t *testing.T) {
 	}
 }
 
+// TestGetProfile_SerializesTheStatsRow guards the three figures the profile
+// screen displays.
+//
+// This is a REGRESSION test for a real bug: rating_average/rating_count were
+// populated by the monolith and carried by monolithclient.Profile, but
+// profileResponse — the only thing the app ever sees — had no fields for
+// them, so they were silently dropped and every user's rating rendered as
+// "no ratings yet". The count was fine at every layer except the last one,
+// which is exactly the kind of gap an end-to-end assertion on the JSON
+// catches and a per-layer one does not.
+//
+// meetups_completed is asserted alongside them because it replaced a
+// hardcoded literal on the client and has the same failure mode available to
+// it — plumbed everywhere except the response.
+func TestGetProfile_SerializesTheStatsRow(t *testing.T) {
+	s := newTestServer(t)
+	s.monolith.profile = monolithclient.Profile{
+		UserID:           "user-1",
+		FullName:         "Ada Lovelace",
+		TrustLevel:       2,
+		RatingAverage:    4.75,
+		RatingCount:      4,
+		MeetupsCompleted: 7,
+	}
+
+	rec := s.do(http.MethodGet, "/v1/users/me", "", s.tokenFor(t, "user-1", 2))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	body := decodeBody(t, rec)
+	if got := body["rating_average"]; got != 4.75 {
+		t.Errorf("rating_average = %v, want 4.75 — the profile screen cannot show a rating the response omits", got)
+	}
+	if got := body["rating_count"]; got != float64(4) {
+		t.Errorf("rating_count = %v, want 4", got)
+	}
+	if got := body["meetups_completed"]; got != float64(7) {
+		t.Errorf("meetups_completed = %v, want 7", got)
+	}
+}
+
+// TestGetProfile_ZeroStatsAreStillSerialized pins the new-account case, which
+// is where the original bug was actually reported from: a fresh account must
+// receive real zeros, not absent fields the client would fall back on and not
+// a fabricated number.
+func TestGetProfile_ZeroStatsAreStillSerialized(t *testing.T) {
+	s := newTestServer(t)
+	s.monolith.profile = monolithclient.Profile{UserID: "user-1", FullName: "New User"}
+
+	rec := s.do(http.MethodGet, "/v1/users/me", "", s.tokenFor(t, "user-1", 1))
+	body := decodeBody(t, rec)
+
+	for _, field := range []string{"rating_average", "rating_count", "meetups_completed"} {
+		got, present := body[field]
+		if !present {
+			t.Errorf("%s missing from the response entirely", field)
+			continue
+		}
+		if got != float64(0) {
+			t.Errorf("%s = %v, want 0 for a brand-new account", field, got)
+		}
+	}
+}
+
 func TestMalformedJSONBodyIs400(t *testing.T) {
 	s := newTestServer(t)
 	rec := s.do(http.MethodPost, "/v1/auth/refresh", `{not json`, "")
@@ -453,35 +541,15 @@ func TestMalformedJSONBodyIs400(t *testing.T) {
 
 // --- Phase 2/3 routes ---------------------------------------------------
 
-// TestUnbuiltModuleRoutes_Return503 walks every meetup/billing route this
-// phase registers but does not implement. Each must answer 503 — never a
-// plausible-looking success shape, and never a 404 (the endpoint is real,
-// its backend isn't built yet).
+// TestUnbuiltModuleRoutes_Return503 walks every route this phase registers
+// but does not implement. As of Phase 2 that is billing only — the meetup
+// routes are real (see TestMeetupRoutes_* below), which is itself the
+// assertion that they stopped being stubs.
 func TestUnbuiltModuleRoutes_Return503(t *testing.T) {
 	s := newTestServer(t)
 	token := s.tokenFor(t, "user-1", 3)
 
 	authenticated := []struct{ method, path string }{
-		{http.MethodPost, "/v1/meetups"},
-		{http.MethodGet, "/v1/meetups"},
-		{http.MethodGet, "/v1/meetups/mine"},
-		{http.MethodGet, "/v1/meetups/active"},
-		{http.MethodGet, "/v1/meetups/m1"},
-		{http.MethodPost, "/v1/meetups/m1/close"},
-		{http.MethodPost, "/v1/meetups/m1/cancel"},
-		{http.MethodGet, "/v1/meetups/m1/requests"},
-		{http.MethodPost, "/v1/meetups/m1/requests"},
-		{http.MethodPost, "/v1/meetups/requests/r1/withdraw"},
-		{http.MethodPost, "/v1/meetups/requests/r1/respond"},
-		{http.MethodPost, "/v1/meetups/device-token"},
-		{http.MethodGet, "/v1/meetups/m1/safety"},
-		{http.MethodPost, "/v1/meetups/m1/safety/checklist"},
-		{http.MethodPost, "/v1/meetups/m1/safety/live-location"},
-		{http.MethodPost, "/v1/meetups/m1/safety/check-in"},
-		{http.MethodPost, "/v1/meetups/m1/safety/decline"},
-		{http.MethodPost, "/v1/meetups/m1/feedback"},
-		{http.MethodGet, "/v1/meetups/m1/ratings/ratable"},
-		{http.MethodPost, "/v1/meetups/m1/ratings"},
 		{http.MethodPost, "/v1/billing/purchases/verify"},
 		{http.MethodGet, "/v1/billing/subscription"},
 	}
@@ -497,9 +565,7 @@ func TestUnbuiltModuleRoutes_Return503(t *testing.T) {
 		})
 
 		t.Run(route.method+" "+route.path+" (unauthenticated)", func(t *testing.T) {
-			// Auth precedence: an unauthenticated caller gets 401, not 503 —
-			// the same order the source has, since requireAuth wraps the
-			// handler that would return 503.
+			// Auth precedence: an unauthenticated caller gets 401, not 503.
 			rec := s.do(route.method, route.path, `{}`, "")
 			if rec.Code != http.StatusUnauthorized {
 				t.Errorf("status = %d, want 401", rec.Code)
@@ -523,11 +589,11 @@ func TestUnbuiltModuleRoutes_Return503(t *testing.T) {
 // success" rule an assertion rather than a comment.
 func TestUnbuiltModuleRoutes_NeverReturnAFakeSuccessShape(t *testing.T) {
 	s := newTestServer(t)
-	rec := s.do(http.MethodGet, "/v1/meetups", "", s.tokenFor(t, "user-1", 3))
+	rec := s.do(http.MethodGet, "/v1/billing/subscription", "", s.tokenFor(t, "user-1", 3))
 
 	body := decodeBody(t, rec)
-	if _, hasMeetups := body["meetups"]; hasMeetups {
-		t.Error("the 503 response carries a meetups field — an empty list is indistinguishable from 'none nearby'")
+	if _, hasSubscription := body["subscription"]; hasSubscription {
+		t.Error("the 503 response carries a subscription field — a stubbed shape is indistinguishable from a real answer")
 	}
 	if len(body) != 1 || body["error"] == nil {
 		t.Errorf("body = %+v, want only an error field", body)

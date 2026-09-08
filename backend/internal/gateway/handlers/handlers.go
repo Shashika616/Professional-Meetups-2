@@ -33,7 +33,7 @@ type Handler struct {
 	monolith    monolithclient.Client
 	signer      *jwt.Signer
 	requireAuth func(http.Handler) http.Handler
-	limiter     *ratelimit.Limiter
+	limiter     ratelimit.Limiter
 	logger      *slog.Logger
 }
 
@@ -45,7 +45,7 @@ type Option func(*Handler)
 // middleware.UserKeyedRateLimit onto the SOS trigger route. Omit it (as most
 // tests do) and that route runs without the per-user limit — the global
 // IP+path RateLimit in cmd/gateway still applies regardless.
-func WithRateLimiter(limiter *ratelimit.Limiter) Option {
+func WithRateLimiter(limiter ratelimit.Limiter) Option {
 	return func(h *Handler) { h.limiter = limiter }
 }
 
@@ -86,6 +86,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/auth/linkedin/callback", h.linkedInCallback)
 	mux.HandleFunc("POST /v1/auth/email/signup/start", h.startEmailSignup)
 	mux.HandleFunc("POST /v1/auth/email/signup", h.completeEmailSignup)
+	mux.HandleFunc("POST /v1/auth/guest/signup", h.guestSignup)
 	mux.HandleFunc("POST /v1/auth/email/login/start", h.startEmailLogin)
 	mux.HandleFunc("POST /v1/auth/email/login", h.completeEmailLogin)
 	mux.HandleFunc("POST /v1/auth/refresh", h.refresh)
@@ -127,8 +128,54 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// only call site on the frontend; no periodic timer.
 	mux.Handle("POST /v1/users/me/location", h.requireAuth(http.HandlerFunc(h.updateLastKnownLocation)))
 
-	// meetup (Phase 2) and billing (Phase 3) routes: registered, 503 until
-	// their modules exist. See unavailable.go.
+	// Meetup scheduling and join requests — all authenticated, same
+	// requireAuth as above. RequestToJoin gets the same blanket IP+path rate
+	// limit every route on this mux gets (a spam-join-requests vector is the
+	// same shape of abuse as spam-OTP-sends), so no separate limiter there.
+	//
+	// CreateMeetup gets an ADDITIONAL per-user limit (10/hour) on top of that
+	// — the same UserKeyedRateLimit mechanism /v1/sos/trigger uses, chained
+	// AFTER requireAuth for the same reason (it needs UserIDFromContext).
+	// CreateMeetup triggers an external reverse-geocoding call when the
+	// label is empty or a placeholder: an unpredictable-latency,
+	// real-per-call-cost dependency the blanket 20/min-per-IP limit doesn't
+	// account for. A legitimate host scheduling several meetups a day fits
+	// comfortably under 10/hour.
+	var createMeetup http.Handler = http.HandlerFunc(h.createMeetup)
+	if h.limiter != nil {
+		createMeetup = middleware.UserKeyedRateLimit(h.limiter, "/v1/meetups", 10, time.Hour)(createMeetup)
+	}
+	mux.Handle("POST /v1/meetups", h.requireAuth(createMeetup))
+
+	// ListOpenMeetups deliberately keeps only the blanket per-(IP, path)
+	// limit, not a tighter per-user one: unlike CreateMeetup it has no
+	// external per-call cost — it is one indexed Postgres query (the GiST
+	// index backs ST_DWithin, idx_meetups_intent_status backs the
+	// status/intent filter) — and browsing is normal, frequent, low-stakes
+	// usage that a tighter budget would break for no security gain.
+	mux.Handle("GET /v1/meetups", h.requireAuth(http.HandlerFunc(h.listOpenMeetups)))
+	mux.Handle("GET /v1/meetups/mine", h.requireAuth(http.HandlerFunc(h.listMyMeetups)))
+	mux.Handle("GET /v1/meetups/active", h.requireAuth(http.HandlerFunc(h.listActiveMeetups)))
+	mux.Handle("GET /v1/meetups/{id}", h.requireAuth(http.HandlerFunc(h.getMeetup)))
+	mux.Handle("POST /v1/meetups/{id}/close", h.requireAuth(http.HandlerFunc(h.closeMeetup)))
+	mux.Handle("POST /v1/meetups/{id}/cancel", h.requireAuth(http.HandlerFunc(h.cancelMeetup)))
+	mux.Handle("GET /v1/meetups/{id}/requests", h.requireAuth(http.HandlerFunc(h.listMeetupRequests)))
+	mux.Handle("POST /v1/meetups/{id}/requests", h.requireAuth(http.HandlerFunc(h.requestToJoin)))
+	mux.Handle("POST /v1/meetups/requests/{id}/withdraw", h.requireAuth(http.HandlerFunc(h.withdrawRequest)))
+	mux.Handle("POST /v1/meetups/requests/{id}/respond", h.requireAuth(http.HandlerFunc(h.respondToRequest)))
+	mux.Handle("POST /v1/meetups/device-token", h.requireAuth(http.HandlerFunc(h.registerDeviceToken)))
+	mux.Handle("GET /v1/meetups/{id}/safety", h.requireAuth(http.HandlerFunc(h.getSafetyState)))
+	mux.Handle("POST /v1/meetups/{id}/safety/checklist", h.requireAuth(http.HandlerFunc(h.acknowledgeSafetyChecklist)))
+	mux.Handle("POST /v1/meetups/{id}/safety/live-location", h.requireAuth(http.HandlerFunc(h.setLiveLocationOptIn)))
+	mux.Handle("POST /v1/meetups/{id}/safety/share", h.requireAuth(http.HandlerFunc(h.shareWithContacts)))
+	mux.Handle("POST /v1/meetups/{id}/safety/check-in", h.requireAuth(http.HandlerFunc(h.checkIn)))
+	mux.Handle("POST /v1/meetups/{id}/safety/decline", h.requireAuth(http.HandlerFunc(h.declineCheckIn)))
+	mux.Handle("POST /v1/meetups/{id}/feedback", h.requireAuth(http.HandlerFunc(h.submitMeetupFeedback)))
+	mux.Handle("GET /v1/meetups/{id}/ratings/ratable", h.requireAuth(http.HandlerFunc(h.listRatableParticipants)))
+	mux.Handle("POST /v1/meetups/{id}/ratings", h.requireAuth(http.HandlerFunc(h.submitRating)))
+
+	// billing (Phase 3) routes: registered, 503 until that module exists.
+	// See unavailable.go.
 	h.registerUnbuiltModuleRoutes(mux)
 }
 
@@ -257,6 +304,35 @@ func (h *Handler) completeEmailSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, err := h.monolith.CompleteEmailSignup(r.Context(), req.Email, req.Code, req.AgeConfirmedOver18)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+
+	h.writeSession(w, session)
+}
+
+type guestSignupRequest struct {
+	AgeConfirmedOver18 bool `json:"age_confirmed_over_18"`
+}
+
+// guestSignup creates a read-only guest account and returns a real session
+// (ADR-002 §3). Unauthenticated, like the other signup routes.
+//
+// It carries a DEDICATED rate limit on top of the blanket per-(IP, path) one
+// — 5 per IP per day (middleware's accountCreationPaths). This is the only
+// endpoint in the system that mints a fully usable account with no
+// verification step of any kind, and the shared 20/min would have allowed
+// ~28,800 of them per IP per day. See that limiter's own comment for why the
+// number is 5 and what it does not claim to stop.
+func (h *Handler) guestSignup(w http.ResponseWriter, r *http.Request) {
+	var req guestSignupRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, err := h.monolith.GuestSignup(r.Context(), req.AgeConfirmedOver18)
 	if err != nil {
 		writeGRPCError(w, err)
 		return

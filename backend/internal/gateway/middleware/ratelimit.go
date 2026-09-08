@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"professional-meetups-monolith/backend/internal/platform/ratelimit"
@@ -49,6 +50,45 @@ const (
 	targetKeyedWindow = time.Hour
 )
 
+// accountCreationPaths are routes that mint a fully usable account with NO
+// verification step of any kind. Today that is exactly one: guest signup
+// (ADR-002 §3).
+//
+// # WHY THE BLANKET LIMIT IS THE WRONG SHAPE HERE
+//
+// Every other unauthenticated route is bounded by something outside the
+// attacker's control before it can do damage: the email/OTP paths need a
+// real inbox, the federated paths need a valid provider id_token. Guest
+// signup needs nothing — one HTTP call with a single boolean produces a real
+// auth.users row and a real session. At the shared 20/min it would allow
+// ~28,800 accounts per IP per day, which is a database-filling primitive
+// rather than a signup flow.
+//
+// # WHY THIS NUMBER
+//
+// A real device calls this ONCE, ever — the session is persisted and a guest
+// who returns is already signed in. Five allows for a reinstall, a cleared
+// app, a shared NAT with a couple of genuine new users, and a retry or two,
+// while making bulk creation useless. A daily window rather than hourly
+// because the legitimate rate is "once", so there is no burst to accommodate.
+//
+// # WHAT THIS DOES NOT CLAIM
+//
+// It is IP-keyed, so it is defeated by a proxy pool, and it is deliberately
+// not the only thing standing between an attacker and a mass of guest
+// accounts — it is the cheap bound that makes casual abuse pointless. A
+// determined attacker needs a server-side answer (proof-of-work, device
+// attestation, or dropping anonymous accounts entirely), which is a product
+// decision, not a middleware one.
+var accountCreationPaths = map[string]bool{
+	"/v1/auth/guest/signup": true,
+}
+
+const (
+	accountCreationLimit  = 5
+	accountCreationWindow = 24 * time.Hour
+)
+
 // RateLimit is the blanket, per-(IP, path) fixed-window limiter applied to
 // the whole mux, plus the two additional keyed checks above where the IP key
 // alone is the wrong shape of protection. Both must pass; either can reject.
@@ -56,20 +96,31 @@ const (
 // Deliberately the simplest correct algorithm (fixed window), not a token
 // bucket or sliding window — upgrade later only if the fixed-window edge
 // effect (bursts at window boundaries) actually becomes a measured problem.
-func RateLimit(limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
+func RateLimit(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ipKey := fmt.Sprintf("ratelimit:%s:%s", clientIP(r), r.URL.Path)
 			if !limiter.Allow(ipKey, requestsPerMinute, time.Minute) {
-				writeRateLimited(w)
+				writeRateLimited(w, time.Minute)
 				return
+			}
+
+			// Checked before the body-keyed limiters below because it needs
+			// nothing from the body at all — an account-creation route is
+			// rejected on the IP key alone, without paying for a body read.
+			if accountCreationPaths[r.URL.Path] {
+				key := fmt.Sprintf("ratelimit:accountcreate:%s:%s", r.URL.Path, clientIP(r))
+				if !limiter.Allow(key, accountCreationLimit, accountCreationWindow) {
+					writeRateLimited(w, accountCreationWindow)
+					return
+				}
 			}
 
 			if emailKeyedPaths[r.URL.Path] {
 				if email, ok := peekRequestField(r, "email"); ok && email != "" {
 					emailKey := fmt.Sprintf("ratelimit:email:%s:%s", r.URL.Path, email)
 					if !limiter.Allow(emailKey, requestsPerMinute, time.Minute) {
-						writeRateLimited(w)
+						writeRateLimited(w, time.Minute)
 						return
 					}
 				}
@@ -79,7 +130,7 @@ func RateLimit(limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
 				if target, ok := peekRequestField(r, field); ok && target != "" {
 					targetKey := fmt.Sprintf("ratelimit:target:%s:%s", r.URL.Path, target)
 					if !limiter.Allow(targetKey, targetKeyedLimit, targetKeyedWindow) {
-						writeRateLimited(w)
+						writeRateLimited(w, targetKeyedWindow)
 						return
 					}
 				}
@@ -97,14 +148,14 @@ func RateLimit(limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
 // from the token). Unlike RateLimit, which wraps the whole mux before Auth
 // ever runs, this must be chained AFTER the per-route Auth middleware so the
 // context actually carries a verified identity by the time it runs.
-func UserKeyedRateLimit(limiter *ratelimit.Limiter, routePath string, limit int, window time.Duration) func(http.Handler) http.Handler {
+func UserKeyedRateLimit(limiter ratelimit.Limiter, routePath string, limit int, window time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			userID := UserIDFromContext(r.Context())
 			if userID != "" {
 				key := fmt.Sprintf("ratelimit:user:%s:%s", routePath, userID)
 				if !limiter.Allow(key, limit, window) {
-					writeRateLimited(w)
+					writeRateLimited(w, window)
 					return
 				}
 			}
@@ -113,8 +164,26 @@ func UserKeyedRateLimit(limiter *ratelimit.Limiter, routePath string, limit int,
 	}
 }
 
-func writeRateLimited(w http.ResponseWriter) {
-	w.Header().Set("Retry-After", "60")
+// writeRateLimited rejects with 429 and an honest Retry-After.
+//
+// The header takes the WINDOW that was actually exceeded rather than a fixed
+// 60. That was harmless while every limiter here used a one-minute window,
+// but the account-creation limit's window is a day: telling a well-behaved
+// client to retry in 60 seconds when the real answer is "tomorrow" makes it
+// retry 1,440 times to discover that, which is worse for both sides than
+// being told the truth once.
+//
+// Retry-After is an upper bound on the wait, not an exact one — these are
+// fixed windows, so the caller may be admitted sooner when the window rolls.
+// Over-stating is the safe direction: a client that waits too long costs
+// itself latency, one that waits too little costs the server another
+// rejected request.
+func writeRateLimited(w http.ResponseWriter, window time.Duration) {
+	seconds := int(window.Seconds())
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
 	_, _ = w.Write([]byte(`{"error":"rate limited"}`))

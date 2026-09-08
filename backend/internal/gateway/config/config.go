@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // Config is loaded once at startup. Every field here is required and
@@ -29,6 +30,13 @@ type Config struct {
 	MonolithAddr      string
 	JWTPrivateKeyPath string
 	JWTPublicKeyPath  string
+	// JWTPreviousPublicKeyPaths are public keys from a signing key that has
+	// been rotated out but whose tokens may still be in flight (§A3).
+	// Optional and normally empty — it is set only for the deploy that
+	// performs a rotation, and removed again once AccessTokenTTL has elapsed.
+	// Comma-separated; see internal/platform/jwt's Verifier doc for the
+	// procedure.
+	JWTPreviousPublicKeyPaths []string
 	// MonolithSharedSecret authenticates this process to the monolith on
 	// every gRPC call (see internal/platform/internalauth). Required, and
 	// deliberately not defaulted: a gateway that silently started without it
@@ -47,6 +55,8 @@ func Load() (Config, error) {
 		MonolithAddr:      os.Getenv("MONOLITH_ADDR"),
 		JWTPrivateKeyPath: os.Getenv("JWT_PRIVATE_KEY_PATH"),
 		JWTPublicKeyPath:  os.Getenv("JWT_PUBLIC_KEY_PATH"),
+
+		JWTPreviousPublicKeyPaths: splitPaths(os.Getenv("JWT_PREVIOUS_PUBLIC_KEY_PATHS")),
 
 		MonolithSharedSecret: os.Getenv("MONOLITH_SHARED_SECRET"),
 	}
@@ -68,4 +78,21 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// splitPaths parses a comma-separated, optional path list. Empty elements
+// are dropped rather than becoming an empty path that would fail to open
+// with a confusing message — a trailing comma is a typo, not a request to
+// load "".
+func splitPaths(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -168,6 +168,26 @@ type profileResponse struct {
 	PersonalEmail           string `json:"personal_email"`
 	LegalName               string `json:"legal_name"`
 	Address                 string `json:"address"`
+	// ADR-002 — the client can no longer infer this from trust_level.
+	LinkedInConnected bool `json:"linkedin_connected"`
+	// ADR-002 §3/§2 — guest chrome and hosting-unlock prefill.
+	IsGuest     bool   `json:"is_guest"`
+	CompanyName string `json:"company_name"`
+
+	// The profile screen's stats row.
+	//
+	// rating_average/rating_count were MISSING from this struct, which is
+	// why the client's rating always read as zero: the monolith populated
+	// them, monolithclient.Profile carried them, and this response object —
+	// the only thing the app actually sees — silently dropped them on the
+	// floor. The client's RATING chip could therefore only ever render its
+	// "no ratings yet" dash, for every user, forever.
+	RatingAverage float64 `json:"rating_average"`
+	RatingCount   int     `json:"rating_count"`
+	// meetups_completed is new (auth/0005). It replaces a hardcoded literal
+	// on the client, which showed every account — including one created
+	// seconds ago — the same fixed number.
+	MeetupsCompleted int `json:"meetups_completed"`
 }
 
 func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
@@ -197,5 +217,11 @@ func profileResponseFromClient(profile monolithclient.Profile) profileResponse {
 		PersonalEmail:           profile.PersonalEmail,
 		LegalName:               profile.LegalName,
 		Address:                 profile.Address,
+		LinkedInConnected:       profile.LinkedInConnected,
+		IsGuest:                 profile.IsGuest,
+		CompanyName:             profile.CompanyName,
+		RatingAverage:           profile.RatingAverage,
+		RatingCount:             profile.RatingCount,
+		MeetupsCompleted:        profile.MeetupsCompleted,
 	}
 }

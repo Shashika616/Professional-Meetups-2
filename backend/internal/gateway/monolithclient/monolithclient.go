@@ -17,9 +17,11 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	"professional-meetups-monolith/backend/internal/platform/internalauth"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
+	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
 )
 
 // connectTimeout bounds how long New waits for the initial connection before
@@ -61,10 +63,14 @@ type Profile struct {
 	WorkEmailVerified       bool
 	RatingAverage           float64
 	RatingCount             int
+	MeetupsCompleted        int
 	PhoneNumber             string
 	PersonalEmail           string
 	LegalName               string
 	Address                 string
+	LinkedInConnected       bool
+	IsGuest                 bool
+	CompanyName             string
 }
 
 // TrustedContact is this package's own representation of a trusted contact.
@@ -95,6 +101,8 @@ type Client interface {
 	LinkIdentity(ctx context.Context, userID, provider, idToken, nonce, authorizationCode, redirectURI string) (Session, error)
 	StartEmailSignup(ctx context.Context, email string) (resendAfterSeconds int32, err error)
 	CompleteEmailSignup(ctx context.Context, email, code string, ageConfirmedOver18 bool) (Session, error)
+	// GuestSignup creates a read-only guest account (ADR-002 §3).
+	GuestSignup(ctx context.Context, ageConfirmedOver18 bool) (Session, error)
 	StartEmailLogin(ctx context.Context, email string) (resendAfterSeconds int32, err error)
 	CompleteEmailLogin(ctx context.Context, email, code string) (Session, error)
 	RefreshSession(ctx context.Context, refreshToken string) (Session, error)
@@ -120,12 +128,44 @@ type Client interface {
 	// TriggerSOS returns how many trusted contacts were actually alerted.
 	TriggerSOS(ctx context.Context, userID, contextMessage string, lat, lng float64) (contactsNotified int32, err error)
 
+	// --- meetup module (Phase 2) — same connection, same interceptor ---
+	CreateMeetup(ctx context.Context, hostUserID string, hostTrustLevel int32, intent string, windowStart, windowEnd int64, lat, lng float64, label string, capacity int32) (Meetup, error)
+	// intent "" means every intent; withinDays 0 means no time restriction.
+	ListOpenMeetups(ctx context.Context, userID, intent, cursor string, pageSize int32, viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32) ([]Meetup, string, error)
+	GetMeetup(ctx context.Context, meetupID, userID string, viewerTrustLevel int32) (Meetup, error)
+	ListMyMeetups(ctx context.Context, userID, hostedCursor, requestedCursor string) (hosted, requested []Meetup, hostedNextCursor string, hostedHasMore bool, requestedNextCursor string, requestedHasMore bool, err error)
+	ListActiveMeetups(ctx context.Context, userID string) ([]Meetup, error)
+	ListMeetupRequests(ctx context.Context, meetupID, hostUserID string) ([]MeetupRequest, error)
+	RequestToJoin(ctx context.Context, meetupID, requesterID string, requesterTrustLevel int32) (MeetupRequest, error)
+	WithdrawRequest(ctx context.Context, requestID, requesterID, note string) error
+	RespondToRequest(ctx context.Context, requestID, hostUserID string, accept bool) (MeetupRequest, error)
+	RegisterDeviceToken(ctx context.Context, userID, fcmToken string) error
+	GetSafetyState(ctx context.Context, meetupID, userID string) (SafetyState, error)
+	AcknowledgeSafetyChecklist(ctx context.Context, meetupID, userID string) (SafetyState, error)
+	SetLiveLocationOptIn(ctx context.Context, meetupID, userID string, optIn bool) (SafetyState, error)
+	ShareWithContacts(ctx context.Context, meetupID, userID string, contactIDs []string) (SafetyState, error)
+	CheckIn(ctx context.Context, meetupID, userID string) (SafetyState, error)
+	DeclineCheckIn(ctx context.Context, meetupID, userID, reason string) (SafetyState, error)
+	SubmitMeetupFeedback(ctx context.Context, meetupID, userID string, happened bool, feltSafe, profileAccurate, wouldMeetAgain *bool, notes *string) error
+	ListRatableParticipants(ctx context.Context, meetupID, viewerID string) ([]RatableParticipant, error)
+	SubmitRating(ctx context.Context, meetupID, raterUserID, ratedUserID string, score int32) error
+	CloseMeetup(ctx context.Context, meetupID, hostUserID string) (Meetup, error)
+	CancelMeetup(ctx context.Context, meetupID, hostUserID, reason string) error
+
+	// CheckHealth asks the monolith's gRPC health service whether it is
+	// serving — what the gateway's /readyz reports (§D3). Separate from the
+	// business RPCs because it must work (and be callable) without any user
+	// context at all.
+	CheckHealth(ctx context.Context) error
+
 	Close() error
 }
 
 type grpcClient struct {
-	conn *grpc.ClientConn
-	auth authv1.AuthServiceClient
+	conn   *grpc.ClientConn
+	auth   authv1.AuthServiceClient
+	meetup meetupv1.MeetupServiceClient
+	health healthpb.HealthClient
 }
 
 // New connects to the monolith at addr (e.g. "monolith:9090"), blocking
@@ -160,7 +200,29 @@ func New(addr, sharedSecret string) (Client, error) {
 		}
 	}
 
-	return &grpcClient{conn: conn, auth: authv1.NewAuthServiceClient(conn)}, nil
+	return &grpcClient{
+		conn:   conn,
+		auth:   authv1.NewAuthServiceClient(conn),
+		meetup: meetupv1.NewMeetupServiceClient(conn),
+		health: healthpb.NewHealthClient(conn),
+	}, nil
+}
+
+// CheckHealth queries the monolith's standard gRPC health service.
+//
+// The empty service name means "the server as a whole", which is what the
+// monolith registers under — and which it deliberately reports as SERVING
+// only once its listener is actually accepting, not merely once the process
+// has started.
+func (c *grpcClient) CheckHealth(ctx context.Context) error {
+	resp, err := c.health.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
+	if err != nil {
+		return fmt.Errorf("monolithclient: health check: %w", err)
+	}
+	if resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		return fmt.Errorf("monolithclient: monolith reports %s", resp.GetStatus())
+	}
+	return nil
 }
 
 func (c *grpcClient) Close() error {
@@ -255,6 +317,16 @@ func (c *grpcClient) CompleteEmailSignup(
 	resp, err := c.auth.CompleteEmailSignup(ctx, &authv1.CompleteEmailSignupRequest{
 		Email:               email,
 		Code:                code,
+		AgeConfirmedOver_18: ageConfirmedOver18,
+	})
+	if err != nil {
+		return Session{}, err
+	}
+	return sessionFromProto(resp), nil
+}
+
+func (c *grpcClient) GuestSignup(ctx context.Context, ageConfirmedOver18 bool) (Session, error) {
+	resp, err := c.auth.GuestSignup(ctx, &authv1.GuestSignupRequest{
 		AgeConfirmedOver_18: ageConfirmedOver18,
 	})
 	if err != nil {
@@ -477,10 +549,14 @@ func profileFromProto(resp *authv1.ProfileResponse) Profile {
 		WorkEmailVerified:       resp.GetWorkEmailVerified(),
 		RatingAverage:           resp.GetRatingAverage(),
 		RatingCount:             int(resp.GetRatingCount()),
+		MeetupsCompleted:        int(resp.GetMeetupsCompleted()),
 		PhoneNumber:             resp.GetPhoneNumber(),
 		PersonalEmail:           resp.GetPersonalEmail(),
 		LegalName:               resp.GetLegalName(),
 		Address:                 resp.GetAddress(),
+		LinkedInConnected:       resp.GetLinkedinConnected(),
+		IsGuest:                 resp.GetIsGuest(),
+		CompanyName:             resp.GetCompanyName(),
 	}
 }
 
