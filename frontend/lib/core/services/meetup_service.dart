@@ -26,11 +26,16 @@ abstract interface class MeetupService {
   /// required (ADR-021 §2) — the browse screen's on-demand location read;
   /// there is no unfiltered fallback, the caller must have a fresh
   /// coordinate before calling this at all.
+  /// [intent] null means EVERY intent — Home's "All" filter. [withinDays]
+  /// 0 means no time restriction; Home's "Happening Soon" passes 7. Both
+  /// default to the pre-existing behaviour, so nothing that called this
+  /// before needs to change.
   Future<PagedResult<Meetup>> listOpenMeetups({
-    required IntentType intent,
+    IntentType? intent,
     required double viewerLat,
     required double viewerLng,
     String? cursor,
+    int withinDays = 0,
   });
 
   Future<Meetup> getMeetup(String meetupId);
@@ -95,6 +100,21 @@ abstract interface class MeetupService {
   Future<SafetyState> getSafetyState(String meetupId);
   Future<SafetyState> acknowledgeSafetyChecklist(String meetupId);
   Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn);
+
+  /// Tells the caller's chosen trusted contacts where and when this meetup
+  /// is.
+  ///
+  /// [contactIds] must be the caller's own contacts — the server rejects any
+  /// that are not, so a guessed id cannot reach a stranger. Nothing about
+  /// the message is client-supplied: the server builds it from the meetup
+  /// row.
+  ///
+  /// Idempotent per contact: re-sharing with someone who already knows does
+  /// not text them twice.
+  Future<SafetyState> shareWithContacts(
+    String meetupId,
+    List<String> contactIds,
+  );
   Future<SafetyState> checkIn(String meetupId);
 
   /// Declines the safety checklist/check-in stage instead of silently not
@@ -190,9 +210,33 @@ class MeetupSessionExpiredException extends MeetupException {
   const MeetupSessionExpiredException(super.message);
 }
 
+/// The server was reached and answered with something the client could not
+/// use — a 400, a 5xx, an unparseable body. NOT a connectivity problem: the
+/// request got there.
 class MeetupNetworkException extends MeetupException {
   const MeetupNetworkException([
     super.message = 'Something went wrong. Please try again.',
+  ]);
+}
+
+/// The request never reached the server at all — no connection, DNS failure,
+/// or a timeout.
+///
+/// # WHY THIS IS ITS OWN TYPE
+///
+/// [MeetupNetworkException] is named as if it meant this, but it is thrown
+/// for a 400 and for every unmapped status including 5xx — cases where the
+/// server very much was reached. A transport failure, meanwhile, used to
+/// escape as a raw `SocketException`/`http.ClientException` and never became
+/// a [MeetupException] at all.
+///
+/// So the UI had no way to tell "you are offline" from "the server rejected
+/// this", and screens that wanted to say the former had to say it for both.
+/// Anything user-facing that offers a "check your connection" message should
+/// key on THIS type and nothing else.
+class MeetupOfflineException extends MeetupException {
+  const MeetupOfflineException([
+    super.message = 'No connection. Check your network and try again.',
   ]);
 }
 
@@ -258,19 +302,27 @@ class MockMeetupService implements MeetupService {
 
   @override
   Future<PagedResult<Meetup>> listOpenMeetups({
-    required IntentType intent,
+    IntentType? intent,
     required double viewerLat,
     required double viewerLng,
     String? cursor,
+    int withinDays = 0,
   }) async {
-    // viewerLat/viewerLng ignored — mock data is small/static, same
-    // no-op-but-accepts-the-parameter treatment MockAuthService gives
+    // viewerLat/viewerLng/withinDays ignored — mock data is small/static,
+    // same no-op-but-accepts-the-parameter treatment MockAuthService gives
     // params it doesn't need to act on, so call sites compile identically
     // to HttpMeetupService.
     await Future<void>.delayed(latency);
-    if (_meetups.isEmpty) _meetups.add(_mockMeetup(intent));
+    if (_meetups.isEmpty) {
+      _meetups.add(_mockMeetup(intent ?? IntentType.coffee));
+    }
     return PagedResult(
-      items: _meetups.where((m) => m.intent == intent).toList(),
+      // A null intent is Home's "All" — every intent, not "an intent that
+      // is null". Filtering on equality here would have made the mock's
+      // default view silently empty.
+      items: intent == null
+          ? List.of(_meetups)
+          : _meetups.where((m) => m.intent == intent).toList(),
     );
   }
 
@@ -414,6 +466,29 @@ class MockMeetupService implements MeetupService {
       checklistAckAt: current.checklistAckAt,
       liveLocationOptIn: optIn,
       checkedInAt: current.checkedInAt,
+    );
+    _safetyStates[meetupId] = state;
+    return state;
+  }
+
+  @override
+  Future<SafetyState> shareWithContacts(
+    String meetupId,
+    List<String> contactIds,
+  ) async {
+    await Future<void>.delayed(latency);
+    final current = _safetyStates[meetupId] ?? SafetyState(meetupId: meetupId);
+    // Union, not replace — sharing with one more contact later must add to
+    // the set, matching the server's per-contact upsert.
+    final merged = {...current.sharedWithContactIds, ...contactIds}.toList();
+    final state = SafetyState(
+      meetupId: meetupId,
+      checklistAckAt: current.checklistAckAt,
+      liveLocationOptIn: current.liveLocationOptIn,
+      checkedInAt: current.checkedInAt,
+      declinedAt: current.declinedAt,
+      declineReason: current.declineReason,
+      sharedWithContactIds: merged,
     );
     _safetyStates[meetupId] = state;
     return state;

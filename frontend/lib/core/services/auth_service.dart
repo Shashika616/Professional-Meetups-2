@@ -40,6 +40,19 @@ abstract interface class AuthService {
     required bool ageConfirmedOver18,
   });
 
+  /// Creates a read-only guest account and returns a real session for it
+  /// (ADR-002 § 3) — no email, no phone, no LinkedIn, a server-generated
+  /// display handle. Lands at trust Level 0.
+  ///
+  /// Takes the same 18+ attestation every other signup path does: it is an
+  /// eligibility gate, not a trust step, and applies uniformly.
+  ///
+  /// There is no matching "upgrade" call, deliberately. A guest who later
+  /// verifies anything does so through the existing verification methods on
+  /// this interface, against the same account — the server clears the guest
+  /// flag on its own and the next session is Level 1.
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18});
+
   /// Sends the OTP [loginWithEmail] verifies, as the first step of
   /// passwordless email login (ADR-019 §1) — every return visit sends a
   /// fresh code, there is no stored credential to check. Same convention
@@ -258,6 +271,21 @@ class MockAuthService implements AuthService {
       isNewUser: true,
       accessTokenExpiresAt: DateTime.now().add(const Duration(minutes: 15)),
       fullName: 'Mock User',
+      profilePhotoUrl: '',
+    );
+  }
+
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) async {
+    await Future<void>.delayed(latency);
+    return AuthSession(
+      userId: 'mock-guest-1',
+      accessToken: 'mock-access-token',
+      refreshToken: 'mock-refresh-token',
+      trustLevel: 0,
+      isNewUser: true,
+      accessTokenExpiresAt: DateTime.now().add(const Duration(minutes: 15)),
+      fullName: 'Guest-MockOtter1234',
       profilePhotoUrl: '',
     );
   }

@@ -39,13 +39,32 @@ abstract interface class PushNotificationService {
 /// hands the real implementation into this app's own shape — deliberately
 /// not `firebase_messaging`'s `RemoteMessage`; see [PushNotificationService]'s
 /// own doc comment for why.
+/// How a [PushMessage] reached the app.
+///
+/// The distinction is load-bearing: a message that ARRIVES while the app is
+/// open needs the app to say something, because FCM shows no system banner
+/// in the foreground. A message the user TAPPED in the tray needs no notice
+/// at all — they just read it, and repeating it as a toast over the screen
+/// they were sent to is noise.
+enum PushMessageSource {
+  /// Arrived while the app was open and in front of the user.
+  foreground,
+
+  /// The user tapped a system notification and the app came forward.
+  opened,
+}
+
 class PushMessage {
   const PushMessage({
     required this.type,
     this.meetupId,
     required this.title,
     required this.body,
+    this.source = PushMessageSource.foreground,
   });
+
+  /// See [PushMessageSource].
+  final PushMessageSource source;
 
   /// e.g. `"meetup_closed"` — what a listener switches on to decide what,
   /// if anything, to invalidate/navigate to. An open string, not an enum,

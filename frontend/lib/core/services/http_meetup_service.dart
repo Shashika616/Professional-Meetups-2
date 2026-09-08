@@ -1,4 +1,6 @@
+import 'dart:async' show TimeoutException;
 import 'dart:convert';
+import 'dart:io' show SocketException;
 
 import 'package:http/http.dart' as http;
 
@@ -49,16 +51,22 @@ class HttpMeetupService implements MeetupService {
 
   @override
   Future<PagedResult<Meetup>> listOpenMeetups({
-    required IntentType intent,
+    IntentType? intent,
     required double viewerLat,
     required double viewerLng,
     String? cursor,
+    int withinDays = 0,
   }) async {
+    // Both new filters are OMITTED from the query when unset rather than
+    // sent as an empty/zero value: the gateway reads an absent parameter as
+    // "no restriction", so omission and the default agree by construction
+    // instead of relying on two sides interpreting "" and 0 the same way.
     final query = {
-      'intent': intent.wireValue,
+      if (intent != null) 'intent': intent.wireValue,
       'viewer_lat': viewerLat.toString(),
       'viewer_lng': viewerLng.toString(),
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
+      if (withinDays > 0) 'within_days': withinDays.toString(),
     };
     final response = await _authenticatedGet('/v1/meetups', query: query);
     final decoded = _decodeOrThrow(response);
@@ -194,6 +202,18 @@ class HttpMeetupService implements MeetupService {
   }
 
   @override
+  Future<SafetyState> shareWithContacts(
+    String meetupId,
+    List<String> contactIds,
+  ) async {
+    final response = await _authenticatedPost(
+      '/v1/meetups/$meetupId/safety/share',
+      {'contact_ids': contactIds},
+    );
+    return SafetyState.fromJson(_decodeOrThrow(response));
+  }
+
+  @override
   Future<SafetyState> checkIn(String meetupId) async {
     final response = await _authenticatedPost(
       '/v1/meetups/$meetupId/safety/check-in',
@@ -312,10 +332,12 @@ class HttpMeetupService implements MeetupService {
     Map<String, Object?> body,
   ) async {
     final headers = await _authHeaders();
-    return _httpClient.post(
-      Uri.parse('$_baseUrl$path'),
-      headers: headers,
-      body: jsonEncode(body),
+    return _send(
+      () => _httpClient.post(
+        Uri.parse('$_baseUrl$path'),
+        headers: headers,
+        body: jsonEncode(body),
+      ),
     );
   }
 
@@ -327,8 +349,38 @@ class HttpMeetupService implements MeetupService {
     final uri = Uri.parse(
       '$_baseUrl$path',
     ).replace(queryParameters: query?.isEmpty ?? true ? null : query);
-    return _httpClient.get(uri, headers: headers);
+    return _send(() => _httpClient.get(uri, headers: headers));
   }
+
+  /// Turns a failure to REACH the server into a typed
+  /// [MeetupOfflineException].
+  ///
+  /// Previously these escaped as a raw `SocketException` or
+  /// `http.ClientException`, which is neither a [MeetupException] nor
+  /// anything a caller could match on — so every screen either swallowed it
+  /// into a generic message or let it surface as an unhandled error. A
+  /// connectivity failure is the one error the user can actually do
+  /// something about, so it is worth naming.
+  ///
+  /// Deliberately narrow: only transport-level failures are caught here. A
+  /// response that arrives and happens to be a 500 is not a connection
+  /// problem and is still mapped by [_mapError].
+  Future<http.Response> _send(Future<http.Response> Function() request) async {
+    try {
+      return await request();
+    } on SocketException catch (error) {
+      throw MeetupOfflineException(_offlineMessage(error));
+    } on http.ClientException catch (error) {
+      throw MeetupOfflineException(_offlineMessage(error));
+    } on TimeoutException catch (error) {
+      throw MeetupOfflineException(_offlineMessage(error));
+    }
+  }
+
+  /// The exception's own text is deliberately discarded — it carries host
+  /// names, ports and errno strings that mean nothing to a user.
+  String _offlineMessage(Object _) =>
+      'No connection. Check your network and try again.';
 
   Future<Map<String, String>> _authHeaders() async {
     final token = await _getAccessToken();

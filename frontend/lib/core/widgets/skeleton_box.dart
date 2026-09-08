@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
+/// One placeholder block. Deliberately just a shape and a tint — the motion
+/// comes from a [Shimmer] ancestor, which [SkeletonLoader] supplies, so a
+/// dozen boxes share one sweep instead of a dozen out-of-phase ones.
+///
+/// Use it inside a [SkeletonLoader] rather than on its own: that is what
+/// adds both the shimmer and the delay-before-showing.
 class SkeletonBox extends StatelessWidget {
   const SkeletonBox({
     super.key,
@@ -24,7 +30,7 @@ class SkeletonBox extends StatelessWidget {
     // mode, near-black in light mode), and light mode also gets a boosted
     // effective alpha: the same low percentage reads much fainter against a
     // bright background than against a dark one, so matching the dark-mode
-    // alpha exactly left the light-mode shimmer essentially invisible.
+    // alpha exactly left the light-mode placeholder essentially invisible.
     final effectiveOpacity = AppPalette.isLight
         ? (opacity * 2.2).clamp(0.0, 1.0)
         : opacity;

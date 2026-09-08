@@ -39,10 +39,14 @@ class UserProfile {
     this.workEmailVerified = false,
     this.ratingAverage = 0,
     this.ratingCount = 0,
+    this.meetupsCompleted = 0,
     this.phoneNumber = '',
     this.personalEmail = '',
     this.legalName = '',
     this.address = '',
+    this.linkedInConnectedFlag = false,
+    this.isGuest = false,
+    this.companyName = '',
   });
 
   final String id;
@@ -62,17 +66,50 @@ class UserProfile {
   final String legalName;
   final String address;
 
+  /// Whether this account is a guest (ADR-002 §3) — no email, no phone, no
+  /// LinkedIn, a generated handle, read-only. Server-sourced rather than
+  /// inferred from `trustLevel == 0`: those coincide today but answer
+  /// different questions, and the ladder has already been redefined once.
+  final bool isGuest;
+
+  /// Free-text organisation name (ADR-002 §2). Required for Level 3
+  /// alongside a verified work email; prefills the hosting-unlock flow.
+  final String companyName;
+
   /// Post-meetup star rating aggregate (ADR-015,
   /// docs/02-domain/domain-model.md § Rating) — 0/0 until this user has
   /// been rated at least once.
   final double ratingAverage;
   final int ratingCount;
 
-  /// LinkedIn is the sole path to Level 1+ (ADR-014 §1: Apple/Google/email
-  /// alone never grant trust, no matter how many are linked) — a first-
-  /// class derived signal so call sites (ProfilePage's banner/badge) don't
-  /// each re-derive `trustLevel >= 1` themselves.
-  bool get linkedInConnected => trustLevel >= 1;
+  /// How many meetups this user has actually completed — the profile stats
+  /// row's MEETUPS figure.
+  ///
+  /// Server-sourced (auth.users.meetups_completed, a cache the meetup module
+  /// keeps current). It was a hardcoded `'12'` in `profile_page.dart` before
+  /// this field existed, shown identically to an account created seconds
+  /// ago. Defaults to 0, which is both the safe fallback and the correct
+  /// value for a new account.
+  final int meetupsCompleted;
+
+  /// Server-sourced `linkedin_connected`. Backing field for
+  /// [linkedInConnected]; read that instead.
+  final bool linkedInConnectedFlag;
+
+  /// Whether LinkedIn is actually linked to this account.
+  ///
+  /// THIS USED TO BE `trustLevel >= 1`, AND ADR-002 BROKE THAT. Under the old
+  /// ladder Level 1 was reachable only via LinkedIn, so the inference held.
+  /// ADR-002 §2 makes every real signup path Level 1, so an Apple/Google/
+  /// email account with no LinkedIn is now Level 1 — and the old expression
+  /// would claim LinkedIn was connected for all of them. That would show the
+  /// Level 2 checklist's LinkedIn row as done and unlock the phone/email/
+  /// details rows beneath it, every one of which the server then rejects
+  /// (requireLinkedIn, deliberately unchanged by ADR-002).
+  ///
+  /// It now reads the server's own `linkedin_connected` field. Kept as a
+  /// getter over a private field so every existing call site is unchanged.
+  bool get linkedInConnected => linkedInConnectedFlag;
 
   /// Parses `GET /v1/users/me`'s response body. Distinct from
   /// `AuthSession.fromJson` — this is a different endpoint/response shape,
@@ -91,10 +128,14 @@ class UserProfile {
       workEmailVerified: json['work_email_verified'] as bool? ?? false,
       ratingAverage: (json['rating_average'] as num?)?.toDouble() ?? 0,
       ratingCount: json['rating_count'] as int? ?? 0,
+      meetupsCompleted: json['meetups_completed'] as int? ?? 0,
       phoneNumber: json['phone_number'] as String? ?? '',
       personalEmail: json['personal_email'] as String? ?? '',
       legalName: json['legal_name'] as String? ?? '',
       address: json['address'] as String? ?? '',
+      linkedInConnectedFlag: json['linkedin_connected'] as bool? ?? false,
+      isGuest: json['is_guest'] as bool? ?? false,
+      companyName: json['company_name'] as String? ?? '',
     );
   }
 
@@ -110,10 +151,14 @@ class UserProfile {
     bool? workEmailVerified,
     double? ratingAverage,
     int? ratingCount,
+    int? meetupsCompleted,
     String? phoneNumber,
     String? personalEmail,
     String? legalName,
     String? address,
+    bool? linkedInConnectedFlag,
+    bool? isGuest,
+    String? companyName,
   }) {
     return UserProfile(
       id: id,
@@ -130,10 +175,15 @@ class UserProfile {
       workEmailVerified: workEmailVerified ?? this.workEmailVerified,
       ratingAverage: ratingAverage ?? this.ratingAverage,
       ratingCount: ratingCount ?? this.ratingCount,
+      meetupsCompleted: meetupsCompleted ?? this.meetupsCompleted,
       phoneNumber: phoneNumber ?? this.phoneNumber,
       personalEmail: personalEmail ?? this.personalEmail,
       legalName: legalName ?? this.legalName,
       address: address ?? this.address,
+      linkedInConnectedFlag:
+          linkedInConnectedFlag ?? this.linkedInConnectedFlag,
+      isGuest: isGuest ?? this.isGuest,
+      companyName: companyName ?? this.companyName,
     );
   }
 }

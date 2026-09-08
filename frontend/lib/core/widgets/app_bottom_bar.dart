@@ -25,11 +25,16 @@ class AppBottomBar extends StatelessWidget {
   final int index;
   final ValueChanged<int> onTap;
 
+  // Chats is deliberately removed for now (2026-09-08) — the whole feature
+  // is a static, backend-less placeholder (frontend/lib/features/chats/
+  // chats_page.dart), never wired to anything real. Left in place rather
+  // than deleted, matching this codebase's usual "defer, don't delete"
+  // treatment (see ADR-004's rideShare/dating precedent) — just disconnect
+  // it from navigation until it's actually built.
   static const List<_NavItem> _items = [
     _NavItem(Icons.home_outlined, Icons.home, 'HOME'),
-    _NavItem(Icons.people_outline, Icons.people, 'MATCHES'),
+    _NavItem(Icons.event_outlined, Icons.event, 'EVENTS'),
     _NavItem(Icons.shield_outlined, Icons.shield, 'SAFETY'),
-    _NavItem(Icons.chat_bubble_outline, Icons.chat_bubble, 'CHATS'),
     _NavItem(Icons.person_outline, Icons.person, 'PROFILE'),
   ];
 
@@ -38,7 +43,7 @@ class AppBottomBar extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: AppPalette.card,
-        border: Border(top: BorderSide(color: AppPalette.glassBorder)),
+        border: Border(top: BorderSide(color: AppPalette.hairline)),
       ),
       child: SafeArea(
         top: false,

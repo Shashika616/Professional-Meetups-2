@@ -14,6 +14,7 @@ import 'package:professional_connections_platform/core/models/trusted_contact.da
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/oauth_state.dart';
+import 'package:professional_connections_platform/core/services/sign_in_nonce.dart';
 
 /// Backstop only — how long to wait for the LinkedIn redirect before giving
 /// up, on the rare chance the app-resume-based detection below
@@ -206,6 +207,12 @@ class HttpAuthService implements AuthService {
   Future<AuthSession> signInWithApple({
     required bool ageConfirmedOver18,
   }) async {
+    // A fresh nonce for THIS attempt. Apple gets the hash (which it embeds
+    // in the id_token's `nonce` claim); the backend gets the raw pre-image
+    // and hashes it to compare. See [SignInNonce] for why it has to be that
+    // way round.
+    final nonce = SignInNonce.generate();
+
     final AuthorizationCredentialAppleID credential;
     try {
       credential = await SignInWithApple.getAppleIDCredential(
@@ -213,6 +220,7 @@ class HttpAuthService implements AuthService {
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
+        nonce: nonce.hashed,
       );
     } on SignInWithAppleException catch (error) {
       // Catches every subtype (SignInWithAppleAuthorizationException,
@@ -232,6 +240,7 @@ class HttpAuthService implements AuthService {
     return _completeFederatedSignup(
       provider: 'apple',
       idToken: idToken,
+      nonce: nonce.raw,
       ageConfirmedOver18: ageConfirmedOver18,
     );
   }
@@ -250,7 +259,7 @@ class HttpAuthService implements AuthService {
     }
 
     try {
-      await _ensureGoogleSignInInitialized();
+      final nonce = await _ensureGoogleSignInInitialized();
       final account = await GoogleSignIn.instance.authenticate();
       final idToken = account.authentication.idToken;
       if (idToken == null || idToken.isEmpty) {
@@ -261,6 +270,7 @@ class HttpAuthService implements AuthService {
       return await _completeFederatedSignup(
         provider: 'google',
         idToken: idToken,
+        nonce: nonce.raw,
         ageConfirmedOver18: ageConfirmedOver18,
       );
     } on GoogleSignInException catch (error) {
@@ -273,17 +283,40 @@ class HttpAuthService implements AuthService {
   /// exactly once" per its own doc comment — memoized so repeated
   /// [signInWithGoogle] calls (a user backing out and retrying) don't
   /// re-initialize the singleton.
-  static Future<void>? _googleSignInInit;
+  ///
+  /// This memoization is also why the Google nonce is per-APP-RUN rather
+  /// than per-attempt, unlike Apple's: `google_sign_in` 7.x takes the nonce
+  /// on `initialize`, not on `authenticate`, and its own docs say calling
+  /// `initialize` more than once "will result in undefined behavior" — so
+  /// there is no supported way to rotate it per sign-in. The nonce is
+  /// generated once here, alongside that single call, and reused for every
+  /// Google attempt in this process.
+  ///
+  /// That is weaker than Apple's per-attempt nonce, and worth being precise
+  /// about: it still means a submitted `id_token` must be accompanied by a
+  /// pre-image that only this app instance knows and that never appears in
+  /// the token, which is the property the backend check is for. What it does
+  /// not do is scope that proof to one individual attempt. Revisit if
+  /// `google_sign_in` ever moves the parameter to `authenticate`.
+  static Future<SignInNonce>? _googleSignInInit;
 
-  Future<void> _ensureGoogleSignInInitialized() {
-    return _googleSignInInit ??= GoogleSignIn.instance.initialize(
-      serverClientId: AppConfig.googleServerClientId,
-    );
+  Future<SignInNonce> _ensureGoogleSignInInitialized() {
+    return _googleSignInInit ??= () async {
+      final nonce = SignInNonce.generate();
+      await GoogleSignIn.instance.initialize(
+        serverClientId: AppConfig.googleServerClientId,
+        nonce: nonce.hashed,
+      );
+      return nonce;
+    }();
   }
 
+  /// [nonce] is the RAW pre-image, never the value handed to the provider —
+  /// see [SignInNonce]. The backend rejects the call outright if it is empty.
   Future<AuthSession> _completeFederatedSignup({
     required String provider,
     required String idToken,
+    required String nonce,
     required bool ageConfirmedOver18,
   }) async {
     final response = await _httpClient.post(
@@ -292,6 +325,7 @@ class HttpAuthService implements AuthService {
       body: jsonEncode({
         'provider': provider,
         'id_token': idToken,
+        'nonce': nonce,
         'age_confirmed_over_18': ageConfirmedOver18,
       }),
     );
@@ -331,6 +365,20 @@ class HttpAuthService implements AuthService {
       response,
       on400: InvalidVerificationCodeException.new,
     );
+  }
+
+  @override
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) async {
+    final response = await _httpClient.post(
+      Uri.parse('$_baseUrl/v1/auth/guest/signup'),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'age_confirmed_over_18': ageConfirmedOver18}),
+    );
+    // No on400 override: the only 400 this endpoint produces is the age
+    // attestation being false, which the UI cannot reach (the age step is
+    // completed before the button is shown) and which is not a bad-code
+    // case, so the generic mapping is the honest one.
+    return _parseSessionResponse(response);
   }
 
   @override

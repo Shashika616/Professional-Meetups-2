@@ -86,14 +86,27 @@ class FirebasePushNotificationService implements PushNotificationService {
     }
 
     try {
+      // onMessage = it arrived while the user was looking at the app. FCM
+      // deliberately shows NO system banner in that case, so this is the
+      // only path by which the user can be told.
       _onMessageSubscription = FirebaseMessaging.onMessage.listen(
-        (message) =>
-            _messagesController.add(pushMessageFromRemoteMessage(message)),
+        (message) => _messagesController.add(
+          pushMessageFromRemoteMessage(
+            message,
+            source: PushMessageSource.foreground,
+          ),
+        ),
       );
+      // onMessageOpenedApp = they tapped the banner. They have already read
+      // it; the app should act on it, not repeat it back.
       _onMessageOpenedAppSubscription = FirebaseMessaging.onMessageOpenedApp
           .listen(
-            (message) =>
-                _messagesController.add(pushMessageFromRemoteMessage(message)),
+            (message) => _messagesController.add(
+              pushMessageFromRemoteMessage(
+                message,
+                source: PushMessageSource.opened,
+              ),
+            ),
           );
 
       final callback = onTokenRefreshed;
@@ -166,11 +179,15 @@ class FirebasePushNotificationService implements PushNotificationService {
 /// empty strings, never null, matching [PushMessage]'s own non-nullable
 /// fields (a data-only message with no `notification` block is valid FCM
 /// shape).
-PushMessage pushMessageFromRemoteMessage(RemoteMessage message) {
+PushMessage pushMessageFromRemoteMessage(
+  RemoteMessage message, {
+  PushMessageSource source = PushMessageSource.foreground,
+}) {
   return PushMessage(
     type: message.data['type'] ?? '',
     meetupId: message.data['meetup_id'],
     title: message.notification?.title ?? '',
     body: message.notification?.body ?? '',
+    source: source,
   );
 }

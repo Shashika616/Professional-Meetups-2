@@ -135,13 +135,20 @@ class _AuthBundle {
   final HttpSubscriptionService subscriptionService;
 }
 
-final selectedIntentProvider = StateProvider<IntentType>(
-  (ref) => IntentType.coffee,
-);
+/// Home's intent filter for the "Happening Soon" list. NULL MEANS "ALL
+/// INTENTS", which is both the default and the new option the backend's
+/// nullable intent filter exists for.
+///
+/// Replaces the old non-nullable `selectedIntentProvider`. That one defaulted
+/// to coffee because every surface reading it needed exactly one intent to
+/// browse; the browse page is now inline on Home, where "show me everything
+/// happening near me this week" is the more useful opening state and the one
+/// a first-time user is best served by.
+final homeIntentFilterProvider = StateProvider<IntentType?>((ref) => null);
 
 /// AppShell's bottom-nav tab index — a provider rather than AppShell's own
-/// local `setState` so another page (HomePage's "FIND MATCHES" button) can
-/// switch tabs too, not just the bottom nav bar itself.
+/// local `setState` so a page can switch tabs too, not just the bottom nav
+/// bar itself.
 final currentTabIndexProvider = StateProvider<int>((ref) => 0);
 
 /// Open meetups for the currently-selected intent, within 40km of the
@@ -149,13 +156,20 @@ final currentTabIndexProvider = StateProvider<int>((ref) => 0);
 /// matchesProvider (ADR-013 § 7). `.autoDispose` so a stale page isn't kept
 /// alive after the user navigates away from the browse tab. The family key
 /// is a record (not just [IntentType]) because the viewer coordinate is
-/// itself part of what's being asked for — [MatchesPage] only ever
-/// constructs this key once per successful location read (Step 2 of
-/// `frontend/geo-visibility-PLAN.md`), not on every rebuild.
+/// itself part of what's being asked for — HomePage's "Happening Soon"
+/// section only constructs this key once per successful location read
+/// (Step 2 of `frontend/geo-visibility-PLAN.md`), not on every rebuild.
+/// The family key gained two members alongside the viewer coordinate:
+/// `intent` is now nullable (null = every intent, Home's "All" chip) and
+/// `withinDays` bounds how far out to look (0 = unrestricted, Home's
+/// "Happening Soon" passes 7). Both are part of the key rather than the
+/// call because they are part of WHAT IS BEING ASKED FOR — two different
+/// filters are two different cached results, not one result to invalidate
+/// between.
 final openMeetupsProvider = FutureProvider.autoDispose
     .family<
       PagedResult<Meetup>,
-      ({IntentType intent, double viewerLat, double viewerLng})
+      ({IntentType? intent, double viewerLat, double viewerLng, int withinDays})
     >(
       (ref, key) => ref
           .watch(meetupServiceProvider)
@@ -163,15 +177,16 @@ final openMeetupsProvider = FutureProvider.autoDispose
             intent: key.intent,
             viewerLat: key.viewerLat,
             viewerLng: key.viewerLng,
+            withinDays: key.withinDays,
           ),
     );
 
 /// The signed-in user's hosted + requested meetups — "My Meetups"
 /// (frontend/meetup-scheduling-PLAN.md Step 8). Only ever the *first* page
-/// of each side (2026-08-31 round-4 hardening) — `MyMeetupsPage`'s own
-/// `_MeetupList` (mirroring `matches_page.dart`'s pattern) accumulates
-/// further pages itself via direct `listMyMeetups` calls, the same split
-/// `openMeetupsProvider`/`matches_page.dart` already established.
+/// of each side (2026-08-31 round-4 hardening) — `EventsPage`'s lists
+/// accumulate further pages themselves through the shared
+/// `PaginatedMeetupList`, the same split `openMeetupsProvider` and Home's
+/// own "Happening Soon" list use.
 final myMeetupsProvider =
     FutureProvider.autoDispose<
       ({
@@ -290,6 +305,16 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
         () => ref
             .read(authServiceProvider)
             .signInWithGoogle(ageConfirmedOver18: ageConfirmedOver18),
+      );
+
+  /// The guest path (ADR-002 § 3). Uses the same [_completeSignIn] tail as
+  /// every other entry point — a guest gets a real session and a real
+  /// profile fetch, because it is a real account.
+  Future<void> guestSignup({required bool ageConfirmedOver18}) =>
+      _completeSignIn(
+        () => ref
+            .read(authServiceProvider)
+            .guestSignup(ageConfirmedOver18: ageConfirmedOver18),
       );
 
   Future<void> signUpWithEmail({

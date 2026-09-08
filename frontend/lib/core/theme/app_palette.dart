@@ -45,9 +45,29 @@ class AppPalette {
   static Color get verified => isLight ? _Light.verified : _Dark.verified;
   static Color get danger => isLight ? _Light.danger : _Dark.danger;
   static Color get gold => isLight ? _Light.gold : _Dark.gold;
-  static Color get glassTint => isLight ? _Light.glassTint : _Dark.glassTint;
-  static Color get glassBorder =>
-      isLight ? _Light.glassBorder : _Dark.glassBorder;
+
+  /// The hairline that separates a surface from what is behind it. Was
+  /// `glassBorder`, renamed with the rest of the glass vocabulary — it is a
+  /// 1px border, and calling it glass implied a translucency the app no
+  /// longer has anywhere.
+  static Color get hairline => isLight ? _Light.hairline : _Dark.hairline;
+
+  /// Paints [tint] ONTO the card surface instead of letting it show through
+  /// to whatever is behind the card.
+  ///
+  /// # WHY THIS EXISTS
+  ///
+  /// Nine components asked for a subtle accent by passing a 6–15% alpha
+  /// colour as a card's fill. That does not tint a card — it makes the card
+  /// 85–94% TRANSPARENT, so `AppBackground`'s photo showed straight through
+  /// every one of them. On a light theme, a dark desaturated photo behind a
+  /// near-white card is exactly the murky, half-finished "glass" look this
+  /// removes.
+  ///
+  /// Compositing the same colour over the opaque card gives the accent that
+  /// was actually intended, at the same values, with nothing showing
+  /// through.
+  static Color tintedSurface(Color tint) => Color.alphaBlend(tint, card);
 }
 
 /// The original values, unchanged — every one of these was previously a
@@ -66,8 +86,7 @@ class _Dark {
   static const Color verified = Color(0xFF4ADE80);
   static const Color danger = Color(0xFFE5484D);
   static const Color gold = Color(0xFFE5B93D);
-  static const Color glassTint = Color(0x14B2D5E5);
-  static const Color glassBorder = Color(0x26FFFFFF);
+  static const Color hairline = Color(0x26FFFFFF);
 }
 
 /// First-pass light-mode values (Slice G) — background/surface/card/text
@@ -75,9 +94,13 @@ class _Dark {
 /// dark-mode pastel values since those read as accent text/icon color
 /// throughout the app and the original pale tones have poor contrast on a
 /// light background; verified/danger/gold darkened slightly for the same
-/// contrast reason. glassTint/glassBorder are a first guess, not a
-/// mechanical inversion (white-on-dark glass has no direct light-mode
-/// analogue) — flagged for visual review, not to be treated as final.
+/// contrast reason.
+///
+/// The old `glassTint` is GONE, not ported: it existed for a translucent
+/// surface treatment the app no longer uses, and its light-mode value was
+/// always flagged as a guess rather than a real inversion. `hairline` (was
+/// `glassBorder`) survives because a 1px separator is a real thing that both
+/// themes need.
 class _Light {
   _Light._();
 
@@ -92,6 +115,5 @@ class _Light {
   static const Color verified = Color(0xFF1E9A56);
   static const Color danger = Color(0xFFC7373D);
   static const Color gold = Color(0xFFB68A1E);
-  static const Color glassTint = Color(0xB3FFFFFF);
-  static const Color glassBorder = Color(0x1F12181C);
+  static const Color hairline = Color(0x1F12181C);
 }

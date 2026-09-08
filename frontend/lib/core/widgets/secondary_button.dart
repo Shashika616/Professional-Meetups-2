@@ -37,7 +37,7 @@ class SecondaryButton extends StatelessWidget {
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         minimumSize: Size.fromHeight(height),
-        side: BorderSide(color: borderColor ?? AppPalette.glassBorder),
+        side: BorderSide(color: borderColor ?? AppPalette.hairline),
       ),
       child: FittedBox(
         fit: BoxFit.scaleDown,

@@ -380,6 +380,7 @@ class SafetyState {
     this.checkedInAt,
     this.declinedAt,
     this.declineReason,
+    this.sharedWithContactIds = const [],
   });
 
   final String meetupId;
@@ -393,6 +394,15 @@ class SafetyState {
   final DateTime? declinedAt;
   final String? declineReason;
 
+  /// Trusted contacts already told about this meetup by the viewer.
+  ///
+  /// Server-sourced on every safety-state read, so reopening the screen shows
+  /// what was actually done. That confirmation is the point of the feature —
+  /// a safety action you cannot verify afterwards is one you cannot rely on.
+  final List<String> sharedWithContactIds;
+
+  bool get sharedWithAnyContact => sharedWithContactIds.isNotEmpty;
+
   bool get checklistAcknowledged => checklistAckAt != null;
   bool get checkedIn => checkedInAt != null;
   bool get declined => declinedAt != null;
@@ -405,6 +415,12 @@ class SafetyState {
       checkedInAt: _secondsToDateTime(json['checked_in_at_unix_seconds']),
       declinedAt: _secondsToDateTime(json['declined_at_unix_seconds']),
       declineReason: json['decline_reason'] as String?,
+      // The server always emits this key (never omitempty — see the
+      // gateway's safetyStateResponse), but it is read defensively anyway so
+      // an older build reads as "told nobody" rather than throwing.
+      sharedWithContactIds:
+          (json['shared_with_contact_ids'] as List<dynamic>?)?.cast<String>() ??
+          const [],
     );
   }
 }
