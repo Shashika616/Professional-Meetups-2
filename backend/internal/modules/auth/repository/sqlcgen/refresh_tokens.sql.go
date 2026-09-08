@@ -39,6 +39,47 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 	return i, err
 }
 
+const deleteExpiredRefreshTokens = `-- name: DeleteExpiredRefreshTokens :execrows
+DELETE FROM auth.refresh_tokens
+WHERE id IN (
+  SELECT id FROM auth.refresh_tokens
+  WHERE revoked_at IS NOT NULL
+     OR expires_at < $1::timestamptz
+  LIMIT $2
+)
+`
+
+type DeleteExpiredRefreshTokensParams struct {
+	ExpiredBefore pgtype.Timestamptz `json:"expired_before"`
+	BatchSize     int32              `json:"batch_size"`
+}
+
+// The retention sweep (§B3). Every login and every refresh inserts a row and
+// nothing ever deleted one, so this table grew without bound — cheap to trim
+// continuously now, expensive to backfill-delete from a large table under
+// production load later.
+//
+// Batched via the id subquery rather than one unbounded DELETE: on the first
+// run after this ships (or after the sweep has been disabled for a while)
+// the eligible set could be very large, and a single statement would hold
+// one long transaction and a correspondingly long lock. The caller loops
+// until this returns 0.
+//
+// Two eligibility rules, both meaning "this row can never authenticate
+// anything again":
+//   - revoked_at IS NOT NULL — explicitly killed (logout, rotation, or §B1's
+//     family revocation).
+//   - expires_at < now() - retention — expired, plus a grace window kept
+//     deliberately so a recent expiry is still visible while debugging a
+//     "why was I logged out" report.
+func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context, arg DeleteExpiredRefreshTokensParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredRefreshTokens, arg.ExpiredBefore, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getRefreshTokenByHash = `-- name: GetRefreshTokenByHash :one
 SELECT id, user_id, token_hash, issued_at, expires_at, revoked_at, replaced_by FROM auth.refresh_tokens WHERE token_hash = $1
 `
@@ -90,6 +131,29 @@ type MarkRefreshTokenReplacedParams struct {
 func (q *Queries) MarkRefreshTokenReplaced(ctx context.Context, arg MarkRefreshTokenReplacedParams) error {
 	_, err := q.db.Exec(ctx, markRefreshTokenReplaced, arg.ID, arg.ReplacedBy)
 	return err
+}
+
+const revokeAllRefreshTokensForUser = `-- name: RevokeAllRefreshTokensForUser :execrows
+UPDATE auth.refresh_tokens SET revoked_at = now()
+WHERE user_id = $1 AND revoked_at IS NULL
+`
+
+// The reuse-detection response (docs/plans/03-hardening-pass.md §B1): when a
+// refresh token that has already been rotated or revoked is presented again,
+// every still-live token in that user's session family is revoked, not just
+// the replayed one. Rows affected tells the caller how many sessions were
+// actually terminated, purely for the security log line.
+//
+// Deliberately unconditional on expiry: revoking an already-expired row is a
+// harmless no-op that keeps the WHERE clause (and therefore the index usage)
+// simple, and "revoked_at IS NULL" is the only condition that matters for
+// idempotency.
+func (q *Queries) RevokeAllRefreshTokensForUser(ctx context.Context, userID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeAllRefreshTokensForUser, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeRefreshTokenByHash = `-- name: RevokeRefreshTokenByHash :exec

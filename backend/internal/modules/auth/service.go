@@ -60,6 +60,7 @@ type (
 	TrustedContact              = sos.TrustedContact
 	AddTrustedContactRequest    = sos.AddTrustedContactRequest
 	RemoveTrustedContactRequest = sos.RemoveTrustedContactRequest
+	MeetupShare                 = sos.MeetupShare
 	TriggerSOSRequest           = sos.TriggerSOSRequest
 	TriggerSOSResult            = sos.TriggerSOSResult
 )
@@ -74,6 +75,10 @@ type Service interface {
 	CompleteLinkedInOnboarding(ctx context.Context, req CompleteLinkedInOnboardingRequest) (SessionResult, error)
 	StartEmailSignup(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error)
 	CompleteEmailSignup(ctx context.Context, req CompleteEmailSignupRequest) (SessionResult, error)
+	// GuestSignup creates a read-only guest account (trust Level 0) and
+	// issues a real session for it (ADR-002 §3). Unauthenticated, like the
+	// other three signup RPCs above.
+	GuestSignup(ctx context.Context, req GuestSignupRequest) (SessionResult, error)
 	StartEmailLogin(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error)
 	CompleteEmailLogin(ctx context.Context, req VerifyCodeRequest) (SessionResult, error)
 	RefreshSession(ctx context.Context, refreshToken string) (SessionResult, error)
@@ -92,11 +97,37 @@ type Service interface {
 	CompleteProfileSetup(ctx context.Context, req CompleteProfileSetupRequest) (Profile, error)
 	UpdateLastKnownLocation(ctx context.Context, req UpdateLastKnownLocationRequest) error
 
+	// --- event consumer (rating_consumer.go) ---
+	// ApplyRatingUpdate is called by the meetup module's rating-updated
+	// event, wired in cmd/monolith. Not reachable over gRPC — no RPC writes
+	// these columns.
+	ApplyRatingUpdate(ctx context.Context, userID string, ratingAverage float64, ratingCount int, occurredAt time.Time) (applied bool, err error)
+
+	// ApplyMeetupsCompletedUpdate is the same arrangement for the
+	// meetups-completed event: driven by the meetup module, wired in
+	// cmd/monolith, and deliberately not reachable over gRPC.
+	ApplyMeetupsCompletedUpdate(ctx context.Context, userID string, meetupsCompleted int, occurredAt time.Time) (applied bool, err error)
+
+	// --- background maintenance (sweeper.go) ---
+	// SweepExpiredRefreshTokens deletes refresh-token rows that can never
+	// authenticate anything again (§B3). Driven by RefreshTokenSweeper from
+	// cmd/monolith, and likewise not reachable over gRPC — it is
+	// housekeeping, not a client-facing operation. On the interface so the
+	// sweeper can be constructed against Service rather than the concrete
+	// type, matching how every other background loop in this process is
+	// wired.
+	SweepExpiredRefreshTokens(ctx context.Context) (deleted int, err error)
+
 	// --- trusted contacts + SOS (sos sub-package) ---
 	AddTrustedContact(ctx context.Context, req AddTrustedContactRequest) (TrustedContact, error)
 	ListTrustedContacts(ctx context.Context, userID string) ([]TrustedContact, error)
 	RemoveTrustedContact(ctx context.Context, req RemoveTrustedContactRequest) error
 	TriggerSOS(ctx context.Context, req TriggerSOSRequest) (TriggerSOSResult, error)
+	// NotifyMeetupShare tells the caller's SELECTED trusted contacts about
+	// one meetup. Driven by the meetup module (which owns the meetup facts)
+	// through an adapter wired in cmd/monolith — see sos.NotifyMeetupShare
+	// for why none of the message content comes from the client.
+	NotifyMeetupShare(ctx context.Context, userID string, share MeetupShare) (int, error)
 }
 
 // service implements Service. Every dependency is passed explicitly via New —
@@ -190,6 +221,10 @@ func (s *service) RemoveTrustedContact(ctx context.Context, req RemoveTrustedCon
 
 func (s *service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (TriggerSOSResult, error) {
 	return s.sos.TriggerSOS(ctx, req)
+}
+
+func (s *service) NotifyMeetupShare(ctx context.Context, userID string, share MeetupShare) (int, error) {
+	return s.sos.NotifyMeetupShare(ctx, userID, share)
 }
 
 // CompleteFederatedSignup creates or resolves a Level 0 account via Sign in
@@ -491,9 +526,41 @@ func (s *service) RefreshSession(ctx context.Context, refreshToken string) (Sess
 		return SessionResult{}, err
 	}
 
-	// A replayed, already-rotated (or revoked) refresh token is a possible
-	// theft signal — reject rather than silently accept.
+	// A replayed, already-rotated (or revoked) refresh token is the
+	// signature of a STOLEN one, not a client bug: rotation is single-use
+	// and transactional, so a well-behaved client physically cannot present
+	// the same token twice — it discarded the old value the moment it
+	// received the replacement.
+	//
+	// §B1: rejecting just this one request is not enough. If an attacker has
+	// a copy of a token the legitimate client has since rotated, the
+	// attacker also plausibly has the rest of that session's chain, and the
+	// server has no way to tell which side of this exchange is the thief.
+	// The standard response is to end the whole session family and make both
+	// parties re-authenticate — the legitimate user is logged out too, which
+	// is the correct trade-off: a forced re-login is a minor annoyance, a
+	// silently-shared session is an account takeover.
 	if old.RevokedAt != nil || old.ReplacedBy != nil {
+		revoked, revokeErr := s.refreshTokens.RevokeAllForUser(ctx, old.UserID)
+		if revokeErr != nil {
+			// Logged, not propagated: the caller must still be rejected, and
+			// returning the revocation's error instead would turn a
+			// definite "no" into an ambiguous 500 that a client might retry.
+			s.logger.Error("refresh token reuse detected but revoking the session family failed",
+				"event", "refresh_token_reuse",
+				"user_id", old.UserID,
+				"error", revokeErr,
+			)
+		} else {
+			// Deliberately loud, and deliberately without the token or its
+			// hash: this is the one log line that says an account may be
+			// compromised, and it is what an operator would alert on.
+			s.logger.Warn("refresh token reuse detected — revoked the user's entire session family",
+				"event", "refresh_token_reuse",
+				"user_id", old.UserID,
+				"sessions_revoked", revoked,
+			)
+		}
 		return SessionResult{}, fmt.Errorf("refresh token already used: %w", apperror.ErrUnauthorized)
 	}
 	if time.Now().After(old.ExpiresAt) {

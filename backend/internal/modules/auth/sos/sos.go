@@ -384,3 +384,131 @@ func trustedContactFromRepo(c repository.TrustedContact) TrustedContact {
 		CreatedAtUnixSeconds: c.CreatedAt.Unix(),
 	}
 }
+
+// MeetupShare is what a caller wants their chosen contacts told about one
+// meetup. Every field is server-sourced by the meetup module from the meetup
+// row itself — see NotifyMeetupShare for why none of it comes from the
+// client.
+type MeetupShare struct {
+	ContactIDs    []string
+	LocationLabel string
+	Latitude      float64
+	Longitude     float64
+	WindowStart   time.Time
+	WindowEnd     time.Time
+}
+
+// NotifyMeetupShare tells the caller's SELECTED trusted contacts where and
+// when they are meeting someone.
+//
+// # HOW THIS DIFFERS FROM TriggerSOS
+//
+// TriggerSOS is an emergency: it alerts EVERY contact, and its body carries
+// a free-text context message the client supplies. This is the calm,
+// planned version — the user picks who to tell, before anything has gone
+// wrong — so:
+//
+//   - it fans out only to [MeetupShare.ContactIDs], and silently ignores an
+//     id that is not one of this user's own contacts. A caller cannot text a
+//     stranger by guessing a uuid;
+//   - NOTHING in the body comes from the client. The meetup module reads the
+//     window, label and coordinates off the meetup row and passes them here,
+//     so the worst a modified client can do is tell its own contacts about a
+//     meetup it is genuinely a participant of.
+//
+// Sends are best-effort per contact, exactly like TriggerSOS: one contact's
+// failure is logged and skipped rather than failing the whole call, and the
+// same per-channel circuit breakers apply so a degraded Twilio cannot stall
+// the request.
+func (s *Service) NotifyMeetupShare(ctx context.Context, userID string, share MeetupShare) (int, error) {
+	if len(share.ContactIDs) == 0 {
+		return 0, fmt.Errorf("auth: pick at least one trusted contact: %w", apperror.ErrInvalidInput)
+	}
+	if err := geo.ValidateLatLng(share.Latitude, share.Longitude); err != nil {
+		return 0, fmt.Errorf("auth: %v: %w", err, apperror.ErrInvalidInput)
+	}
+
+	contacts, err := s.trustedContacts.ListForUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if len(contacts) == 0 {
+		return 0, fmt.Errorf("auth: add a trusted contact first: %w", apperror.ErrInvalidInput)
+	}
+
+	// Intersect with what the caller actually owns. This is the check that
+	// makes a contact id safe to accept from the client at all.
+	wanted := make(map[string]bool, len(share.ContactIDs))
+	for _, id := range share.ContactIDs {
+		wanted[id] = true
+	}
+	selected := make([]repository.TrustedContact, 0, len(share.ContactIDs))
+	for _, c := range contacts {
+		if wanted[c.ID] {
+			selected = append(selected, c)
+		}
+	}
+	if len(selected) == 0 {
+		return 0, fmt.Errorf("auth: none of those contacts belong to you: %w", apperror.ErrInvalidInput)
+	}
+
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+
+	message := MeetupShareMessage(
+		user.FullName, share.LocationLabel, share.Latitude, share.Longitude,
+		share.WindowStart, share.WindowEnd,
+	)
+
+	notified := 0
+	for _, contact := range selected {
+		sent := false
+		if contact.PhoneNumber != "" {
+			if err := s.sendWithResilience(ctx, s.smsBreaker, func() error {
+				return s.sms.SendAlert(ctx, contact.PhoneNumber, message)
+			}); err != nil {
+				// Never logs the number or the body — this message names a
+				// real person, a real place and a real time.
+				s.logger.Error("send meetup share sms", "error", err)
+			} else {
+				sent = true
+			}
+		}
+		if contact.Email != "" {
+			if err := s.sendWithResilience(ctx, s.emailBreaker, func() error {
+				return s.email.SendAlert(ctx, contact.Email, message)
+			}); err != nil {
+				s.logger.Error("send meetup share email", "error", err)
+			} else {
+				sent = true
+			}
+		}
+		if sent {
+			notified++
+		}
+	}
+	return notified, nil
+}
+
+// MeetupShareMessage builds the body each selected contact receives.
+// Exported for the module's tests, same as AlertMessage.
+//
+// Deliberately states a WINDOW and a PLACE, not "live location". The link is
+// a static map pin at the meetup's own coordinates — the app does not track
+// anyone, and a message implying otherwise would be a safety promise it
+// cannot keep.
+func MeetupShareMessage(callerName, locationLabel string, lat, lng float64, start, end time.Time) string {
+	msg := fmt.Sprintf(
+		"%s is meeting %s–%s",
+		callerName,
+		start.Format("Mon 3:04 PM"),
+		end.Format("3:04 PM"),
+	)
+	if strings.TrimSpace(locationLabel) != "" {
+		msg += fmt.Sprintf(" at %s", locationLabel)
+	}
+	msg += fmt.Sprintf(". Location: https://maps.google.com/?q=%f,%f", lat, lng)
+	return msg
+}

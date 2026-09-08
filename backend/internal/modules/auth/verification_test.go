@@ -677,6 +677,18 @@ func TestGetProfile_ReturnsRawContactInfoToOwner(t *testing.T) {
 		"PhoneVerified": true, "PersonalEmailVerified": true, "PersonalDetailsComplete": true,
 		"CompanyDomain": true, "WorkEmailVerified": true, "RatingAverage": true, "RatingCount": true,
 		"PhoneNumber": true, "PersonalEmail": true, "LegalName": true, "Address": true,
+		// ADR-002: IsGuest lets the client render guest chrome; CompanyName
+		// is the user's own self-entered organisation name, self-view only,
+		// alongside the CompanyDomain already allowed above. Both are
+		// deliberate additions to this allowlist — the guard exists to catch
+		// an ACCIDENTAL field (above all a raw work email, ADR-003), and it
+		// did its job by failing when these two arrived.
+		"IsGuest": true, "CompanyName": true, "LinkedInConnected": true,
+		// MeetupsCompleted (auth/0005) is likewise a deliberate addition,
+		// and likewise had to be added here because the guard failed first.
+		// It is a count the user's own profile screen displays — no PII, and
+		// nothing derived from a work email.
+		"MeetupsCompleted": true,
 	}
 	profileType := reflect.TypeOf(profile)
 	if got := profileType.NumField(); got != len(wantFields) {

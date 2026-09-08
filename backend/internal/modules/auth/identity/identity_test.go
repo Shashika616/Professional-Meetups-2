@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -70,13 +71,17 @@ func TestJWKSProvider_Verify(t *testing.T) {
 		wantAudience = "test-client-id"
 	)
 
-	const wantNonce = "nonce-from-this-signin-attempt"
+	// The client generates rawNonce and hands the provider its hash, so the
+	// hash is what lands in the token and the raw value is what the caller
+	// presents to Verify.
+	const rawNonce = "nonce-from-this-signin-attempt"
+	hashedNonce := HashNonce(rawNonce)
 
 	validClaims := func() idTokenClaims {
 		return idTokenClaims{
 			Email: "ada@example.com",
 			Name:  "Ada Lovelace",
-			Nonce: wantNonce,
+			Nonce: hashedNonce,
 			RegisteredClaims: jwtlib.RegisteredClaims{
 				Issuer:    wantIssuer,
 				Subject:   "subject-123",
@@ -92,7 +97,7 @@ func TestJWKSProvider_Verify(t *testing.T) {
 		signingKey *rsa.PrivateKey // which key actually signs the token
 		mutate     func(*idTokenClaims)
 		noExpiry   bool   // omit exp entirely, rather than an expired one
-		nonce      string // what the CALLER claims this attempt's nonce was; defaults to wantNonce
+		nonce      string // the raw pre-image the CALLER presents; defaults to rawNonce
 		wantErr    bool
 		wantSub    string
 	}{
@@ -149,6 +154,18 @@ func TestJWKSProvider_Verify(t *testing.T) {
 			wantErr:    true,
 		},
 		{
+			// THE attack the pre-image design exists to stop, and the one an
+			// earlier version of this check let through: a nonce claim is not
+			// secret — anyone holding the id_token can base64-decode it and
+			// read the claim straight out. Presenting that value back must
+			// NOT authenticate, because it proves nothing the token itself
+			// didn't already carry.
+			name:       "attacker replays the token, presenting the claim value itself as the nonce",
+			signingKey: key,
+			nonce:      HashNonce("nonce-from-this-signin-attempt"), // == the claim
+			wantErr:    true,
+		},
+		{
 			name:       "token carries no nonce claim at all",
 			signingKey: key,
 			mutate:     func(c *idTokenClaims) { c.Nonce = "" },
@@ -191,14 +208,14 @@ func TestJWKSProvider_Verify(t *testing.T) {
 			}
 			idToken := signTestToken(t, tt.signingKey, claims)
 
-			expectedNonce := wantNonce
+			presentedNonce := rawNonce
 			if tt.nonce == "-" {
-				expectedNonce = ""
+				presentedNonce = ""
 			} else if tt.nonce != "" {
-				expectedNonce = tt.nonce
+				presentedNonce = tt.nonce
 			}
 
-			got, err := p.Verify(ctx, idToken, expectedNonce)
+			got, err := p.Verify(ctx, idToken, presentedNonce)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("Verify() returned nil error, want error")
@@ -315,5 +332,34 @@ func TestNewJWKSProvider_FetchFailureDoesNotFailConstruction(t *testing.T) {
 func TestNewJWKSProvider_MalformedURL(t *testing.T) {
 	if _, err := newJWKSProvider(context.Background(), "test", "not a url", "aud", []string{"iss"}); err == nil {
 		t.Fatal("newJWKSProvider() returned nil error for a malformed URL, want error")
+	}
+}
+
+// TestHashNonce_MatchesTheClientDefinition pins the raw→claim mapping to a
+// known vector. Its twin lives in the Flutter app
+// (frontend/test/sign_in_nonce_test.dart, same input, same expected string):
+// the two implementations are in different languages and can only be kept in
+// agreement by asserting the same vector on both sides. A drift here is a
+// total Apple/Google sign-in outage, so it is worth one hard-coded value.
+func TestHashNonce_MatchesTheClientDefinition(t *testing.T) {
+	const (
+		input = "abc"
+		want  = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+	)
+	if got := HashNonce(input); got != want {
+		t.Errorf("HashNonce(%q) = %q, want %q — the Flutter client hashes the same way and will stop matching", input, got, want)
+	}
+}
+
+// TestHashNonce_IsLowercaseHex guards the encoding specifically: base64, or
+// uppercase hex, would compare unequal against a client that produced the
+// other, with no signal beyond "sign-in stopped working".
+func TestHashNonce_IsLowercaseHex(t *testing.T) {
+	got := HashNonce("some-raw-nonce")
+	if len(got) != 64 {
+		t.Errorf("HashNonce produced %d chars, want 64 (hex-encoded SHA-256)", len(got))
+	}
+	if got != strings.ToLower(got) {
+		t.Errorf("HashNonce produced %q, want lowercase", got)
 	}
 }

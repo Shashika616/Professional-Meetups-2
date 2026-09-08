@@ -58,6 +58,9 @@ type fakeUserRepository struct {
 	// user, mirroring the real rating_updated_at column — UpsertRatingCache
 	// uses this to reproduce the ordering guard in tests.
 	ratingCacheUpdatedAt map[string]time.Time
+	// meetupsCompletedUpdatedAt is the same thing for the meetups-completed
+	// cache, mirroring meetups_completed_updated_at.
+	meetupsCompletedUpdatedAt map[string]time.Time
 }
 
 func newFakeUserRepository() *fakeUserRepository {
@@ -132,6 +135,7 @@ func (f *fakeUserRepository) Create(_ context.Context, u repository.NewUser) (re
 		TrustLevel:         u.TrustLevel,
 		AccountStatus:      repository.AccountStatusActive,
 		AgeConfirmedOver18: u.AgeConfirmedOver18,
+		IsGuest:            u.IsGuest,
 	}
 	// Mirrors the real CreateUser query: age_confirmed_at is set only when
 	// age_confirmed_over_18 is true, never backdated, never set for false.
@@ -162,6 +166,8 @@ func (f *fakeUserRepository) UpdatePhoneNumber(_ context.Context, userID, phoneN
 	}
 	u.PhoneNumber = phoneNumber
 	u.TrustLevel = trustLevel
+	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
+	u.IsGuest = false
 	f.save(u)
 	return u, nil
 }
@@ -178,6 +184,8 @@ func (f *fakeUserRepository) UpdatePersonalEmail(_ context.Context, userID, pers
 	}
 	u.PersonalEmail = personalEmail
 	u.TrustLevel = trustLevel
+	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
+	u.IsGuest = false
 	f.save(u)
 	return u, nil
 }
@@ -190,11 +198,24 @@ func (f *fakeUserRepository) UpdatePersonalDetails(_ context.Context, userID, le
 	u.LegalName = legalName
 	u.Address = address
 	u.TrustLevel = trustLevel
+	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
+	u.IsGuest = false
 	f.save(u)
 	return u, nil
 }
 
-func (f *fakeUserRepository) UpdateWorkEmailVerified(_ context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash string, trustLevel int) (repository.User, error) {
+func (f *fakeUserRepository) ClearGuestFlag(_ context.Context, userID string, trustLevel int) (repository.User, error) {
+	u, ok := f.byID[userID]
+	if !ok {
+		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	u.IsGuest = false
+	u.TrustLevel = trustLevel
+	f.save(u)
+	return u, nil
+}
+
+func (f *fakeUserRepository) UpdateWorkEmailVerified(_ context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, trustLevel int) (repository.User, error) {
 	for id, u := range f.byID {
 		if id != userID && u.WorkEmailHash != "" && u.WorkEmailHash == workEmailHash {
 			return repository.User{}, fmt.Errorf("fake: work email hash already claimed by a different account: %w", apperror.ErrConflict)
@@ -208,6 +229,9 @@ func (f *fakeUserRepository) UpdateWorkEmailVerified(_ context.Context, userID, 
 	u.WorkEmailVerified = verified
 	u.WorkEmailVerifiedAt = &verifiedAt
 	u.WorkEmailHash = workEmailHash
+	// Written in the same call as work_email_verified, mirroring the real
+	// query — the two halves of the Level 3 condition are never apart.
+	u.CompanyName = companyName
 	u.TrustLevel = trustLevel
 	f.save(u)
 	return u, nil
@@ -229,6 +253,8 @@ func (f *fakeUserRepository) UpdateLinkedInSub(_ context.Context, userID, linked
 	}
 	u.LinkedInSub = linkedInSub
 	u.TrustLevel = trustLevel
+	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
+	u.IsGuest = false
 	f.save(u)
 	return u, nil
 }
@@ -253,6 +279,29 @@ func (f *fakeUserRepository) UpsertRatingCache(_ context.Context, userID string,
 		f.ratingCacheUpdatedAt = map[string]time.Time{}
 	}
 	f.ratingCacheUpdatedAt[userID] = occurredAt
+	return true, nil
+}
+
+// UpsertMeetupsCompletedCache — corrected 2026-09-08 to guard on the count
+// itself, not occurredAt, matching the real repository's fix (see
+// UpsertUserMeetupsCompletedCache's doc comment / auth/0005's SQL): a
+// completed-meetup count is monotonically non-decreasing per user, so
+// comparing values is strictly safer than comparing wall-clock timestamps
+// under concurrent completions for the same user.
+func (f *fakeUserRepository) UpsertMeetupsCompletedCache(_ context.Context, userID string, meetupsCompleted int, occurredAt time.Time) (bool, error) {
+	u, ok := f.byID[userID]
+	if !ok {
+		return false, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	if meetupsCompleted <= u.MeetupsCompleted {
+		return false, nil
+	}
+	u.MeetupsCompleted = meetupsCompleted
+	f.save(u)
+	if f.meetupsCompletedUpdatedAt == nil {
+		f.meetupsCompletedUpdatedAt = map[string]time.Time{}
+	}
+	f.meetupsCompletedUpdatedAt[userID] = occurredAt
 	return true, nil
 }
 
@@ -333,11 +382,16 @@ func (f *fakeUserIdentityRepository) ListForUser(_ context.Context, userID strin
 }
 
 type fakeRefreshTokenRepository struct {
-	byHash    map[string]repository.RefreshToken
-	byID      map[string]repository.RefreshToken
-	nextID    int
-	createErr error
-	rotateErr error
+	byHash       map[string]repository.RefreshToken
+	byID         map[string]repository.RefreshToken
+	nextID       int
+	createErr    error
+	rotateErr    error
+	revokeAllErr error
+	// revokeAllCalls records every RevokeAllForUser call, so a test can
+	// assert the reuse-detection path fired for the right user — and, just
+	// as importantly, that it did NOT fire on a legitimate refresh.
+	revokeAllCalls []string
 }
 
 func newFakeRefreshTokenRepository() *fakeRefreshTokenRepository {
@@ -410,6 +464,49 @@ func (f *fakeRefreshTokenRepository) Revoke(_ context.Context, tokenHash string)
 	f.byHash[tokenHash] = rt
 	f.byID[rt.ID] = rt
 	return nil
+}
+
+// RevokeAllForUser mirrors the real UPDATE's semantics: every row for the
+// user whose revoked_at IS NULL is stamped, and the count returned is how
+// many actually changed.
+func (f *fakeRefreshTokenRepository) RevokeAllForUser(_ context.Context, userID string) (int, error) {
+	if f.revokeAllErr != nil {
+		return 0, f.revokeAllErr
+	}
+	f.revokeAllCalls = append(f.revokeAllCalls, userID)
+
+	now := time.Now()
+	revoked := 0
+	for id, rt := range f.byID {
+		if rt.UserID != userID || rt.RevokedAt != nil {
+			continue
+		}
+		stamped := now
+		rt.RevokedAt = &stamped
+		f.byID[id] = rt
+		f.byHash[rt.TokenHash] = rt
+		revoked++
+	}
+	return revoked, nil
+}
+
+// DeleteExpired mirrors the real sweep's eligibility rules (revoked, or
+// expired longer ago than retention) and its batch cap.
+func (f *fakeRefreshTokenRepository) DeleteExpired(_ context.Context, retention time.Duration, batchSize int) (int, error) {
+	cutoff := time.Now().Add(-retention)
+	deleted := 0
+	for id, rt := range f.byID {
+		if deleted >= batchSize {
+			break
+		}
+		if rt.RevokedAt == nil && !rt.ExpiresAt.Before(cutoff) {
+			continue
+		}
+		delete(f.byID, id)
+		delete(f.byHash, rt.TokenHash)
+		deleted++
+	}
+	return deleted, nil
 }
 
 // fakeVerificationCodeRepository keys rows by (userID, purpose), mirroring

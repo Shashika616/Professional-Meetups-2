@@ -12,6 +12,16 @@ import (
 )
 
 type Querier interface {
+	// Linking Apple or Google to an existing account (LinkIdentityToUser's
+	// non-LinkedIn branch, ADR-002 §3). That path writes only user_identities,
+	// so unlike every other verification it has no users UPDATE to ride along
+	// with — hence its own statement.
+	//
+	// It writes trust_level too, for the same reason every other mutation above
+	// does: the caller has already computed the new value, and leaving it stale
+	// would strand a freshly-upgraded guest at 0 until some unrelated write
+	// happened to recompute it.
+	ClearUserGuestFlag(ctx context.Context, arg ClearUserGuestFlagParams) (AuthUser, error)
 	// Backs the soft cap of 3 per user (ADR-026 §1), enforced at the service
 	// layer, not a DB constraint.
 	CountTrustedContactsForUser(ctx context.Context, userID uuid.UUID) (int64, error)
@@ -20,7 +30,31 @@ type Querier interface {
 	// (the only case CreateUser is ever called with, in practice — the service
 	// layer rejects false before reaching here) — never backdated, never set
 	// for a false confirmation.
+	//
+	// is_guest is passed explicitly rather than left to the column DEFAULT: the
+	// guest path is the only caller that sets it true, and making every caller
+	// state which kind of account it is creating keeps a future fifth signup path
+	// from silently inheriting "not a guest" without anyone deciding it.
 	CreateUser(ctx context.Context, arg CreateUserParams) (AuthUser, error)
+	// The retention sweep (§B3). Every login and every refresh inserts a row and
+	// nothing ever deleted one, so this table grew without bound — cheap to trim
+	// continuously now, expensive to backfill-delete from a large table under
+	// production load later.
+	//
+	// Batched via the id subquery rather than one unbounded DELETE: on the first
+	// run after this ships (or after the sweep has been disabled for a while)
+	// the eligible set could be very large, and a single statement would hold
+	// one long transaction and a correspondingly long lock. The caller loops
+	// until this returns 0.
+	//
+	// Two eligibility rules, both meaning "this row can never authenticate
+	// anything again":
+	//   * revoked_at IS NOT NULL — explicitly killed (logout, rotation, or §B1's
+	//     family revocation).
+	//   * expires_at < now() - retention — expired, plus a grace window kept
+	//     deliberately so a recent expiry is still visible while debugging a
+	//     "why was I logged out" report.
+	DeleteExpiredRefreshTokens(ctx context.Context, arg DeleteExpiredRefreshTokensParams) (int64, error)
 	// Scoped to (id, user_id) so a caller can never delete another user's
 	// contact by guessing an id — the service layer additionally checks
 	// ownership explicitly first (same "no row for this caller -> Forbidden"
@@ -69,6 +103,17 @@ type Querier interface {
 	ListIdentitiesForUser(ctx context.Context, userID uuid.UUID) ([]AuthUserIdentity, error)
 	ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]AuthTrustedContact, error)
 	MarkRefreshTokenReplaced(ctx context.Context, arg MarkRefreshTokenReplacedParams) error
+	// The reuse-detection response (docs/plans/03-hardening-pass.md §B1): when a
+	// refresh token that has already been rotated or revoked is presented again,
+	// every still-live token in that user's session family is revoked, not just
+	// the replayed one. Rows affected tells the caller how many sessions were
+	// actually terminated, purely for the security log line.
+	//
+	// Deliberately unconditional on expiry: revoking an already-expired row is a
+	// harmless no-op that keeps the WHERE clause (and therefore the index usage)
+	// simple, and "revoked_at IS NULL" is the only condition that matters for
+	// idempotency.
+	RevokeAllRefreshTokensForUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error
 	// ADR-019 §2's post-auth profile-completion screen — CompleteProfileSetup
 	// is the only caller. fullName is always required there, unlike every
@@ -90,6 +135,9 @@ type Querier interface {
 	// linking a LinkedIn subject already claimed by a different user — the
 	// caller (internal/service) maps that 23505 into apperror.ErrConflict,
 	// same pattern as UpdateUserPhoneNumber/UpdateUserPersonalEmail below.
+	//
+	// is_guest is cleared here too (ADR-002 §3): connecting LinkedIn is one of
+	// the four real signup paths, so a guest doing it stops being a guest.
 	UpdateUserLinkedInSub(ctx context.Context, arg UpdateUserLinkedInSubParams) (AuthUser, error)
 	UpdateUserPersonalDetails(ctx context.Context, arg UpdateUserPersonalDetailsParams) (AuthUser, error)
 	UpdateUserPersonalEmail(ctx context.Context, arg UpdateUserPersonalEmailParams) (AuthUser, error)
@@ -98,13 +146,54 @@ type Querier interface {
 	// (internal/service) computes the new value via computeTrustLevel before
 	// calling these, so the row is never left with a stale trust_level between
 	// the field write and a separate recompute step.
+	//
+	// EVERY ONE OF THEM ALSO CLEARS is_guest (ADR-002 §3). Completing any real
+	// verification is exactly what stops an account being a guest, and putting
+	// that in the SQL rather than at the call sites means it cannot be forgotten
+	// by one of them — the failure it prevents is a guest who verifies something,
+	// stays flagged, and is stranded at Level 0 with no way to notice why.
+	// Idempotent: it is already false for every non-guest account.
 	UpdateUserPhoneNumber(ctx context.Context, arg UpdateUserPhoneNumberParams) (AuthUser, error)
 	// work_email_hash is set alongside company_domain/work_email_verified
 	// (ADR-019 §3) — a keyed HMAC of the normalized raw address, the reuse-
 	// abuse check's UNIQUE anchor (GetUserByWorkEmailHash below is what
 	// detects a collision BEFORE this runs; the UNIQUE constraint here is the
 	// last-resort race guard, same pattern as phone_number/personal_email).
+	//
+	// company_name (ADR-002 §1) is written HERE, in the same statement as
+	// work_email_verified, rather than through a separate save. That is the whole
+	// reason no new RPC was added for it: Level 3 requires both a verified work
+	// email AND a non-empty company name, and writing them together makes it
+	// impossible for the row to hold one without the other. VerifyCorporateEmailCode
+	// already required, validated and length-capped company_name long before this
+	// change (it feeds the known-companies name-vs-domain cross-check) — it simply
+	// had nowhere to be persisted.
 	UpdateUserWorkEmailVerified(ctx context.Context, arg UpdateUserWorkEmailVerifiedParams) (AuthUser, error)
+	// The meetups-completed consumer's idempotent, order-guarded upsert.
+	//
+	// The event carries an ABSOLUTE count, not a delta. That is what makes a
+	// redelivery safe: re-applying "this user has completed 7 meetups" is a
+	// no-op, whereas re-applying "+1" would silently inflate the number every
+	// time the bus redelivered.
+	//
+	// Corrected 2026-09-08: this used to guard on `occurred_at` (mirroring
+	// UpsertUserRatingCache above), the way every other guarded-upsert in this
+	// codebase does. That comparison is wrong for THIS cache specifically —
+	// unlike a rating average, a completed-meetup count is monotonically
+	// non-decreasing per user (a meetup can never un-complete), so the value
+	// itself is a safe, strictly correct ordering key, and comparing on it is
+	// strictly safer than comparing on wall-clock time: two concurrent
+	// completions for the same user (e.g. a manual host-close racing an
+	// auto-close sweep's batch recompute) can each recompute from a snapshot
+	// that doesn't see the other's not-yet-committed completion, so the
+	// transaction that happens to commit second can carry a LOWER correct
+	// count with a LATER timestamp — under the old guard that overwrites the
+	// higher, correct value, and nothing ever corrects it since this cache is
+	// only ever written from a completion event, never reconciled. Guarding on
+	// the count itself makes a stale/lower recompute a no-op instead of a
+	// regression, with no loss of redelivery-safety (an exact-equal redelivery
+	// is still a no-op, just via `>` instead of failing an `IS NULL` check).
+	UpsertUserMeetupsCompletedCache(ctx context.Context, arg UpsertUserMeetupsCompletedCacheParams) (int64, error)
 	// The rating-updated consumer's idempotent, order-guarded upsert (ADR-018
 	// Decision 2, ADR-017's addendum Step 5b) — users.rating_average/
 	// rating_count are a read-only cache of what services/meetup owns as of

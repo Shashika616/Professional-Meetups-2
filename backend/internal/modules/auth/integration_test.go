@@ -77,7 +77,16 @@ func requirePostgres(t *testing.T) string {
 	}
 	_ = conn.Close()
 
-	return dbURL
+	// Integration tests get their OWN database, never the one a running
+	// monolith is attached to — see db.EnsureTestDatabase for why that is a
+	// correctness requirement here and not just hygiene (briefly: the live
+	// app's outbox poller claims the rows these tests queue, and its
+	// dead-token cleanup deletes their fixtures).
+	testURL, err := db.EnsureTestDatabase(context.Background(), dbURL)
+	if err != nil {
+		t.Fatalf("prepare isolated test database: %v", err)
+	}
+	return testURL
 }
 
 // truncateAuthTables gives each test a clean slate without dropping the
@@ -235,6 +244,18 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(pool.Close)
+
+	// Serialise against every other integration-test harness in this repo.
+	// They share one database (ADR-001 §3) and their truncate sets overlap —
+	// meetup's harness truncates auth.users, which is what this one is
+	// populating — and `go test ./...` runs packages in parallel. See
+	// db.IntegrationTestLockKey for the full story.
+	release, err := db.AcquireIntegrationTestLock(ctx, pool)
+	if err != nil {
+		t.Fatalf("acquire integration test lock: %v", err)
+	}
+	t.Cleanup(release)
+
 	truncateAuthTables(t, pool)
 
 	linkedInSub := fmt.Sprintf("li-sub-%d", time.Now().UnixNano())
@@ -314,8 +335,10 @@ func TestEmailSignup_Integration(t *testing.T) {
 	if session.UserID == "" || session.RefreshToken == "" {
 		t.Fatalf("session = %+v, want a persisted user id and a raw refresh token", session)
 	}
-	if session.TrustLevel != 0 {
-		t.Errorf("TrustLevel = %d, want 0 — email alone never grants Level 1", session.TrustLevel)
+	// CHANGED (ADR-002 §2): was 0, "email alone never grants Level 1". Every
+	// real signup path now grants Level 1 immediately; only a guest is 0.
+	if session.TrustLevel != 1 {
+		t.Errorf("TrustLevel = %d, want 1 — email signup grants Level 1 immediately (ADR-002 §2)", session.TrustLevel)
 	}
 
 	profile, err := h.svc.CompleteProfileSetup(ctx, auth.CompleteProfileSetupRequest{

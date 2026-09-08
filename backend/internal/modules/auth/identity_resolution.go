@@ -133,7 +133,7 @@ func (s *service) LinkIdentityToUser(ctx context.Context, userID string, provide
 	}
 
 	if provider == FederatedProviderLinkedIn {
-		hypothetical := user
+		hypothetical := afterVerification(user)
 		hypothetical.LinkedInSub = subject
 		_, err := s.users.UpdateLinkedInSub(ctx, userID, subject, computeTrustLevel(hypothetical))
 		return err
@@ -143,10 +143,23 @@ func (s *service) LinkIdentityToUser(ctx context.Context, userID string, provide
 	if err != nil {
 		return err
 	}
-	// Linking Apple/Google in any combination never raises trust level
-	// (ADR-014 §1) — no trust_level write needed here, unlike the LinkedIn
-	// branch above.
-	_, err = s.identities.Insert(ctx, userID, repoProvider, subject, "")
+	if _, err := s.identities.Insert(ctx, userID, repoProvider, subject, ""); err != nil {
+		return err
+	}
+
+	// CHANGED BY ADR-002 §3. This used to be a bare Insert with the note
+	// "linking Apple/Google never raises trust level (ADR-014 §1)". That is
+	// no longer true: Apple and Google are two of the four real signup paths,
+	// so a GUEST linking one stops being a guest and becomes Level 1.
+	//
+	// Skipped entirely for an account that was never a guest — for them this
+	// really does change nothing, and an unnecessary write would publish a
+	// pointless user-profile-updated event to the meetup module's cache.
+	if !user.IsGuest {
+		return nil
+	}
+	hypothetical := afterVerification(user)
+	_, err = s.users.ClearGuestFlag(ctx, userID, computeTrustLevel(hypothetical))
 	return err
 }
 
@@ -212,7 +225,7 @@ func (s *service) SignUpOrRecoverWithEmail(
 	// proved control via OTP) — a head start toward Level 2 later, but not
 	// toward Level 1 by itself (computeTrustLevel still returns 0 here
 	// since linkedin_sub is empty).
-	hypothetical := created
+	hypothetical := afterVerification(created)
 	hypothetical.PersonalEmail = email
 	withEmail, err := s.users.UpdatePersonalEmail(ctx, created.ID, email, computeTrustLevel(hypothetical))
 	if err != nil {

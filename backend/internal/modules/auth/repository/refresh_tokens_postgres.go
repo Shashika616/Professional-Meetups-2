@@ -116,6 +116,41 @@ func (r *postgresRefreshTokenRepository) Revoke(ctx context.Context, tokenHash s
 	return nil
 }
 
+// RevokeAllForUser revokes every non-revoked refresh token for userID.
+//
+// One UPDATE, not a select-then-loop: the set being revoked is exactly "this
+// user's live tokens," which the WHERE clause expresses directly, and doing
+// it in a single statement means a concurrent refresh cannot slip a
+// newly-rotated token past the sweep between the read and the write.
+func (r *postgresRefreshTokenRepository) RevokeAllForUser(ctx context.Context, userID string) (int, error) {
+	parsedUserID, err := uuid.Parse(userID)
+	if err != nil {
+		return 0, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+
+	revoked, err := r.q.RevokeAllRefreshTokensForUser(ctx, parsedUserID)
+	if err != nil {
+		return 0, fmt.Errorf("repository: revoke all refresh tokens for user: %w", err)
+	}
+	return int(revoked), nil
+}
+
+// DeleteExpired removes one batch of unusable refresh-token rows.
+func (r *postgresRefreshTokenRepository) DeleteExpired(ctx context.Context, retention time.Duration, batchSize int) (int, error) {
+	if batchSize <= 0 {
+		return 0, fmt.Errorf("repository: refresh token sweep batch size must be positive: %w", apperror.ErrInvalidInput)
+	}
+
+	deleted, err := r.q.DeleteExpiredRefreshTokens(ctx, sqlcgen.DeleteExpiredRefreshTokensParams{
+		ExpiredBefore: toTimestamptz(time.Now().UTC().Add(-retention)),
+		BatchSize:     int32(batchSize),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("repository: delete expired refresh tokens: %w", err)
+	}
+	return int(deleted), nil
+}
+
 func refreshTokenFromRow(row sqlcgen.AuthRefreshToken) RefreshToken {
 	return RefreshToken{
 		ID:         row.ID.String(),

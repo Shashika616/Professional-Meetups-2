@@ -76,7 +76,7 @@ func (s *service) VerifyPhoneCode(ctx context.Context, req VerifyCodeRequest) (S
 	if err != nil {
 		return SessionResult{}, err
 	}
-	hypothetical := user
+	hypothetical := afterVerification(user)
 	hypothetical.PhoneNumber = req.Target
 
 	persisted, err := s.users.UpdatePhoneNumber(ctx, req.UserID, req.Target, computeTrustLevel(hypothetical))
@@ -114,7 +114,7 @@ func (s *service) VerifyPersonalEmailCode(ctx context.Context, req VerifyCodeReq
 	if err != nil {
 		return SessionResult{}, err
 	}
-	hypothetical := user
+	hypothetical := afterVerification(user)
 	hypothetical.PersonalEmail = req.Target
 
 	persisted, err := s.users.UpdatePersonalEmail(ctx, req.UserID, req.Target, computeTrustLevel(hypothetical))
@@ -142,7 +142,7 @@ func (s *service) SubmitPersonalDetails(ctx context.Context, req SubmitPersonalD
 	if err != nil {
 		return SessionResult{}, err
 	}
-	hypothetical := user
+	hypothetical := afterVerification(user)
 	hypothetical.LegalName = req.LegalName
 	hypothetical.Address = req.Address
 
@@ -253,11 +253,17 @@ func (s *service) VerifyCorporateEmailCode(ctx context.Context, req VerifyCodeRe
 		return SessionResult{}, err
 	}
 
-	hypothetical := user
+	// CompanyName is set on the hypothetical too, not just the persisted row
+	// (ADR-002 §2): Level 3 now requires it, so a trust level computed
+	// without it would come out as 2 while the row being written actually
+	// satisfies 3 — the value stored in trust_level has to be computed from
+	// exactly the row this statement is about to produce.
+	hypothetical := afterVerification(user)
 	hypothetical.CompanyDomain = domain
 	hypothetical.WorkEmailVerified = true
+	hypothetical.CompanyName = companyName
 
-	persisted, err := s.users.UpdateWorkEmailVerified(ctx, req.UserID, domain, true, time.Now(), workEmailHash, computeTrustLevel(hypothetical))
+	persisted, err := s.users.UpdateWorkEmailVerified(ctx, req.UserID, domain, true, time.Now(), workEmailHash, companyName, computeTrustLevel(hypothetical))
 	if err != nil {
 		return SessionResult{}, err
 	}
@@ -296,10 +302,14 @@ func profileFromUser(user repository.User) Profile {
 		WorkEmailVerified:       user.WorkEmailVerified,
 		RatingAverage:           user.RatingAverage,
 		RatingCount:             user.RatingCount,
+		MeetupsCompleted:        user.MeetupsCompleted,
 		PhoneNumber:             user.PhoneNumber,
 		PersonalEmail:           user.PersonalEmail,
 		LegalName:               user.LegalName,
 		Address:                 user.Address,
+		LinkedInConnected:       user.LinkedInSub != "",
+		IsGuest:                 user.IsGuest,
+		CompanyName:             user.CompanyName,
 	}
 }
 

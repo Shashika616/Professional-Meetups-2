@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math/big"
+	"os"
 	"strings"
 	"time"
 )
@@ -46,21 +47,48 @@ func hashOTP(code string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// testOTPBypassCode is the fixed code accepted when allowTestOTPBypass() is
+// true — same value as the source's own hardcoded bypass
+// (../Professional-Meetups/TESTING-NOTES.md), for continuity with existing
+// manual-testing habits.
+const testOTPBypassCode = "123456"
+
+// allowTestOTPBypass reports whether the test-only OTP bypass is active.
+// Off unless ALLOW_TEST_OTP_BYPASS=true is explicitly set in the process
+// environment — never on by default, and never inferred from any other
+// config (e.g. Twilio/Resend being unconfigured does NOT imply this should
+// be on; use the LoggingSmsSender/LoggingEmailSender log line for that case
+// instead). See TESTING-NOTES.md at the repo root.
+func allowTestOTPBypass() bool {
+	return os.Getenv("ALLOW_TEST_OTP_BYPASS") == "true"
+}
+
 // otpMatches compares a stored hash against a presented code. Constant-time
 // on principle, even though the comparison operates on already-hashed values
 // rather than a raw secret.
 //
-// DELIBERATELY NOT PORTED: the source ships a testing bypass here
+// Test-only bypass, off by default: the source ships a testing shortcut here
 // (../Professional-Meetups/TESTING-NOTES.md) that accepts the hardcoded code
-// "123456" for every purpose and comments the real comparison out, marked
-// "DO NOT SHIP TO PRODUCTION" — it exists so the app can be exercised
-// end-to-end without a real Twilio/Resend send. Porting it would be porting
-// an authentication bypass, which is not what "port the validation rules
-// faithfully" means. The real comparison is restored below; local end-to-end
-// testing without a real SMS/email provider reads the code from the
-// LoggingSmsSender/LoggingEmailSender log line instead, which is what those
-// senders exist for.
+// "123456" for every purpose by commenting the real comparison out entirely,
+// marked "DO NOT SHIP TO PRODUCTION". That shape — an unconditional bypass
+// with no gate — was deliberately not ported in Phase 1: porting it as-is
+// would be porting an authentication bypass, not a validation rule, and
+// "port faithfully" was never meant to cover that.
+//
+// What's below instead: the real comparison always runs, and "123456" is
+// only ever accepted *in addition* to it, and only when allowTestOTPBypass()
+// is true (ALLOW_TEST_OTP_BYPASS=true, an explicit opt-in env var, absent
+// from every deployed environment and never set in backend/.env.example).
+// This exists purely so manual testing doesn't require digging a real code
+// out of the LoggingSmsSender/LoggingEmailSender log line every time; it is
+// not a replacement for that log line, which remains the only way to see a
+// *real* generated code. Must never be true outside local development — see
+// TESTING-NOTES.md at the repo root, which this file's behavior must stay
+// consistent with.
 func otpMatches(hash, code string) bool {
+	if allowTestOTPBypass() && code == testOTPBypassCode {
+		return true
+	}
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(hashOTP(code))) == 1
 }
 

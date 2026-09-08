@@ -127,6 +127,7 @@ func (r *postgresUserRepository) Create(ctx context.Context, u NewUser) (User, e
 		Headline:           textOrNull(u.Headline),
 		TrustLevel:         int16(u.TrustLevel),
 		AgeConfirmedOver18: u.AgeConfirmedOver18,
+		IsGuest:            u.IsGuest,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -286,7 +287,26 @@ func (r *postgresUserRepository) UpdateLinkedInSub(ctx context.Context, userID, 
 	return updated, nil
 }
 
-func (r *postgresUserRepository) UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash string, trustLevel int) (User, error) {
+func (r *postgresUserRepository) ClearGuestFlag(ctx context.Context, userID string, trustLevel int) (User, error) {
+	parsed, err := uuid.Parse(userID)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+
+	row, err := r.q.ClearUserGuestFlag(ctx, sqlcgen.ClearUserGuestFlagParams{
+		ID:         parsed,
+		TrustLevel: int16(trustLevel),
+	})
+	if err != nil {
+		return User{}, fmt.Errorf("repository: clear user guest flag: %w", err)
+	}
+	updated := userFromRow(row)
+
+	r.publishProfileUpdated(ctx, updated)
+	return updated, nil
+}
+
+func (r *postgresUserRepository) UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, trustLevel int) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
 		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
@@ -299,6 +319,7 @@ func (r *postgresUserRepository) UpdateWorkEmailVerified(ctx context.Context, us
 		WorkEmailVerifiedAt: toTimestamptz(verifiedAt),
 		WorkEmailHash:       textOrNull(workEmailHash),
 		TrustLevel:          int16(trustLevel),
+		CompanyName:         textOrNull(companyName),
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -350,6 +371,23 @@ func (r *postgresUserRepository) UpsertRatingCache(ctx context.Context, userID s
 	return rowsAffected > 0, nil
 }
 
+func (r *postgresUserRepository) UpsertMeetupsCompletedCache(ctx context.Context, userID string, meetupsCompleted int, occurredAt time.Time) (bool, error) {
+	parsed, err := uuid.Parse(userID)
+	if err != nil {
+		return false, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+
+	rowsAffected, err := r.q.UpsertUserMeetupsCompletedCache(ctx, sqlcgen.UpsertUserMeetupsCompletedCacheParams{
+		MeetupsCompleted: int32(meetupsCompleted),
+		OccurredAt:       toTimestamptz(occurredAt),
+		UserID:           parsed,
+	})
+	if err != nil {
+		return false, fmt.Errorf("repository: upsert meetups-completed cache: %w", err)
+	}
+	return rowsAffected > 0, nil
+}
+
 func userFromRow(row sqlcgen.AuthUser) User {
 	return User{
 		ID:              row.ID.String(),
@@ -374,8 +412,13 @@ func userFromRow(row sqlcgen.AuthUser) User {
 		AgeConfirmedAt:     timePtrOrNil(row.AgeConfirmedAt),
 		WorkEmailHash:      textOrEmpty(row.WorkEmailHash),
 
+		IsGuest:     row.IsGuest,
+		CompanyName: textOrEmpty(row.CompanyName),
+
 		RatingAverage: numericToFloat64(row.RatingAverage),
 		RatingCount:   int(row.RatingCount),
+
+		MeetupsCompleted: int(row.MeetupsCompleted),
 
 		LastLocationLat:       float8PtrOrNil(row.LastLocationLat),
 		LastLocationLng:       float8PtrOrNil(row.LastLocationLng),

@@ -142,6 +142,140 @@ func (ns NullAuthVerificationPurpose) Value() (driver.Value, error) {
 	return string(ns.AuthVerificationPurpose), nil
 }
 
+type MeetupIntentType string
+
+const (
+	MeetupIntentTypeCoffee     MeetupIntentType = "coffee"
+	MeetupIntentTypeLunch      MeetupIntentType = "lunch"
+	MeetupIntentTypeNetworking MeetupIntentType = "networking"
+	MeetupIntentTypeMentorship MeetupIntentType = "mentorship"
+	MeetupIntentTypeRideShare  MeetupIntentType = "ride_share"
+	MeetupIntentTypeDating     MeetupIntentType = "dating"
+)
+
+func (e *MeetupIntentType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MeetupIntentType(s)
+	case string:
+		*e = MeetupIntentType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MeetupIntentType: %T", src)
+	}
+	return nil
+}
+
+type NullMeetupIntentType struct {
+	MeetupIntentType MeetupIntentType `json:"meetup_intent_type"`
+	Valid            bool             `json:"valid"` // Valid is true if MeetupIntentType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMeetupIntentType) Scan(value interface{}) error {
+	if value == nil {
+		ns.MeetupIntentType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MeetupIntentType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMeetupIntentType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MeetupIntentType), nil
+}
+
+type MeetupMeetupRequestStatus string
+
+const (
+	MeetupMeetupRequestStatusPending   MeetupMeetupRequestStatus = "pending"
+	MeetupMeetupRequestStatusAccepted  MeetupMeetupRequestStatus = "accepted"
+	MeetupMeetupRequestStatusRejected  MeetupMeetupRequestStatus = "rejected"
+	MeetupMeetupRequestStatusWithdrawn MeetupMeetupRequestStatus = "withdrawn"
+)
+
+func (e *MeetupMeetupRequestStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MeetupMeetupRequestStatus(s)
+	case string:
+		*e = MeetupMeetupRequestStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MeetupMeetupRequestStatus: %T", src)
+	}
+	return nil
+}
+
+type NullMeetupMeetupRequestStatus struct {
+	MeetupMeetupRequestStatus MeetupMeetupRequestStatus `json:"meetup_meetup_request_status"`
+	Valid                     bool                      `json:"valid"` // Valid is true if MeetupMeetupRequestStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMeetupMeetupRequestStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.MeetupMeetupRequestStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MeetupMeetupRequestStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMeetupMeetupRequestStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MeetupMeetupRequestStatus), nil
+}
+
+type MeetupMeetupStatus string
+
+const (
+	MeetupMeetupStatusOpen      MeetupMeetupStatus = "open"
+	MeetupMeetupStatusFull      MeetupMeetupStatus = "full"
+	MeetupMeetupStatusCancelled MeetupMeetupStatus = "cancelled"
+	MeetupMeetupStatusCompleted MeetupMeetupStatus = "completed"
+)
+
+func (e *MeetupMeetupStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = MeetupMeetupStatus(s)
+	case string:
+		*e = MeetupMeetupStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for MeetupMeetupStatus: %T", src)
+	}
+	return nil
+}
+
+type NullMeetupMeetupStatus struct {
+	MeetupMeetupStatus MeetupMeetupStatus `json:"meetup_meetup_status"`
+	Valid              bool               `json:"valid"` // Valid is true if MeetupMeetupStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullMeetupMeetupStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.MeetupMeetupStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.MeetupMeetupStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullMeetupMeetupStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.MeetupMeetupStatus), nil
+}
+
 type AuthKnownCompany struct {
 	ID             uuid.UUID          `json:"id"`
 	NameNormalized string             `json:"name_normalized"`
@@ -188,31 +322,35 @@ type AuthUnverifiedCompanyClaim struct {
 }
 
 type AuthUser struct {
-	ID                    uuid.UUID          `json:"id"`
-	LinkedinSub           pgtype.Text        `json:"linkedin_sub"`
-	FullName              string             `json:"full_name"`
-	ProfilePhotoUrl       pgtype.Text        `json:"profile_photo_url"`
-	Headline              pgtype.Text        `json:"headline"`
-	TrustLevel            int16              `json:"trust_level"`
-	AccountStatus         AuthAccountStatus  `json:"account_status"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	PhoneNumber           pgtype.Text        `json:"phone_number"`
-	PersonalEmail         pgtype.Text        `json:"personal_email"`
-	LegalName             pgtype.Text        `json:"legal_name"`
-	Address               pgtype.Text        `json:"address"`
-	CompanyDomain         pgtype.Text        `json:"company_domain"`
-	WorkEmailVerified     bool               `json:"work_email_verified"`
-	WorkEmailVerifiedAt   pgtype.Timestamptz `json:"work_email_verified_at"`
-	AgeConfirmedOver18    bool               `json:"age_confirmed_over_18"`
-	AgeConfirmedAt        pgtype.Timestamptz `json:"age_confirmed_at"`
-	WorkEmailHash         pgtype.Text        `json:"work_email_hash"`
-	RatingAverage         pgtype.Numeric     `json:"rating_average"`
-	RatingCount           int32              `json:"rating_count"`
-	RatingUpdatedAt       pgtype.Timestamptz `json:"rating_updated_at"`
-	LastLocationLat       pgtype.Float8      `json:"last_location_lat"`
-	LastLocationLng       pgtype.Float8      `json:"last_location_lng"`
-	LastLocationUpdatedAt pgtype.Timestamptz `json:"last_location_updated_at"`
+	ID                        uuid.UUID          `json:"id"`
+	LinkedinSub               pgtype.Text        `json:"linkedin_sub"`
+	FullName                  string             `json:"full_name"`
+	ProfilePhotoUrl           pgtype.Text        `json:"profile_photo_url"`
+	Headline                  pgtype.Text        `json:"headline"`
+	TrustLevel                int16              `json:"trust_level"`
+	AccountStatus             AuthAccountStatus  `json:"account_status"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	PhoneNumber               pgtype.Text        `json:"phone_number"`
+	PersonalEmail             pgtype.Text        `json:"personal_email"`
+	LegalName                 pgtype.Text        `json:"legal_name"`
+	Address                   pgtype.Text        `json:"address"`
+	CompanyDomain             pgtype.Text        `json:"company_domain"`
+	WorkEmailVerified         bool               `json:"work_email_verified"`
+	WorkEmailVerifiedAt       pgtype.Timestamptz `json:"work_email_verified_at"`
+	AgeConfirmedOver18        bool               `json:"age_confirmed_over_18"`
+	AgeConfirmedAt            pgtype.Timestamptz `json:"age_confirmed_at"`
+	WorkEmailHash             pgtype.Text        `json:"work_email_hash"`
+	RatingAverage             pgtype.Numeric     `json:"rating_average"`
+	RatingCount               int32              `json:"rating_count"`
+	RatingUpdatedAt           pgtype.Timestamptz `json:"rating_updated_at"`
+	LastLocationLat           pgtype.Float8      `json:"last_location_lat"`
+	LastLocationLng           pgtype.Float8      `json:"last_location_lng"`
+	LastLocationUpdatedAt     pgtype.Timestamptz `json:"last_location_updated_at"`
+	IsGuest                   bool               `json:"is_guest"`
+	CompanyName               pgtype.Text        `json:"company_name"`
+	MeetupsCompleted          int32              `json:"meetups_completed"`
+	MeetupsCompletedUpdatedAt pgtype.Timestamptz `json:"meetups_completed_updated_at"`
 }
 
 type AuthUserIdentity struct {
@@ -233,4 +371,128 @@ type AuthVerificationCode struct {
 	Attempts  int16                   `json:"attempts"`
 	ExpiresAt pgtype.Timestamptz      `json:"expires_at"`
 	CreatedAt pgtype.Timestamptz      `json:"created_at"`
+}
+
+type MeetupDeviceToken struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	FcmToken  string             `json:"fcm_token"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MeetupMeetup struct {
+	ID                     uuid.UUID          `json:"id"`
+	HostUserID             uuid.UUID          `json:"host_user_id"`
+	Intent                 MeetupIntentType   `json:"intent"`
+	LocationLat            float64            `json:"location_lat"`
+	LocationLng            float64            `json:"location_lng"`
+	LocationLabel          string             `json:"location_label"`
+	Capacity               int16              `json:"capacity"`
+	Status                 MeetupMeetupStatus `json:"status"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	CancelledAt            pgtype.Timestamptz `json:"cancelled_at"`
+	WindowStart            pgtype.Timestamptz `json:"window_start"`
+	WindowEnd              pgtype.Timestamptz `json:"window_end"`
+	ClosedAt               pgtype.Timestamptz `json:"closed_at"`
+	CancellationReason     pgtype.Text        `json:"cancellation_reason"`
+	StartingSoonNotifiedAt pgtype.Timestamptz `json:"starting_soon_notified_at"`
+	Location               interface{}        `json:"location"`
+}
+
+type MeetupMeetupFeedback struct {
+	MeetupID        uuid.UUID          `json:"meetup_id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Happened        bool               `json:"happened"`
+	FeltSafe        pgtype.Bool        `json:"felt_safe"`
+	ProfileAccurate pgtype.Bool        `json:"profile_accurate"`
+	WouldMeetAgain  pgtype.Bool        `json:"would_meet_again"`
+	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
+	Notes           pgtype.Text        `json:"notes"`
+}
+
+type MeetupMeetupRequest struct {
+	ID             uuid.UUID                 `json:"id"`
+	MeetupID       uuid.UUID                 `json:"meetup_id"`
+	RequesterID    uuid.UUID                 `json:"requester_id"`
+	Status         MeetupMeetupRequestStatus `json:"status"`
+	AutoRejected   bool                      `json:"auto_rejected"`
+	CreatedAt      pgtype.Timestamptz        `json:"created_at"`
+	ResolvedAt     pgtype.Timestamptz        `json:"resolved_at"`
+	WithdrawalNote pgtype.Text               `json:"withdrawal_note"`
+}
+
+type MeetupMeetupUserRating struct {
+	ID          uuid.UUID          `json:"id"`
+	MeetupID    uuid.UUID          `json:"meetup_id"`
+	RaterUserID uuid.UUID          `json:"rater_user_id"`
+	RatedUserID uuid.UUID          `json:"rated_user_id"`
+	Score       int16              `json:"score"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type MeetupMeetupsCompletedOutbox struct {
+	ID             uuid.UUID          `json:"id"`
+	MeetupIds      []uuid.UUID        `json:"meetup_ids"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	Attempts       int32              `json:"attempts"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+}
+
+type MeetupNotificationOutbox struct {
+	ID             uuid.UUID          `json:"id"`
+	FcmTokens      []string           `json:"fcm_tokens"`
+	Title          string             `json:"title"`
+	Body           string             `json:"body"`
+	Data           []byte             `json:"data"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	Attempts       int32              `json:"attempts"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+}
+
+type MeetupSafetyShare struct {
+	MeetupID   uuid.UUID          `json:"meetup_id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	ContactID  uuid.UUID          `json:"contact_id"`
+	NotifiedAt pgtype.Timestamptz `json:"notified_at"`
+}
+
+type MeetupSafetyState struct {
+	MeetupID          uuid.UUID          `json:"meetup_id"`
+	UserID            uuid.UUID          `json:"user_id"`
+	ChecklistAckAt    pgtype.Timestamptz `json:"checklist_ack_at"`
+	LiveLocationOptIn bool               `json:"live_location_opt_in"`
+	CheckedInAt       pgtype.Timestamptz `json:"checked_in_at"`
+	DeclinedAt        pgtype.Timestamptz `json:"declined_at"`
+	DeclineReason     pgtype.Text        `json:"decline_reason"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MeetupSubscriptionCache struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	Tier      string             `json:"tier"`
+	Entitled  bool               `json:"entitled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MeetupUserDisplayCache struct {
+	UserID          uuid.UUID          `json:"user_id"`
+	FullName        string             `json:"full_name"`
+	ProfilePhotoUrl pgtype.Text        `json:"profile_photo_url"`
+	TrustLevel      int16              `json:"trust_level"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type MeetupUserLocationCache struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	Lat       float64            `json:"lat"`
+	Lng       float64            `json:"lng"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	Location  interface{}        `json:"location"`
 }

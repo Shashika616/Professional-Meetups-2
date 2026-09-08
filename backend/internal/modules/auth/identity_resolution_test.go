@@ -26,8 +26,14 @@ func TestResolveOrCreateIdentity(t *testing.T) {
 		if !isNewUser {
 			t.Error("isNewUser = false, want true")
 		}
-		if user.TrustLevel != 0 {
-			t.Errorf("TrustLevel = %d, want 0 (Apple alone never grants trust)", user.TrustLevel)
+		// CHANGED (ADR-002 §2): was 0, "Apple alone never grants trust".
+		// Apple/Google/email/LinkedIn now all grant Level 1 equally and
+		// immediately — is_guest is the only thing that yields 0.
+		if user.TrustLevel != 1 {
+			t.Errorf("TrustLevel = %d, want 1 (any real signup path grants Level 1 immediately, ADR-002 §2)", user.TrustLevel)
+		}
+		if user.IsGuest {
+			t.Error("IsGuest = true for an Apple signup — only GuestSignup creates guests")
 		}
 		if user.FullName != "Ada Lovelace" {
 			t.Errorf("FullName = %q, want %q", user.FullName, "Ada Lovelace")
@@ -241,8 +247,12 @@ func TestSignUpOrRecoverWithEmail_TableDriven(t *testing.T) {
 		if !isNewUser {
 			t.Error("isNewUser = false, want true")
 		}
-		if user.TrustLevel != 0 {
-			t.Errorf("TrustLevel = %d, want 0 (email alone never grants Level 1)", user.TrustLevel)
+		// CHANGED (ADR-002 §2): was 0, "email alone never grants Level 1".
+		if user.TrustLevel != 1 {
+			t.Errorf("TrustLevel = %d, want 1 (email signup grants Level 1 immediately, ADR-002 §2)", user.TrustLevel)
+		}
+		if user.IsGuest {
+			t.Error("IsGuest = true for an email signup — only GuestSignup creates guests")
 		}
 		if user.PersonalEmail != "new@example.com" {
 			t.Errorf("PersonalEmail = %q, want %q", user.PersonalEmail, "new@example.com")

@@ -67,11 +67,31 @@ type User struct {
 	AgeConfirmedAt     *time.Time
 	WorkEmailHash      string
 
+	// IsGuest marks an account created by GuestSignup — no email, no phone,
+	// no LinkedIn, a generated display name (ADR-002 §3). It is the ONLY
+	// thing separating trust Level 0 from Level 1 (computeTrustLevel), and it
+	// flips to false permanently the first time the account completes any
+	// real verification. Nothing ever sets it back to true.
+	IsGuest bool
+
+	// CompanyName is the free-text organisation name required for Level 3
+	// alongside WorkEmailVerified (ADR-002 §2). Distinct from CompanyDomain,
+	// which is derived from the verified address — a domain does not give you
+	// back the name.
+	CompanyName string
+
 	// RatingAverage/RatingCount are written by the meetup module (SubmitRating,
 	// ADR-015, docs/02-domain/domain-model.md § Rating) — the auth module only
 	// ever reads them, both services sharing one literal Postgres database.
 	RatingAverage float64
 	RatingCount   int
+
+	// MeetupsCompleted is the same arrangement one step further: written
+	// only by the meetups-completed consumer (auth/0005), owned by the
+	// meetup module, read here. Unlike the rating columns above it was
+	// never a live cross-schema read either — the profile simply showed a
+	// hardcoded literal before this existed.
+	MeetupsCompleted int
 
 	// LastLocation* (ADR-021 §4) — a coarse, infrequently-refreshed
 	// last-known location, written only by UpdateLastKnownLocation (the
@@ -97,6 +117,10 @@ type NewUser struct {
 	Headline           string
 	TrustLevel         int
 	AgeConfirmedOver18 bool
+	// IsGuest is true only for GuestSignup (ADR-002 §3). Every other
+	// creation path leaves it false, which is what lands those accounts at
+	// Level 1 immediately.
+	IsGuest bool
 }
 
 // UserRepository is the persistence boundary for user records.
@@ -138,7 +162,21 @@ type UserRepository interface {
 	// (GetByWorkEmailHash) before calling this, so a UNIQUE violation here
 	// is only ever the same race UpdatePhoneNumber/UpdatePersonalEmail
 	// guard against, not the expected rejection path.
-	UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash string, trustLevel int) (User, error)
+	//
+	// companyName (ADR-002 §2) is written in that same statement, and that
+	// co-location is deliberate: Level 3 requires a verified work email AND a
+	// non-empty company name, so writing them together means the row can
+	// never hold one without the other. It is why this change needed no new
+	// RPC — VerifyCorporateEmailCode already required and validated the name.
+	UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, trustLevel int) (User, error)
+	// ClearGuestFlag marks an account as no longer a guest (ADR-002 §3),
+	// writing the recomputed trust level in the same statement.
+	//
+	// Needed only for the Apple/Google linking path, which writes nothing
+	// else on auth.users — every other verification clears the flag inside
+	// its own UPDATE (see queries/users.sql). Idempotent: calling it on an
+	// account that was never a guest is a no-op beyond the trust-level write.
+	ClearGuestFlag(ctx context.Context, userID string, trustLevel int) (User, error)
 	// UpdateLinkedInSub links LinkedIn to an already-existing account
 	// (ADR-014 — LinkedIn no longer creates accounts). Returns
 	// apperror.ErrConflict (wrapped) if linkedInSub already belongs to a
@@ -155,6 +193,15 @@ type UserRepository interface {
 	// stored, the ordering guard silently no-op'ing a stale/out-of-order
 	// redelivery rather than regressing a newer value.
 	UpsertRatingCache(ctx context.Context, userID string, ratingAverage float64, ratingCount int, occurredAt time.Time) (applied bool, err error)
+
+	// UpsertMeetupsCompletedCache is the same contract for the
+	// meetups-completed event: a guarded UPDATE of the cached count,
+	// occurredAt is the event's own timestamp, and applied is false (with
+	// no error) when the guard drops a stale or redelivered event.
+	//
+	// meetupsCompleted is an ABSOLUTE total, never a delta — see the SQL
+	// comment for why that is what makes redelivery harmless.
+	UpsertMeetupsCompletedCache(ctx context.Context, userID string, meetupsCompleted int, occurredAt time.Time) (applied bool, err error)
 
 	// UpdateLastKnownLocation (ADR-021 §4) — self-only data, no participant/
 	// trust-level gate needed. Plain unconditional write (see the SQL
@@ -229,6 +276,22 @@ type RefreshTokenRepository interface {
 	// Revoke is idempotent — revoking an already-revoked or unknown token
 	// is not an error (mirrors the gateway's /v1/auth/logout contract).
 	Revoke(ctx context.Context, tokenHash string) error
+	// RevokeAllForUser revokes every still-live refresh token belonging to
+	// userID and reports how many it actually revoked. This is the
+	// reuse-detection response (§B1), not a general logout-everywhere
+	// feature: presenting an already-rotated token is the signature of a
+	// stolen one, and at that point the server cannot tell the thief from
+	// the legitimate client, so the only safe move is to end the whole
+	// session family and make both re-authenticate.
+	//
+	// Idempotent — running it against a user with no live tokens revokes
+	// nothing and is not an error.
+	RevokeAllForUser(ctx context.Context, userID string) (revoked int, err error)
+	// DeleteExpired removes up to batchSize rows that can never
+	// authenticate anything again — revoked, or expired longer ago than
+	// retention. Returns how many it deleted so the caller can loop until
+	// the table is trimmed (§B3).
+	DeleteExpired(ctx context.Context, retention time.Duration, batchSize int) (deleted int, err error)
 }
 
 // VerificationPurpose mirrors the verification_purpose Postgres enum

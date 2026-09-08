@@ -441,3 +441,116 @@ func TestTriggerSOS_WritesSosEventRow(t *testing.T) {
 		t.Errorf("sos event = %+v, want the trigger's own values recorded", got)
 	}
 }
+
+// --- NotifyMeetupShare -----------------------------------------------------
+//
+// The planned, non-emergency counterpart of TriggerSOS: the user picks WHO to
+// tell, before anything has gone wrong. These tests are mostly about what a
+// modified client cannot do, because this sends real text messages.
+
+func TestNotifyMeetupShare_OnlyTextsTheContactsTheCallerPicked(t *testing.T) {
+	svc, users, trustedContacts, _, _, smsSender := newTestServiceForSOS(t)
+	ctx := context.Background()
+	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
+
+	picked, err := trustedContacts.Insert(ctx, "user-1", "Amma", "+94771111111", "")
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if _, err := trustedContacts.Insert(ctx, "user-1", "Friend", "+94772222222", ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	notified, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
+		ContactIDs:    []string{picked.ID},
+		LocationLabel: "Colombo Fort Cafe",
+		Latitude:      6.9271,
+		Longitude:     79.8612,
+		WindowStart:   time.Date(2026, 9, 8, 15, 0, 0, 0, time.UTC),
+		WindowEnd:     time.Date(2026, 9, 8, 16, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("NotifyMeetupShare: %v", err)
+	}
+	if notified != 1 {
+		t.Errorf("notified = %d, want 1 — only the picked contact", notified)
+	}
+	if got := len(smsSender.alertsSent); got != 1 {
+		t.Fatalf("sent %d messages, want 1 — the unpicked contact must not be texted", got)
+	}
+	if smsSender.alertsSent[0].to != "+94771111111" {
+		t.Errorf("texted %q, want the picked contact", smsSender.alertsSent[0].to)
+	}
+}
+
+func TestNotifyMeetupShare_RejectsContactsThatAreNotYours(t *testing.T) {
+	svc, users, trustedContacts, _, _, smsSender := newTestServiceForSOS(t)
+	ctx := context.Background()
+	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
+	if _, err := trustedContacts.Insert(ctx, "user-1", "Amma", "+94771111111", ""); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	// A guessed id belonging to somebody else. Without the intersection
+	// against the caller's own list this is a way to text a stranger.
+	_, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
+		ContactIDs:  []string{"not-this-users-contact"},
+		Latitude:    6.9271,
+		Longitude:   79.8612,
+		WindowStart: time.Now(),
+		WindowEnd:   time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Fatalf("error = %v, want ErrInvalidInput", err)
+	}
+	if len(smsSender.alertsSent) != 0 {
+		t.Error("a message was sent to a contact the caller does not own")
+	}
+}
+
+func TestNotifyMeetupShare_RejectsAnEmptySelectionAndBadCoordinates(t *testing.T) {
+	svc, users, trustedContacts, _, _, _ := newTestServiceForSOS(t)
+	ctx := context.Background()
+	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
+	c, _ := trustedContacts.Insert(ctx, "user-1", "Amma", "+94771111111", "")
+
+	if _, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
+		Latitude: 6.9, Longitude: 79.8,
+	}); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("empty selection: error = %v, want ErrInvalidInput", err)
+	}
+
+	// Garbage coordinates would otherwise flow into a real maps link.
+	if _, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
+		ContactIDs: []string{c.ID}, Latitude: math.NaN(), Longitude: 79.8,
+	}); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("NaN latitude: error = %v, want ErrInvalidInput", err)
+	}
+}
+
+// TestMeetupShareMessage_StatesAWindowAndPlaceNotLiveTracking pins the
+// wording. The app does not track anyone — it sends a static pin at the
+// meetup's own coordinates — and a message implying otherwise would be a
+// safety promise the product cannot keep.
+func TestMeetupShareMessage_StatesAWindowAndPlaceNotLiveTracking(t *testing.T) {
+	msg := sos.MeetupShareMessage(
+		"Ada Lovelace", "Colombo Fort Cafe", 6.9271, 79.8612,
+		time.Date(2026, 9, 8, 15, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 8, 16, 0, 0, 0, time.UTC),
+	)
+
+	for _, want := range []string{"Ada Lovelace", "Colombo Fort Cafe", "maps.google.com"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q is missing %q", msg, want)
+		}
+	}
+	for _, forbidden := range []string{"live", "Live", "track", "Track"} {
+		if strings.Contains(msg, forbidden) {
+			t.Errorf("message %q claims %q — the app sends a static pin, not tracking", msg, forbidden)
+		}
+	}
+	// Not an emergency: it must not borrow SOS's alarm wording.
+	if strings.Contains(msg, "may need help") {
+		t.Errorf("message %q reads as an SOS alert", msg)
+	}
+}

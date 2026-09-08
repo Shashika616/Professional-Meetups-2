@@ -22,7 +22,9 @@ package identity
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -66,16 +68,31 @@ type VerifiedIdentity struct {
 // identity provider's own published keys, and checks that the token was
 // minted for THIS sign-in attempt (expectedNonce).
 //
-// expectedNonce is the value the client generated and passed to the
-// provider's own sign-in call, forwarded to the server alongside the token.
-// The server compares, it never derives: for Sign in with Apple, where the
-// convention is to hand Apple the SHA-256 of a locally-generated random
-// value, the client must send that same SHA-256 (which is what lands in the
-// token's nonce claim), not the pre-image. An empty expectedNonce is
-// rejected outright rather than treated as "skip the check" — a bypass
-// reachable by simply omitting a field is not a check.
+// rawNonce is the PRE-IMAGE of the token's nonce claim: the client generates
+// a random value, hands the provider SHA-256(rawNonce) as the sign-in
+// request's nonce (which is what the provider embeds in the id_token), and
+// sends the raw value here. This function hashes it and compares.
+//
+// Why the pre-image and not the claim value itself — this is the whole point
+// of the check, and getting it wrong makes it decorative:
+//
+//	A token's nonce claim is not secret. It is base64 in a JWT anyone holding
+//	the token can read. If the server compared a client-supplied value
+//	directly against that claim, an attacker who obtained an id_token by any
+//	means (a log, a debug session, a malicious SDK, another app sharing the
+//	audience) could read the claim out of the token and submit it right back
+//	— passing the check and defeating the entire purpose. Requiring the
+//	PRE-IMAGE closes that: SHA-256 is one-way, the raw value never appears in
+//	the token, and it never leaves the device except on the one request it
+//	authorizes.
+//
+// This is the same construction Apple documents for Sign in with Apple and
+// that Firebase's own `OAuthProvider.credential(idToken:rawNonce:)` uses.
+//
+// An empty rawNonce is rejected outright rather than treated as "skip the
+// check" — a bypass reachable by omitting a field is not a check.
 type Provider interface {
-	Verify(ctx context.Context, idToken, expectedNonce string) (VerifiedIdentity, error)
+	Verify(ctx context.Context, idToken, rawNonce string) (VerifiedIdentity, error)
 }
 
 // idTokenClaims is the subset of an Apple/Google id_token this package
@@ -158,11 +175,11 @@ func newJWKSProvider(ctx context.Context, name, jwksURL, audience string, validI
 // with an empty audience (real credentials not yet issued for this
 // environment) can never pass verification here: no real id_token will
 // ever carry an empty aud claim, so this fails closed, not open.
-func (p *jwksProvider) Verify(_ context.Context, idToken, expectedNonce string) (VerifiedIdentity, error) {
+func (p *jwksProvider) Verify(_ context.Context, idToken, rawNonce string) (VerifiedIdentity, error) {
 	if p.audience == "" {
 		return VerifiedIdentity{}, fmt.Errorf("identity: %s: provider not configured (no audience set)", p.name)
 	}
-	if expectedNonce == "" {
+	if rawNonce == "" {
 		return VerifiedIdentity{}, fmt.Errorf("identity: %s: sign-in nonce is required", p.name)
 	}
 
@@ -189,13 +206,14 @@ func (p *jwksProvider) Verify(_ context.Context, idToken, expectedNonce string) 
 	if !slices.Contains(p.validIssuers, claims.Issuer) {
 		return VerifiedIdentity{}, fmt.Errorf("identity: %s: unexpected issuer %q", p.name, claims.Issuer)
 	}
-	// Replay protection: the token must carry the nonce this specific
-	// sign-in attempt generated. Checked after signature/audience/issuer, so
-	// an attacker can't use nonce-comparison timing to learn anything about
-	// a token that was never validly signed in the first place.
-	// Constant-time on principle, same discipline as the OTP comparison in
-	// the parent package.
-	if subtle.ConstantTimeCompare([]byte(claims.Nonce), []byte(expectedNonce)) != 1 {
+	// Replay protection: the token's nonce claim must be the hash of the
+	// pre-image the caller presented (see the Provider doc comment for why
+	// the pre-image, not the claim value, is what the caller must know).
+	// Checked after signature/audience/issuer, so an attacker can't use
+	// nonce-comparison timing to learn anything about a token that was never
+	// validly signed in the first place. Constant-time on principle, same
+	// discipline as the OTP comparison in the parent package.
+	if subtle.ConstantTimeCompare([]byte(claims.Nonce), []byte(HashNonce(rawNonce))) != 1 {
 		return VerifiedIdentity{}, fmt.Errorf("identity: %s: id_token nonce does not match this sign-in attempt", p.name)
 	}
 	if claims.Subject == "" {
@@ -203,4 +221,17 @@ func (p *jwksProvider) Verify(_ context.Context, idToken, expectedNonce string) 
 	}
 
 	return VerifiedIdentity{Subject: claims.Subject, Email: claims.Email, Name: claims.Name}, nil
+}
+
+// HashNonce is the one definition of how a raw sign-in nonce maps to the
+// value a provider embeds in an id_token: SHA-256, lowercase hex.
+//
+// Exported so the clients that have to produce the same value — the Flutter
+// app, and this package's own tests — are provably agreeing with the server
+// rather than each re-implementing it. Hex rather than base64 because it has
+// exactly one encoding: no padding variants, no URL-safe alphabet, nothing
+// for a client on another platform to get subtly wrong.
+func HashNonce(rawNonce string) string {
+	sum := sha256.Sum256([]byte(rawNonce))
+	return hex.EncodeToString(sum[:])
 }

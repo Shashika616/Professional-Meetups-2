@@ -12,10 +12,65 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearUserGuestFlag = `-- name: ClearUserGuestFlag :one
+UPDATE auth.users SET is_guest = false, trust_level = $2 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
+`
+
+type ClearUserGuestFlagParams struct {
+	ID         uuid.UUID `json:"id"`
+	TrustLevel int16     `json:"trust_level"`
+}
+
+// Linking Apple or Google to an existing account (LinkIdentityToUser's
+// non-LinkedIn branch, ADR-002 §3). That path writes only user_identities,
+// so unlike every other verification it has no users UPDATE to ride along
+// with — hence its own statement.
+//
+// It writes trust_level too, for the same reason every other mutation above
+// does: the caller has already computed the new value, and leaving it stale
+// would strand a freshly-upgraded guest at 0 until some unrelated write
+// happened to recompute it.
+func (q *Queries) ClearUserGuestFlag(ctx context.Context, arg ClearUserGuestFlagParams) (AuthUser, error) {
+	row := q.db.QueryRow(ctx, clearUserGuestFlag, arg.ID, arg.TrustLevel)
+	var i AuthUser
+	err := row.Scan(
+		&i.ID,
+		&i.LinkedinSub,
+		&i.FullName,
+		&i.ProfilePhotoUrl,
+		&i.Headline,
+		&i.TrustLevel,
+		&i.AccountStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PhoneNumber,
+		&i.PersonalEmail,
+		&i.LegalName,
+		&i.Address,
+		&i.CompanyDomain,
+		&i.WorkEmailVerified,
+		&i.WorkEmailVerifiedAt,
+		&i.AgeConfirmedOver18,
+		&i.AgeConfirmedAt,
+		&i.WorkEmailHash,
+		&i.RatingAverage,
+		&i.RatingCount,
+		&i.RatingUpdatedAt,
+		&i.LastLocationLat,
+		&i.LastLocationLng,
+		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
-INSERT INTO auth.users (linkedin_sub, full_name, profile_photo_url, headline, trust_level, age_confirmed_over_18, age_confirmed_at)
-VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN now() ELSE NULL END)
-RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+INSERT INTO auth.users (linkedin_sub, full_name, profile_photo_url, headline, trust_level, age_confirmed_over_18, age_confirmed_at, is_guest)
+VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN now() ELSE NULL END, $7)
+RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type CreateUserParams struct {
@@ -25,12 +80,18 @@ type CreateUserParams struct {
 	Headline           pgtype.Text `json:"headline"`
 	TrustLevel         int16       `json:"trust_level"`
 	AgeConfirmedOver18 bool        `json:"age_confirmed_over_18"`
+	IsGuest            bool        `json:"is_guest"`
 }
 
 // age_confirmed_at is set to now() only when age_confirmed_over_18 is true
 // (the only case CreateUser is ever called with, in practice — the service
 // layer rejects false before reaching here) — never backdated, never set
 // for a false confirmation.
+//
+// is_guest is passed explicitly rather than left to the column DEFAULT: the
+// guest path is the only caller that sets it true, and making every caller
+// state which kind of account it is creating keeps a future fifth signup path
+// from silently inheriting "not a guest" without anyone deciding it.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (AuthUser, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.LinkedinSub,
@@ -39,6 +100,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (AuthUse
 		arg.Headline,
 		arg.TrustLevel,
 		arg.AgeConfirmedOver18,
+		arg.IsGuest,
 	)
 	var i AuthUser
 	err := row.Scan(
@@ -67,12 +129,16 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (AuthUse
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at FROM auth.users WHERE id = $1
+SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at FROM auth.users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (AuthUser, error) {
@@ -104,12 +170,16 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (AuthUser, erro
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const getUserByLinkedInSub = `-- name: GetUserByLinkedInSub :one
-SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at FROM auth.users WHERE linkedin_sub = $1
+SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at FROM auth.users WHERE linkedin_sub = $1
 `
 
 func (q *Queries) GetUserByLinkedInSub(ctx context.Context, linkedinSub pgtype.Text) (AuthUser, error) {
@@ -141,12 +211,16 @@ func (q *Queries) GetUserByLinkedInSub(ctx context.Context, linkedinSub pgtype.T
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const getUserByPersonalEmail = `-- name: GetUserByPersonalEmail :one
-SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at FROM auth.users WHERE personal_email = $1
+SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at FROM auth.users WHERE personal_email = $1
 `
 
 // personal_email's mere presence already means "verified" in this schema
@@ -185,12 +259,16 @@ func (q *Queries) GetUserByPersonalEmail(ctx context.Context, personalEmail pgty
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const getUserByWorkEmailHash = `-- name: GetUserByWorkEmailHash :one
-SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at FROM auth.users WHERE work_email_hash = $1
+SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at FROM auth.users WHERE work_email_hash = $1
 `
 
 // Reuse-abuse check (ADR-019 §3) — called before committing a corporate-
@@ -226,12 +304,16 @@ func (q *Queries) GetUserByWorkEmailHash(ctx context.Context, workEmailHash pgty
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const updateUserFullName = `-- name: UpdateUserFullName :one
-UPDATE auth.users SET full_name = $2 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+UPDATE auth.users SET full_name = $2 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type UpdateUserFullNameParams struct {
@@ -271,13 +353,17 @@ func (q *Queries) UpdateUserFullName(ctx context.Context, arg UpdateUserFullName
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const updateUserLastKnownLocation = `-- name: UpdateUserLastKnownLocation :one
 UPDATE auth.users SET last_location_lat = $2, last_location_lng = $3, last_location_updated_at = now()
-WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type UpdateUserLastKnownLocationParams struct {
@@ -321,12 +407,16 @@ func (q *Queries) UpdateUserLastKnownLocation(ctx context.Context, arg UpdateUse
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const updateUserLinkedInSub = `-- name: UpdateUserLinkedInSub :one
-UPDATE auth.users SET linkedin_sub = $2, trust_level = $3 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+UPDATE auth.users SET linkedin_sub = $2, trust_level = $3, is_guest = false WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type UpdateUserLinkedInSubParams struct {
@@ -344,6 +434,9 @@ type UpdateUserLinkedInSubParams struct {
 // linking a LinkedIn subject already claimed by a different user — the
 // caller (internal/service) maps that 23505 into apperror.ErrConflict,
 // same pattern as UpdateUserPhoneNumber/UpdateUserPersonalEmail below.
+//
+// is_guest is cleared here too (ADR-002 §3): connecting LinkedIn is one of
+// the four real signup paths, so a guest doing it stops being a guest.
 func (q *Queries) UpdateUserLinkedInSub(ctx context.Context, arg UpdateUserLinkedInSubParams) (AuthUser, error) {
 	row := q.db.QueryRow(ctx, updateUserLinkedInSub, arg.ID, arg.LinkedinSub, arg.TrustLevel)
 	var i AuthUser
@@ -373,12 +466,16 @@ func (q *Queries) UpdateUserLinkedInSub(ctx context.Context, arg UpdateUserLinke
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const updateUserPersonalDetails = `-- name: UpdateUserPersonalDetails :one
-UPDATE auth.users SET legal_name = $2, address = $3, trust_level = $4 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+UPDATE auth.users SET legal_name = $2, address = $3, trust_level = $4, is_guest = false WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type UpdateUserPersonalDetailsParams struct {
@@ -422,12 +519,16 @@ func (q *Queries) UpdateUserPersonalDetails(ctx context.Context, arg UpdateUserP
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const updateUserPersonalEmail = `-- name: UpdateUserPersonalEmail :one
-UPDATE auth.users SET personal_email = $2, trust_level = $3 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+UPDATE auth.users SET personal_email = $2, trust_level = $3, is_guest = false WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type UpdateUserPersonalEmailParams struct {
@@ -465,13 +566,17 @@ func (q *Queries) UpdateUserPersonalEmail(ctx context.Context, arg UpdateUserPer
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const updateUserPhoneNumber = `-- name: UpdateUserPhoneNumber :one
 
-UPDATE auth.users SET phone_number = $2, trust_level = $3 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+UPDATE auth.users SET phone_number = $2, trust_level = $3, is_guest = false WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type UpdateUserPhoneNumberParams struct {
@@ -485,6 +590,13 @@ type UpdateUserPhoneNumberParams struct {
 // (internal/service) computes the new value via computeTrustLevel before
 // calling these, so the row is never left with a stale trust_level between
 // the field write and a separate recompute step.
+//
+// EVERY ONE OF THEM ALSO CLEARS is_guest (ADR-002 §3). Completing any real
+// verification is exactly what stops an account being a guest, and putting
+// that in the SQL rather than at the call sites means it cannot be forgotten
+// by one of them — the failure it prevents is a guest who verifies something,
+// stays flagged, and is stranded at Level 0 with no way to notice why.
+// Idempotent: it is already false for every non-guest account.
 func (q *Queries) UpdateUserPhoneNumber(ctx context.Context, arg UpdateUserPhoneNumberParams) (AuthUser, error) {
 	row := q.db.QueryRow(ctx, updateUserPhoneNumber, arg.ID, arg.PhoneNumber, arg.TrustLevel)
 	var i AuthUser
@@ -514,13 +626,17 @@ func (q *Queries) UpdateUserPhoneNumber(ctx context.Context, arg UpdateUserPhone
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
 }
 
 const updateUserWorkEmailVerified = `-- name: UpdateUserWorkEmailVerified :one
-UPDATE auth.users SET company_domain = $2, work_email_verified = $3, work_email_verified_at = $4, work_email_hash = $5, trust_level = $6
-WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at
+UPDATE auth.users SET company_domain = $2, work_email_verified = $3, work_email_verified_at = $4, work_email_hash = $5, trust_level = $6, company_name = $7, is_guest = false
+WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `
 
 type UpdateUserWorkEmailVerifiedParams struct {
@@ -530,6 +646,7 @@ type UpdateUserWorkEmailVerifiedParams struct {
 	WorkEmailVerifiedAt pgtype.Timestamptz `json:"work_email_verified_at"`
 	WorkEmailHash       pgtype.Text        `json:"work_email_hash"`
 	TrustLevel          int16              `json:"trust_level"`
+	CompanyName         pgtype.Text        `json:"company_name"`
 }
 
 // work_email_hash is set alongside company_domain/work_email_verified
@@ -537,6 +654,15 @@ type UpdateUserWorkEmailVerifiedParams struct {
 // abuse check's UNIQUE anchor (GetUserByWorkEmailHash below is what
 // detects a collision BEFORE this runs; the UNIQUE constraint here is the
 // last-resort race guard, same pattern as phone_number/personal_email).
+//
+// company_name (ADR-002 §1) is written HERE, in the same statement as
+// work_email_verified, rather than through a separate save. That is the whole
+// reason no new RPC was added for it: Level 3 requires both a verified work
+// email AND a non-empty company name, and writing them together makes it
+// impossible for the row to hold one without the other. VerifyCorporateEmailCode
+// already required, validated and length-capped company_name long before this
+// change (it feeds the known-companies name-vs-domain cross-check) — it simply
+// had nowhere to be persisted.
 func (q *Queries) UpdateUserWorkEmailVerified(ctx context.Context, arg UpdateUserWorkEmailVerifiedParams) (AuthUser, error) {
 	row := q.db.QueryRow(ctx, updateUserWorkEmailVerified,
 		arg.ID,
@@ -545,6 +671,7 @@ func (q *Queries) UpdateUserWorkEmailVerified(ctx context.Context, arg UpdateUse
 		arg.WorkEmailVerifiedAt,
 		arg.WorkEmailHash,
 		arg.TrustLevel,
+		arg.CompanyName,
 	)
 	var i AuthUser
 	err := row.Scan(
@@ -573,8 +700,58 @@ func (q *Queries) UpdateUserWorkEmailVerified(ctx context.Context, arg UpdateUse
 		&i.LastLocationLat,
 		&i.LastLocationLng,
 		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
 	)
 	return i, err
+}
+
+const upsertUserMeetupsCompletedCache = `-- name: UpsertUserMeetupsCompletedCache :execrows
+UPDATE auth.users
+SET meetups_completed = $1,
+    meetups_completed_updated_at = $2
+WHERE id = $3
+  AND $1::int > meetups_completed
+`
+
+type UpsertUserMeetupsCompletedCacheParams struct {
+	MeetupsCompleted int32              `json:"meetups_completed"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	UserID           uuid.UUID          `json:"user_id"`
+}
+
+// The meetups-completed consumer's idempotent, order-guarded upsert.
+//
+// The event carries an ABSOLUTE count, not a delta. That is what makes a
+// redelivery safe: re-applying "this user has completed 7 meetups" is a
+// no-op, whereas re-applying "+1" would silently inflate the number every
+// time the bus redelivered.
+//
+// Corrected 2026-09-08: this used to guard on `occurred_at` (mirroring
+// UpsertUserRatingCache above), the way every other guarded-upsert in this
+// codebase does. That comparison is wrong for THIS cache specifically —
+// unlike a rating average, a completed-meetup count is monotonically
+// non-decreasing per user (a meetup can never un-complete), so the value
+// itself is a safe, strictly correct ordering key, and comparing on it is
+// strictly safer than comparing on wall-clock time: two concurrent
+// completions for the same user (e.g. a manual host-close racing an
+// auto-close sweep's batch recompute) can each recompute from a snapshot
+// that doesn't see the other's not-yet-committed completion, so the
+// transaction that happens to commit second can carry a LOWER correct
+// count with a LATER timestamp — under the old guard that overwrites the
+// higher, correct value, and nothing ever corrects it since this cache is
+// only ever written from a completion event, never reconciled. Guarding on
+// the count itself makes a stale/lower recompute a no-op instead of a
+// regression, with no loss of redelivery-safety (an exact-equal redelivery
+// is still a no-op, just via `>` instead of failing an `IS NULL` check).
+func (q *Queries) UpsertUserMeetupsCompletedCache(ctx context.Context, arg UpsertUserMeetupsCompletedCacheParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertUserMeetupsCompletedCache, arg.MeetupsCompleted, arg.OccurredAt, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertUserRatingCache = `-- name: UpsertUserRatingCache :execrows

@@ -82,12 +82,13 @@ type SessionResult struct {
 type CompleteFederatedSignupRequest struct {
 	Provider FederatedProvider
 	IDToken  string
-	// Nonce is the client-generated per-sign-in-attempt value that must
-	// match the id_token's own `nonce` claim. NOT present in the source's
-	// proto — added here as the security fix
-	// docs/security-review-framework.md's Authenticity section requires
-	// (see identity.Provider.Verify). Required: an empty nonce is rejected,
-	// not treated as "skip the check".
+	// Nonce is the RAW, client-generated per-sign-in-attempt value whose
+	// SHA-256 the id_token carries as its `nonce` claim — the pre-image, not
+	// the claim itself (identity.Provider.Verify explains why that
+	// distinction is the entire protection). NOT present in the source's
+	// proto; added here as the security fix
+	// docs/security-review-framework.md's Authenticity section requires.
+	// Required: an empty nonce is rejected, not treated as "skip the check".
 	Nonce              string
 	AgeConfirmedOver18 bool
 }
@@ -160,6 +161,14 @@ type CompleteEmailSignupRequest struct {
 	AgeConfirmedOver18 bool
 }
 
+// GuestSignupRequest carries only the 18+ attestation (ADR-002 §3). There is
+// deliberately nothing else in it: a guest supplies no email, no phone, no
+// name — the display handle is generated server-side, never client-supplied,
+// so a caller cannot pick their own "Guest-" name or impersonate one.
+type GuestSignupRequest struct {
+	AgeConfirmedOver18 bool
+}
+
 // SubmitPersonalDetailsRequest is the one Level 2 step with no OTP — legal
 // name and address are self-reported.
 type SubmitPersonalDetailsRequest struct {
@@ -195,10 +204,38 @@ type Profile struct {
 	WorkEmailVerified       bool
 	RatingAverage           float64
 	RatingCount             int
-	PhoneNumber             string
-	PersonalEmail           string
-	LegalName               string
-	Address                 string
+	// MeetupsCompleted is the profile's "MEETUPS" figure. Cached here,
+	// owned by the meetup module — see UpsertMeetupsCompletedCache.
+	MeetupsCompleted int
+	PhoneNumber      string
+	PersonalEmail    string
+	LegalName        string
+	Address          string
+
+	// LinkedInConnected is a derived boolean, never the raw linkedin_sub.
+	//
+	// REQUIRED BY ADR-002, not optional polish: the client used to derive
+	// "LinkedIn is connected" from trustLevel >= 1, which was sound under the
+	// old ladder because Level 1 was reachable ONLY via LinkedIn. ADR-002 §2
+	// makes every real signup path Level 1, so that inference now reports
+	// true for an Apple/Google/email account that has never connected
+	// LinkedIn — which would show the Level 2 checklist as further along than
+	// it is and unlock rows the server rejects (requireLinkedIn, deliberately
+	// unchanged). The client needs the real signal.
+	LinkedInConnected bool
+
+	// IsGuest lets the client render "you're browsing as a guest" chrome and
+	// route a guest to signup instead of to the Level 2 checklist. Exposed
+	// rather than left for the client to infer from TrustLevel == 0: those
+	// two happen to coincide today, but they are different questions, and a
+	// client that guesses one from the other silently breaks if the ladder
+	// ever changes again (ADR-002 §2 changed it once already).
+	IsGuest bool
+
+	// CompanyName is exposed so the hosting-unlock page can prefill it when
+	// a company was already registered once — the same reason CompanyDomain
+	// is already here. Self-view only, like every other field on this struct.
+	CompanyName string
 }
 
 // UpdateLastKnownLocationRequest carries the browse screen's on-demand

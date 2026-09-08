@@ -142,8 +142,14 @@ func TestCompleteFederatedSignup_NewUser(t *testing.T) {
 	}
 
 	created := deps.users.byID[resp.UserID]
-	if created.TrustLevel != 0 {
-		t.Errorf("new federated user's TrustLevel = %d, want 0 (Level 0, no LinkedIn linked yet)", created.TrustLevel)
+	// CHANGED (ADR-002 §2): was 0, "no LinkedIn linked yet". A federated
+	// signup is now worth Level 1 immediately; LinkedIn is still required to
+	// climb to Level 2, which requireLinkedIn (unchanged) enforces.
+	if created.TrustLevel != 1 {
+		t.Errorf("new federated user's TrustLevel = %d, want 1 (ADR-002 §2)", created.TrustLevel)
+	}
+	if created.IsGuest {
+		t.Error("IsGuest = true for a federated signup — only GuestSignup creates guests")
 	}
 	if !created.AgeConfirmedOver18 {
 		t.Error("AgeConfirmedOver18 = false, want true")
@@ -171,8 +177,14 @@ func TestCompleteFederatedSignup_NewUser(t *testing.T) {
 	if len(deps.users.createCalls) != 1 {
 		t.Fatalf("Create called %d times, want 1", len(deps.users.createCalls))
 	}
-	if deps.users.createCalls[0].TrustLevel != 0 {
-		t.Errorf("created user's TrustLevel = %d, want 0", deps.users.createCalls[0].TrustLevel)
+	// CHANGED (ADR-002 §2): was 0. Asserted on the Create call itself, not
+	// just the stored row, so the value written at creation time is right
+	// rather than corrected by a later recompute.
+	if deps.users.createCalls[0].TrustLevel != 1 {
+		t.Errorf("created user's TrustLevel = %d, want 1 (ADR-002 §2)", deps.users.createCalls[0].TrustLevel)
+	}
+	if deps.users.createCalls[0].IsGuest {
+		t.Error("Create was called with IsGuest = true for a federated signup")
 	}
 }
 
@@ -483,8 +495,9 @@ func TestEmailSignupAndLogin_FullRoundTrip(t *testing.T) {
 	}
 
 	created := deps.users.byID[signupResp.UserID]
-	if created.TrustLevel != 0 {
-		t.Errorf("TrustLevel = %d, want 0 (email alone never grants Level 1)", created.TrustLevel)
+	// CHANGED (ADR-002 §2): was 0, "email alone never grants Level 1".
+	if created.TrustLevel != 1 {
+		t.Errorf("TrustLevel = %d, want 1 (email signup grants Level 1 immediately, ADR-002 §2)", created.TrustLevel)
 	}
 
 	// The same code must not be usable twice.
