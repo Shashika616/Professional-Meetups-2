@@ -63,10 +63,14 @@ func profileToProto(p auth.Profile) *authv1.ProfileResponse {
 		WorkEmailVerified:       p.WorkEmailVerified,
 		RatingAverage:           p.RatingAverage,
 		RatingCount:             int32(p.RatingCount),
+		MeetupsCompleted:        int32(p.MeetupsCompleted),
 		PhoneNumber:             p.PhoneNumber,
 		PersonalEmail:           p.PersonalEmail,
 		LegalName:               p.LegalName,
 		Address:                 p.Address,
+		LinkedinConnected:       p.LinkedInConnected,
+		IsGuest:                 p.IsGuest,
+		CompanyName:             p.CompanyName,
 	}
 }
 
@@ -178,6 +182,19 @@ func (s *AuthServer) CompleteEmailSignup(ctx context.Context, req *authv1.Comple
 	session, err := s.svc.CompleteEmailSignup(ctx, auth.CompleteEmailSignupRequest{
 		Email:              req.GetEmail(),
 		Code:               req.GetCode(),
+		AgeConfirmedOver18: req.GetAgeConfirmedOver_18(),
+	})
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return sessionToProto(session), nil
+}
+
+// GuestSignup creates a read-only guest account (ADR-002 §3). Nothing from
+// the request reaches the account beyond the age attestation — the display
+// handle is generated server-side, so a caller cannot choose it.
+func (s *AuthServer) GuestSignup(ctx context.Context, req *authv1.GuestSignupRequest) (*authv1.SessionResponse, error) {
+	session, err := s.svc.GuestSignup(ctx, auth.GuestSignupRequest{
 		AgeConfirmedOver18: req.GetAgeConfirmedOver_18(),
 	})
 	if err != nil {

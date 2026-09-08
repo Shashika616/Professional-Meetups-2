@@ -24,6 +24,7 @@ const (
 	AuthService_LinkIdentity_FullMethodName                    = "/auth.v1.AuthService/LinkIdentity"
 	AuthService_StartEmailSignup_FullMethodName                = "/auth.v1.AuthService/StartEmailSignup"
 	AuthService_CompleteEmailSignup_FullMethodName             = "/auth.v1.AuthService/CompleteEmailSignup"
+	AuthService_GuestSignup_FullMethodName                     = "/auth.v1.AuthService/GuestSignup"
 	AuthService_StartEmailLogin_FullMethodName                 = "/auth.v1.AuthService/StartEmailLogin"
 	AuthService_CompleteEmailLogin_FullMethodName              = "/auth.v1.AuthService/CompleteEmailLogin"
 	AuthService_RefreshSession_FullMethodName                  = "/auth.v1.AuthService/RefreshSession"
@@ -126,6 +127,15 @@ type AuthServiceClient interface {
 	// creates a new Level 0 user. See SignUpOrRecoverWithEmail's own doc
 	// comment for why recovery is the deliberate design here, not a bug.
 	CompleteEmailSignup(ctx context.Context, in *CompleteEmailSignupRequest, opts ...grpc.CallOption) (*SessionResponse, error)
+	// GuestSignup creates a read-only guest account and returns a real session
+	// for it (ADR-002 §3). No email, no phone, no LinkedIn — just the same
+	// mandatory 18+ attestation every other signup path requires. The display
+	// name is generated server-side and is never client-supplied.
+	//
+	// There is no matching "upgrade" RPC, deliberately: a guest who later
+	// verifies anything does so through the existing verification RPCs, against
+	// the same auth.users row, which flips is_guest to false on its own.
+	GuestSignup(ctx context.Context, in *GuestSignupRequest, opts ...grpc.CallOption) (*SessionResponse, error)
 	// StartEmailLogin/CompleteEmailLogin (ADR-019 §1) are symmetric to
 	// StartEmailSignup/CompleteEmailSignup in shape — a fresh
 	// VERIFICATION_PURPOSE_EMAIL_LOGIN code, sent and verified the same
@@ -248,6 +258,16 @@ func (c *authServiceClient) CompleteEmailSignup(ctx context.Context, in *Complet
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SessionResponse)
 	err := c.cc.Invoke(ctx, AuthService_CompleteEmailSignup_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) GuestSignup(ctx context.Context, in *GuestSignupRequest, opts ...grpc.CallOption) (*SessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionResponse)
+	err := c.cc.Invoke(ctx, AuthService_GuestSignup_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -516,6 +536,15 @@ type AuthServiceServer interface {
 	// creates a new Level 0 user. See SignUpOrRecoverWithEmail's own doc
 	// comment for why recovery is the deliberate design here, not a bug.
 	CompleteEmailSignup(context.Context, *CompleteEmailSignupRequest) (*SessionResponse, error)
+	// GuestSignup creates a read-only guest account and returns a real session
+	// for it (ADR-002 §3). No email, no phone, no LinkedIn — just the same
+	// mandatory 18+ attestation every other signup path requires. The display
+	// name is generated server-side and is never client-supplied.
+	//
+	// There is no matching "upgrade" RPC, deliberately: a guest who later
+	// verifies anything does so through the existing verification RPCs, against
+	// the same auth.users row, which flips is_guest to false on its own.
+	GuestSignup(context.Context, *GuestSignupRequest) (*SessionResponse, error)
 	// StartEmailLogin/CompleteEmailLogin (ADR-019 §1) are symmetric to
 	// StartEmailSignup/CompleteEmailSignup in shape — a fresh
 	// VERIFICATION_PURPOSE_EMAIL_LOGIN code, sent and verified the same
@@ -608,6 +637,9 @@ func (UnimplementedAuthServiceServer) StartEmailSignup(context.Context, *StartVe
 }
 func (UnimplementedAuthServiceServer) CompleteEmailSignup(context.Context, *CompleteEmailSignupRequest) (*SessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteEmailSignup not implemented")
+}
+func (UnimplementedAuthServiceServer) GuestSignup(context.Context, *GuestSignupRequest) (*SessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GuestSignup not implemented")
 }
 func (UnimplementedAuthServiceServer) StartEmailLogin(context.Context, *StartVerificationRequest) (*StartVerificationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartEmailLogin not implemented")
@@ -770,6 +802,24 @@ func _AuthService_CompleteEmailSignup_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).CompleteEmailSignup(ctx, req.(*CompleteEmailSignupRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_GuestSignup_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GuestSignupRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GuestSignup(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GuestSignup_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GuestSignup(ctx, req.(*GuestSignupRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1124,6 +1174,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteEmailSignup",
 			Handler:    _AuthService_CompleteEmailSignup_Handler,
+		},
+		{
+			MethodName: "GuestSignup",
+			Handler:    _AuthService_GuestSignup_Handler,
 		},
 		{
 			MethodName: "StartEmailLogin",

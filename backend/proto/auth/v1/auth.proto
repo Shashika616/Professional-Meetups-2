@@ -85,6 +85,15 @@ service AuthService {
   // creates a new Level 0 user. See SignUpOrRecoverWithEmail's own doc
   // comment for why recovery is the deliberate design here, not a bug.
   rpc CompleteEmailSignup(CompleteEmailSignupRequest) returns (SessionResponse);
+  // GuestSignup creates a read-only guest account and returns a real session
+  // for it (ADR-002 §3). No email, no phone, no LinkedIn — just the same
+  // mandatory 18+ attestation every other signup path requires. The display
+  // name is generated server-side and is never client-supplied.
+  //
+  // There is no matching "upgrade" RPC, deliberately: a guest who later
+  // verifies anything does so through the existing verification RPCs, against
+  // the same auth.users row, which flips is_guest to false on its own.
+  rpc GuestSignup(GuestSignupRequest) returns (SessionResponse);
   // StartEmailLogin/CompleteEmailLogin (ADR-019 §1) are symmetric to
   // StartEmailSignup/CompleteEmailSignup in shape — a fresh
   // VERIFICATION_PURPOSE_EMAIL_LOGIN code, sent and verified the same
@@ -177,18 +186,22 @@ message CompleteFederatedSignupRequest {
   string id_token = 2;
   bool age_confirmed_over_18 = 3;
   // nonce is a DELIBERATE ADDITION over the sibling repo's contract, not a
-  // port: the value the client generated for this sign-in attempt and passed
-  // to Apple's/Google's own sign-in call, which the provider echoes back
-  // inside the signed id_token. The server compares the two and rejects a
-  // mismatch (internal/modules/auth/identity), closing the replay window the
-  // source leaves open by never checking this claim — see
-  // docs/security-review-framework.md's Authenticity section. Required: an
-  // empty value is rejected, never treated as "skip the check".
+  // port — it closes the id_token replay window the source leaves open by
+  // never checking this claim (docs/security-review-framework.md,
+  // Authenticity). Required: an empty value is rejected, never treated as
+  // "skip the check".
   //
-  // For Sign in with Apple, where the convention is to hand Apple the
-  // SHA-256 of a locally-generated random value, send that same SHA-256 —
-  // it is what lands in the token's nonce claim; the server compares, it
-  // never derives.
+  // IT IS THE PRE-IMAGE, NOT THE CLAIM VALUE. The client generates a random
+  // value, hands the provider SHA-256(value) as the sign-in request's nonce
+  // (which is what Apple/Google embed in the id_token), and sends the RAW
+  // value here. The server hashes it and compares.
+  //
+  // Sending the claim value itself would make the check decorative: a JWT's
+  // nonce claim is readable by anyone holding the token, so an attacker who
+  // obtained an id_token could read it out and submit it right back. The
+  // pre-image is what they cannot produce. Same construction Apple documents
+  // for Sign in with Apple and that Firebase's own
+  // OAuthProvider.credential(idToken:rawNonce:) uses.
   string nonce = 4;
 }
 
@@ -210,10 +223,17 @@ message LinkIdentityRequest {
   string authorization_code = 4;
   string redirect_uri = 5;         // must exactly match the URI used to start the flow
   // nonce accompanies id_token on the Apple/Google branch, exactly as on
-  // CompleteFederatedSignupRequest above (and ignored on the LinkedIn
-  // branch, which has no id_token to bind it to and is protected by its own
-  // state parameter instead).
+  // CompleteFederatedSignupRequest above — the raw pre-image, not the
+  // token's claim value. Ignored on the LinkedIn branch, which has no
+  // id_token to bind it to and is protected by its own state parameter
+  // instead.
   string nonce = 6;
+}
+
+// GuestSignupRequest carries only the age attestation — a guest supplies
+// nothing else, by design.
+message GuestSignupRequest {
+  bool age_confirmed_over_18 = 1;
 }
 
 message CompleteEmailSignupRequest {
@@ -375,6 +395,24 @@ message ProfileResponse {
   string personal_email = 13;
   string legal_name = 14;
   string address = 15;
+  // ADR-002: derived boolean, never the raw linkedin_sub. The client can no
+  // longer infer this from trust_level >= 1 — after ADR-002 §2 that is true
+  // for every real signup path, LinkedIn or not.
+  bool linkedin_connected = 18;
+  // ADR-002 §3: lets the client render guest chrome and route a guest to
+  // signup rather than to the Level 2 checklist, without inferring it from
+  // trust_level == 0 (a different question that only coincides today).
+  bool is_guest = 16;
+  // ADR-002 §2: the free-text organisation name, now part of the Level 3
+  // condition alongside work_email_verified. Prefills the hosting-unlock
+  // page when a company was registered once already.
+  string company_name = 17;
+  // How many meetups this user has actually completed — the profile's
+  // "MEETUPS" figure, which was a hardcoded literal on the client until
+  // this field existed. Read from auth.users.meetups_completed, a cache the
+  // meetup module keeps current (auth/0005), same arrangement as
+  // rating_average/rating_count above.
+  int32 meetups_completed = 19;
 }
 
 message CompleteProfileSetupRequest {
