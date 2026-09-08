@@ -31,6 +31,13 @@ services:
       - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    # Resource limits (§D2). Generous rather than tuned — the point is that a
+    # ceiling EXISTS, so a runaway query or a leak degrades one container
+    # instead of exhausting the host and taking the whole stack (including
+    # Docker itself) with it. Compose v2 honours these on `docker compose up`;
+    # raise them if a real workload needs it, but do not remove them.
+    mem_limit: 2g
+    cpus: 2.0
     healthcheck:
       # -h 127.0.0.1 is load-bearing on a fresh volume, not decoration — see
       # the sibling repo's docker-compose.yml for the full explanation (a
@@ -94,15 +101,49 @@ services:
       RESEND_API_KEY: ${RESEND_API_KEY}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL}
       WORK_EMAIL_HMAC_KEY_PATH: /secrets/work_email_hmac.key
+      # Testing-only OTP bypass — see TESTING-NOTES.md. MUST be forwarded
+      # explicitly like this: a value in backend/.env is only used to
+      # INTERPOLATE into this file, and never reaches a container unless it is
+      # named here. Without this line the flag looked enabled (it was set in
+      # .env) while the monolith never saw it, so "123456" was silently
+      # rejected and the loud startup warning that is supposed to make this
+      # impossible to miss never fired either.
+      #
+      # Empty default, not `:?`: absent means OFF, which is the only safe
+      # direction for a flag that weakens authentication. The monolith logs a
+      # WARN on every startup while it is set to "true".
+      ALLOW_TEST_OTP_BYPASS: ${ALLOW_TEST_OTP_BYPASS:-}
       # Shared secret the monolith requires on every incoming gRPC call
       # (ADR-001's 2026-09-04 correction). Same .env value as the gateway's
       # MONOLITH_SHARED_SECRET below — one source, so they can't drift.
       INTERNAL_GRPC_SHARED_SECRET: ${INTERNAL_GRPC_SHARED_SECRET:?set INTERNAL_GRPC_SHARED_SECRET in backend/.env — see .env.example}
       # --- meetup module config (Phase 2 — add here when built, don't wire early) ---
       # --- billing module config (Phase 3 — add here when built) ---
-      # --- notification module config (Phase 4 — e.g. FIREBASE_SERVICE_ACCOUNT_JSON, add here when built) ---
+      # Notification module (Phase 4, pulled forward 2026-09-04 — see
+      # docs/plans/03-hardening-pass.md §E). Raw JSON content of a downloaded
+      # Firebase service-account key, not a file path. Optional, same
+      # empty-means-fallback pattern as Twilio/Resend/Gmail above — empty
+      # means LoggingPushSender, a real value means FCMPushSender.
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
     volumes:
       - ./secrets:/secrets:ro
+    mem_limit: 1g
+    cpus: 2.0
+    # §D1. `monolith -healthcheck` is a mode of the same binary (see
+    # cmd/monolith/healthcheck.go) — the runtime image is distroless, so
+    # there is no shell for CMD-SHELL and no curl, and adding a
+    # grpc-health-probe binary would mean another third-party artifact to
+    # pin and patch for something this binary already does.
+    #
+    # start_period covers startup work (pool warm-up, Apple/Google JWKS
+    # fetches) during which failures do not count against retries, so a
+    # slow-but-healthy start is not mistaken for a crash loop.
+    healthcheck:
+      test: ["CMD", "/monolith", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   gateway:
     build:
@@ -110,8 +151,14 @@ services:
       dockerfile: cmd/gateway/Dockerfile
     restart: unless-stopped
     depends_on:
+      # service_healthy, not service_started (§D1). service_started only
+      # confirms the container process launched — the gateway could then
+      # start accepting traffic while the monolith was still warming up its
+      # pool and fetching JWKS, and every request in that window failed for
+      # no reason a user could understand. The healthcheck above is what
+      # makes this condition mean "actually able to serve".
       monolith:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:8080"
     environment:
@@ -126,10 +173,28 @@ services:
       # the monolith verifies against (see its
       # INTERNAL_GRPC_SHARED_SECRET above).
       MONOLITH_SHARED_SECRET: ${INTERNAL_GRPC_SHARED_SECRET:?set INTERNAL_GRPC_SHARED_SECRET in backend/.env — see .env.example}
+      # Public keys from a signing key that has been rotated out but whose
+      # tokens may still be in flight (§A3). Normally empty — set only for
+      # the deploy that performs a rotation, then removed. Comma-separated;
+      # see backend/secrets/README.md for the procedure.
+      JWT_PREVIOUS_PUBLIC_KEY_PATHS: ${JWT_PREVIOUS_PUBLIC_KEY_PATHS:-}
       # No REDIS_ADDR — rate limiting is in-memory, single gateway instance
       # (ADR-001 §5's explicit, accepted trade-off).
     volumes:
       - ./secrets:/secrets:ro
+    mem_limit: 512m
+    cpus: 1.0
+    # §D3. Liveness only — /healthz never consults the monolith, on purpose:
+    # a monolith outage answering this endpoint with a failure would get
+    # every gateway replica restarted, turning a recoverable downstream
+    # problem into a full one. /readyz is the endpoint that checks the
+    # dependency, and it is for routing decisions, not restarts.
+    healthcheck:
+      test: ["CMD", "/gateway", "-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres-data:

@@ -38,10 +38,15 @@ jobs:
           --health-retries 10
 
     env:
-      # Picked up by whatever skip-if-unreachable helper this backend's
-      # integration tests use (mirroring the sibling repo's
-      # requirePostgres-style pattern) — with this container healthy, tests
-      # run for real instead of skipping.
+      # Picked up by this backend's requirePostgres helper — with the
+      # container healthy, integration tests run for real instead of
+      # skipping.
+      #
+      # The harness derives its own database from this URL and creates it
+      # (monolith_db_test, see db.EnsureTestDatabase). CI has no application
+      # attached to this Postgres, so isolation is not strictly required
+      # here — but using the same code path locally and in CI is what stops
+      # "works in CI, flaky on a laptop" from being a category of bug.
       DATABASE_URL: postgres://app:app@localhost:5432/monolith_db?sslmode=disable
 
     steps:
@@ -70,6 +75,102 @@ jobs:
         working-directory: backend
         run: golangci-lint run ./...
 
+      # -race is not optional here: this backend runs four concurrent
+      # background loops (the lifecycle poller, the notification outbox
+      # poller, and two retention sweeps) alongside request handling, and
+      # several tests deliberately exercise concurrent claimers. A data race
+      # in that code is exactly the kind of defect that passes a serial test
+      # run and fails in production.
+      #
+      # -coverprofile (§D6): coverage was previously not merely unenforced
+      # but entirely unmeasured. The profile is uploaded as an artifact
+      # below; a threshold gate can come later, once there is a baseline
+      # number to set one from.
       - name: Test
         working-directory: backend
-        run: go test ./...
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Coverage summary
+        working-directory: backend
+        run: |
+          go tool cover -func=coverage.out | tail -1
+          go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: |
+            backend/coverage.out
+            backend/coverage.html
+          retention-days: 14
+
+  # §D5: builds both images. The Go job above compiles the binaries but never
+  # exercised a Dockerfile, so a wrong COPY path, a wrong ENTRYPOINT, or a
+  # build-context assumption that broke would pass CI green and surface for
+  # the first time at deploy. Separate job because it shares nothing with the
+  # test job (no Postgres, no Go toolchain) and can run in parallel with it.
+  #
+  # No push. The point is only to prove both images build from a clean
+  # context — publishing is a deployment concern this repo does not have yet.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build monolith image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/cmd/monolith/Dockerfile
+          push: false
+          load: true
+          tags: professional-meetups-monolith:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          file: backend/cmd/gateway/Dockerfile
+          push: false
+          load: true
+          tags: professional-meetups-gateway:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Proves the ENTRYPOINT is actually runnable, which a successful build
+      # does not. Both binaries exit non-zero on a missing required env var,
+      # so a run that fails with the CONFIG error (rather than exec format
+      # error / no such file) is what confirms the image is wired correctly.
+      - name: Smoke-test both entrypoints
+        run: |
+          set -e
+          for image in professional-meetups-monolith:ci professional-meetups-gateway:ci; do
+            echo "--- $image ---"
+            output=$(docker run --rm "$image" 2>&1 || true)
+            echo "$output"
+            if ! echo "$output" | grep -q "required environment variable"; then
+              echo "FAIL: $image did not reach its own config validation — the entrypoint is not running the built binary"
+              exit 1
+            fi
+          done
+
+      # §D4: the .dockerignore is only useful if it actually excludes what it
+      # claims to. This asserts secrets/ never entered the build context,
+      # which is the failure that would matter and the one nobody would
+      # notice on their own.
+      - name: Assert secrets are excluded from the build context
+        run: |
+          set -e
+          mkdir -p backend/secrets
+          echo "FAKE-PRIVATE-KEY-CANARY" > backend/secrets/canary.pem
+          docker build -f backend/cmd/monolith/Dockerfile -t context-check:ci --target build backend
+          if docker run --rm context-check:ci ls /workspace/secrets 2>/dev/null; then
+            echo "FAIL: secrets/ is present in the build context despite .dockerignore"
+            exit 1
+          fi
+          echo "OK: secrets/ was excluded from the build context"

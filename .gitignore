@@ -23,3 +23,12 @@ frontend/.env
 .DS_Store
 .vscode/
 .idea/
+
+# Test/coverage output and stray `go build ./cmd/...` binaries. The backfill
+# commands are the ones that bite: `go build ./cmd/...` drops an executable
+# named after each command in backend/, right next to the source.
+coverage.out
+coverage.html
+coverage-all.out
+/backend/backfill-user-display-cache
+/backend/backfill-user-location-cache

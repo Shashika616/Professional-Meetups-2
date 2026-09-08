@@ -1,0 +1,47 @@
+# Build-context exclusions (docs/plans/03-hardening-pass.md §D4).
+#
+# WHY THIS MATTERS EVEN THOUGH THE FINAL IMAGE IS DISTROLESS: each Dockerfile
+# does `COPY . .` into its BUILD stage. Without this file, everything below
+# gets uploaded to the daemon and baked into an intermediate layer — including
+# secrets/, which holds real private keys on a developer's disk (gitignored,
+# but gitignore has no bearing on a Docker build context). The final stage
+# copies only the compiled binary, so those layers are not in the shipped
+# image — but they exist in the local layer cache, and anyone who later adds a
+# `COPY . .` to the runtime stage, or pushes an intermediate stage as a cache
+# image, ships them. Excluding them here is the durable fix; relying on the
+# final stage's discipline is not.
+#
+# It also makes builds meaningfully faster, since the context is uploaded to
+# the daemon in full on every build.
+
+# Real key material. The single most important line in this file.
+secrets/
+
+# Local environment files — these hold real credentials (Firebase service
+# account, Gmail app password, LinkedIn secrets) and must never enter a build.
+.env
+.env.*
+!.env.example
+
+# Version control metadata: large, and nothing in the build reads it.
+.git/
+.gitignore
+
+# Documentation. Nothing in either Dockerfile reads a .md file.
+*.md
+
+# Test and coverage output.
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# Editor/OS noise.
+.DS_Store
+.idea/
+.vscode/
+
+# The Dockerfiles themselves don't need to be inside the image they build.
+cmd/*/Dockerfile
+docker-compose.yml
+.dockerignore

@@ -23,3 +23,18 @@ sql:
         overrides:
           - db_type: "uuid"
             go_type: "github.com/google/uuid.UUID"
+  # Phase 2. Same shape as auth's entry above — its own queries directory,
+  # its own generated package, the same shared migration history for schema.
+  - engine: "postgresql"
+    queries: "internal/modules/meetup/repository/queries"
+    schema: "migrations"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/modules/meetup/repository/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
