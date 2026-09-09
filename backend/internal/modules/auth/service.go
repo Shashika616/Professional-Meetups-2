@@ -117,6 +117,10 @@ type Service interface {
 	// type, matching how every other background loop in this process is
 	// wired.
 	SweepExpiredRefreshTokens(ctx context.Context) (deleted int, err error)
+	// SweepAbandonedGuests deletes guest accounts with no refresh token left
+	// and no way back in (plan 14 Part B). Driven by the same sweeper, on
+	// the same tick, right after the token sweep.
+	SweepAbandonedGuests(ctx context.Context) (deleted int, err error)
 
 	// --- trusted contacts + SOS (sos sub-package) ---
 	AddTrustedContact(ctx context.Context, req AddTrustedContactRequest) (TrustedContact, error)
@@ -208,6 +212,12 @@ func New(deps Deps) Service {
 // --- trusted contacts + SOS: straight delegation to the sub-package ---
 
 func (s *service) AddTrustedContact(ctx context.Context, req AddTrustedContactRequest) (TrustedContact, error) {
+	// ADR-003. Checked here rather than inside the sos subpackage, which
+	// stays a plain CRUD/alerting layer — the same reasoning as its
+	// injected validator.
+	if err := requireSafetyFeatureTrustLevel("adding a trusted contact", req.CallerTrustLevel); err != nil {
+		return TrustedContact{}, err
+	}
 	return s.sos.AddTrustedContact(ctx, req)
 }
 
@@ -220,6 +230,10 @@ func (s *service) RemoveTrustedContact(ctx context.Context, req RemoveTrustedCon
 }
 
 func (s *service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (TriggerSOSResult, error) {
+	// ADR-003 — see AddTrustedContact above.
+	if err := requireSafetyFeatureTrustLevel("triggering SOS", req.CallerTrustLevel); err != nil {
+		return TriggerSOSResult{}, err
+	}
 	return s.sos.TriggerSOS(ctx, req)
 }
 

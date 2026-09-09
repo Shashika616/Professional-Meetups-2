@@ -32,8 +32,12 @@ type meetupRecorder struct {
 	gotOptIn       bool
 	gotScore       int32
 	gotRatedUserID string
-	gotFCMToken    string
-	gotWithinDays  int32
+
+	gotOverallScore       int32
+	gotReviewParticipants []monolithclient.ReviewParticipantInput
+	review                monolithclient.MeetupReview
+	gotFCMToken           string
+	gotWithinDays         int32
 }
 
 // The fake in handlers_test.go embeds monolithclient.Client, so these
@@ -123,9 +127,35 @@ func (f *fakeMonolith) SubmitMeetupFeedback(_ context.Context, meetupID, userID 
 	return f.err
 }
 
-func (f *fakeMonolith) ListRatableParticipants(_ context.Context, meetupID, viewerID string) ([]monolithclient.RatableParticipant, error) {
-	f.meetup.gotMeetupID, f.meetup.gotUserID = meetupID, viewerID
+func (f *fakeMonolith) ListNotifications(_ context.Context, userID string) ([]monolithclient.UserNotification, error) {
+	f.meetup.gotUserID = userID
 	return nil, f.err
+}
+
+func (f *fakeMonolith) ListMeetupParticipants(_ context.Context, meetupID, viewerID string, viewerTrustLevel int32) (monolithclient.MeetupParticipants, error) {
+	f.meetup.gotMeetupID, f.meetup.gotUserID = meetupID, viewerID
+	f.meetup.gotTrustLevel = viewerTrustLevel
+	return monolithclient.MeetupParticipants{}, f.err
+}
+
+func (f *fakeMonolith) ListRatableParticipants(_ context.Context, meetupID, viewerID string, viewerTrustLevel int32) (monolithclient.RatableParticipants, error) {
+	f.meetup.gotMeetupID, f.meetup.gotUserID = meetupID, viewerID
+	// Recorded the same way ListMeetupParticipants above records it, so the
+	// token-not-body assertion can be made against this endpoint too.
+	f.meetup.gotTrustLevel = viewerTrustLevel
+	return monolithclient.RatableParticipants{}, f.err
+}
+
+func (f *fakeMonolith) SubmitMeetupReview(_ context.Context, meetupID, raterUserID string, overallScore int32, _ *string, participants []monolithclient.ReviewParticipantInput) error {
+	f.meetup.gotMeetupID, f.meetup.gotUserID = meetupID, raterUserID
+	f.meetup.gotOverallScore = overallScore
+	f.meetup.gotReviewParticipants = participants
+	return f.err
+}
+
+func (f *fakeMonolith) GetMeetupReview(_ context.Context, meetupID, viewerID string) (monolithclient.MeetupReview, error) {
+	f.meetup.gotMeetupID, f.meetup.gotUserID = meetupID, viewerID
+	return f.meetup.review, f.err
 }
 
 func (f *fakeMonolith) SubmitRating(_ context.Context, meetupID, raterUserID, ratedUserID string, score int32) error {
@@ -169,8 +199,12 @@ func TestMeetupRoutes_AreWiredAndRequireAuth(t *testing.T) {
 		{http.MethodPost, "/v1/meetups/m1/safety/check-in", `{}`},
 		{http.MethodPost, "/v1/meetups/m1/safety/decline", `{"reason":"x"}`},
 		{http.MethodPost, "/v1/meetups/m1/feedback", `{"happened":true}`},
+		{http.MethodGet, "/v1/meetups/m1/participants", ""},
+		{http.MethodGet, "/v1/notifications", ""},
 		{http.MethodGet, "/v1/meetups/m1/ratings/ratable", ""},
 		{http.MethodPost, "/v1/meetups/m1/ratings", `{"rated_user_id":"u2","score":5}`},
+		{http.MethodPost, "/v1/meetups/m1/review", `{"overall_score":5,"participants":[{"user_id":"u2","score":5,"traits":["cheerful"]}]}`},
+		{http.MethodGet, "/v1/meetups/m1/review", ""},
 	}
 
 	for _, route := range routes {
@@ -226,6 +260,14 @@ func TestMeetupRoutes_IdentityAndTrustLevelComeFromTheToken(t *testing.T) {
 		{"safety state", http.MethodGet, "/v1/meetups/m1/safety?user_id=victim", "", false},
 		{"check in", http.MethodPost, "/v1/meetups/m1/safety/check-in", `{"user_id":"victim"}`, false},
 		{"submit rating", http.MethodPost, "/v1/meetups/m1/ratings", `{"rater_user_id":"victim","rated_user_id":"u2","score":5}`, false},
+		// A review writes ratings onto other people's profiles, so the rater
+		// must come from the token, never the body.
+		{"submit review", http.MethodPost, "/v1/meetups/m1/review", `{"rater_user_id":"victim","overall_score":5,"participants":[]}`, false},
+		{"get review", http.MethodGet, "/v1/meetups/m1/review?viewer_id=victim", "", false},
+		// The trust level decides whether attendee identities are disclosed
+		// at all, so it is exactly the value a modified client would want to
+		// supply. It must come from the token.
+		{"list participants", http.MethodGet, "/v1/meetups/m1/participants?viewer_id=victim&viewer_trust_level=4", "", true},
 	}
 
 	for _, tc := range cases {

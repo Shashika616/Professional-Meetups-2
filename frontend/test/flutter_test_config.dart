@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
+import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
 
 /// Runs once before every test in this directory — Flutter's own
 /// convention for this exact filename/signature, not a hand-rolled hook.
@@ -21,24 +21,24 @@ import 'package:professional_connections_platform/core/widgets/skeleton_loader.d
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   SharedPreferences.setMockInitialValues({});
 
-  // Freeze the loading shimmer for the whole suite.
+  // Freeze every ambient (forever-repeating, input-free) animation for the
+  // whole suite: the loading shimmer, the review card's attention pulse.
   //
-  // WHY: `Shimmer` (core/widgets/skeleton_loader.dart) drives every loading
-  // placeholder with a REPEATING AnimationController. A repeating controller
-  // schedules frames forever and `pumpAndSettle` waits for frames to stop,
-  // so any test that settles while a placeholder is on screen would hang
-  // until it timed out. Eight did.
+  // WHY: a repeating AnimationController schedules frames forever and
+  // `pumpAndSettle` waits for frames to stop, so any test that settles while
+  // one is on screen hangs until it times out. Eight tests hung on the
+  // shimmer; two more on the pulse.
   //
   // NOT done via the OS "reduce motion" accessibility flag, which was the
   // first attempt: setting that makes Flutter scale every other
   // AnimationController by 0.05 as well, and a pull-to-refresh test started
   // failing because its gesture timings moved underneath it. This flag
-  // affects the sweep and nothing else.
+  // affects ambient animations and nothing else.
   //
   // The ANIMATED path is covered deliberately in `skeleton_loader_test.dart`,
   // which turns this back off for its own tests, so neither branch is left
   // untested.
-  debugDisableShimmerAnimation = true;
+  debugDisableAmbientAnimations = true;
 
   await testMain();
 }

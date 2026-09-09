@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:professional_connections_platform/app_shell.dart';
@@ -14,6 +15,7 @@ import 'package:professional_connections_platform/core/models/user_profile.dart'
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
+import 'package:professional_connections_platform/core/widgets/brand_marks.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
 
@@ -401,7 +403,10 @@ void main() {
       find.textContaining('keeps your account more restricted'),
       findsOneWidget,
     );
-    expect(find.text('Sign up with email'), findsOneWidget);
+    // CHANGED: was 'Sign up with email', a 13px text link. Both alternative
+    // entry points are real, icon-bearing buttons now — the labels went
+    // uppercase to match every other button in the app.
+    expect(find.text('SIGN UP WITH EMAIL'), findsOneWidget);
   });
 
   testWidgets(
@@ -559,5 +564,198 @@ void _guestGroup() {
     // The button must be usable again — a stalled spinner with no feedback
     // is the failure mode _handleSignInError exists to prevent.
     expect(find.byKey(const Key('continueAsGuest')), findsOneWidget);
+  });
+
+  /// # THE TWO ALTERNATIVE WAYS IN ARE BUTTONS, NOT FINE PRINT
+  ///
+  /// Both were 13px text links at the bottom of the screen — the guest one
+  /// without even an underline, so nothing marked it as tappable, and its
+  /// tap target was roughly half the 44px minimum. "Weakest entry point"
+  /// (ADR-033 §1 keeps a guest's view deliberately reduced) had turned into
+  /// "almost invisible", which is a different thing.
+  group('alternative entry points are visible controls', () {
+    testWidgets('both render as buttons with a leading icon', (tester) async {
+      await tester.pumpWidget(_appWith(_FakeAuthService.success(_testSession)));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      for (final key in ['signUpWithEmail', 'continueAsGuest']) {
+        final button = find.byKey(Key(key));
+        expect(button, findsOneWidget, reason: '$key must be present');
+        expect(
+          find.descendant(of: button, matching: find.byType(Icon)),
+          findsOneWidget,
+          reason: '$key needs its leading icon',
+        );
+      }
+    });
+
+    testWidgets(
+      'both meet the 44px minimum tap target — the guest link used to be '
+      'about half of it',
+      (tester) async {
+        await tester.pumpWidget(
+          _appWith(_FakeAuthService.success(_testSession)),
+        );
+        await tester.pumpAndSettle();
+        await _confirmAge(tester);
+
+        for (final key in ['signUpWithEmail', 'continueAsGuest']) {
+          final size = tester.getSize(find.byKey(Key(key)));
+          expect(
+            size.height,
+            greaterThanOrEqualTo(44),
+            reason: '$key is ${size.height}px tall',
+          );
+        }
+      },
+    );
+
+    testWidgets(
+      'the OAuth buttons stay the visually dominant pair — the fix was to '
+      'make the alternatives legible, not to flatten the hierarchy',
+      (tester) async {
+        await tester.pumpWidget(
+          _appWith(_FakeAuthService.success(_testSession)),
+        );
+        await tester.pumpAndSettle();
+        await _confirmAge(tester);
+
+        final primary = tester
+            .getSize(find.byKey(const Key('continueWithLinkedIn')))
+            .height;
+        final alternative = tester
+            .getSize(find.byKey(const Key('continueAsGuest')))
+            .height;
+
+        expect(
+          primary,
+          greaterThan(alternative),
+          reason: 'the one-tap path should still read as the default',
+        );
+      },
+    );
+
+    testWidgets('guest still works from the new button', (tester) async {
+      final auth = _FakeAuthService.success(_testSession);
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      await tester.tap(find.byKey(const Key('continueAsGuest')));
+      await tester.pumpAndSettle();
+
+      expect(auth.guestCallCount, 1);
+    });
+  });
+
+  /// Brand marks, not stand-ins. Material has no LinkedIn glyph and its "G"
+  /// is a plain letter, so LinkedIn shipped with no icon and Google with
+  /// something that read as a placeholder. Apple's HIG and Google's Sign-In
+  /// branding both expect their own logo on their own button.
+  group('sign-in buttons carry real brand icons', () {
+    testWidgets('each provider button has an icon', (tester) async {
+      await tester.pumpWidget(_appWith(_FakeAuthService.success(_testSession)));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      final linkedIn = find.byKey(const Key('continueWithLinkedIn'));
+      expect(
+        find.descendant(of: linkedIn, matching: find.byType(Icon)),
+        findsOneWidget,
+        reason: 'LinkedIn shipped with no icon at all',
+      );
+
+      // The other provider is Apple or Google depending on platform; both
+      // paths must carry a mark.
+      final other = find.ancestor(
+        of: find.textContaining('CONTINUE WITH'),
+        matching: find.byType(PrimaryButton),
+      );
+      expect(other, findsNWidgets(2));
+    });
+
+    testWidgets(
+      'the icons come from the brand font, not Material\'s generic set',
+      (tester) async {
+        await tester.pumpWidget(
+          _appWith(_FakeAuthService.success(_testSession)),
+        );
+        await tester.pumpAndSettle();
+        await _confirmAge(tester);
+
+        final icon = tester.widget<Icon>(
+          find
+              .descendant(
+                of: find.byKey(const Key('continueWithLinkedIn')),
+                matching: find.byType(Icon),
+              )
+              .first,
+        );
+        expect(
+          icon.icon!.fontFamily,
+          contains('FontAwesome'),
+          reason:
+              'a Material fallback here means the brand mark was silently '
+              'lost — which is how LinkedIn ended up with none',
+        );
+      },
+    );
+
+    // The marks shipped as monochrome glyphs first: correct shapes, wrong
+    // colour, so the buttons read as a row of grey placeholders.
+    testWidgets('the LinkedIn mark is drawn in LinkedIn blue, not the '
+        'button foreground', (tester) async {
+      await tester.pumpWidget(_appWith(_FakeAuthService.success(_testSession)));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      final icon = tester.widget<Icon>(
+        find
+            .descendant(
+              of: find.byKey(const Key('continueWithLinkedIn')),
+              matching: find.byType(Icon),
+            )
+            .first,
+      );
+      expect(icon.color, LinkedInMark.brandBlue);
+    });
+
+    testWidgets('Google is a four-colour vector, not a single-colour glyph', (
+      tester,
+    ) async {
+      await tester.pumpWidget(_appWith(_FakeAuthService.success(_testSession)));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      // Skipped on the Apple path, where this button is not built at all.
+      final google = find.ancestor(
+        of: find.text('CONTINUE WITH GOOGLE'),
+        matching: find.byType(PrimaryButton),
+      );
+      if (google.evaluate().isEmpty) return;
+
+      // Asserting on GoogleMark alone would pass even if its insides were
+      // swapped back to a glyph, so this checks what it actually paints.
+      expect(
+        find.descendant(of: google, matching: find.byType(SvgPicture)),
+        findsOneWidget,
+        reason: 'a font glyph cannot render four colours',
+      );
+    });
+
+    testWidgets('the provider labels sit below the wordmark in the type '
+        'hierarchy', (tester) async {
+      await tester.pumpWidget(_appWith(_FakeAuthService.success(_testSession)));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      final label = tester
+          .widget<Text>(find.text('CONTINUE WITH LINKEDIN'))
+          .style!;
+      // The buttons used to be set at 15/1.5, which read at a glance as the
+      // same weight as the 20px logo above them.
+      expect(label.fontSize, lessThan(15));
+    });
   });
 }

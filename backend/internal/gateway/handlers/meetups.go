@@ -543,19 +543,119 @@ type ratableParticipantResponse struct {
 	ContextNote     *string `json:"context_note,omitempty"`
 }
 
-type listRatableParticipantsResponse struct {
-	Participants []ratableParticipantResponse `json:"participants"`
+type userNotificationResponse struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Body      string `json:"body"`
+	Type      string `json:"type"`
+	MeetupID  string `json:"meetup_id"`
+	CreatedAt int64  `json:"created_at"`
+	Delivered bool   `json:"delivered"`
 }
 
-func (h *Handler) listRatableParticipants(w http.ResponseWriter, r *http.Request) {
+type listNotificationsResponse struct {
+	Notifications []userNotificationResponse `json:"notifications"`
+}
+
+func (h *Handler) listNotifications(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	participants, err := h.monolith.ListRatableParticipants(ctx, r.PathValue("id"), middleware.UserIDFromContext(ctx))
+	rows, err := h.monolith.ListNotifications(ctx, middleware.UserIDFromContext(ctx))
 	if err != nil {
 		writeGRPCError(w, err)
 		return
 	}
-	out := make([]ratableParticipantResponse, 0, len(participants))
-	for _, p := range participants {
+	out := make([]userNotificationResponse, 0, len(rows))
+	for _, n := range rows {
+		out = append(out, userNotificationResponse{
+			ID:        n.ID,
+			Title:     n.Title,
+			Body:      n.Body,
+			Type:      n.Type,
+			MeetupID:  n.MeetupID,
+			CreatedAt: n.CreatedAt,
+			Delivered: n.Delivered,
+		})
+	}
+	writeJSON(w, http.StatusOK, listNotificationsResponse{Notifications: out})
+}
+
+type meetupParticipantResponse struct {
+	UserID          string `json:"user_id"`
+	IsHost          bool   `json:"is_host"`
+	FullName        string `json:"full_name"`
+	ProfilePhotoURL string `json:"profile_photo_url"`
+	TrustLevel      int32  `json:"trust_level"`
+}
+
+type listMeetupParticipantsResponse struct {
+	Participants []meetupParticipantResponse `json:"participants"`
+	Redacted     bool                        `json:"redacted"`
+	TotalCount   int32                       `json:"total_count"`
+}
+
+func (h *Handler) listMeetupParticipants(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// Both the viewer and their trust level come from the verified JWT. The
+	// trust level decides whether identities are disclosed at all, so it is
+	// exactly the value a modified client would want to supply.
+	result, err := h.monolith.ListMeetupParticipants(
+		ctx,
+		r.PathValue("id"),
+		middleware.UserIDFromContext(ctx),
+		int32(middleware.TrustLevelFromContext(ctx)),
+	)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	out := make([]meetupParticipantResponse, 0, len(result.Participants))
+	for _, p := range result.Participants {
+		out = append(out, meetupParticipantResponse{
+			UserID:          p.UserID,
+			IsHost:          p.IsHost,
+			FullName:        p.FullName,
+			ProfilePhotoURL: p.ProfilePhotoURL,
+			TrustLevel:      p.TrustLevel,
+		})
+	}
+	writeJSON(w, http.StatusOK, listMeetupParticipantsResponse{
+		Participants: out,
+		Redacted:     result.Redacted,
+		TotalCount:   result.TotalCount,
+	})
+}
+
+type ratingTraitResponse struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Emoji string `json:"emoji"`
+}
+
+type listRatableParticipantsResponse struct {
+	Participants []ratableParticipantResponse `json:"participants"`
+	// The trait vocabulary, sent with the list because the review screen
+	// renders both together and would otherwise need a second round trip
+	// before it could draw anything.
+	AvailableTraits []ratingTraitResponse `json:"available_traits"`
+}
+
+func (h *Handler) listRatableParticipants(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// Trust level from the verified JWT, exactly as listMeetupParticipants
+	// above does — it gates a redaction, so it is precisely the value a
+	// modified client would want to supply.
+	result, err := h.monolith.ListRatableParticipants(
+		ctx,
+		r.PathValue("id"),
+		middleware.UserIDFromContext(ctx),
+		int32(middleware.TrustLevelFromContext(ctx)),
+	)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	out := make([]ratableParticipantResponse, 0, len(result.Participants))
+	for _, p := range result.Participants {
 		out = append(out, ratableParticipantResponse{
 			UserID:          p.UserID,
 			FullName:        p.FullName,
@@ -565,7 +665,85 @@ func (h *Handler) listRatableParticipants(w http.ResponseWriter, r *http.Request
 			ContextNote:     p.ContextNote,
 		})
 	}
-	writeJSON(w, http.StatusOK, listRatableParticipantsResponse{Participants: out})
+	traits := make([]ratingTraitResponse, 0, len(result.AvailableTraits))
+	for _, t := range result.AvailableTraits {
+		traits = append(traits, ratingTraitResponse{Key: t.Key, Label: t.Label, Emoji: t.Emoji})
+	}
+	writeJSON(w, http.StatusOK, listRatableParticipantsResponse{Participants: out, AvailableTraits: traits})
+}
+
+type reviewParticipantRequest struct {
+	UserID string   `json:"user_id"`
+	Score  int32    `json:"score"`
+	Traits []string `json:"traits"`
+}
+
+type submitMeetupReviewRequest struct {
+	OverallScore int32                      `json:"overall_score"`
+	Notes        *string                    `json:"notes"`
+	Participants []reviewParticipantRequest `json:"participants"`
+}
+
+func (h *Handler) submitMeetupReview(w http.ResponseWriter, r *http.Request) {
+	var req submitMeetupReviewRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	participants := make([]monolithclient.ReviewParticipantInput, 0, len(req.Participants))
+	for _, p := range req.Participants {
+		participants = append(participants, monolithclient.ReviewParticipantInput{
+			UserID: p.UserID, Score: p.Score, Traits: p.Traits,
+		})
+	}
+
+	ctx := r.Context()
+	if err := h.monolith.SubmitMeetupReview(ctx, r.PathValue("id"), middleware.UserIDFromContext(ctx), req.OverallScore, req.Notes, participants); err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, successResponse{Success: true})
+}
+
+type reviewedParticipantResponse struct {
+	UserID          string   `json:"user_id"`
+	FullName        string   `json:"full_name"`
+	ProfilePhotoURL string   `json:"profile_photo_url"`
+	Score           int32    `json:"score"`
+	Traits          []string `json:"traits"`
+}
+
+type meetupReviewResponse struct {
+	Completed    bool                          `json:"completed"`
+	OverallScore int32                         `json:"overall_score"`
+	Notes        *string                       `json:"notes,omitempty"`
+	Participants []reviewedParticipantResponse `json:"participants"`
+}
+
+func (h *Handler) getMeetupReview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	review, err := h.monolith.GetMeetupReview(ctx, r.PathValue("id"), middleware.UserIDFromContext(ctx))
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	participants := make([]reviewedParticipantResponse, 0, len(review.Participants))
+	for _, p := range review.Participants {
+		participants = append(participants, reviewedParticipantResponse{
+			UserID:          p.UserID,
+			FullName:        p.FullName,
+			ProfilePhotoURL: p.ProfilePhotoURL,
+			Score:           p.Score,
+			Traits:          p.Traits,
+		})
+	}
+	writeJSON(w, http.StatusOK, meetupReviewResponse{
+		Completed:    review.Completed,
+		OverallScore: review.OverallScore,
+		Notes:        review.Notes,
+		Participants: participants,
+	})
 }
 
 type submitRatingRequest struct {

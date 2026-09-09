@@ -263,6 +263,53 @@ class HttpMeetupService implements MeetupService {
   }
 
   @override
+  Future<MeetupParticipants> listMeetupParticipants(String meetupId) async {
+    final response = await _authenticatedGet(
+      '/v1/meetups/$meetupId/participants',
+    );
+    return MeetupParticipants.fromJson(_decodeOrThrow(response));
+  }
+
+  @override
+  Future<List<AppNotification>> listNotifications() async {
+    final response = await _authenticatedGet('/v1/notifications');
+    final decoded = _decodeOrThrow(response);
+    return ((decoded['notifications'] as List<dynamic>?) ?? const [])
+        .map((e) => AppNotification.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  @override
+  Future<RatableParticipants> listRatableParticipantsWithTraits(
+    String meetupId,
+  ) async {
+    final response = await _authenticatedGet(
+      '/v1/meetups/$meetupId/ratings/ratable',
+    );
+    return RatableParticipants.fromJson(_decodeOrThrow(response));
+  }
+
+  @override
+  Future<void> submitMeetupReview(
+    String meetupId, {
+    required int overallScore,
+    String? notes,
+    required List<ReviewParticipantInput> participants,
+  }) async {
+    await _authenticatedPost('/v1/meetups/$meetupId/review', {
+      'overall_score': overallScore,
+      'notes': ?notes,
+      'participants': participants.map((p) => p.toJson()).toList(),
+    });
+  }
+
+  @override
+  Future<MeetupReview> getMeetupReview(String meetupId) async {
+    final response = await _authenticatedGet('/v1/meetups/$meetupId/review');
+    return MeetupReview.fromJson(_decodeOrThrow(response));
+  }
+
+  @override
   Future<void> submitRating(
     String meetupId, {
     required String ratedUserId,

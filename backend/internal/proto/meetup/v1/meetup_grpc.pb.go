@@ -36,8 +36,12 @@ const (
 	MeetupService_CheckIn_FullMethodName                    = "/meetup.v1.MeetupService/CheckIn"
 	MeetupService_DeclineCheckIn_FullMethodName             = "/meetup.v1.MeetupService/DeclineCheckIn"
 	MeetupService_SubmitMeetupFeedback_FullMethodName       = "/meetup.v1.MeetupService/SubmitMeetupFeedback"
+	MeetupService_ListMeetupParticipants_FullMethodName     = "/meetup.v1.MeetupService/ListMeetupParticipants"
+	MeetupService_ListNotifications_FullMethodName          = "/meetup.v1.MeetupService/ListNotifications"
 	MeetupService_ListRatableParticipants_FullMethodName    = "/meetup.v1.MeetupService/ListRatableParticipants"
 	MeetupService_SubmitRating_FullMethodName               = "/meetup.v1.MeetupService/SubmitRating"
+	MeetupService_SubmitMeetupReview_FullMethodName         = "/meetup.v1.MeetupService/SubmitMeetupReview"
+	MeetupService_GetMeetupReview_FullMethodName            = "/meetup.v1.MeetupService/GetMeetupReview"
 	MeetupService_CloseMeetup_FullMethodName                = "/meetup.v1.MeetupService/CloseMeetup"
 	MeetupService_CancelMeetup_FullMethodName               = "/meetup.v1.MeetupService/CancelMeetup"
 )
@@ -154,6 +158,14 @@ type MeetupServiceClient interface {
 	// accepted requesters, excluding self), each flagged with whether the
 	// caller already rated them. Empty (not an error) if the caller isn't a
 	// participant.
+	// Who is on a meetup: its host plus everyone accepted. Identities are
+	// withheld below trust level 2 — withheld on the SERVER, not blurred on
+	// the client, so the names are never on the wire at all.
+	ListMeetupParticipants(ctx context.Context, in *ListMeetupParticipantsRequest, opts ...grpc.CallOption) (*ListMeetupParticipantsResponse, error)
+	// The caller's in-app notification history, newest first, bounded by the
+	// same retention window that trims the outbox — so the list can never show
+	// a row that is about to be swept.
+	ListNotifications(ctx context.Context, in *ListNotificationsRequest, opts ...grpc.CallOption) (*ListNotificationsResponse, error)
 	ListRatableParticipants(ctx context.Context, in *ListRatableParticipantsRequest, opts ...grpc.CallOption) (*ListRatableParticipantsResponse, error)
 	// Records rater_user_id's score for rated_user_id on meetup_id. Rejects
 	// with Forbidden if rater_user_id isn't a participant of meetup_id, or
@@ -167,6 +179,17 @@ type MeetupServiceClient interface {
 	// out-of-range score. All three branches write into the exact same
 	// rating pool — never a separate one per trigger.
 	SubmitRating(ctx context.Context, in *SubmitRatingRequest, opts ...grpc.CallOption) (*SubmitRatingResponse, error)
+	// The post-meetup review flow's single write: the overall score for the
+	// meetup, an optional note, and a score plus traits for every other
+	// participant. All-or-nothing — ratings are immutable, so a partially
+	// applied review could never be finished on a retry.
+	//
+	// This is the only call that marks a meetup reviewed, which is what takes
+	// it off the caller's home list.
+	SubmitMeetupReview(ctx context.Context, in *SubmitMeetupReviewRequest, opts ...grpc.CallOption) (*SubmitMeetupReviewResponse, error)
+	// Reads back what the CALLER themselves submitted — never another rater's
+	// scores. Backs the "see the ratings you gave" view on a history card.
+	GetMeetupReview(ctx context.Context, in *GetMeetupReviewRequest, opts ...grpc.CallOption) (*GetMeetupReviewResponse, error)
 	// Host-only "meetup is done" action (ADR-016), reviving meetup_status's
 	// previously-unused COMPLETED value. Rejects with Forbidden if the
 	// caller isn't the host or the window hasn't started yet
@@ -361,6 +384,26 @@ func (c *meetupServiceClient) SubmitMeetupFeedback(ctx context.Context, in *Subm
 	return out, nil
 }
 
+func (c *meetupServiceClient) ListMeetupParticipants(ctx context.Context, in *ListMeetupParticipantsRequest, opts ...grpc.CallOption) (*ListMeetupParticipantsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListMeetupParticipantsResponse)
+	err := c.cc.Invoke(ctx, MeetupService_ListMeetupParticipants_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *meetupServiceClient) ListNotifications(ctx context.Context, in *ListNotificationsRequest, opts ...grpc.CallOption) (*ListNotificationsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListNotificationsResponse)
+	err := c.cc.Invoke(ctx, MeetupService_ListNotifications_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *meetupServiceClient) ListRatableParticipants(ctx context.Context, in *ListRatableParticipantsRequest, opts ...grpc.CallOption) (*ListRatableParticipantsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListRatableParticipantsResponse)
@@ -375,6 +418,26 @@ func (c *meetupServiceClient) SubmitRating(ctx context.Context, in *SubmitRating
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SubmitRatingResponse)
 	err := c.cc.Invoke(ctx, MeetupService_SubmitRating_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *meetupServiceClient) SubmitMeetupReview(ctx context.Context, in *SubmitMeetupReviewRequest, opts ...grpc.CallOption) (*SubmitMeetupReviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubmitMeetupReviewResponse)
+	err := c.cc.Invoke(ctx, MeetupService_SubmitMeetupReview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *meetupServiceClient) GetMeetupReview(ctx context.Context, in *GetMeetupReviewRequest, opts ...grpc.CallOption) (*GetMeetupReviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMeetupReviewResponse)
+	err := c.cc.Invoke(ctx, MeetupService_GetMeetupReview_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -513,6 +576,14 @@ type MeetupServiceServer interface {
 	// accepted requesters, excluding self), each flagged with whether the
 	// caller already rated them. Empty (not an error) if the caller isn't a
 	// participant.
+	// Who is on a meetup: its host plus everyone accepted. Identities are
+	// withheld below trust level 2 — withheld on the SERVER, not blurred on
+	// the client, so the names are never on the wire at all.
+	ListMeetupParticipants(context.Context, *ListMeetupParticipantsRequest) (*ListMeetupParticipantsResponse, error)
+	// The caller's in-app notification history, newest first, bounded by the
+	// same retention window that trims the outbox — so the list can never show
+	// a row that is about to be swept.
+	ListNotifications(context.Context, *ListNotificationsRequest) (*ListNotificationsResponse, error)
 	ListRatableParticipants(context.Context, *ListRatableParticipantsRequest) (*ListRatableParticipantsResponse, error)
 	// Records rater_user_id's score for rated_user_id on meetup_id. Rejects
 	// with Forbidden if rater_user_id isn't a participant of meetup_id, or
@@ -526,6 +597,17 @@ type MeetupServiceServer interface {
 	// out-of-range score. All three branches write into the exact same
 	// rating pool — never a separate one per trigger.
 	SubmitRating(context.Context, *SubmitRatingRequest) (*SubmitRatingResponse, error)
+	// The post-meetup review flow's single write: the overall score for the
+	// meetup, an optional note, and a score plus traits for every other
+	// participant. All-or-nothing — ratings are immutable, so a partially
+	// applied review could never be finished on a retry.
+	//
+	// This is the only call that marks a meetup reviewed, which is what takes
+	// it off the caller's home list.
+	SubmitMeetupReview(context.Context, *SubmitMeetupReviewRequest) (*SubmitMeetupReviewResponse, error)
+	// Reads back what the CALLER themselves submitted — never another rater's
+	// scores. Backs the "see the ratings you gave" view on a history card.
+	GetMeetupReview(context.Context, *GetMeetupReviewRequest) (*GetMeetupReviewResponse, error)
 	// Host-only "meetup is done" action (ADR-016), reviving meetup_status's
 	// previously-unused COMPLETED value. Rejects with Forbidden if the
 	// caller isn't the host or the window hasn't started yet
@@ -601,11 +683,23 @@ func (UnimplementedMeetupServiceServer) DeclineCheckIn(context.Context, *Decline
 func (UnimplementedMeetupServiceServer) SubmitMeetupFeedback(context.Context, *SubmitMeetupFeedbackRequest) (*SubmitMeetupFeedbackResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubmitMeetupFeedback not implemented")
 }
+func (UnimplementedMeetupServiceServer) ListMeetupParticipants(context.Context, *ListMeetupParticipantsRequest) (*ListMeetupParticipantsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListMeetupParticipants not implemented")
+}
+func (UnimplementedMeetupServiceServer) ListNotifications(context.Context, *ListNotificationsRequest) (*ListNotificationsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListNotifications not implemented")
+}
 func (UnimplementedMeetupServiceServer) ListRatableParticipants(context.Context, *ListRatableParticipantsRequest) (*ListRatableParticipantsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListRatableParticipants not implemented")
 }
 func (UnimplementedMeetupServiceServer) SubmitRating(context.Context, *SubmitRatingRequest) (*SubmitRatingResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SubmitRating not implemented")
+}
+func (UnimplementedMeetupServiceServer) SubmitMeetupReview(context.Context, *SubmitMeetupReviewRequest) (*SubmitMeetupReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitMeetupReview not implemented")
+}
+func (UnimplementedMeetupServiceServer) GetMeetupReview(context.Context, *GetMeetupReviewRequest) (*GetMeetupReviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMeetupReview not implemented")
 }
 func (UnimplementedMeetupServiceServer) CloseMeetup(context.Context, *CloseMeetupRequest) (*CloseMeetupResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CloseMeetup not implemented")
@@ -940,6 +1034,42 @@ func _MeetupService_SubmitMeetupFeedback_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MeetupService_ListMeetupParticipants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListMeetupParticipantsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).ListMeetupParticipants(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_ListMeetupParticipants_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).ListMeetupParticipants(ctx, req.(*ListMeetupParticipantsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MeetupService_ListNotifications_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListNotificationsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).ListNotifications(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_ListNotifications_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).ListNotifications(ctx, req.(*ListNotificationsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MeetupService_ListRatableParticipants_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListRatableParticipantsRequest)
 	if err := dec(in); err != nil {
@@ -972,6 +1102,42 @@ func _MeetupService_SubmitRating_Handler(srv interface{}, ctx context.Context, d
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MeetupServiceServer).SubmitRating(ctx, req.(*SubmitRatingRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MeetupService_SubmitMeetupReview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubmitMeetupReviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).SubmitMeetupReview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_SubmitMeetupReview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).SubmitMeetupReview(ctx, req.(*SubmitMeetupReviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MeetupService_GetMeetupReview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMeetupReviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).GetMeetupReview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_GetMeetupReview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).GetMeetupReview(ctx, req.(*GetMeetupReviewRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1088,12 +1254,28 @@ var MeetupService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MeetupService_SubmitMeetupFeedback_Handler,
 		},
 		{
+			MethodName: "ListMeetupParticipants",
+			Handler:    _MeetupService_ListMeetupParticipants_Handler,
+		},
+		{
+			MethodName: "ListNotifications",
+			Handler:    _MeetupService_ListNotifications_Handler,
+		},
+		{
 			MethodName: "ListRatableParticipants",
 			Handler:    _MeetupService_ListRatableParticipants_Handler,
 		},
 		{
 			MethodName: "SubmitRating",
 			Handler:    _MeetupService_SubmitRating_Handler,
+		},
+		{
+			MethodName: "SubmitMeetupReview",
+			Handler:    _MeetupService_SubmitMeetupReview_Handler,
+		},
+		{
+			MethodName: "GetMeetupReview",
+			Handler:    _MeetupService_GetMeetupReview_Handler,
 		},
 		{
 			MethodName: "CloseMeetup",

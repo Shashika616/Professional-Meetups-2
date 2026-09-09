@@ -540,7 +540,7 @@ func TestEmailSignupAndLogin_FullRoundTrip(t *testing.T) {
 func TestCompleteEmailLogin_RejectsWrongCodeAndUnknownEmailIdentically(t *testing.T) {
 	svc, deps := newFederatedTestService(t)
 	existing, _ := deps.users.Create(context.Background(), repository.NewUser{FullName: "Ada", TrustLevel: 0, AgeConfirmedOver18: true})
-	_, _ = deps.users.UpdatePersonalEmail(context.Background(), existing.ID, "ada@example.com", 0)
+	_, _ = deps.users.UpdatePersonalEmail(context.Background(), existing.ID, "ada@example.com", func(repository.User) int { return 0 })
 
 	if _, err := svc.StartEmailLogin(context.Background(), StartVerificationRequest{
 		Purpose: VerificationPurposeEmailLogin, Target: "ada@example.com",

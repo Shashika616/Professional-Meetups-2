@@ -439,6 +439,68 @@ func (q *Queries) GetMeetupByIDForUpdate(ctx context.Context, id uuid.UUID) (Mee
 	return i, err
 }
 
+const listMeetupParticipants = `-- name: ListMeetupParticipants :many
+SELECT
+  participants.user_id,
+  participants.is_host,
+  COALESCE(u.full_name, '') AS full_name,
+  u.profile_photo_url,
+  COALESCE(u.trust_level, 0) AS trust_level
+FROM (
+  SELECT m.host_user_id AS user_id, true AS is_host
+  FROM meetup.meetups m WHERE m.id = $1
+  UNION
+  SELECT r.requester_id AS user_id, false AS is_host
+  FROM meetup.meetup_requests r
+  WHERE r.meetup_id = $1 AND r.status = 'accepted'
+) participants
+LEFT JOIN meetup.user_display_cache u ON u.user_id = participants.user_id
+ORDER BY participants.is_host DESC, u.full_name
+`
+
+type ListMeetupParticipantsRow struct {
+	UserID          uuid.UUID   `json:"user_id"`
+	IsHost          bool        `json:"is_host"`
+	FullName        string      `json:"full_name"`
+	ProfilePhotoUrl pgtype.Text `json:"profile_photo_url"`
+	TrustLevel      int16       `json:"trust_level"`
+}
+
+// The people on a meetup: its host, plus everyone whose request was
+// accepted. Ordered host-first, then by name, so the list reads the same way
+// every time it is fetched.
+//
+// Deliberately NOT scoped to a viewer. Who may see WHAT of this is a policy
+// question the service layer answers (see ListMeetupParticipants there) —
+// this query answers only "who is on this meetup". Mixing the two here would
+// put a trust rule in SQL where nobody reviewing the trust ladder would
+// think to look for it.
+func (q *Queries) ListMeetupParticipants(ctx context.Context, meetupID uuid.UUID) ([]ListMeetupParticipantsRow, error) {
+	rows, err := q.db.Query(ctx, listMeetupParticipants, meetupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMeetupParticipantsRow
+	for rows.Next() {
+		var i ListMeetupParticipantsRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.IsHost,
+			&i.FullName,
+			&i.ProfilePhotoUrl,
+			&i.TrustLevel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMeetupsByHostAfterCursor = `-- name: ListMeetupsByHostAfterCursor :many
 SELECT
   m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location,

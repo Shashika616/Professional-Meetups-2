@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/services/subscription_ser
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
@@ -98,54 +99,64 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
 
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // extendBodyBehindAppBar so AppBackground paints the app-bar strip
+      // too — without it the (transparent) bar shows through to nothing and
+      // sits as a flat band above the image. Same shape as
+      // verification_checklist_page.dart's Scaffold.
+      extendBodyBehindAppBar: true,
       appBar: AppBar(title: const Text('PREMIUM')),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-          children: [
-            statusAsync.when(
-              data: (status) => _statusCard(status),
-              loading: () => const SkeletonLoader(
-                child: SkeletonBox(width: double.infinity, height: 88),
-              ),
-              error: (_, _) => const SizedBox.shrink(),
-            ),
-            const SizedBox(height: 24),
-            SectionLabel('PLANS'),
-            const SizedBox(height: 12),
-            if (_loadError != null)
-              Text(
-                _loadError!,
-                style: TextStyle(color: AppPalette.danger, fontSize: 12),
-              )
-            else if (_products == null)
-              const SkeletonBox(width: double.infinity, height: 96)
-            else if (_products!.isEmpty)
-              Text(
-                'Premium isn\'t available on this device right now.',
-                style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-              )
-            else
-              for (final product in _products!) ...[
-                _productCard(
-                  product,
-                  entitled: statusAsync.value?.isEntitled ?? false,
+      body: AppBackground(
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+            children: [
+              statusAsync.when(
+                data: (status) => _statusCard(status),
+                loading: () => const SkeletonLoader(
+                  child: SkeletonBox(width: double.infinity, height: 88),
                 ),
-                const SizedBox(height: 12),
-              ],
-            const SizedBox(height: 20),
-            Center(
-              child: TextButton(
-                onPressed: _controller.busy
-                    ? null
-                    : () => _controller.restore(),
-                child: Text(
-                  'Restore Purchases',
-                  style: TextStyle(color: AppPalette.candyBlue, fontSize: 13),
+                error: (_, _) => const SizedBox.shrink(),
+              ),
+              const SizedBox(height: 24),
+              SectionLabel('PLANS'),
+              const SizedBox(height: 12),
+              if (_loadError != null)
+                Text(
+                  _loadError!,
+                  style: TextStyle(color: AppPalette.danger, fontSize: 12),
+                )
+              else if (_products == null)
+                const SkeletonBox(width: double.infinity, height: 96)
+              else if (_products!.isEmpty)
+                Text(
+                  'Premium isn\'t available on this device right now.',
+                  style: TextStyle(
+                    color: AppPalette.textSecondary,
+                    fontSize: 12,
+                  ),
+                )
+              else
+                for (final product in _products!) ...[
+                  _productCard(
+                    product,
+                    entitled: statusAsync.value?.isEntitled ?? false,
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              const SizedBox(height: 20),
+              Center(
+                child: TextButton(
+                  onPressed: _controller.busy
+                      ? null
+                      : () => _controller.restore(),
+                  child: Text(
+                    'Restore Purchases',
+                    style: TextStyle(color: AppPalette.candyBlue, fontSize: 13),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

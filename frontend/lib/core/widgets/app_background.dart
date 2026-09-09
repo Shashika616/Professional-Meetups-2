@@ -44,17 +44,22 @@ class AppBackground extends StatelessWidget {
   /// each of the eight call sites having to know about the difference.
   final double imageOpacity;
 
-  /// The photo is a dark, desaturated image. On the dark theme it reads as
-  /// depth. On the light theme the same value sits behind near-white
-  /// surfaces and reads as grey murk — the whole screen looks dirty, and
-  /// anything translucent above it looks worse.
+  /// The photo is a dark, desaturated image, so the same value does not read
+  /// the same on both themes — over near-white it turns to grey cast rather
+  /// than depth.
   ///
-  /// A third of the authored value keeps the texture without the cast. Not
-  /// zero: the photo is the app's one piece of visual identity, and dropping
-  /// it entirely in light mode would make the two themes look like two
-  /// different products.
+  /// TUNED TWICE. The first pass took light mode down to a third of the
+  /// authored value AND pushed the veil below to 0.82, because at the time
+  /// several cards were translucent and the photo showed through them as
+  /// murk. Together those two changes made the image invisible.
+  ///
+  /// Those cards are opaque now (FlatCard composites its tint instead of
+  /// replacing the surface), so the photo only ever meets the page
+  /// background. It can afford to be seen: 60% of the authored value, with
+  /// the veil pulled back to roughly dark mode's, gives light mode the same
+  /// texture the dark theme has without the cast that started this.
   double get _effectiveImageOpacity =>
-      AppPalette.isLight ? imageOpacity * 0.33 : imageOpacity;
+      AppPalette.isLight ? imageOpacity * 0.6 : imageOpacity;
 
   /// Marks the painted layer so a test can count how many actually rendered
   /// — the widget count alone cannot tell a painting instance from a
@@ -109,14 +114,14 @@ class AppBackground extends StatelessWidget {
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     stops: const [0.0, 0.5, 1.0],
-                    // Light mode starts the veil far more opaque. The dark
-                    // theme wants the photo visible at the top of the
-                    // screen; the light theme wants it to be a texture you
-                    // stop noticing, because content sits directly on it.
+                    // Light mode still veils a little harder — content sits
+                    // directly on this and dark-on-light needs more
+                    // separation than light-on-dark — but only a little.
+                    // At 0.82 the photo was gone entirely.
                     colors: AppPalette.isLight
                         ? [
-                            AppPalette.onyx.withValues(alpha: 0.82),
-                            AppPalette.onyx.withValues(alpha: 0.94),
+                            AppPalette.onyx.withValues(alpha: 0.55),
+                            AppPalette.onyx.withValues(alpha: 0.80),
                             AppPalette.onyx,
                           ]
                         : [

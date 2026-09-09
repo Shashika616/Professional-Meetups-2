@@ -32,7 +32,28 @@ import 'package:professional_connections_platform/features/verification/phone_ve
 /// `ProfilePage` relies on, per its own doc comment), so popping back here
 /// re-renders reactively via `ref.watch` with no manual refetch needed.
 class VerificationChecklistPage extends ConsumerWidget {
-  const VerificationChecklistPage({super.key});
+  const VerificationChecklistPage({
+    super.key,
+    this.title = defaultTitle,
+    this.description = defaultDescription,
+  });
+
+  /// The copy this page has always shown. Kept as the defaults so every
+  /// existing call site behaves identically — the parameters exist only so
+  /// a second entry point can say what IT unlocks.
+  static const defaultTitle = 'UNLOCK JOINING MEETUPS';
+  static const defaultDescription =
+      'Complete these to reach Level 2 trust and unlock joining meetups.';
+
+  /// What reaching Level 2 unlocks, from the caller's point of view.
+  ///
+  /// The checklist itself is identical either way — Level 2 is Level 2, and
+  /// there is no separate "safety trust level" (ADR-003). Only the framing
+  /// changes, so someone sent here from the Safety Center is told what they
+  /// are working towards rather than being asked to unlock meetups they
+  /// were not trying to join.
+  final String title;
+  final String description;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -53,14 +74,14 @@ class VerificationChecklistPage extends ConsumerWidget {
       // so the SafeArea below still pushes content clear of the title row.
       // Same fix as profile_setup_screen.dart's identical Scaffold shape.
       extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('UNLOCK JOINING MEETUPS')),
+      appBar: AppBar(title: Text(title)),
       body: AppBackground(
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
             children: [
               Text(
-                'Complete these to reach Level 2 trust and unlock joining meetups.',
+                description,
                 style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 20),

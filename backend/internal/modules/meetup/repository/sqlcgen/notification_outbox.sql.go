@@ -176,15 +176,16 @@ func (q *Queries) DeleteProcessedNotifications(ctx context.Context, arg DeletePr
 }
 
 const enqueueNotification = `-- name: EnqueueNotification :exec
-INSERT INTO meetup.notification_outbox (fcm_tokens, title, body, data)
-VALUES ($1::text[], $2, $3, $4)
+INSERT INTO meetup.notification_outbox (fcm_tokens, title, body, data, user_id)
+VALUES ($1::text[], $2, $3, $4, $5)
 `
 
 type EnqueueNotificationParams struct {
-	FcmTokens []string `json:"fcm_tokens"`
-	Title     string   `json:"title"`
-	Body      string   `json:"body"`
-	Data      []byte   `json:"data"`
+	FcmTokens []string    `json:"fcm_tokens"`
+	Title     string      `json:"title"`
+	Body      string      `json:"body"`
+	Data      []byte      `json:"data"`
+	UserID    pgtype.UUID `json:"user_id"`
 }
 
 // The outbox insert (§F3). Always executed on a transaction handle that is
@@ -193,14 +194,78 @@ type EnqueueNotificationParams struct {
 // implies either both commit or neither does. A crash between them is not a
 // window that has to be tolerated; it is a state the database will not
 // produce.
+//
+// user_id is the RECIPIENT, carried alongside the resolved tokens purely so
+// the in-app notification list can ask "what was sent to me" (migration
+// 0009). Delivery itself still uses fcm_tokens only and never reads this.
 func (q *Queries) EnqueueNotification(ctx context.Context, arg EnqueueNotificationParams) error {
 	_, err := q.db.Exec(ctx, enqueueNotification,
 		arg.FcmTokens,
 		arg.Title,
 		arg.Body,
 		arg.Data,
+		arg.UserID,
 	)
 	return err
+}
+
+const listNotificationsForUser = `-- name: ListNotificationsForUser :many
+SELECT id, title, body, data, created_at, processed_at
+FROM meetup.notification_outbox
+WHERE user_id = $1
+  AND created_at >= $2::timestamptz
+  AND dead_lettered_at IS NULL
+ORDER BY created_at DESC
+LIMIT $3
+`
+
+type ListNotificationsForUserParams struct {
+	UserID   pgtype.UUID        `json:"user_id"`
+	Since    pgtype.Timestamptz `json:"since"`
+	RowLimit int32              `json:"row_limit"`
+}
+
+type ListNotificationsForUserRow struct {
+	ID          uuid.UUID          `json:"id"`
+	Title       string             `json:"title"`
+	Body        string             `json:"body"`
+	Data        []byte             `json:"data"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
+}
+
+// The in-app notification list. Bounded by `since`, which the caller sets to
+// the same retention window the cleanup job uses — so the list can never
+// show a row that is about to vanish, and the two windows cannot drift.
+//
+// Dead-lettered rows are excluded: they were never delivered to anyone, so
+// showing them would be telling the user about a notification they did not
+// get.
+func (q *Queries) ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]ListNotificationsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listNotificationsForUser, arg.UserID, arg.Since, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListNotificationsForUserRow
+	for rows.Next() {
+		var i ListNotificationsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Body,
+			&i.Data,
+			&i.CreatedAt,
+			&i.ProcessedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markNotificationDeadLettered = `-- name: MarkNotificationDeadLettered :exec

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
+import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 
 /// [SkeletonLoader] is the one place the app decides what "still loading"
@@ -73,11 +74,11 @@ void main() {
   });
 
   group('the shimmer', () {
-    tearDown(() => debugDisableShimmerAnimation = true);
+    tearDown(() => debugDisableAmbientAnimations = true);
 
     testWidgets('animates by default — a static grey block reads as a glitch, '
         'motion reads as loading', (tester) async {
-      debugDisableShimmerAnimation = false;
+      debugDisableAmbientAnimations = false;
 
       await tester.pumpWidget(wrap(const SkeletonLoader(child: child)));
       await tester.pump(const Duration(milliseconds: 200));
@@ -100,7 +101,7 @@ void main() {
       'one sweep covers the whole block rather than each box animating '
       'separately, which would read as noise',
       (tester) async {
-        debugDisableShimmerAnimation = false;
+        debugDisableAmbientAnimations = false;
 
         await tester.pumpWidget(
           wrap(
@@ -129,7 +130,7 @@ void main() {
     testWidgets(
       'honours reduce-motion: the placeholder stays visible but stops moving',
       (tester) async {
-        debugDisableShimmerAnimation = false;
+        debugDisableAmbientAnimations = false;
 
         await tester.pumpWidget(
           MaterialApp(

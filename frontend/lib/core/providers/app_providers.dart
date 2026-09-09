@@ -260,21 +260,36 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     }
   }
 
-  /// ADR-030 (round-9 scaffolding) — best-effort push-token registration,
-  /// called once a session is established (session-restore here,
-  /// [_completeSignIn] for a fresh sign-in/sign-up). Always a no-op
-  /// end-to-end today: [NoOpPushNotificationService.currentToken] always
-  /// returns `null`, so [MeetupService.registerDeviceToken] never actually
-  /// fires — the plumbing exists so a real `PushNotificationService`
-  /// implementation makes this live with no call-site change. `unawaited`
-  /// at both call sites deliberately — this must never delay or fail
-  /// session establishment over a notification concern, and any failure
-  /// inside is swallowed for the same reason.
+  /// Best-effort push-token registration, called once a session is
+  /// established (session-restore here, [_completeSignIn] for a fresh
+  /// sign-in/sign-up). `unawaited` at both call sites deliberately — this
+  /// must never delay or fail session establishment over a notification
+  /// concern, and any failure inside is swallowed for the same reason.
+  ///
+  /// # WHY IT INITIALIZES FIRST
+  ///
+  /// It used to go straight to `currentToken()`. [PushNotificationService]'s
+  /// contract says `initialize()` sets up what `currentToken()` needs, and
+  /// for the Firebase implementation that includes requesting notification
+  /// permission — without which iOS has no APNs token and `getToken()`
+  /// returns null.
+  ///
+  /// The only other `initialize()` call is `AppShell.initState()`, which
+  /// runs strictly AFTER this: sign-in completes, THEN the shell is pushed.
+  /// So on a device's first-ever session the token came back null, nothing
+  /// was registered, and — because `onTokenRefresh` fires on rotation, not
+  /// on a permission grant — nothing registered it later either. The backend
+  /// resolves no device for that user, `queueNotification` no-ops, and the
+  /// user gets no join-request/accept/decline/cancellation notification at
+  /// all until the next app launch happens to re-run this.
+  ///
+  /// `initialize()` is documented idempotent, so calling it here and again
+  /// in `AppShell` is safe.
   Future<void> _registerPushTokenIfAvailable() async {
     try {
-      final token = await ref
-          .read(pushNotificationServiceProvider)
-          .currentToken();
+      final push = ref.read(pushNotificationServiceProvider);
+      await push.initialize();
+      final token = await push.currentToken();
       if (token == null) return;
       await ref.read(meetupServiceProvider).registerDeviceToken(token);
     } catch (_) {

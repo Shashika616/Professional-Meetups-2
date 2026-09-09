@@ -441,6 +441,10 @@ message AddTrustedContactRequest {
   // mirroring the DB CHECK constraint (migration 0009).
   string phone_number = 3;
   string email = 4;
+  // ADR-003 — set by the gateway from the verified JWT's trust_level claim,
+  // never a client-supplied value. AddTrustedContact/TriggerSOS require
+  // Level 2, the same floor as joining a meetup.
+  int32 caller_trust_level = 5;
 }
 
 message TrustedContactResponse {
@@ -473,6 +477,8 @@ message TriggerSOSRequest {
   string context_message = 2; // optional — meetup title/location/time, or empty
   double latitude = 3;
   double longitude = 4;
+  // ADR-003 — see AddTrustedContactRequest.caller_trust_level.
+  int32 caller_trust_level = 5;
 }
 
 message TriggerSOSResponse {

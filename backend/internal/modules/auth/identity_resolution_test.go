@@ -265,7 +265,7 @@ func TestSignUpOrRecoverWithEmail_TableDriven(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed existing user: %v", err)
 		}
-		if _, err := deps.users.UpdatePersonalEmail(context.Background(), existing.ID, "ada@example.com", 1); err != nil {
+		if _, err := deps.users.UpdatePersonalEmail(context.Background(), existing.ID, "ada@example.com", func(repository.User) int { return 1 }); err != nil {
 			t.Fatalf("seed verified personal_email: %v", err)
 		}
 		createCallsBeforeRecovery := len(deps.users.createCalls)
@@ -288,7 +288,7 @@ func TestSignUpOrRecoverWithEmail_TableDriven(t *testing.T) {
 	t.Run("recovery ignores ageConfirmedOver18 — an existing account is never blocked by a stale/false flag", func(t *testing.T) {
 		svc, deps := newFederatedTestService(t)
 		existing, _ := deps.users.Create(context.Background(), repository.NewUser{LinkedInSub: "li-sub-1", FullName: "Ada", TrustLevel: 1, AgeConfirmedOver18: true})
-		_, _ = deps.users.UpdatePersonalEmail(context.Background(), existing.ID, "ada@example.com", 1)
+		_, _ = deps.users.UpdatePersonalEmail(context.Background(), existing.ID, "ada@example.com", func(repository.User) int { return 1 })
 
 		user, isNewUser, err := svc.SignUpOrRecoverWithEmail(context.Background(), "ada@example.com", false)
 		if err != nil {

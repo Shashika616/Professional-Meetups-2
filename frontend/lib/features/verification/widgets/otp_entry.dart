@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/otp_box_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 
 /// Shared 6-digit code entry — used identically by every OTP-based signup/
@@ -66,9 +66,9 @@ class _OtpEntryState extends State<OtpEntry> {
   void initState() {
     super.initState();
     _startTimer();
-    // GlassTextField doesn't expose onChanged — listening on the
-    // controller directly is what makes the VERIFY button react as digits
-    // are typed (enabled only once all 6 are entered).
+    // OtpBoxField doesn't expose onChanged — listening on the controller
+    // directly is what makes the VERIFY button react as digits are typed
+    // (enabled only once all 6 are entered).
     _codeController.addListener(_onCodeChanged);
     _sendInitialCode();
   }
@@ -173,15 +173,13 @@ class _OtpEntryState extends State<OtpEntry> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        GlassTextField(
-          controller: _codeController,
-          icon: Icons.pin_outlined,
-          hint: '######',
-          keyboardType: TextInputType.number,
-          maxLength: 6,
-          textAlign: TextAlign.center,
-          letterSpacing: 8,
-        ),
+        // WAS a single centred text field with a '######' hint and wide
+        // letter-spacing. One box per digit is what people expect from a
+        // code screen, and the widget also brings OS one-time-code autofill
+        // with it — see OtpBoxField for why it is one hidden field rather
+        // than six real ones. Same controller, so every piece of logic
+        // around it is untouched.
+        OtpBoxField(controller: _codeController),
         if (_error != null) ...[
           const SizedBox(height: 10),
           Text(

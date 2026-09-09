@@ -37,6 +37,33 @@ class _TrackingNoOpPushNotificationService implements PushNotificationService {
   Stream<PushMessage> get messages => const Stream<PushMessage>.empty();
 }
 
+/// Models what a REAL push service does on a device that has not been asked
+/// for notification permission yet: no token. On iOS `getToken()` returns
+/// null until the APNs token exists, which it does not until
+/// `requestPermission()` has run — and `requestPermission()` runs inside
+/// `initialize()`.
+///
+/// This is the behaviour [PushNotificationService]'s own contract describes
+/// ("sets up whatever the concrete implementation needs BEFORE
+/// currentToken()/messages are useful"), so a caller that skips
+/// [initialize] gets null and registers nothing.
+class _UninitializedYieldsNullPushService implements PushNotificationService {
+  bool initialized = false;
+  int currentTokenCallCount = 0;
+
+  @override
+  Future<void> initialize() async => initialized = true;
+
+  @override
+  Future<String?> currentToken() async {
+    currentTokenCallCount++;
+    return initialized ? 'fcm-token-1' : null;
+  }
+
+  @override
+  Stream<PushMessage> get messages => const Stream<PushMessage>.empty();
+}
+
 /// Every method throws except getProfile() — the notifier's build() path
 /// under test never needs the others, and UnimplementedError makes it
 /// obvious if that assumption ever stops holding.
@@ -313,5 +340,52 @@ void main() {
       0,
       reason: 'must stay inert — currentToken() returned null',
     );
+  });
+
+  test('session-restore initializes the push service before asking it for a '
+      'token — otherwise the FIRST session on a device registers nothing, and '
+      'that user gets no notifications at all until the app is next '
+      'relaunched', () async {
+    final valid = _sessionExpiringIn(const Duration(minutes: 15));
+    await storage.saveSession(valid);
+    final pushService = _UninitializedYieldsNullPushService();
+    final meetupService = ScriptedMeetupService();
+
+    final container = ProviderContainer(
+      overrides: [
+        sessionStorageProvider.overrideWithValue(storage),
+        tokenRefresherProvider.overrideWithValue(
+          TokenRefresher(
+            storage: storage,
+            refreshSession: (token) async =>
+                throw StateError('should never be called'),
+          ),
+        ),
+        authServiceProvider.overrideWithValue(
+          _FakeAuthService(
+            const UserProfile(id: 'user-1', fullName: 'Ada Lovelace'),
+          ),
+        ),
+        pushNotificationServiceProvider.overrideWithValue(pushService),
+        meetupServiceProvider.overrideWithValue(meetupService),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(authSessionProvider.future);
+    // Fire-and-forget, and now two awaits deep (initialize, then
+    // currentToken), so drain rather than hopping a fixed number of turns.
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(
+      pushService.initialized,
+      isTrue,
+      reason:
+          'AppShell.initState() initializes too, but that runs AFTER '
+          'sign-in has already asked for the token',
+    );
+    expect(meetupService.registerDeviceTokenCallCount, 1);
+    expect(meetupService.lastRegisteredDeviceToken, 'fcm-token-1');
   });
 }

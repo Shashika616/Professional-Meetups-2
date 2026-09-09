@@ -462,6 +462,233 @@ class RatableParticipant {
   }
 }
 
+/// One person on a meetup — its host, or someone whose request was accepted.
+///
+/// On a redacted list every identifying field is EMPTY, because the server
+/// never sent them. That is the point: blurring names the client has already
+/// received would be a picture of a privacy control, not one.
+class MeetupParticipant {
+  const MeetupParticipant({
+    this.userId = '',
+    required this.isHost,
+    this.fullName = '',
+    this.profilePhotoUrl = '',
+    this.trustLevel = 0,
+  });
+
+  final String userId;
+  final bool isHost;
+  final String fullName;
+  final String profilePhotoUrl;
+  final int trustLevel;
+
+  factory MeetupParticipant.fromJson(Map<String, dynamic> json) =>
+      MeetupParticipant(
+        userId: json['user_id'] as String? ?? '',
+        isHost: json['is_host'] as bool? ?? false,
+        fullName: json['full_name'] as String? ?? '',
+        profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+        trustLevel: json['trust_level'] as int? ?? 0,
+      );
+}
+
+/// A meetup's attendee list as one viewer may see it.
+class MeetupParticipants {
+  const MeetupParticipants({
+    this.participants = const [],
+    this.redacted = false,
+    this.totalCount = 0,
+  });
+
+  final List<MeetupParticipant> participants;
+
+  /// True when the server withheld identities because the viewer is below
+  /// trust level 2. Read this rather than inferring it from empty names —
+  /// an empty name can also mean the display cache has not synced.
+  final bool redacted;
+
+  /// How many people are on the meetup, redacted or not. A viewer below the
+  /// floor is still told how many are coming.
+  final int totalCount;
+
+  factory MeetupParticipants.fromJson(Map<String, dynamic> json) =>
+      MeetupParticipants(
+        participants: ((json['participants'] as List<dynamic>?) ?? const [])
+            .map((e) => MeetupParticipant.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        redacted: json['redacted'] as bool? ?? false,
+        totalCount: json['total_count'] as int? ?? 0,
+      );
+}
+
+/// One notification this user was sent, for the in-app history list.
+///
+/// Bounded server-side by the same retention window that trims the outbox,
+/// so this list can never show a row that is about to be swept.
+class AppNotification {
+  const AppNotification({
+    required this.id,
+    required this.title,
+    required this.body,
+    this.type = '',
+    this.meetupId = '',
+    required this.createdAt,
+    this.delivered = true,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+
+  /// The push's own `type` — what a tapped row deep-links on, the same
+  /// value the foreground toast handler switches on.
+  final String type;
+
+  /// Empty when the notification is not about a specific meetup.
+  final String meetupId;
+
+  final DateTime createdAt;
+
+  /// False while the push is still queued. Shown either way — it is already
+  /// a real notification for this user.
+  final bool delivered;
+
+  factory AppNotification.fromJson(Map<String, dynamic> json) =>
+      AppNotification(
+        id: json['id'] as String,
+        title: json['title'] as String? ?? '',
+        body: json['body'] as String? ?? '',
+        type: json['type'] as String? ?? '',
+        meetupId: json['meetup_id'] as String? ?? '',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+          ((json['created_at'] as int?) ?? 0) * 1000,
+        ),
+        delivered: json['delivered'] as bool? ?? true,
+      );
+}
+
+/// One selectable personality trait, defined by the server.
+///
+/// The vocabulary is server-owned rather than hardcoded here so it can grow
+/// without an app release, and so what gets stored against a real person's
+/// name is always something the server named. The client renders
+/// [emoji] + [label] and sends back [key]; only [key] is ever persisted.
+class RatingTrait {
+  const RatingTrait({
+    required this.key,
+    required this.label,
+    required this.emoji,
+  });
+
+  final String key;
+  final String label;
+  final String emoji;
+
+  factory RatingTrait.fromJson(Map<String, dynamic> json) => RatingTrait(
+    key: json['key'] as String,
+    label: json['label'] as String? ?? '',
+    emoji: json['emoji'] as String? ?? '',
+  );
+}
+
+/// The review screen's whole input: who can be rated, and the trait
+/// vocabulary to offer for each of them. Fetched together because the screen
+/// cannot draw either half without the other.
+class RatableParticipants {
+  const RatableParticipants({
+    required this.participants,
+    required this.availableTraits,
+  });
+
+  final List<RatableParticipant> participants;
+  final List<RatingTrait> availableTraits;
+
+  factory RatableParticipants.fromJson(Map<String, dynamic> json) {
+    return RatableParticipants(
+      participants: ((json['participants'] as List<dynamic>?) ?? const [])
+          .map((e) => RatableParticipant.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      availableTraits:
+          ((json['available_traits'] as List<dynamic>?) ?? const [])
+              .map((e) => RatingTrait.fromJson(e as Map<String, dynamic>))
+              .toList(),
+    );
+  }
+}
+
+/// One person's line in a review being submitted.
+class ReviewParticipantInput {
+  const ReviewParticipantInput({
+    required this.userId,
+    required this.score,
+    this.traits = const [],
+  });
+
+  final String userId;
+  final int score;
+  final List<String> traits;
+
+  Map<String, dynamic> toJson() => {
+    'user_id': userId,
+    'score': score,
+    'traits': traits,
+  };
+}
+
+/// A review read back — what the viewer themselves said, never anyone else.
+class MeetupReview {
+  const MeetupReview({
+    required this.completed,
+    this.overallScore = 0,
+    this.notes,
+    this.participants = const [],
+  });
+
+  /// False when the viewer has not finished the flow. The detail page shows
+  /// the flow rather than the result.
+  final bool completed;
+  final int overallScore;
+  final String? notes;
+  final List<ReviewedParticipant> participants;
+
+  factory MeetupReview.fromJson(Map<String, dynamic> json) => MeetupReview(
+    completed: json['completed'] as bool? ?? false,
+    overallScore: json['overall_score'] as int? ?? 0,
+    notes: json['notes'] as String?,
+    participants: ((json['participants'] as List<dynamic>?) ?? const [])
+        .map((e) => ReviewedParticipant.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+/// One rating the viewer gave, for display on a history card.
+class ReviewedParticipant {
+  const ReviewedParticipant({
+    required this.userId,
+    required this.fullName,
+    this.profilePhotoUrl = '',
+    required this.score,
+    this.traits = const [],
+  });
+
+  final String userId;
+  final String fullName;
+  final String profilePhotoUrl;
+  final int score;
+  final List<String> traits;
+
+  factory ReviewedParticipant.fromJson(Map<String, dynamic> json) =>
+      ReviewedParticipant(
+        userId: json['user_id'] as String,
+        fullName: json['full_name'] as String? ?? '',
+        profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+        score: json['score'] as int? ?? 0,
+        traits: ((json['traits'] as List<dynamic>?) ?? const [])
+            .map((e) => e as String)
+            .toList(),
+      );
+}
+
 DateTime? _secondsToDateTime(Object? value) {
   if (value == null) return null;
   return DateTime.fromMillisecondsSinceEpoch((value as int) * 1000);

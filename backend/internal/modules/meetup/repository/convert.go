@@ -135,3 +135,12 @@ func numericToFloat64(n pgtype.Numeric) float64 {
 	}
 	return f.Float64
 }
+
+// int2OrNull maps an optional small integer onto pgtype.Int2 — the shape
+// sqlc generates for a nullable SMALLINT column.
+func int2OrNull(v *int) pgtype.Int2 {
+	if v == nil {
+		return pgtype.Int2{}
+	}
+	return pgtype.Int2{Int16: int16(*v), Valid: true}
+}

@@ -120,6 +120,31 @@ class ImmediateMeetupService implements MeetupService {
       throw UnimplementedError();
 
   @override
+  Future<MeetupParticipants> listMeetupParticipants(String meetupId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<AppNotification>> listNotifications() =>
+      throw UnimplementedError();
+
+  @override
+  Future<RatableParticipants> listRatableParticipantsWithTraits(
+    String meetupId,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<void> submitMeetupReview(
+    String meetupId, {
+    required int overallScore,
+    String? notes,
+    required List<ReviewParticipantInput> participants,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<MeetupReview> getMeetupReview(String meetupId) =>
+      throw UnimplementedError();
+
+  @override
   Future<void> submitRating(
     String meetupId, {
     required String ratedUserId,

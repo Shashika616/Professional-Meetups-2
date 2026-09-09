@@ -22,6 +22,7 @@ package meetup_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,18 @@ func notifiedSet(t *testing.T, h *harness, title string) map[string]int {
 		out[userID] = n
 	}
 	return out
+}
+
+// notificationBody returns the single outbox body written under title.
+func notificationBody(t *testing.T, h *harness, title string) string {
+	t.Helper()
+	var body string
+	if err := h.pool.QueryRow(context.Background(),
+		`SELECT body FROM meetup.notification_outbox WHERE title = $1`, title,
+	).Scan(&body); err != nil {
+		t.Fatalf("read body for %q: %v", title, err)
+	}
+	return body
 }
 
 func assertNotified(t *testing.T, h *harness, title string, want map[string]string) {
@@ -148,6 +161,14 @@ func TestTrigger_WithdrawRequest_NotifiesHost_Integration(t *testing.T) {
 	}
 
 	assertNotified(t, h, "Request withdrawn", map[string]string{f.host: "the host"})
+
+	// Named, not "a requester". A host running a meetup with several
+	// accepted participants cannot act on an anonymous withdrawal — they
+	// can't tell whether they still have enough people, or who to follow up
+	// with. newTriggerFixture seeds this requester's display name.
+	if body := notificationBody(t, h, "Request withdrawn"); !strings.Contains(body, "Requester") {
+		t.Errorf("withdrawal body %q does not name who withdrew", body)
+	}
 }
 
 // Rows 3+4: RespondToRequest(accept) -> requester gets BOTH "Request

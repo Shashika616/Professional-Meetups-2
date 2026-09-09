@@ -448,3 +448,30 @@ SELECT p.user_id,
               )
        )::bigint AS meetups_completed
   FROM participants p;
+
+-- name: ListMeetupParticipants :many
+-- The people on a meetup: its host, plus everyone whose request was
+-- accepted. Ordered host-first, then by name, so the list reads the same way
+-- every time it is fetched.
+--
+-- Deliberately NOT scoped to a viewer. Who may see WHAT of this is a policy
+-- question the service layer answers (see ListMeetupParticipants there) —
+-- this query answers only "who is on this meetup". Mixing the two here would
+-- put a trust rule in SQL where nobody reviewing the trust ladder would
+-- think to look for it.
+SELECT
+  participants.user_id,
+  participants.is_host,
+  COALESCE(u.full_name, '') AS full_name,
+  u.profile_photo_url,
+  COALESCE(u.trust_level, 0) AS trust_level
+FROM (
+  SELECT m.host_user_id AS user_id, true AS is_host
+  FROM meetup.meetups m WHERE m.id = sqlc.arg(meetup_id)
+  UNION
+  SELECT r.requester_id AS user_id, false AS is_host
+  FROM meetup.meetup_requests r
+  WHERE r.meetup_id = sqlc.arg(meetup_id) AND r.status = 'accepted'
+) participants
+LEFT JOIN meetup.user_display_cache u ON u.user_id = participants.user_id
+ORDER BY participants.is_host DESC, u.full_name;

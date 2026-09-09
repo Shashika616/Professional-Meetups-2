@@ -1135,6 +1135,51 @@ void main() {
       },
     );
 
+    // The four notifications a meetup's participants actually depend on.
+    // Each is composed and queued by the backend today; this asserts the
+    // client half — that an open app SAYS something when one arrives,
+    // rather than silently refreshing a list the user is not looking at.
+    for (final scenario in const [
+      // A requester asks to join -> the HOST hears about it.
+      ('join_request', 'Ada wants to join your coffee meetup'),
+      // The host accepts -> the REQUESTER hears about it.
+      ('request_accepted', 'The host accepted your request'),
+      // The host declines -> the REQUESTER hears about it.
+      ('request_declined', 'The host declined your request'),
+      // The host calls it off -> every accepted PARTICIPANT hears about it.
+      ('meetup_cancelled', 'The host cancelled your coffee meetup'),
+      // An accepted participant pulls out -> the HOST hears about it.
+      ('request_withdrawn', 'A requester withdrew from your coffee meetup'),
+    ]) {
+      final (type, body) = scenario;
+      testWidgets('$type reaches an open app as an in-app notice', (
+        tester,
+      ) async {
+        final service = ScriptedMeetupService();
+        await pumpShell(tester, service);
+
+        messages.add(
+          PushMessage(
+            type: type,
+            meetupId: 'meetup-1',
+            title: 'Meetup update',
+            body: body,
+          ),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(
+          find.text(body),
+          findsOneWidget,
+          reason:
+              '$type is one of the notifications the app is expected to '
+              'surface while the user is looking at it',
+        );
+        await tester.pump(const Duration(seconds: 3));
+      });
+    }
+
     testWidgets('an unknown type is shown but refetches nothing — a new '
         'server-side type must never crash an older client', (tester) async {
       final service = ScriptedMeetupService();

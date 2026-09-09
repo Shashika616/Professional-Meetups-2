@@ -54,6 +54,24 @@ type NotificationOutboxRepository interface {
 	// retention job (§F8), batched — see the queries for why.
 	DeleteProcessedOlderThan(ctx context.Context, age time.Duration, batchSize int) (int, error)
 	DeleteDeadLetteredOlderThan(ctx context.Context, age time.Duration, batchSize int) (int, error)
+
+	// ListForUser backs the in-app notification list: rows addressed to
+	// userID, newest first, no older than since. Dead-lettered rows are
+	// excluded by the query — they never reached anybody.
+	ListForUser(ctx context.Context, userID string, since time.Time, limit int) ([]UserNotification, error)
+}
+
+// UserNotification is one delivered notification as the recipient sees it.
+type UserNotification struct {
+	ID        string
+	Title     string
+	Body      string
+	Data      map[string]string
+	CreatedAt time.Time
+	// Delivered is false while the row is still queued — the push has not
+	// gone out yet, but it is already a real notification for this user, so
+	// the list shows it rather than pretending nothing happened.
+	Delivered bool
 }
 
 type postgresNotificationOutboxRepository struct {
@@ -236,4 +254,39 @@ func truncateError(s string) string {
 		return s
 	}
 	return s[:maxLastErrorLength] + "… (truncated)"
+}
+
+func (r *postgresNotificationOutboxRepository) ListForUser(ctx context.Context, userID string, since time.Time, limit int) ([]UserNotification, error) {
+	id, err := parseUUID(userID)
+	if err != nil {
+		return nil, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+
+	rows, err := r.q.ListNotificationsForUser(ctx, sqlcgen.ListNotificationsForUserParams{
+		UserID:   pgtype.UUID{Bytes: id, Valid: true},
+		Since:    pgtype.Timestamptz{Time: since, Valid: true},
+		RowLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("repository: list notifications for user: %w", err)
+	}
+
+	out := make([]UserNotification, 0, len(rows))
+	for _, row := range rows {
+		data := map[string]string{}
+		if len(row.Data) > 0 {
+			// A malformed payload must not take down the whole list — the
+			// title and body are what the user actually reads.
+			_ = json.Unmarshal(row.Data, &data)
+		}
+		out = append(out, UserNotification{
+			ID:        row.ID.String(),
+			Title:     row.Title,
+			Body:      row.Body,
+			Data:      data,
+			CreatedAt: row.CreatedAt.Time,
+			Delivered: row.ProcessedAt.Valid,
+		})
+	}
+	return out, nil
 }

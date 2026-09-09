@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/core/models/trusted_contact.da
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
+import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
 
 import 'support/scripted_meetup_service.dart';
 
@@ -106,6 +107,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.text('I UNDERSTAND'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('I UNDERSTAND'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('I UNDERSTAND'));
       await tester.pumpAndSettle();
 
@@ -146,6 +151,10 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.text('I UNDERSTAND'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('I UNDERSTAND'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('I UNDERSTAND'));
       await tester.pumpAndSettle();
 
@@ -174,6 +183,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.ensureVisible(find.text('I UNDERSTAND'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('I UNDERSTAND'));
     await tester.pumpAndSettle();
 
@@ -598,6 +609,217 @@ void main() {
       expect(service.lastWithdrawRequestNote, isNull);
 
       await tester.pump(const Duration(seconds: 3));
+    });
+  });
+
+  group('a finished meetup is a different page', () {
+    Future<void> pumpPast(
+      WidgetTester tester,
+      ScriptedMeetupService service,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(
+            home: MeetupDetailPage(meetupId: 'meetup-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Meetup pastMeetup() => _acceptedMeetup(
+      windowStart: DateTime.now().subtract(const Duration(hours: 3)),
+    );
+
+    testWidgets('it drops everything about GETTING to the meetup', (
+      tester,
+    ) async {
+      await pumpPast(
+        tester,
+        ScriptedMeetupService(
+          meetupDetail: pastMeetup(),
+          safetyState: const SafetyState(meetupId: 'meetup-1'),
+        ),
+      );
+
+      // All of this exists to help someone arrive at a meetup, and offering
+      // it after the fact was the bug — a WITHDRAW REQUEST for an evening
+      // that already finished.
+      expect(find.text('WITHDRAW REQUEST'), findsNothing);
+      expect(find.text('SAFETY GATE'), findsNothing);
+      expect(find.text('I UNDERSTAND'), findsNothing);
+      expect(find.text('TELL SOMEONE'), findsNothing);
+      expect(find.text('How did it go?'), findsNothing);
+    });
+
+    testWidgets('it keeps what a past meetup is still about — the details '
+        'and the location', (tester) async {
+      await pumpPast(
+        tester,
+        ScriptedMeetupService(
+          meetupDetail: pastMeetup(),
+          safetyState: const SafetyState(meetupId: 'meetup-1'),
+        ),
+      );
+
+      expect(find.text('Colombo Fort Cafe'), findsOneWidget);
+      expect(find.text('VIEW LOCATION'), findsOneWidget);
+    });
+
+    testWidgets('an unreviewed past meetup offers the review — this is what '
+        'keeps it reachable after the home card lapses', (tester) async {
+      await pumpPast(
+        tester,
+        ScriptedMeetupService(
+          meetupDetail: pastMeetup(),
+          safetyState: const SafetyState(meetupId: 'meetup-1'),
+        ),
+      );
+
+      expect(
+        find.text('Share your thoughts about this meetup'),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('START REVIEW'));
+      await tester.pumpAndSettle();
+      expect(find.text('How was your experience?'), findsOneWidget);
+    });
+
+    testWidgets('finishing the review replaces the prompt with the result, '
+        'right there on the page', (tester) async {
+      late final ScriptedMeetupService service;
+      service =
+          ScriptedMeetupService(
+              meetupDetail: pastMeetup(),
+              safetyState: const SafetyState(meetupId: 'meetup-1'),
+            )
+            ..onSubmitReview = () => service.meetupReview = const MeetupReview(
+              completed: true,
+              overallScore: 3,
+            );
+      await pumpPast(tester, service);
+
+      expect(find.text('START REVIEW'), findsOneWidget);
+      await tester.tap(find.text('START REVIEW'));
+      await tester.pumpAndSettle();
+
+      final slider = tester.getRect(find.byType(ExperienceSlider));
+      await tester.tapAt(Offset(slider.center.dx, slider.center.dy));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('SUBMIT'));
+      await tester.pumpAndSettle();
+
+      expect(service.submitReviewCallCount, 1);
+      expect(
+        find.text('Share your thoughts about this meetup'),
+        findsNothing,
+        reason: 'the prompt outlived the review that answered it',
+      );
+      expect(find.text('Okay'), findsOneWidget);
+    });
+
+    testWidgets('a reviewed meetup shows the scores that were given, as '
+        'static stars — ratings are immutable, so a picker would be a lie', (
+      tester,
+    ) async {
+      await pumpPast(
+        tester,
+        ScriptedMeetupService(
+            meetupDetail: pastMeetup(),
+            safetyState: const SafetyState(meetupId: 'meetup-1'),
+          )
+          ..meetupReview = const MeetupReview(
+            completed: true,
+            overallScore: 5,
+            notes: 'Genuinely useful.',
+            participants: [
+              ReviewedParticipant(
+                userId: 'host-1',
+                fullName: 'Grace Hopper',
+                score: 4,
+                traits: ['great_listener'],
+              ),
+            ],
+          ),
+      );
+
+      expect(find.text('YOUR REVIEW'), findsOneWidget);
+      expect(find.text('Excellent'), findsOneWidget);
+      expect(find.text('"Genuinely useful."'), findsOneWidget);
+      expect(find.text('HOW YOU RATED THEM'), findsOneWidget);
+      expect(find.text('Grace Hopper'), findsOneWidget);
+      // Stored as a key; rendered as words, without shipping a second copy
+      // of the server's vocabulary.
+      expect(find.text('Great listener'), findsOneWidget);
+      // The prompt is gone once there is nothing left to ask for.
+      expect(find.text('START REVIEW'), findsNothing);
+    });
+  });
+
+  group('"How did it go?" is only offered once the meetup has started', () {
+    testWidgets('a meetup scheduled for later shows neither the question nor '
+        'the rating block it unlocks', (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final service = ScriptedMeetupService(
+        meetupDetail: _acceptedMeetup(
+          windowStart: DateTime.now().add(const Duration(days: 1)),
+        ),
+        safetyState: const SafetyState(meetupId: 'meetup-1'),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(
+            home: MeetupDetailPage(meetupId: 'meetup-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('How did it go?'),
+        findsNothing,
+        reason:
+            'a meetup that has not begun has no answer to this — and '
+            'IT HAPPENED is what unlocks rating everyone on it',
+      );
+      expect(find.text('IT HAPPENED'), findsNothing);
+      expect(find.text("DIDN'T HAPPEN"), findsNothing);
+      expect(find.text('RATE WHO YOU MET'), findsNothing);
+    });
+
+    testWidgets('the same meetup, once under way, offers it', (tester) async {
+      tester.view.physicalSize = const Size(800, 2000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final service = ScriptedMeetupService(
+        meetupDetail: _acceptedMeetup(
+          windowStart: DateTime.now().subtract(const Duration(minutes: 5)),
+        ),
+        safetyState: const SafetyState(meetupId: 'meetup-1'),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(
+            home: MeetupDetailPage(meetupId: 'meetup-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('How did it go?'), findsOneWidget);
     });
   });
 

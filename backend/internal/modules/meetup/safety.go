@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
@@ -186,7 +187,35 @@ func (s *service) DeclineCheckIn(ctx context.Context, req DeclineCheckInRequest)
 // as "happened but felt unsafe", so they are dropped in that case rather
 // than written as real negative answers. Notes is never gated on Happened: a
 // note is meaningful either way (e.g. "never showed up").
+//
+// # WHY THE TWO GUARDS BELOW
+//
+// This call had neither, and it is not a low-stakes write: a row here with
+// Happened=true is precisely what HasConfirmedHappened reads, which is
+// SubmitRating's first eligibility branch. So "I attended this" was the
+// unguarded door to "I may now rate everyone on it".
+//
+//   - Participation: without it any authenticated user could file feedback
+//     on a meetup they had nothing to do with. SubmitRating's own
+//     IsParticipant check kept that from becoming a rating, but a stranger
+//     writing safety feedback on someone else's meetup is its own problem.
+//   - The window having started: a meetup scheduled for next week has not
+//     happened, and no honest answer to "how did it go?" exists yet.
+//     Without this a participant could mark a future meetup as attended and
+//     rate people they had not met. WindowStart, not WindowEnd, so someone
+//     can report a no-show without waiting out the full window.
 func (s *service) SubmitMeetupFeedback(ctx context.Context, req SubmitMeetupFeedbackRequest) error {
+	if err := s.requireParticipant(ctx, req.MeetupID, req.UserID); err != nil {
+		return err
+	}
+	m, err := s.meetups.GetByID(ctx, req.MeetupID, req.UserID)
+	if err != nil {
+		return err
+	}
+	if time.Now().Before(m.WindowStart) {
+		return fmt.Errorf("meetup: %s has not started yet: %w", req.MeetupID, apperror.ErrConflict)
+	}
+
 	var feltSafe, profileAccurate, wouldMeetAgain *bool
 	if req.Happened {
 		feltSafe = req.FeltSafe

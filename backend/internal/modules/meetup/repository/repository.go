@@ -143,6 +143,10 @@ type MeetupRepository interface {
 	// GetByID returns apperror.ErrNotFound (wrapped) if id doesn't exist.
 	// viewerID populates MyRequestStatus relative to that specific caller.
 	GetByID(ctx context.Context, id, viewerID string) (Meetup, error)
+	// ListParticipants returns the meetup's host plus everyone whose request
+	// was accepted, host first. Viewer-independent: what a given viewer may
+	// SEE of these people is decided in the service layer, not here.
+	ListParticipants(ctx context.Context, meetupID string) ([]MeetupParticipant, error)
 	// ListOpen returns open meetups for intent, newest first, cursor-
 	// paginated, within 40km of (viewerLat, viewerLng) (ADR-021 §2). cursor
 	// nil means the first page. Returns one page of at most pageSize
@@ -340,12 +344,39 @@ type SafetyStateRepository interface {
 	ListShareContactIDs(ctx context.Context, meetupID, userID string) ([]string, error)
 }
 
+// MeetupParticipant is one person on a meetup — the host, or someone whose
+// request was accepted. Carries no viewer-dependent redaction; that is the
+// service layer's job.
+type MeetupParticipant struct {
+	UserID          string
+	IsHost          bool
+	FullName        string
+	ProfilePhotoURL string
+	TrustLevel      int
+}
+
 // FeedbackRepository is the persistence boundary for post-meetup feedback
 // (Safety UX Flows.md's five questions — felt_safe/profile_accurate/
 // would_meet_again are nil when happened is false, there's nothing
 // meaningful to ask if the meetup didn't happen).
 type FeedbackRepository interface {
 	Upsert(ctx context.Context, meetupID, userID string, happened bool, feltSafe, profileAccurate, wouldMeetAgain *bool, notes *string) error
+	// IDsAwaitingReview returns the ids of meetups userID took part in whose
+	// window has ended after cutoff and which they have not finished
+	// reviewing — what keeps a finished meetup on Home until it is reviewed.
+	IDsAwaitingReview(ctx context.Context, userID string, cutoff time.Time) ([]string, error)
+	// Get returns userID's feedback row for meetupID, or ErrNotFound.
+	Get(ctx context.Context, meetupID, userID string) (MeetupFeedback, error)
+}
+
+// MeetupFeedback is one user's answers about one meetup — the safety
+// questions plus, once the review flow completes, the overall score and the
+// stamp that says it is done.
+type MeetupFeedback struct {
+	Happened          bool
+	OverallScore      *int
+	Notes             *string
+	ReviewCompletedAt *time.Time
 }
 
 // RatableParticipant is another participant of a meetup the viewer can
@@ -360,6 +391,36 @@ type RatableParticipant struct {
 	// §5) — that request's withdrawal_note, if any. Nil for every
 	// happened-based or cancellation-triggered entry.
 	ContextNote *string
+}
+
+// ReviewSubmission is one complete post-meetup review: the overall score
+// for the meetup, an optional note, and one entry per participant being
+// rated. Written atomically — see RatingRepository.SubmitReview.
+type ReviewSubmission struct {
+	MeetupID     string
+	RaterID      string
+	OverallScore int
+	Notes        *string
+	Participants []ReviewParticipant
+}
+
+// ReviewParticipant is one person's line in a review.
+type ReviewParticipant struct {
+	UserID string
+	Score  int
+	// Trait keys from the server's own vocabulary, already validated by the
+	// service layer (see meetup/traits.go).
+	Traits []string
+}
+
+// SubmittedRating is a rating the viewer themselves gave, read back for the
+// history view.
+type SubmittedRating struct {
+	UserID          string
+	FullName        string
+	ProfilePhotoURL string
+	Score           int
+	Traits          []string
 }
 
 // RatingRepository is the persistence boundary for post-meetup star ratings
@@ -411,6 +472,16 @@ type RatingRepository interface {
 	// CHECK(rater_user_id <> rated_user_id) fires (a malformed direct API
 	// call — the UI never offers self as ratable).
 	Submit(ctx context.Context, meetupID, raterID, ratedID string, score int) error
+	// SubmitReview writes a whole review — overall score, note, every
+	// participant's rating and traits, and the completion stamp — in one
+	// transaction. Same error mapping as Submit for the per-rating
+	// constraints. A partial review is not a state this system can leave a
+	// user in: ratings are immutable, so a half-applied review can never be
+	// retried to completion.
+	SubmitReview(ctx context.Context, review ReviewSubmission) error
+	// ListMyRatings returns only what viewerID themselves submitted on
+	// meetupID — never what anyone else gave.
+	ListMyRatings(ctx context.Context, meetupID, viewerID string) ([]SubmittedRating, error)
 }
 
 // UserDisplayCacheRepository is the persistence boundary for

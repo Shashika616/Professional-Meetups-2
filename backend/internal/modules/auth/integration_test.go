@@ -722,7 +722,8 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	var first auth.TrustedContact
 	for i := 0; i < 3; i++ {
 		contact, err := h.svc.AddTrustedContact(ctx, auth.AddTrustedContactRequest{
-			UserID: owner.UserID, Name: fmt.Sprintf("Contact %d", i), PhoneNumber: "+9477123456" + fmt.Sprint(i),
+			CallerTrustLevel: 2,
+			UserID:           owner.UserID, Name: fmt.Sprintf("Contact %d", i), PhoneNumber: "+9477123456" + fmt.Sprint(i),
 		})
 		if err != nil {
 			t.Fatalf("AddTrustedContact %d: %v", i, err)
@@ -733,7 +734,8 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	}
 
 	if _, err := h.svc.AddTrustedContact(ctx, auth.AddTrustedContactRequest{
-		UserID: owner.UserID, Name: "Fourth", PhoneNumber: "+94771234599",
+		CallerTrustLevel: 2,
+		UserID:           owner.UserID, Name: "Fourth", PhoneNumber: "+94771234599",
 	}); err == nil {
 		t.Error("a 4th trusted contact was accepted, want the cap of 3 enforced")
 	} else if !isSentinel(err, apperror.ErrInvalidInput) {
@@ -766,7 +768,8 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	}
 
 	result, err := h.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
-		UserID: owner.UserID, ContextMessage: "Coffee at 3pm", Latitude: 6.9271, Longitude: 79.8612,
+		CallerTrustLevel: 2,
+		UserID:           owner.UserID, ContextMessage: "Coffee at 3pm", Latitude: 6.9271, Longitude: 79.8612,
 	})
 	if err != nil {
 		t.Fatalf("TriggerSOS: %v", err)
@@ -786,14 +789,16 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 
 	// Oversized context message is rejected server-side.
 	if _, err := h.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
-		UserID: owner.UserID, ContextMessage: strings.Repeat("a", 501), Latitude: 1, Longitude: 1,
+		CallerTrustLevel: 2,
+		UserID:           owner.UserID, ContextMessage: strings.Repeat("a", 501), Latitude: 1, Longitude: 1,
 	}); err == nil {
 		t.Error("a 501-character context message was accepted, want the 500 cap enforced")
 	}
 
 	// Out-of-range coordinates never reach a real maps link.
 	if _, err := h.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
-		UserID: owner.UserID, Latitude: 91, Longitude: 0,
+		CallerTrustLevel: 2,
+		UserID:           owner.UserID, Latitude: 91, Longitude: 0,
 	}); err == nil {
 		t.Error("latitude 91 was accepted, want rejection")
 	}

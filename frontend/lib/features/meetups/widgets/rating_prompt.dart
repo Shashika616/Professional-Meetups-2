@@ -21,9 +21,27 @@ import 'package:professional_connections_platform/core/widgets/section_label.dar
 /// rule — becomes a static "Rated" state once submitted rather than a
 /// re-tappable picker.
 class RatingPrompt extends ConsumerStatefulWidget {
-  const RatingPrompt({super.key, required this.meetupId});
+  const RatingPrompt({super.key, required this.meetupId, this.onlyUserIds});
 
   final String meetupId;
+
+  /// Restricts the block to these users, or shows everyone the server
+  /// returned when null (the post-meetup flow, which is the whole point of
+  /// the list).
+  ///
+  /// The one caller that passes it is the REQUESTS screen's REJECTED tab,
+  /// which surfaces this widget for a single narrow reason (ADR-020 §4): a
+  /// host may rate a requester who WITHDREW. `listRatableParticipants`
+  /// answers a broader question — everyone the viewer may rate on this
+  /// meetup, which after the meetup completes includes every attendee — and
+  /// carries no field distinguishing the two reasons, so the tab that knows
+  /// which requests were withdrawn is the one that has to say so.
+  ///
+  /// Without this, a REJECTED tab reading "No rejected or withdrawn
+  /// requests." still offered the meetup's attendees to rate underneath it,
+  /// which both contradicts the empty state and puts the post-meetup rating
+  /// flow on a screen that is not about the meetup happening.
+  final Set<String>? onlyUserIds;
 
   @override
   ConsumerState<RatingPrompt> createState() => _RatingPromptState();
@@ -45,10 +63,22 @@ class _RatingPromptState extends ConsumerState<RatingPrompt> {
           .read(meetupServiceProvider)
           .listRatableParticipants(widget.meetupId);
       if (!mounted) return;
+      final only = widget.onlyUserIds;
       setState(() {
-        _participants = participants;
+        _participants = only == null
+            ? participants
+            : participants.where((p) => only.contains(p.userId)).toList();
         _loading = false;
       });
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (_) {
       // A failed fetch here shouldn't block the rest of the page — this
       // step is entirely optional/skippable, so it just quietly stays
@@ -141,6 +171,15 @@ class _RatingPromptState extends ConsumerState<RatingPrompt> {
             )
             .toList();
       });
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (!mounted) return;
       showSnack(

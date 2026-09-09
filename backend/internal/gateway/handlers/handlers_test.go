@@ -45,14 +45,17 @@ type fakeMonolith struct {
 	meetupResponse monolithclient.Meetup
 
 	// captured arguments
-	gotUserID         string
-	gotProvider       string
-	gotIDToken        string
-	gotNonce          string
-	gotRefreshToken   string
-	gotContextMessage string
-	gotContactID      string
-	gotLat, gotLng    float64
+	gotUserID string
+	// ADR-003 — recorded so a test can prove the trust level came from the
+	// token rather than the request body.
+	gotCallerTrustLevel int32
+	gotProvider         string
+	gotIDToken          string
+	gotNonce            string
+	gotRefreshToken     string
+	gotContextMessage   string
+	gotContactID        string
+	gotLat, gotLng      float64
 }
 
 func (f *fakeMonolith) CompleteFederatedSignup(_ context.Context, provider, idToken, nonce string, _ bool) (monolithclient.Session, error) {
@@ -90,8 +93,9 @@ func (f *fakeMonolith) StartPhoneVerification(_ context.Context, userID, _ strin
 	return 60, f.err
 }
 
-func (f *fakeMonolith) AddTrustedContact(_ context.Context, userID, name, phone, email string) (monolithclient.TrustedContact, error) {
+func (f *fakeMonolith) AddTrustedContact(_ context.Context, userID, name, phone, email string, callerTrustLevel int32) (monolithclient.TrustedContact, error) {
 	f.gotUserID = userID
+	f.gotCallerTrustLevel = callerTrustLevel
 	return monolithclient.TrustedContact{ID: "contact-1", Name: name, PhoneNumber: phone, Email: email}, f.err
 }
 
@@ -105,8 +109,9 @@ func (f *fakeMonolith) RemoveTrustedContact(_ context.Context, userID, contactID
 	return f.err
 }
 
-func (f *fakeMonolith) TriggerSOS(_ context.Context, userID, contextMessage string, lat, lng float64) (int32, error) {
+func (f *fakeMonolith) TriggerSOS(_ context.Context, userID, contextMessage string, lat, lng float64, callerTrustLevel int32) (int32, error) {
 	f.gotUserID, f.gotContextMessage, f.gotLat, f.gotLng = userID, contextMessage, lat, lng
+	f.gotCallerTrustLevel = callerTrustLevel
 	return 2, f.err
 }
 
@@ -416,6 +421,31 @@ func TestAuthenticatedRoutes_UserIDComesFromTheTokenNotTheBody(t *testing.T) {
 			if s.monolith.gotUserID != "attacker" {
 				t.Errorf("monolith called with user_id %q, want %q — the body's user_id must be ignored entirely",
 					s.monolith.gotUserID, "attacker")
+			}
+		})
+	}
+}
+
+// ADR-003: the trust level gating the two safety writes must come from the
+// verified JWT, never the request body. A body-sourced value would let a
+// guest hand itself Level 2 and defeat the gate entirely.
+func TestSafetyRoutes_TrustLevelComesFromTheTokenNotTheBody(t *testing.T) {
+	cases := []struct{ name, path, body string }{
+		{"add contact", "/v1/sos/contacts", `{"name":"Ada","phone_number":"+94771234567","caller_trust_level":3}`},
+		{"trigger sos", "/v1/sos/trigger", `{"latitude":1,"longitude":2,"caller_trust_level":3}`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServer(t)
+			// The real token says Level 0 — a guest. The body claims 3.
+			rec := s.do(http.MethodPost, tc.path, tc.body, s.tokenFor(t, "guest-1", 0))
+			if rec.Code >= 500 {
+				t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+			}
+			if s.monolith.gotCallerTrustLevel != 0 {
+				t.Errorf("monolith called with caller_trust_level %d, want 0 — the body's value must be ignored entirely",
+					s.monolith.gotCallerTrustLevel)
 			}
 		})
 	}

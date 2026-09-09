@@ -16,7 +16,9 @@ import 'package:professional_connections_platform/core/widgets/skeleton_loader.d
 import 'package:professional_connections_platform/core/widgets/verification_badges.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
+import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
 import 'package:professional_connections_platform/features/premium/premium_page.dart';
+import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
 import 'package:professional_connections_platform/features/safety/safety_page.dart';
 import 'package:professional_connections_platform/features/verification/corporate_email_verification_page.dart';
 import 'package:professional_connections_platform/features/verification/personal_details_page.dart';
@@ -162,6 +164,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                     size: 18,
                     color: AppPalette.textSecondary,
                   ),
+                  // The chevron pointed at nothing until now.
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (context) => const PrivacyControlsPage(),
+                    ),
+                  ),
                 ),
                 _Divider(),
                 // Deliberately dead (2026-08-31 review hardening) — a real
@@ -171,14 +180,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 _Row(
                   icon: Icons.notifications_none_rounded,
                   title: 'Notifications',
-                  subtitle: 'Coming soon',
-                  trailing: Text(
-                    'SOON',
-                    style: TextStyle(
-                      color: AppPalette.textSecondary,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
+                  subtitle: 'Last 7 days',
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: AppPalette.textSecondary,
+                  ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (context) => const NotificationsPage(),
                     ),
                   ),
                 ),
@@ -217,6 +228,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: () => _confirmSignOut(context, ref),
                 child: FlatCard(
                   radius: 12,
@@ -589,7 +601,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
       trailing: trailing,
     );
     if (locked) return row;
+    // Same reasoning as _PrefRow's: the whole row is the target, not just
+    // the glyphs painted on it.
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () =>
           Navigator.push(context, MaterialPageRoute(builder: buildScreen)),
       child: row,
@@ -819,7 +834,15 @@ class _Row extends StatelessWidget {
       ),
     );
     if (onTap == null) return row;
-    return GestureDetector(onTap: onTap, child: row);
+    // opaque, not the default deferToChild: a Row of an icon, text and a
+    // chevron leaves most of its width as transparent padding, and
+    // deferToChild only hit-tests the painted children — so the row only
+    // responded on the label or the arrow, with dead space between them.
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: row,
+    );
   }
 }
 

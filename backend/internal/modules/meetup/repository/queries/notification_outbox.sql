@@ -5,8 +5,12 @@
 -- implies either both commit or neither does. A crash between them is not a
 -- window that has to be tolerated; it is a state the database will not
 -- produce.
-INSERT INTO meetup.notification_outbox (fcm_tokens, title, body, data)
-VALUES (sqlc.arg(fcm_tokens)::text[], sqlc.arg(title), sqlc.arg(body), sqlc.arg(data));
+--
+-- user_id is the RECIPIENT, carried alongside the resolved tokens purely so
+-- the in-app notification list can ask "what was sent to me" (migration
+-- 0009). Delivery itself still uses fcm_tokens only and never reads this.
+INSERT INTO meetup.notification_outbox (fcm_tokens, title, body, data, user_id)
+VALUES (sqlc.arg(fcm_tokens)::text[], sqlc.arg(title), sqlc.arg(body), sqlc.arg(data), sqlc.narg(user_id));
 
 -- name: ClaimNotificationOutboxBatch :many
 -- Claims up to $1 due rows for delivery.
@@ -124,3 +128,19 @@ WHERE id IN (
 -- set, not a table scan.
 SELECT count(*) FROM meetup.notification_outbox
 WHERE processed_at IS NULL AND dead_lettered_at IS NULL;
+
+-- name: ListNotificationsForUser :many
+-- The in-app notification list. Bounded by `since`, which the caller sets to
+-- the same retention window the cleanup job uses — so the list can never
+-- show a row that is about to vanish, and the two windows cannot drift.
+--
+-- Dead-lettered rows are excluded: they were never delivered to anyone, so
+-- showing them would be telling the user about a notification they did not
+-- get.
+SELECT id, title, body, data, created_at, processed_at
+FROM meetup.notification_outbox
+WHERE user_id = sqlc.arg(user_id)
+  AND created_at >= sqlc.arg(since)::timestamptz
+  AND dead_lettered_at IS NULL
+ORDER BY created_at DESC
+LIMIT sqlc.arg(row_limit);

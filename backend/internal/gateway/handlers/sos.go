@@ -46,7 +46,15 @@ func (h *Handler) addTrustedContact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contact, err := h.monolith.AddTrustedContact(r.Context(), middleware.UserIDFromContext(r.Context()), req.Name, req.PhoneNumber, req.Email)
+	// Trust level from the verified JWT (ADR-003), never the body — it gates
+	// the write, so it is exactly the value a modified client would supply.
+	ctx := r.Context()
+	contact, err := h.monolith.AddTrustedContact(
+		ctx,
+		middleware.UserIDFromContext(ctx),
+		req.Name, req.PhoneNumber, req.Email,
+		int32(middleware.TrustLevelFromContext(ctx)),
+	)
 	if err != nil {
 		writeGRPCError(w, err)
 		return
@@ -100,7 +108,13 @@ func (h *Handler) triggerSOS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	contactsNotified, err := h.monolith.TriggerSOS(r.Context(), middleware.UserIDFromContext(r.Context()), req.ContextMessage, req.Latitude, req.Longitude)
+	ctx := r.Context()
+	contactsNotified, err := h.monolith.TriggerSOS(
+		ctx,
+		middleware.UserIDFromContext(ctx),
+		req.ContextMessage, req.Latitude, req.Longitude,
+		int32(middleware.TrustLevelFromContext(ctx)),
+	)
 	if err != nil {
 		writeGRPCError(w, err)
 		return

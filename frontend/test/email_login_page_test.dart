@@ -219,7 +219,7 @@ void main() {
       await tester.tap(find.text('SEND CODE'));
       await tester.pumpAndSettle();
 
-      await tester.enterText(find.byType(TextFormField), '123456');
+      await tester.enterText(find.byType(TextField), '123456');
       await tester.pumpAndSettle();
       await tester.tap(find.text('VERIFY'));
       await tester.pumpAndSettle();
@@ -244,7 +244,7 @@ void main() {
     await tester.tap(find.text('SEND CODE'));
     await tester.pumpAndSettle();
 
-    await tester.enterText(find.byType(TextFormField), '000000');
+    await tester.enterText(find.byType(TextField), '000000');
     await tester.pumpAndSettle();
     await tester.tap(find.text('VERIFY'));
     await tester.pumpAndSettle();

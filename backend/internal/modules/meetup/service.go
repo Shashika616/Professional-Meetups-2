@@ -100,8 +100,22 @@ type Service interface {
 	DeclineCheckIn(ctx context.Context, req DeclineCheckInRequest) (SafetyState, error)
 	SubmitMeetupFeedback(ctx context.Context, req SubmitMeetupFeedbackRequest) error
 
+	// ListMeetupParticipants returns who is on a meetup, with identities
+	// withheld below participantIdentityFloor.
+	// ListNotifications returns the caller's in-app notification history,
+	// bounded by the outbox retention window.
+	ListNotifications(ctx context.Context, userID string) ([]UserNotification, error)
+
+	ListMeetupParticipants(ctx context.Context, req ListMeetupParticipantsRequest) (MeetupParticipants, error)
+
 	ListRatableParticipants(ctx context.Context, req ListRatableParticipantsRequest) ([]RatableParticipant, error)
 	SubmitRating(ctx context.Context, req SubmitRatingRequest) error
+	// SubmitMeetupReview is the post-meetup review flow's single write —
+	// overall score, note, and every participant's score and traits, all or
+	// nothing. The only thing that marks a meetup reviewed.
+	SubmitMeetupReview(ctx context.Context, req SubmitMeetupReviewRequest) error
+	// GetMeetupReview reads back what the viewer themselves submitted.
+	GetMeetupReview(ctx context.Context, meetupID, viewerID string) (MeetupReview, error)
 	CloseMeetup(ctx context.Context, req CloseMeetupRequest) (Meetup, error)
 	CancelMeetup(ctx context.Context, req CancelMeetupRequest) error
 
@@ -469,22 +483,44 @@ func (s *service) ListActiveMeetups(ctx context.Context, userID string) ([]Meetu
 	}
 
 	now := time.Now()
-	isActive := func(m repository.Meetup) bool {
+
+	// Meetups whose window has ended and that this user still owes a review
+	// on. They stay on Home so the review prompt survives long enough to be
+	// used — it used to appear the moment the window passed and vanish on
+	// the very next refresh, because the filter below dropped anything whose
+	// window had ended. Bounded by reviewWindow so an ignored review does
+	// not sit here forever.
+	awaitingIDs, err := s.feedback.IDsAwaitingReview(ctx, userID, now.Add(-reviewWindow))
+	if err != nil {
+		return nil, err
+	}
+	awaiting := make(map[string]bool, len(awaitingIDs))
+	for _, id := range awaitingIDs {
+		awaiting[id] = true
+	}
+
+	// Live: still open/full and not yet over. Awaiting: over, unreviewed,
+	// and inside the window. A cancelled meetup is neither — there is
+	// nothing to attend and nothing to review.
+	isLive := func(m repository.Meetup) bool {
 		return (m.Status == repository.MeetupStatusOpen || m.Status == repository.MeetupStatusFull) &&
 			m.WindowEnd.After(now)
+	}
+	include := func(m repository.Meetup) bool {
+		return isLive(m) || awaiting[m.ID]
 	}
 
 	seen := make(map[string]bool)
 	var active []repository.Meetup
 	for _, m := range hosted {
-		if !isActive(m) || seen[m.ID] {
+		if !include(m) || seen[m.ID] {
 			continue
 		}
 		seen[m.ID] = true
 		active = append(active, m)
 	}
 	for _, m := range requested {
-		if !isActive(m) || seen[m.ID] {
+		if !include(m) || seen[m.ID] {
 			continue
 		}
 		// Only an accepted request counts as "I'm active in this meetup" — a
@@ -496,8 +532,21 @@ func (s *service) ListActiveMeetups(ctx context.Context, userID string) ([]Meetu
 		active = append(active, m)
 	}
 
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].WindowStart.Before(active[j].WindowStart)
+	// Live meetups first, soonest-first among them, so the card the user
+	// swipes to first is always the one that is next — a newly created
+	// meetup takes the front of the deck ahead of anything merely waiting to
+	// be reviewed. Reviews follow, most recently finished first, which is
+	// the order someone would actually want to write them in.
+	sort.SliceStable(active, func(i, j int) bool {
+		a, b := active[i], active[j]
+		aLive, bLive := isLive(a), isLive(b)
+		if aLive != bLive {
+			return aLive
+		}
+		if aLive {
+			return a.WindowStart.Before(b.WindowStart)
+		}
+		return a.WindowEnd.After(b.WindowEnd)
 	})
 
 	return meetupsFromRepo(active, userID), nil

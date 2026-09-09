@@ -107,6 +107,15 @@ class HostMeetupControls extends ConsumerWidget {
       if (!context.mounted) return;
       onChanged(closed);
       showSnack(context, 'Meetup closed.', type: ToastType.success);
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (context.mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (context.mounted) {
         showSnack(
@@ -154,6 +163,15 @@ class HostMeetupControls extends ConsumerWidget {
         ),
       );
       showSnack(context, 'Meetup cancelled.', type: ToastType.success);
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (context.mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (context.mounted) {
         showSnack(

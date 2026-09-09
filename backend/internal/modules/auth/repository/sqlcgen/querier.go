@@ -36,6 +36,30 @@ type Querier interface {
 	// state which kind of account it is creating keeps a future fifth signup path
 	// from silently inheriting "not a guest" without anyone deciding it.
 	CreateUser(ctx context.Context, arg CreateUserParams) (AuthUser, error)
+	// Guest-account cleanup (plan 14 Part B). A guest signs up, never verifies,
+	// eventually signs out — and the row sits there forever with no way to reach
+	// it again, since a guest account has no email, phone or LinkedIn to sign
+	// back in with.
+	//
+	// Three conditions, all required:
+	//   * is_guest = true — a HARD exclusion. is_guest only ever flips to false
+	//     (nothing sets it back), so a real account can never become eligible
+	//     here no matter how long it sits unused.
+	//   * no refresh_tokens row at all — an anti-join, not a stored "signed out"
+	//     flag. refresh_tokens is already the source of truth for "can this
+	//     account still authenticate"; a second derivable column would be free
+	//     to drift out of sync with it. Note this means ANY row blocks deletion,
+	//     including a dead one: the refresh-token sweep in the same tick removes
+	//     those first, so an account becomes eligible only once its last token
+	//     has been swept.
+	//   * updated_at older than the retention window — the same grace period the
+	//     refresh-token sweep uses, so a just-abandoned account stays
+	//     inspectable for the same length of time a just-expired token does.
+	//
+	// Batched by id the same way DeleteExpiredRefreshTokens is, and for the same
+	// reason: the caller loops until a batch comes back short, so no single
+	// statement holds a long lock.
+	DeleteAbandonedGuests(ctx context.Context, arg DeleteAbandonedGuestsParams) (int64, error)
 	// The retention sweep (§B3). Every login and every refresh inserts a row and
 	// nothing ever deleted one, so this table grew without bound — cheap to trim
 	// continuously now, expensive to backfill-delete from a large table under
@@ -74,6 +98,13 @@ type Querier interface {
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (AuthRefreshToken, error)
 	GetRefreshTokenByID(ctx context.Context, id uuid.UUID) (AuthRefreshToken, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (AuthUser, error)
+	// The read half of every trust-level write (gap-tracker #17). FOR UPDATE
+	// holds a row lock for the rest of the enclosing transaction, so a
+	// concurrent verification step for the same user either already committed
+	// (and this read sees it) or blocks until this one commits (and so sees
+	// this write). Without it both callers compute trust_level from the same
+	// pre-write snapshot and the later write silently under-stamps it.
+	GetUserByIDForUpdate(ctx context.Context, id uuid.UUID) (AuthUser, error)
 	GetUserByLinkedInSub(ctx context.Context, linkedinSub pgtype.Text) (AuthUser, error)
 	// personal_email's mere presence already means "verified" in this schema
 	// (same "presence IS the signal" convention as linkedin_sub/phone_number —

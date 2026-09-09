@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
+
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
 /// The two things every loading placeholder in this app needs, in one
@@ -96,26 +98,6 @@ class _SkeletonLoaderState extends State<SkeletonLoader> {
   }
 }
 
-/// Freezes the shimmer sweep, leaving the placeholder shapes visible but
-/// still.
-///
-/// Set globally by `test/flutter_test_config.dart`. A repeating
-/// AnimationController schedules frames forever, and `pumpAndSettle` waits
-/// for frames to stop — so without this, any test that settles while a
-/// placeholder is on screen hangs until it times out.
-///
-/// A debug flag rather than the accessibility route: turning the real OS
-/// "reduce motion" setting on for the suite ALSO makes Flutter run every
-/// other AnimationController 20x faster (`AnimationBehavior.normal` scales
-/// by 0.05 when `SemanticsBinding.disableAnimations` is set), which silently
-/// broke a legitimate pull-to-refresh test. This flag touches nothing but
-/// the sweep.
-///
-/// Mirrors `location_view_page.dart`'s `debugLaunchUrlOverride` — the shape
-/// this codebase already uses for a production seam only tests set.
-@visibleForTesting
-bool debugDisableShimmerAnimation = false;
-
 /// Sweeps a soft highlight across everything beneath it.
 ///
 /// # ONE CONTROLLER, NOT ONE PER BOX
@@ -156,7 +138,7 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
     // system for less animation should get a still placeholder, not an
     // exception to their own preference — and it keeps the placeholder
     // fully legible either way.
-    if (debugDisableShimmerAnimation ||
+    if (debugDisableAmbientAnimations ||
         (MediaQuery.maybeDisableAnimationsOf(context) ?? false)) {
       return widget.child;
     }

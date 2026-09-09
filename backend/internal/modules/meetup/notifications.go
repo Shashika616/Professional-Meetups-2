@@ -62,6 +62,9 @@ func queueNotification(ctx context.Context, tx repository.NotifyTx, userID, noti
 		Title:     title,
 		Body:      body,
 		Data:      withType,
+		// The recipient, so the in-app list can show this later. Known here
+		// already — it is the same id whose tokens were just resolved.
+		UserID: userID,
 	})
 }
 
@@ -147,6 +150,7 @@ func queueNotifications(ctx context.Context, tx repository.NotifyTx, recipients 
 			Title:     title,
 			Body:      body,
 			Data:      data,
+			UserID:    userID,
 		})
 	}
 	if len(rows) == 0 {

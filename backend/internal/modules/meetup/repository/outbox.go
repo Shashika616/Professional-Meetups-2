@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"professional-meetups-monolith/backend/internal/modules/meetup/repository/sqlcgen"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 )
@@ -23,6 +25,11 @@ type OutboxRow struct {
 	Title     string
 	Body      string
 	Data      map[string]string
+	// UserID is the RECIPIENT — carried alongside the resolved tokens purely
+	// so the in-app notification list can ask "what was sent to me"
+	// (migration 0009). Delivery never reads it. Empty for a row with no
+	// single recipient.
+	UserID string
 }
 
 // NotifyTx is the transaction-scoped surface handed to a notification
@@ -179,11 +186,21 @@ func (n notifyTx) Enqueue(ctx context.Context, rows ...OutboxRow) error {
 			return fmt.Errorf("repository: encode notification data: %w", err)
 		}
 
+		var userID pgtype.UUID
+		if row.UserID != "" {
+			parsed, err := parseUUID(row.UserID)
+			if err != nil {
+				return fmt.Errorf("repository: invalid notification recipient %q: %w", row.UserID, apperror.ErrInvalidInput)
+			}
+			userID = pgtype.UUID{Bytes: parsed, Valid: true}
+		}
+
 		if err := n.q.EnqueueNotification(ctx, sqlcgen.EnqueueNotificationParams{
 			FcmTokens: row.FCMTokens,
 			Title:     row.Title,
 			Body:      row.Body,
 			Data:      encoded,
+			UserID:    userID,
 		}); err != nil {
 			return fmt.Errorf("repository: enqueue notification: %w", err)
 		}

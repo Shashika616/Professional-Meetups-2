@@ -55,7 +55,8 @@ func TestAddTrustedContact_EnforcesSoftCapOfThree(t *testing.T) {
 
 	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
 		_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
-			UserID: "user-1", Name: "Contact", PhoneNumber: "+94771234567",
+			CallerTrustLevel: safetyFeatureTrustFloor,
+			UserID:           "user-1", Name: "Contact", PhoneNumber: "+94771234567",
 		})
 		if err != nil {
 			t.Fatalf("AddTrustedContact() #%d error: %v", i, err)
@@ -63,7 +64,8 @@ func TestAddTrustedContact_EnforcesSoftCapOfThree(t *testing.T) {
 	}
 
 	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
-		UserID: "user-1", Name: "One Too Many", PhoneNumber: "+94770000000",
+		CallerTrustLevel: safetyFeatureTrustFloor,
+		UserID:           "user-1", Name: "One Too Many", PhoneNumber: "+94770000000",
 	})
 	if !errors.Is(err, apperror.ErrInvalidInput) {
 		t.Fatalf("4th AddTrustedContact() code = %v, want %v (soft cap)", err, apperror.ErrInvalidInput)
@@ -74,7 +76,7 @@ func TestAddTrustedContact_RequiresPhoneOrEmail(t *testing.T) {
 	svc, _, _, _, _, _ := newTestServiceForSOS(t)
 	ctx := context.Background()
 
-	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{UserID: "user-1", Name: "No Contact Info"})
+	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "No Contact Info"})
 	if !errors.Is(err, apperror.ErrInvalidInput) {
 		t.Fatalf("AddTrustedContact() with neither phone nor email: code = %v, want %v", err, apperror.ErrInvalidInput)
 	}
@@ -84,7 +86,7 @@ func TestAddTrustedContact_RejectsEmptyName(t *testing.T) {
 	svc, _, _, _, _, _ := newTestServiceForSOS(t)
 	ctx := context.Background()
 
-	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{UserID: "user-1", Name: "  ", PhoneNumber: "+94771234567"})
+	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "  ", PhoneNumber: "+94771234567"})
 	if !errors.Is(err, apperror.ErrInvalidInput) {
 		t.Fatalf("AddTrustedContact() with blank name: code = %v, want %v", err, apperror.ErrInvalidInput)
 	}
@@ -160,7 +162,7 @@ func TestTriggerSOS_RejectsWithZeroContacts(t *testing.T) {
 	ctx := context.Background()
 	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
 
-	_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
 	if !errors.Is(err, apperror.ErrInvalidInput) {
 		t.Fatalf("TriggerSOS() with zero contacts: code = %v, want %v", err, apperror.ErrInvalidInput)
 	}
@@ -193,7 +195,7 @@ func TestTriggerSOS_RejectsInvalidLatLng(t *testing.T) {
 				t.Fatalf("seed error: %v", err)
 			}
 
-			_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: tc.lat, Longitude: tc.lng})
+			_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: tc.lat, Longitude: tc.lng})
 			if !errors.Is(err, apperror.ErrInvalidInput) {
 				t.Errorf("TriggerSOS() with lat=%v lng=%v: code = %v, want %v", tc.lat, tc.lng, err, apperror.ErrInvalidInput)
 			}
@@ -213,7 +215,8 @@ func TestTriggerSOS_SendsToAllContacts(t *testing.T) {
 	}
 
 	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
-		UserID: "user-1", ContextMessage: "at the coffee meetup", Latitude: 6.9271, Longitude: 79.8612,
+		CallerTrustLevel: safetyFeatureTrustFloor,
+		UserID:           "user-1", ContextMessage: "at the coffee meetup", Latitude: 6.9271, Longitude: 79.8612,
 	})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
@@ -248,7 +251,7 @@ func TestTriggerSOS_TolerantOfPartialSendFailure(t *testing.T) {
 	}
 	smsSender.alertErr = errAlertSendFailed
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 1, Longitude: 2})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 1, Longitude: 2})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v, want the call to succeed despite the SMS failure", err)
 	}
@@ -276,7 +279,7 @@ func TestTriggerSOS_RetriesTransientSendFailure(t *testing.T) {
 	smsSender.alertErr = errAlertSendFailed
 	smsSender.alertFailFirstN = 1 // fails once (transient), succeeds on the retry
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}
@@ -306,7 +309,7 @@ func TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel(t *testi
 	}
 	smsSender.alertErr = errAlertSendFailed // sustained failure (alertFailFirstN left at 0)
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}
@@ -347,7 +350,7 @@ func TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures(t *testing.T) {
 	}
 	smsSender.alertErr = errAlertSendFailed // sustained failure
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}
@@ -383,7 +386,7 @@ func TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel(t *te
 	smsSender.alertErr = errAlertSendFailed
 
 	// First call trips the SMS breaker open (5 recorded failures).
-	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-1", Latitude: 6.9, Longitude: 79.8}); err != nil {
+	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8}); err != nil {
 		t.Fatalf("first TriggerSOS() error: %v", err)
 	}
 	callsAfterFirst := smsSender.alertCallCount
@@ -395,7 +398,7 @@ func TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel(t *te
 	// known to be down, so it must fail fast — zero further real sends, and
 	// no retry delay paid.
 	start := time.Now()
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{UserID: "user-2", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-2", Latitude: 6.9, Longitude: 79.8})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("second TriggerSOS() error: %v", err)
@@ -428,7 +431,8 @@ func TestTriggerSOS_WritesSosEventRow(t *testing.T) {
 	}
 
 	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
-		UserID: "user-1", ContextMessage: "help", Latitude: 6.9, Longitude: 79.8,
+		CallerTrustLevel: safetyFeatureTrustFloor,
+		UserID:           "user-1", ContextMessage: "help", Latitude: 6.9, Longitude: 79.8,
 	}); err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}

@@ -43,7 +43,14 @@ const (
 )
 
 // RefreshTokenSweeper deletes refresh-token rows that can never authenticate
-// anything again.
+// anything again, and then the guest accounts those rows were the last way
+// into (plan 14 Part B).
+//
+// Two jobs in one sweeper rather than two sweepers: they run on the same
+// schedule, share a retention window, and the second is only correct AFTER
+// the first has run (an account is eligible once it has no token rows at
+// all). Separate tickers could drift apart and make that ordering
+// accidental.
 //
 // Same shape as the meetup module's lifecycle Poller and the notification
 // outbox's retention job — started with `go sweeper.Run(ctx)` from
@@ -59,6 +66,7 @@ type RefreshTokenSweeper struct {
 // needs, so a test can drive it without constructing the whole module.
 type refreshTokenSweeperService interface {
 	SweepExpiredRefreshTokens(ctx context.Context) (int, error)
+	SweepAbandonedGuests(ctx context.Context) (int, error)
 }
 
 // NewRefreshTokenSweeper constructs a sweeper over svc.
@@ -94,11 +102,53 @@ func (s *RefreshTokenSweeper) Tick(ctx context.Context) {
 	deleted, err := s.svc.SweepExpiredRefreshTokens(ctx)
 	if err != nil {
 		s.logger.Error("refresh token sweep", "error", err)
-		return
-	}
-	if deleted > 0 {
+		// Deliberately not a return: guest cleanup does not depend on the
+		// token sweep succeeding. It only becomes less effective this tick,
+		// since an account is eligible only once its last token row is
+		// gone — a failed sweep defers work, it does not corrupt anything.
+	} else if deleted > 0 {
 		s.logger.Info("refresh token sweep", "deleted", deleted)
 	}
+
+	// Second, and in this order on purpose: the sweep above is what removes
+	// the last dead refresh-token row, and DeleteAbandonedGuests requires
+	// NO row at all. Running guest cleanup first would just miss every
+	// account whose final token died this tick.
+	guests, err := s.svc.SweepAbandonedGuests(ctx)
+	if err != nil {
+		s.logger.Error("guest account cleanup", "error", err)
+		return
+	}
+	if guests > 0 {
+		s.logger.Info("guest account cleanup", "deleted", guests)
+	}
+}
+
+// SweepAbandonedGuests deletes every eligible abandoned guest account,
+// batched, and reports the total removed.
+//
+// Same loop, ceiling and cancellation behaviour as
+// SweepExpiredRefreshTokens — see that method for the reasoning; the two
+// share their retention window and batch parameters deliberately, so there
+// is one set of numbers to reason about rather than two that can drift.
+func (s *service) SweepAbandonedGuests(ctx context.Context) (int, error) {
+	total := 0
+	for batch := 0; batch < refreshTokenSweepMaxBatches; batch++ {
+		if err := ctx.Err(); err != nil {
+			return total, nil
+		}
+
+		deleted, err := s.users.DeleteAbandonedGuests(ctx, RefreshTokenRetention, refreshTokenSweepBatchSize)
+		if err != nil {
+			return total, err
+		}
+		total += deleted
+
+		if deleted < refreshTokenSweepBatchSize {
+			return total, nil
+		}
+	}
+	return total, nil
 }
 
 // SweepExpiredRefreshTokens deletes every eligible refresh-token row,

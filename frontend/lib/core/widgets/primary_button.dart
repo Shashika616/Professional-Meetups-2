@@ -18,6 +18,10 @@ class PrimaryButton extends StatefulWidget {
     this.height = 56,
     this.isLoading = false,
     this.icon,
+    this.iconWidget,
+    this.fillColor,
+    this.foregroundColor,
+    this.borderColor,
   });
 
   final String label;
@@ -25,6 +29,19 @@ class PrimaryButton extends StatefulWidget {
   final double height;
   final bool isLoading;
   final IconData? icon;
+
+  /// A leading icon that is not a font glyph — used for logos that carry
+  /// their own colours, which an [Icon] cannot express (Google's mark is
+  /// four colours; a glyph can only ever be one). Wins over [icon].
+  final Widget? iconWidget;
+
+  /// Overrides for the default candyBlue fill. The provider sign-in buttons
+  /// use a NEUTRAL surface: Apple's HIG and Google's Sign-In branding both
+  /// expect their logo on a plain light or dark button, and a four-colour
+  /// mark on a tinted fill reads as muddy regardless of the rules.
+  final Color? fillColor;
+  final Color? foregroundColor;
+  final Color? borderColor;
 
   @override
   State<PrimaryButton> createState() => _PrimaryButtonState();
@@ -74,8 +91,15 @@ class _PrimaryButtonState extends State<PrimaryButton> {
               borderRadius: BorderRadius.circular(borderRadius),
               // Solid fill, no gradient, no glow — flat (ADR-032).
               color: isEnabled
-                  ? AppPalette.candyBlue
-                  : AppPalette.candyBlue.withValues(alpha: 0.4),
+                  ? (widget.fillColor ?? AppPalette.candyBlue)
+                  : (widget.fillColor ?? AppPalette.candyBlue).withValues(
+                      alpha: 0.4,
+                    ),
+              // Only the neutral provider buttons ask for one; the default
+              // filled button needs no outline against the page.
+              border: widget.borderColor == null
+                  ? null
+                  : Border.all(color: widget.borderColor!),
             ),
             child: InkWell(
               borderRadius: BorderRadius.circular(borderRadius),
@@ -92,15 +116,22 @@ class _PrimaryButtonState extends State<PrimaryButton> {
                         height: 24,
                         child: CircularProgressIndicator(
                           strokeWidth: 2.5,
-                          color: AppPalette.onyx,
+                          color: widget.foregroundColor ?? AppPalette.onyx,
                         ),
                       )
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (widget.icon != null) ...[
-                            Icon(widget.icon, size: 20, color: AppPalette.onyx),
+                          if (widget.iconWidget != null) ...[
+                            widget.iconWidget!,
+                            const SizedBox(width: 12),
+                          ] else if (widget.icon != null) ...[
+                            Icon(
+                              widget.icon,
+                              size: 20,
+                              color: widget.foregroundColor ?? AppPalette.onyx,
+                            ),
                             const SizedBox(width: 12),
                           ],
                           // Shrinks the label to fit instead of ellipsizing
@@ -116,10 +147,16 @@ class _PrimaryButtonState extends State<PrimaryButton> {
                                 widget.label,
                                 maxLines: 1,
                                 style: TextStyle(
-                                  color: AppPalette.onyx,
+                                  color:
+                                      widget.foregroundColor ?? AppPalette.onyx,
                                   fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.5,
-                                  fontSize: 15,
+                                  // 15 sat level with a 20px logo, so the
+                                  // two competed. 13.5 keeps the label
+                                  // clearly secondary to the mark it
+                                  // follows, which is how these buttons
+                                  // read in every app that ships them.
+                                  letterSpacing: 1.1,
+                                  fontSize: 13.5,
                                 ),
                               ),
                             ),

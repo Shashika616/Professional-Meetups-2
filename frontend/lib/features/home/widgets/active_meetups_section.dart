@@ -6,11 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
-import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
+import 'package:professional_connections_platform/features/meetups/review/meetup_review_page.dart';
 
 /// How far ahead of a meetup's `windowStart` the persistent card starts
 /// showing it (ADR-025 §2/§4) — a display-only window computed from the
@@ -236,9 +237,22 @@ class _PageDots extends StatelessWidget {
   }
 }
 
-/// One card. Once `meetup.windowEnd` has passed, converts in place to the
-/// existing [RatingPrompt] rather than a second, purpose-built prompt UI
-/// (ADR-025 §4).
+/// One card. Once `meetup.windowEnd` has passed, it becomes an invitation to
+/// review the meetup instead of a countdown to it.
+///
+/// # WHAT THIS REPLACED
+///
+/// It used to swap itself for a bare [RatingPrompt] the instant the window
+/// passed. Two things were wrong with that. The prompt appeared and then
+/// vanished on the very next refresh, because the server's active-meetups
+/// filter dropped anything already over — so the card people were supposed
+/// to act on had a lifetime of one poll. And a naked star picker with no
+/// context is not an invitation; it does not say which meetup it is about or
+/// what pressing it commits you to.
+///
+/// Now the card keeps the meetup's own identity and adds one clear ask, and
+/// the server keeps it in the list until it is reviewed (or the review
+/// window lapses).
 class _PersistentMeetupCard extends StatelessWidget {
   const _PersistentMeetupCard({required this.meetup});
 
@@ -246,18 +260,8 @@ class _PersistentMeetupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Unchanged from before this round — any windowEnd-passed meetup
-    // flips to RatingPrompt regardless of its server status (RatingPrompt
-    // self-gates on real eligibility, so mounting it early/for an
-    // ineligible meetup is harmless, same reasoning as always). What this
-    // round fixes is the badge _ActiveMeetupRow shows for the same
-    // meetup below — see _effectiveStatus's own doc comment.
     if (DateTime.now().isAfter(meetup.windowEnd!)) {
-      return FlatCard(
-        radius: 12,
-        padding: const EdgeInsets.all(16),
-        child: RatingPrompt(meetupId: meetup.id),
-      );
+      return _ReviewInvitationCard(meetup: meetup);
     }
 
     return GestureDetector(
@@ -466,6 +470,259 @@ class _ActiveMeetupRow extends StatelessWidget {
             // lifecycle-poller lag).
             MeetupStatusBadge(status: _effectiveStatus(meetup)),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The finished-meetup card: the meetup, and one thing to do about it.
+///
+/// Deliberately warmer than the live card — a soft gold wash and a pulsing
+/// icon — because this is the one card on Home that is asking for something
+/// rather than reporting something. It is also a task the user can ignore,
+/// so it has to earn the tap rather than assume it.
+class _ReviewInvitationCard extends ConsumerStatefulWidget {
+  const _ReviewInvitationCard({required this.meetup});
+
+  final Meetup meetup;
+
+  @override
+  ConsumerState<_ReviewInvitationCard> createState() =>
+      _ReviewInvitationCardState();
+}
+
+class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1800),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Started here rather than in initState because whether it should run at
+    // all depends on MediaQuery. Someone who asked the system for less
+    // motion gets a still icon, not a slower one — and the suite freezes it
+    // outright, since a forever-repeating controller never lets
+    // pumpAndSettle finish (see debugDisableAmbientAnimations).
+    final wanted =
+        !debugDisableAmbientAnimations &&
+        !MediaQuery.of(context).disableAnimations;
+    if (wanted && !_pulse.isAnimating) {
+      _pulse.repeat(reverse: true);
+    } else if (!wanted && _pulse.isAnimating) {
+      _pulse.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openReview() async {
+    final submitted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => MeetupReviewPage(
+          meetupId: widget.meetup.id,
+          hostUserId: widget.meetup.hostUserId,
+        ),
+      ),
+    );
+    // The review page invalidates the lists itself on success; this only
+    // covers the case where it was dismissed without submitting, so the
+    // card stays exactly as it was.
+    if (submitted == true && mounted) {
+      ref.invalidate(activeMeetupsProvider);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final meetup = widget.meetup;
+    return GestureDetector(
+      onTap: _openReview,
+      child: FlatCard(
+        radius: 14,
+        elevated: true,
+        border: AppPalette.hairline,
+        tint: AppPalette.gold.withValues(alpha: 0.05),
+        padding: EdgeInsets.zero,
+        // Same skeleton as the live card next to it in the carousel — accent
+        // bar, chip row, then the meetup's own details — because it IS the
+        // same meetup, one state later. A card that dropped that structure
+        // would read as an unrelated notification that happened to be in the
+        // deck.
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: AppPalette.gold,
+                  borderRadius: const BorderRadius.horizontal(
+                    left: Radius.circular(14),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          // Where the live card says NOW. Same shape, so the
+                          // two are comparable at a glance.
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppPalette.gold,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              'REVIEW',
+                              style: TextStyle(
+                                fontSize: 9,
+                                letterSpacing: 1.0,
+                                fontWeight: FontWeight.w800,
+                                color: AppPalette.card,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              meetup.intent.label.toUpperCase(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppPalette.textSecondary,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.1,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      // WHICH meetup. Without these three lines the card
+                      // asked someone to rate an unnamed event: a user with
+                      // two finished meetups in the deck had no way to tell
+                      // the cards apart, and no way to know what they were
+                      // about to review.
+                      Text(
+                        meetup.hostFullName!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppPalette.textPrimary,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        meetup.formattedWindow,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppPalette.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.place_outlined,
+                            size: 12,
+                            color: AppPalette.textSecondary,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              meetup.locationLabel!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppPalette.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      Divider(height: 1, color: AppPalette.hairline),
+                      const SizedBox(height: 10),
+                      // The ask, now clearly ABOUT the meetup named above it
+                      // rather than instead of it.
+                      Row(
+                        children: [
+                          // The one moving thing on the card. A scale and an
+                          // opacity on a 22px icon — nothing under it
+                          // repaints, and it stops the moment the card is
+                          // disposed.
+                          FadeTransition(
+                            opacity: Tween<double>(begin: 0.55, end: 1.0)
+                                .animate(
+                                  CurvedAnimation(
+                                    parent: _pulse,
+                                    curve: Curves.easeInOut,
+                                  ),
+                                ),
+                            child: ScaleTransition(
+                              scale: Tween<double>(begin: 0.9, end: 1.1)
+                                  .animate(
+                                    CurvedAnimation(
+                                      parent: _pulse,
+                                      curve: Curves.easeInOut,
+                                    ),
+                                  ),
+                              child: Icon(
+                                Icons.auto_awesome_rounded,
+                                size: 16,
+                                color: AppPalette.gold,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Share your thoughts about this meetup',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppPalette.textPrimary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: AppPalette.textSecondary,
+                            size: 20,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

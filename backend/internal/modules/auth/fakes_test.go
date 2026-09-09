@@ -57,6 +57,10 @@ type fakeUserRepository struct {
 	// ratingCacheUpdatedAt tracks the last-applied event timestamp per
 	// user, mirroring the real rating_updated_at column — UpsertRatingCache
 	// uses this to reproduce the ordering guard in tests.
+	// hasRefreshToken stands in for the real anti-join against
+	// auth.refresh_tokens — this fake owns no tokens, so a test seeds which
+	// users still hold one.
+	hasRefreshToken      map[string]bool
 	ratingCacheUpdatedAt map[string]time.Time
 	// meetupsCompletedUpdatedAt is the same thing for the meetups-completed
 	// cache, mirroring meetups_completed_updated_at.
@@ -65,8 +69,9 @@ type fakeUserRepository struct {
 
 func newFakeUserRepository() *fakeUserRepository {
 	return &fakeUserRepository{
-		byLinkedInSub: map[string]repository.User{},
-		byID:          map[string]repository.User{},
+		byLinkedInSub:   map[string]repository.User{},
+		byID:            map[string]repository.User{},
+		hasRefreshToken: map[string]bool{},
 	}
 }
 
@@ -148,13 +153,26 @@ func (f *fakeUserRepository) Create(_ context.Context, u repository.NewUser) (re
 	return created, nil
 }
 
+// # THE recomputeTrustLevel CALLBACK IN THE FAKE (gap-tracker #17)
+//
+// Each of the six trust-level writers below applies its own field(s) to the
+// fake's CURRENT stored row and then calls the caller's callback with that
+// row, exactly as the Postgres implementations do against the row they hold
+// a FOR UPDATE lock on. That is what makes the existing service-layer tests
+// genuinely exercise the new closures rather than merely recompile.
+//
+// What this fake CANNOT prove: that the real row lock serialises concurrent
+// transactions. There is no concurrency here to serialise. The tests below
+// prove the recompute-from-current-state logic; only a real Postgres
+// integration test could prove the locking.
+//
 // UpdatePhoneNumber/UpdatePersonalEmail simulate migration 0002's UNIQUE
 // constraint — a linear scan for a conflicting value on a different user is
 // fine at fake-repository scale and is what lets
 // TestVerifyPhoneCode_ConflictOnAlreadyVerifiedNumber (etc) exercise the
 // same race-condition mapping the real Postgres repository provides via
 // pgErr.Code == "23505".
-func (f *fakeUserRepository) UpdatePhoneNumber(_ context.Context, userID, phoneNumber string, trustLevel int) (repository.User, error) {
+func (f *fakeUserRepository) UpdatePhoneNumber(_ context.Context, userID, phoneNumber string, recomputeTrustLevel func(repository.User) int) (repository.User, error) {
 	for id, u := range f.byID {
 		if id != userID && u.PhoneNumber == phoneNumber {
 			return repository.User{}, fmt.Errorf("fake: phone number already verified on a different account: %w", apperror.ErrConflict)
@@ -165,14 +183,17 @@ func (f *fakeUserRepository) UpdatePhoneNumber(_ context.Context, userID, phoneN
 		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	u.PhoneNumber = phoneNumber
-	u.TrustLevel = trustLevel
+	// Mirrors the real repository: the field is applied to the CURRENT row
+	// first, then the trust level is computed from that — never handed in
+	// precomputed from a snapshot the caller read earlier.
+	u.TrustLevel = recomputeTrustLevel(u)
 	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
 	u.IsGuest = false
 	f.save(u)
 	return u, nil
 }
 
-func (f *fakeUserRepository) UpdatePersonalEmail(_ context.Context, userID, personalEmail string, trustLevel int) (repository.User, error) {
+func (f *fakeUserRepository) UpdatePersonalEmail(_ context.Context, userID, personalEmail string, recomputeTrustLevel func(repository.User) int) (repository.User, error) {
 	for id, u := range f.byID {
 		if id != userID && u.PersonalEmail == personalEmail {
 			return repository.User{}, fmt.Errorf("fake: personal email already verified on a different account: %w", apperror.ErrConflict)
@@ -183,39 +204,39 @@ func (f *fakeUserRepository) UpdatePersonalEmail(_ context.Context, userID, pers
 		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	u.PersonalEmail = personalEmail
-	u.TrustLevel = trustLevel
+	u.TrustLevel = recomputeTrustLevel(u)
 	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
 	u.IsGuest = false
 	f.save(u)
 	return u, nil
 }
 
-func (f *fakeUserRepository) UpdatePersonalDetails(_ context.Context, userID, legalName, address string, trustLevel int) (repository.User, error) {
+func (f *fakeUserRepository) UpdatePersonalDetails(_ context.Context, userID, legalName, address string, recomputeTrustLevel func(repository.User) int) (repository.User, error) {
 	u, ok := f.byID[userID]
 	if !ok {
 		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	u.LegalName = legalName
 	u.Address = address
-	u.TrustLevel = trustLevel
+	u.TrustLevel = recomputeTrustLevel(u)
 	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
 	u.IsGuest = false
 	f.save(u)
 	return u, nil
 }
 
-func (f *fakeUserRepository) ClearGuestFlag(_ context.Context, userID string, trustLevel int) (repository.User, error) {
+func (f *fakeUserRepository) ClearGuestFlag(_ context.Context, userID string, recomputeTrustLevel func(repository.User) int) (repository.User, error) {
 	u, ok := f.byID[userID]
 	if !ok {
 		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	u.IsGuest = false
-	u.TrustLevel = trustLevel
+	u.TrustLevel = recomputeTrustLevel(u)
 	f.save(u)
 	return u, nil
 }
 
-func (f *fakeUserRepository) UpdateWorkEmailVerified(_ context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, trustLevel int) (repository.User, error) {
+func (f *fakeUserRepository) UpdateWorkEmailVerified(_ context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, recomputeTrustLevel func(repository.User) int) (repository.User, error) {
 	for id, u := range f.byID {
 		if id != userID && u.WorkEmailHash != "" && u.WorkEmailHash == workEmailHash {
 			return repository.User{}, fmt.Errorf("fake: work email hash already claimed by a different account: %w", apperror.ErrConflict)
@@ -232,7 +253,7 @@ func (f *fakeUserRepository) UpdateWorkEmailVerified(_ context.Context, userID, 
 	// Written in the same call as work_email_verified, mirroring the real
 	// query — the two halves of the Level 3 condition are never apart.
 	u.CompanyName = companyName
-	u.TrustLevel = trustLevel
+	u.TrustLevel = recomputeTrustLevel(u)
 	f.save(u)
 	return u, nil
 }
@@ -241,7 +262,7 @@ func (f *fakeUserRepository) UpdateWorkEmailVerified(_ context.Context, userID, 
 // same way UpdatePhoneNumber/UpdatePersonalEmail simulate their own unique
 // constraints above — a linear scan for a conflicting value on a different
 // user, exercising the same real-Postgres-mapped ErrConflict path.
-func (f *fakeUserRepository) UpdateLinkedInSub(_ context.Context, userID, linkedInSub string, trustLevel int) (repository.User, error) {
+func (f *fakeUserRepository) UpdateLinkedInSub(_ context.Context, userID, linkedInSub string, recomputeTrustLevel func(repository.User) int) (repository.User, error) {
 	for id, u := range f.byID {
 		if id != userID && u.LinkedInSub == linkedInSub {
 			return repository.User{}, fmt.Errorf("fake: linkedin account already linked to a different user: %w", apperror.ErrConflict)
@@ -252,11 +273,34 @@ func (f *fakeUserRepository) UpdateLinkedInSub(_ context.Context, userID, linked
 		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	u.LinkedInSub = linkedInSub
-	u.TrustLevel = trustLevel
+	u.TrustLevel = recomputeTrustLevel(u)
 	// Mirrors the SQL: every verification-recording UPDATE clears is_guest.
 	u.IsGuest = false
 	f.save(u)
 	return u, nil
+}
+
+// DeleteAbandonedGuests mirrors the real anti-join in memory: a guest with
+// no refresh-token row at all, untouched for longer than retention. The
+// fake owns no refresh tokens, so the caller seeds hasRefreshToken to say
+// which users still have one.
+func (f *fakeUserRepository) DeleteAbandonedGuests(_ context.Context, retention time.Duration, batchSize int) (int, error) {
+	cutoff := time.Now().UTC().Add(-retention)
+	deleted := 0
+	for id, u := range f.byID {
+		if deleted >= batchSize {
+			break
+		}
+		if !u.IsGuest || f.hasRefreshToken[id] || !u.UpdatedAt.Before(cutoff) {
+			continue
+		}
+		delete(f.byID, id)
+		if u.LinkedInSub != "" {
+			delete(f.byLinkedInSub, u.LinkedInSub)
+		}
+		deleted++
+	}
+	return deleted, nil
 }
 
 // UpsertRatingCache mirrors the real repository's ordering guard (ADR-018

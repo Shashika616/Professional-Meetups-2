@@ -74,6 +74,18 @@ import 'package:professional_connections_platform/features/meetups/widgets/ratin
 /// competing ancestor to yield to. Its tabs still swipe.
 const _noSwipeInsideAppShell = NeverScrollableScrollPhysics();
 
+/// Whether a meetup is over, or was called off.
+///
+/// Deliberately the same rule as `MeetupDetailPage._isPastMeetup`: the
+/// routing decision and the page it routes to must agree on what "finished"
+/// means, or a host could be sent to the past-meetup view and shown the live
+/// one (or the reverse).
+bool _isFinished(Meetup meetup) {
+  if (meetup.status == MeetupStatus.cancelled) return true;
+  final windowEnd = meetup.windowEnd;
+  return windowEnd != null && DateTime.now().isAfter(windowEnd);
+}
+
 class EventsPage extends ConsumerStatefulWidget {
   /// [initialTab] deep-links straight to My Meetings (0, the default) or
   /// Requested Meetings (1). Kept through the rename because
@@ -183,10 +195,21 @@ class _EventsPageState extends ConsumerState<EventsPage>
                   initialNextCursor: result.hostedNextCursor,
                   initialHasMore: result.hostedHasMore,
                   emptyMessage: 'You aren\'t hosting any meetups yet.',
+                  // A finished meetup goes to the same past-meetup view a
+                  // participant gets, not to request management.
+                  //
+                  // Request management exists to RUN a meetup — accept,
+                  // reject, cancel. None of that means anything once it is
+                  // over, and because it was the host's only destination the
+                  // host could never reach the review section at all: they
+                  // were the one person who could not see the review they
+                  // had just written.
                   onTap: (meetup) async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => _RequestManagementPage(meetup: meetup),
+                        builder: (_) => _isFinished(meetup)
+                            ? MeetupDetailPage(meetupId: meetup.id)
+                            : _RequestManagementPage(meetup: meetup),
                       ),
                     );
                     ref.invalidate(myMeetupsProvider);
@@ -720,6 +743,15 @@ class _RequestManagementPageState
         _meetup = meetup;
         _loading = false;
       });
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -743,6 +775,15 @@ class _RequestManagementPageState
         type: ToastType.success,
       );
       await _load();
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (!mounted) return;
       showSnack(
@@ -881,12 +922,23 @@ class _RequestManagementPageState
             // same RatingPrompt widget the happened-based flow uses
             // elsewhere rather than a bespoke picker, so the score/
             // confirmation/immutability behavior is identical everywhere
-            // (ADR-020 §4). It self-hides when nothing here is ratable
-            // (e.g. no withdrawn requester, or all already rated), so it's
-            // safe to always include on this tab.
+            // (ADR-020 §4).
+            //
+            // Scoped to the people on THIS tab. The endpoint behind
+            // RatingPrompt returns everyone the viewer may rate on the
+            // meetup, which once the meetup completes is every attendee —
+            // so unscoped it put the post-meetup rating flow under a
+            // "No rejected or withdrawn requests." empty state. It still
+            // self-hides when the scoped set is empty or already rated.
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: RatingPrompt(meetupId: _meetup.id),
+              child: RatingPrompt(
+                meetupId: _meetup.id,
+                onlyUserIds: rejectedOrWithdrawn
+                    .where((r) => r.status == MeetupRequestStatus.withdrawn)
+                    .map((r) => r.requesterId)
+                    .toSet(),
+              ),
             ),
           ],
         ),

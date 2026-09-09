@@ -10,6 +10,7 @@ import 'package:professional_connections_platform/core/widgets/meetup_status_bad
 import 'package:professional_connections_platform/features/meetups/events_page.dart';
 
 import 'support/scripted_meetup_service.dart';
+import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 
 Meetup _hostedMeetup({String id = 'meetup-1'}) => Meetup(
   id: id,
@@ -26,6 +27,24 @@ Meetup _hostedMeetup({String id = 'meetup-1'}) => Meetup(
   acceptedCount: 0,
   status: MeetupStatus.open,
   createdAt: DateTime.now(),
+  isHostedByMe: true,
+);
+
+Meetup _hostedMeetupFinished({String id = 'meetup-1'}) => Meetup(
+  id: id,
+  hostUserId: 'me',
+  hostFullName: 'Me',
+  hostTrustLevel: 3,
+  intent: IntentType.coffee,
+  windowStart: DateTime.now().subtract(const Duration(hours: 3)),
+  windowEnd: DateTime.now().subtract(const Duration(hours: 1)),
+  locationLat: 6.9271,
+  locationLng: 79.8612,
+  locationLabel: 'Colombo Fort Cafe',
+  capacity: 4,
+  acceptedCount: 1,
+  status: MeetupStatus.completed,
+  createdAt: DateTime.now().subtract(const Duration(days: 1)),
   isHostedByMe: true,
 );
 
@@ -157,6 +176,120 @@ Widget _eventsApp(ScriptedMeetupService service, {int? initialTab}) =>
     );
 
 void main() {
+  // A host reached _RequestManagementPage for EVERY hosted meetup, including
+  // finished ones — and that page has no review section, so the host could
+  // never see the review they gave. A participant, routed to
+  // MeetupDetailPage, always could.
+  group('a finished hosted meetup opens the same past-meetup view a '
+      'participant gets', () {
+    testWidgets('it shows the review the host gave, not request management', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final service =
+          ScriptedMeetupService(
+              myMeetups: (
+                hosted: [_hostedMeetupFinished()],
+                requested: const [],
+              ),
+              meetupRequests: [_pendingRequest()],
+              meetupDetail: _hostedMeetupFinished(),
+              safetyState: const SafetyState(meetupId: 'meetup-1'),
+            )
+            ..meetupReview = const MeetupReview(
+              completed: true,
+              overallScore: 4,
+              notes: 'Good turnout.',
+              participants: [
+                ReviewedParticipant(
+                  userId: 'guest-1',
+                  fullName: 'Grace Hopper',
+                  score: 5,
+                  traits: ['cheerful'],
+                ),
+              ],
+            );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Colombo Fort Cafe').first);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(MeetupDetailPage), findsOneWidget);
+      expect(find.text('YOUR REVIEW'), findsOneWidget);
+      expect(find.text('"Good turnout."'), findsOneWidget);
+      expect(find.text('HOW YOU RATED THEM'), findsOneWidget);
+      // Request management is for running a meetup, not reviewing a
+      // finished one.
+      expect(find.text('ACCEPT'), findsNothing);
+      expect(find.text('REJECT'), findsNothing);
+    });
+
+    testWidgets('an unreviewed one offers the host the review flow', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: [_hostedMeetupFinished()], requested: const []),
+        meetupRequests: const [],
+        meetupDetail: _hostedMeetupFinished(),
+        safetyState: const SafetyState(meetupId: 'meetup-1'),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Colombo Fort Cafe').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('START REVIEW'), findsOneWidget);
+    });
+
+    testWidgets('a LIVE hosted meetup still opens request management — the '
+        'host still has to accept and reject people', (tester) async {
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: [_hostedMeetup()], requested: const []),
+        meetupRequests: [_pendingRequest()],
+        meetupDetail: _hostedMeetup(),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Colombo Fort Cafe'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ACCEPT'), findsOneWidget);
+      expect(find.byType(MeetupDetailPage), findsNothing);
+    });
+  });
+
   testWidgets(
     'tapping a hosted meetup opens request management, rendering Accept/Reject',
     (tester) async {
@@ -540,6 +673,107 @@ void main() {
       expect(find.text('Withdrawn Person'), findsOneWidget);
       expect(find.text('"Something came up"'), findsOneWidget);
       expect(find.text('Pending Person'), findsNothing);
+    });
+
+    // The rating block on this tab exists for ONE reason (ADR-020 §4): a
+    // host may rate a requester who withdrew. It is not the post-meetup
+    // rating flow, which lives on the meetup itself.
+    testWidgets('the withdrawal-rating block stays hidden when nobody '
+        'withdrew — even though the completed meetup has people the host '
+        'can rate elsewhere', (tester) async {
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: [_hostedMeetup()], requested: const []),
+        meetupRequests: [
+          _request(
+            id: 'r-rejected',
+            requesterFullName: 'Rejected Person',
+            status: MeetupRequestStatus.rejected,
+          ),
+        ],
+        // Ratable because the meetup HAPPENED, not because they withdrew.
+        ratableParticipants: const [
+          RatableParticipant(
+            userId: 'attendee-1',
+            fullName: 'Attended Person',
+            trustLevel: 2,
+          ),
+        ],
+        meetupDetail: _hostedMeetup(),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Colombo Fort Cafe'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('REJECTED'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('RATE WHO YOU MET'),
+        findsNothing,
+        reason:
+            'a tab reading "No rejected or withdrawn requests." offering '
+            'someone to rate contradicts itself',
+      );
+      expect(find.text('Attended Person'), findsNothing);
+    });
+
+    testWidgets('it offers only the requester who withdrew, not everyone the '
+        'host could rate on this meetup', (tester) async {
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: [_hostedMeetup()], requested: const []),
+        meetupRequests: [
+          _request(
+            id: 'r-withdrawn',
+            requesterFullName: 'Withdrawn Person',
+            status: MeetupRequestStatus.withdrawn,
+          ),
+        ],
+        ratableParticipants: const [
+          // requesterId == request id, per _request above.
+          RatableParticipant(
+            userId: 'r-withdrawn',
+            fullName: 'Withdrawn Person',
+            trustLevel: 2,
+          ),
+          RatableParticipant(
+            userId: 'attendee-1',
+            fullName: 'Attended Person',
+            trustLevel: 2,
+          ),
+        ],
+        meetupDetail: _hostedMeetup(),
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Colombo Fort Cafe'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('REJECTED'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('RATE WHO YOU MET'), findsOneWidget);
+      // Once in the request list, once in the rating card.
+      expect(find.text('Withdrawn Person'), findsNWidgets(2));
+      expect(
+        find.text('Attended Person'),
+        findsNothing,
+        reason:
+            'they did not withdraw; rating them belongs to the '
+            'post-meetup flow on the meetup itself',
+      );
     });
   });
 

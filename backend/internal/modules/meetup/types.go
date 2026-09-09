@@ -283,9 +283,12 @@ type SubmitMeetupFeedbackRequest struct {
 }
 
 // ListRatableParticipantsRequest lists who the caller can rate.
+// ViewerTrustLevel is gateway-sourced from the verified JWT and drives the
+// partial redaction described on ListRatableParticipants (rating.go).
 type ListRatableParticipantsRequest struct {
-	MeetupID string
-	ViewerID string
+	MeetupID         string
+	ViewerID         string
+	ViewerTrustLevel int
 }
 
 // RatableParticipant is one other participant the viewer can (or already
@@ -328,4 +331,59 @@ type CancelMeetupRequest struct {
 type RegisterDeviceTokenRequest struct {
 	UserID   string
 	FCMToken string
+}
+
+// reviewWindow bounds how long a finished meetup keeps asking to be
+// reviewed. After it, the meetup drops off the home list unreviewed and
+// lives only in history.
+//
+// Without a bound, "keep it until reviewed" means a user who ignores three
+// meetups permanently carries three dead cards on their main screen, and the
+// prompt stops reading as a task and starts reading as clutter. Fourteen
+// days is long enough that a fortnight's holiday doesn't lose the review,
+// and short enough that Home stays about what is next.
+const reviewWindow = 14 * 24 * time.Hour
+
+// SubmitMeetupReviewRequest is the whole post-meetup review, submitted by
+// the Confirm at the end of the flow. RaterID is gateway-sourced from the
+// verified JWT.
+type SubmitMeetupReviewRequest struct {
+	MeetupID     string
+	RaterID      string
+	OverallScore int
+	Notes        *string
+	Participants []ReviewParticipantInput
+}
+
+// ReviewParticipantInput is one person's line in a submitted review.
+type ReviewParticipantInput struct {
+	UserID string
+	Score  int
+	Traits []string
+}
+
+// MeetupReview is a review read back — what the viewer themselves said.
+type MeetupReview struct {
+	Completed    bool
+	OverallScore int
+	Notes        *string
+	Participants []ReviewedParticipant
+}
+
+// ReviewedParticipant is one rating the viewer gave, for display.
+type ReviewedParticipant struct {
+	UserID          string
+	FullName        string
+	ProfilePhotoURL string
+	Score           int
+	Traits          []string
+}
+
+// ListMeetupParticipantsRequest asks who is on a meetup. ViewerTrustLevel is
+// gateway-sourced from the verified JWT, never client-supplied — it decides
+// whether identities are disclosed at all.
+type ListMeetupParticipantsRequest struct {
+	MeetupID         string
+	ViewerID         string
+	ViewerTrustLevel int
 }

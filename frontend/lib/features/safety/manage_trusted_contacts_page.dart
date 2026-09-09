@@ -340,6 +340,9 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
           );
       widget.onSaved();
     } on AuthException catch (error) {
+      // The await above can outlive this dialog — the `finally` below has
+      // always guarded for that; this branch did not.
+      if (!mounted) return;
       setState(() => _error = error.message);
     } finally {
       if (mounted) setState(() => _saving = false);

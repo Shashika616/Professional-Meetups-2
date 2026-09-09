@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
-import 'package:professional_connections_platform/core/utils/snacks.dart';
-import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
+import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
 
 class HomeHeader extends StatelessWidget {
   const HomeHeader({super.key, required this.userName, this.imageUrl});
@@ -46,10 +45,10 @@ class HomeHeader extends StatelessWidget {
                 ),
               ),
               _NotificationBell(
-                onTap: () => showSnack(
-                  context,
-                  'Notifications will arrive once the backend is live.',
-                  type: ToastType.info,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const NotificationsPage(),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -81,6 +80,9 @@ class _NotificationBell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
+      // opaque so the padding around the glyph is part of the target — a
+      // 24px icon alone is under the 44px minimum tap size.
+      behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Padding(
         padding: EdgeInsets.all(8.0),

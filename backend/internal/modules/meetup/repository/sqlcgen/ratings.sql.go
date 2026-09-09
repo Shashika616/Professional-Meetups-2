@@ -47,9 +47,9 @@ func (q *Queries) ComputeUserRatingAggregate(ctx context.Context, ratedUserID uu
 }
 
 const createMeetupRating = `-- name: CreateMeetupRating :one
-INSERT INTO meetup.meetup_user_ratings (meetup_id, rater_user_id, rated_user_id, score)
-VALUES ($1, $2, $3, $4)
-RETURNING id, meetup_id, rater_user_id, rated_user_id, score, created_at
+INSERT INTO meetup.meetup_user_ratings (meetup_id, rater_user_id, rated_user_id, score, traits)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, meetup_id, rater_user_id, rated_user_id, score, created_at, traits
 `
 
 type CreateMeetupRatingParams struct {
@@ -57,6 +57,7 @@ type CreateMeetupRatingParams struct {
 	RaterUserID uuid.UUID `json:"rater_user_id"`
 	RatedUserID uuid.UUID `json:"rated_user_id"`
 	Score       int16     `json:"score"`
+	Traits      []string  `json:"traits"`
 }
 
 func (q *Queries) CreateMeetupRating(ctx context.Context, arg CreateMeetupRatingParams) (MeetupMeetupUserRating, error) {
@@ -65,6 +66,7 @@ func (q *Queries) CreateMeetupRating(ctx context.Context, arg CreateMeetupRating
 		arg.RaterUserID,
 		arg.RatedUserID,
 		arg.Score,
+		arg.Traits,
 	)
 	var i MeetupMeetupUserRating
 	err := row.Scan(
@@ -74,6 +76,7 @@ func (q *Queries) CreateMeetupRating(ctx context.Context, arg CreateMeetupRating
 		&i.RatedUserID,
 		&i.Score,
 		&i.CreatedAt,
+		&i.Traits,
 	)
 	return i, err
 }
@@ -177,6 +180,62 @@ func (q *Queries) IsMeetupParticipant(ctx context.Context, arg IsMeetupParticipa
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const listMyMeetupRatings = `-- name: ListMyMeetupRatings :many
+SELECT
+  r.rated_user_id,
+  COALESCE(u.full_name, '') AS full_name,
+  u.profile_photo_url,
+  r.score,
+  r.traits
+FROM meetup.meetup_user_ratings r
+LEFT JOIN meetup.user_display_cache u ON u.user_id = r.rated_user_id
+WHERE r.meetup_id = $1 AND r.rater_user_id = $2
+ORDER BY u.full_name
+`
+
+type ListMyMeetupRatingsParams struct {
+	MeetupID uuid.UUID `json:"meetup_id"`
+	ViewerID uuid.UUID `json:"viewer_id"`
+}
+
+type ListMyMeetupRatingsRow struct {
+	RatedUserID     uuid.UUID   `json:"rated_user_id"`
+	FullName        string      `json:"full_name"`
+	ProfilePhotoUrl pgtype.Text `json:"profile_photo_url"`
+	Score           int16       `json:"score"`
+	Traits          []string    `json:"traits"`
+}
+
+// What the viewer themselves submitted on this meetup — the read behind
+// "see the ratings we gave" on a history card. Only ever the viewer's own
+// rows (rater_user_id = viewer): a rating is private to the person who gave
+// it, and this must never become a way to read what others scored someone.
+func (q *Queries) ListMyMeetupRatings(ctx context.Context, arg ListMyMeetupRatingsParams) ([]ListMyMeetupRatingsRow, error) {
+	rows, err := q.db.Query(ctx, listMyMeetupRatings, arg.MeetupID, arg.ViewerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMyMeetupRatingsRow
+	for rows.Next() {
+		var i ListMyMeetupRatingsRow
+		if err := rows.Scan(
+			&i.RatedUserID,
+			&i.FullName,
+			&i.ProfilePhotoUrl,
+			&i.Score,
+			&i.Traits,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRatableParticipants = `-- name: ListRatableParticipants :many

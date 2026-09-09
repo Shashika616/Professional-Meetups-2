@@ -19,11 +19,16 @@ class SecondaryButton extends StatelessWidget {
     this.height = 56,
     this.color,
     this.borderColor,
+    this.icon,
   });
 
   final String label;
   final VoidCallback? onPressed;
   final double height;
+
+  /// Optional leading icon, mirroring [PrimaryButton.icon] so the two button
+  /// styles stay interchangeable at a call site.
+  final IconData? icon;
 
   /// Defaults resolved in [build], not as compile-time default parameter
   /// values — [AppPalette]'s fields are theme-aware getters (Slice G), not
@@ -41,15 +46,24 @@ class SecondaryButton extends StatelessWidget {
       ),
       child: FittedBox(
         fit: BoxFit.scaleDown,
-        child: Text(
-          label,
-          maxLines: 1,
-          style: TextStyle(
-            color: color ?? AppPalette.textSecondary,
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
-            letterSpacing: 0.6,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 18, color: color ?? AppPalette.textSecondary),
+              const SizedBox(width: 10),
+            ],
+            Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
+                color: color ?? AppPalette.textSecondary,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ],
         ),
       ),
     );

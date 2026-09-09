@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/features/verification/hosting_
 
 import 'support/fake_meetup_service.dart';
 import 'support/scripted_meetup_service.dart';
+import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
 
 /// Resolves immediately to a fixed [AuthSessionState] instead of reading
 /// secure storage — HomePage only ever reads `.profile` off this provider,
@@ -63,6 +64,26 @@ void main() {
         );
       },
     );
+
+    testWidgets('the bell opens the notifications page — it used to show a '
+        '"once the backend is live" toast', (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            meetupServiceProvider.overrideWithValue(ScriptedMeetupService()),
+          ],
+          child: const MaterialApp(
+            home: Scaffold(body: HomeHeader(userName: 'Ada Lovelace')),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.byIcon(Icons.notifications_none_rounded));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NotificationsPage), findsOneWidget);
+    });
 
     testWidgets('falls back to initials when imageUrl is null', (tester) async {
       await tester.pumpWidget(

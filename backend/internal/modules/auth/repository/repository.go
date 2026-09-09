@@ -145,17 +145,39 @@ type UserRepository interface {
 	// user (re)confirm on the new mandatory post-auth screen.
 	UpdateFullName(ctx context.Context, userID, fullName string) (User, error)
 
+	// # THE recomputeTrustLevel CALLBACK (gap-tracker #17)
+	//
+	// The six methods below all write trust_level. None of them takes it as
+	// a precomputed int any more; each takes a callback and invokes it
+	// against the user row AS LOCKED at write time — `SELECT ... FOR UPDATE`
+	// inside the same transaction as the UPDATE — with this method's own
+	// field write already applied to that snapshot.
+	//
+	// That is what closes the race. The old design computed trust_level in
+	// the service layer from a GetByID taken before the call, with no
+	// transaction spanning the read and the write. Two concurrent
+	// verification steps for the same user — realistically, someone
+	// clicking through the Level 2 checklist quickly — each read the same
+	// starting row, each computed a trust level reflecting only their own
+	// field, and whichever committed second silently under-stamped
+	// trust_level. Nothing recomputes it afterwards, so the user completes
+	// every Level 2 field and stays at Level 1 with no error and nothing
+	// pointing at the cause.
+	//
+	// The previous comment here described writing the field and the trust
+	// level in one statement as if that closed the race. It closes a
+	// DIFFERENT one (a separate recompute step going stale between two
+	// statements); the snapshot feeding that single statement could itself
+	// already be stale before it ran.
+	//
 	// UpdatePhoneNumber/UpdatePersonalEmail return apperror.ErrConflict
 	// (wrapped) if phoneNumber/personalEmail is already verified on a
 	// different account — the UNIQUE constraint (migration 0002) is what
 	// actually resolves the two-users-race-for-the-same-target case
-	// (backend/PLAN.md's addendum, Step F); trustLevel is computed by the
-	// caller (computeTrustLevel) and written in the same statement so the
-	// row is never left with a stale value between the field write and a
-	// separate recompute step.
-	UpdatePhoneNumber(ctx context.Context, userID, phoneNumber string, trustLevel int) (User, error)
-	UpdatePersonalEmail(ctx context.Context, userID, personalEmail string, trustLevel int) (User, error)
-	UpdatePersonalDetails(ctx context.Context, userID, legalName, address string, trustLevel int) (User, error)
+	// (backend/PLAN.md's addendum, Step F).
+	UpdatePhoneNumber(ctx context.Context, userID, phoneNumber string, recomputeTrustLevel func(User) int) (User, error)
+	UpdatePersonalEmail(ctx context.Context, userID, personalEmail string, recomputeTrustLevel func(User) int) (User, error)
+	UpdatePersonalDetails(ctx context.Context, userID, legalName, address string, recomputeTrustLevel func(User) int) (User, error)
 	// UpdateWorkEmailVerified also writes workEmailHash (ADR-019 §3) in the
 	// same statement as company_domain/work_email_verified — the caller
 	// (internal/service) has already run the reuse-abuse check
@@ -168,7 +190,7 @@ type UserRepository interface {
 	// non-empty company name, so writing them together means the row can
 	// never hold one without the other. It is why this change needed no new
 	// RPC — VerifyCorporateEmailCode already required and validated the name.
-	UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, trustLevel int) (User, error)
+	UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, recomputeTrustLevel func(User) int) (User, error)
 	// ClearGuestFlag marks an account as no longer a guest (ADR-002 §3),
 	// writing the recomputed trust level in the same statement.
 	//
@@ -176,13 +198,27 @@ type UserRepository interface {
 	// else on auth.users — every other verification clears the flag inside
 	// its own UPDATE (see queries/users.sql). Idempotent: calling it on an
 	// account that was never a guest is a no-op beyond the trust-level write.
-	ClearGuestFlag(ctx context.Context, userID string, trustLevel int) (User, error)
+	//
+	// The only one of the six that sets no extra field on the locked
+	// snapshot before calling the callback: is_guest is the sole change, and
+	// the callers' own afterVerification already applies it.
+	ClearGuestFlag(ctx context.Context, userID string, recomputeTrustLevel func(User) int) (User, error)
 	// UpdateLinkedInSub links LinkedIn to an already-existing account
 	// (ADR-014 — LinkedIn no longer creates accounts). Returns
 	// apperror.ErrConflict (wrapped) if linkedInSub already belongs to a
 	// different user — idx_users_linkedin_sub (migration 0001) is what
 	// actually resolves that race, same pattern as UpdatePhoneNumber.
-	UpdateLinkedInSub(ctx context.Context, userID, linkedInSub string, trustLevel int) (User, error)
+	UpdateLinkedInSub(ctx context.Context, userID, linkedInSub string, recomputeTrustLevel func(User) int) (User, error)
+
+	// DeleteAbandonedGuests removes guest accounts that can no longer be
+	// reached: is_guest = true, no refresh-token row at all, and untouched
+	// for longer than retention. Batched like
+	// RefreshTokenRepository.DeleteExpired — the caller loops until a batch
+	// comes back short — and returns how many rows this batch removed.
+	//
+	// is_guest is a hard exclusion, not a heuristic: the flag only ever
+	// flips to false, so an upgraded account can never re-enter this set.
+	DeleteAbandonedGuests(ctx context.Context, retention time.Duration, batchSize int) (int, error)
 
 	// UpsertRatingCache applies a rating-updated event's values to userID's
 	// cached rating_average/rating_count (ADR-017's addendum, ADR-018

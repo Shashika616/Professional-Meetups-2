@@ -142,7 +142,53 @@ abstract interface class MeetupService {
   /// and a host can rate a specific withdrawn requester (returned with a
   /// [RatableParticipant.contextNote] carrying their withdrawal note) —
   /// reachable without ever calling [submitMeetupFeedback].
+  /// Who is on a meetup: the host plus everyone accepted.
+  ///
+  /// Identities are withheld by the SERVER below trust level 2 — such a
+  /// response carries empty ids, names and photos with
+  /// [MeetupParticipants.redacted] set, so the placeholder treatment is a
+  /// rendering choice over absent data rather than a blur over data the
+  /// client was trusted not to show.
+  Future<MeetupParticipants> listMeetupParticipants(String meetupId);
+
+  /// The caller's own notification history, newest first. The server bounds
+  /// it to the outbox retention window (7 days), so nothing older is
+  /// returned and nothing needs clearing client-side.
+  Future<List<AppNotification>> listNotifications();
+
   Future<List<RatableParticipant>> listRatableParticipants(String meetupId);
+
+  /// The review screen's input: the ratable participants plus the
+  /// server-owned trait vocabulary, fetched together because the screen
+  /// cannot draw either half without the other.
+  Future<RatableParticipants> listRatableParticipantsWithTraits(
+    String meetupId,
+  );
+
+  /// The post-meetup review flow's single write: the overall 1-5 for the
+  /// meetup, an optional note, and a score plus traits for every other
+  /// participant.
+  ///
+  /// All-or-nothing on the server — ratings are immutable, so a partly
+  /// applied review could never be finished on a retry. Throws
+  /// [MeetupConflictException] if the meetup is not over yet or has already
+  /// been reviewed by this caller, and [MeetupValidationException] if a
+  /// participant is missing, a score is out of range, or a trait is not in
+  /// the server's vocabulary.
+  ///
+  /// This is the only call that marks a meetup reviewed, which is what takes
+  /// it off the home list.
+  Future<void> submitMeetupReview(
+    String meetupId, {
+    required int overallScore,
+    String? notes,
+    required List<ReviewParticipantInput> participants,
+  });
+
+  /// What the caller themselves submitted for meetupId — never another
+  /// rater's scores. Returns a review with `completed == false` when
+  /// nothing has been submitted yet, rather than throwing.
+  Future<MeetupReview> getMeetupReview(String meetupId);
 
   /// Rates ratedUserId 1-5 for meetupId. Throws [MeetupForbiddenException]
   /// unless one of three eligibility paths holds (ADR-020): the caller
@@ -549,11 +595,47 @@ class MockMeetupService implements MeetupService {
   }
 
   @override
+  Future<MeetupParticipants> listMeetupParticipants(String meetupId) async {
+    await Future<void>.delayed(latency);
+    return const MeetupParticipants();
+  }
+
+  @override
+  Future<List<AppNotification>> listNotifications() async {
+    await Future<void>.delayed(latency);
+    return const [];
+  }
+
+  @override
   Future<List<RatableParticipant>> listRatableParticipants(
     String meetupId,
   ) async {
     await Future<void>.delayed(latency);
     return const [];
+  }
+
+  @override
+  Future<RatableParticipants> listRatableParticipantsWithTraits(
+    String meetupId,
+  ) async {
+    await Future<void>.delayed(latency);
+    return const RatableParticipants(participants: [], availableTraits: []);
+  }
+
+  @override
+  Future<void> submitMeetupReview(
+    String meetupId, {
+    required int overallScore,
+    String? notes,
+    required List<ReviewParticipantInput> participants,
+  }) async {
+    await Future<void>.delayed(latency);
+  }
+
+  @override
+  Future<MeetupReview> getMeetupReview(String meetupId) async {
+    await Future<void>.delayed(latency);
+    return const MeetupReview(completed: false);
   }
 
   @override

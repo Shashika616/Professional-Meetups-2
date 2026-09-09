@@ -380,10 +380,57 @@ func (s *MeetupServer) SubmitMeetupFeedback(ctx context.Context, req *meetupv1.S
 	return &meetupv1.SubmitMeetupFeedbackResponse{Success: true}, nil
 }
 
+func (s *MeetupServer) ListNotifications(ctx context.Context, req *meetupv1.ListNotificationsRequest) (*meetupv1.ListNotificationsResponse, error) {
+	rows, err := s.svc.ListNotifications(ctx, req.GetUserId())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	out := make([]*meetupv1.UserNotification, 0, len(rows))
+	for _, n := range rows {
+		out = append(out, &meetupv1.UserNotification{
+			Id:        n.ID,
+			Title:     n.Title,
+			Body:      n.Body,
+			Type:      n.Type,
+			MeetupId:  n.MeetupID,
+			CreatedAt: n.CreatedAt.Unix(),
+			Delivered: n.Delivered,
+		})
+	}
+	return &meetupv1.ListNotificationsResponse{Notifications: out}, nil
+}
+
+func (s *MeetupServer) ListMeetupParticipants(ctx context.Context, req *meetupv1.ListMeetupParticipantsRequest) (*meetupv1.ListMeetupParticipantsResponse, error) {
+	result, err := s.svc.ListMeetupParticipants(ctx, meetup.ListMeetupParticipantsRequest{
+		MeetupID:         req.GetMeetupId(),
+		ViewerID:         req.GetViewerId(),
+		ViewerTrustLevel: int(req.GetViewerTrustLevel()),
+	})
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	out := make([]*meetupv1.MeetupParticipant, 0, len(result.Participants))
+	for _, p := range result.Participants {
+		out = append(out, &meetupv1.MeetupParticipant{
+			UserId:          p.UserID,
+			IsHost:          p.IsHost,
+			FullName:        p.FullName,
+			ProfilePhotoUrl: p.ProfilePhotoURL,
+			TrustLevel:      int32(p.TrustLevel),
+		})
+	}
+	return &meetupv1.ListMeetupParticipantsResponse{
+		Participants: out,
+		Redacted:     result.Redacted,
+		TotalCount:   int32(result.TotalCount),
+	}, nil
+}
+
 func (s *MeetupServer) ListRatableParticipants(ctx context.Context, req *meetupv1.ListRatableParticipantsRequest) (*meetupv1.ListRatableParticipantsResponse, error) {
 	participants, err := s.svc.ListRatableParticipants(ctx, meetup.ListRatableParticipantsRequest{
-		MeetupID: req.GetMeetupId(),
-		ViewerID: req.GetViewerId(),
+		MeetupID:         req.GetMeetupId(),
+		ViewerID:         req.GetViewerId(),
+		ViewerTrustLevel: int(req.GetViewerTrustLevel()),
 	})
 	if err != nil {
 		return nil, apperror.ToGRPCStatus(err)
@@ -399,7 +446,56 @@ func (s *MeetupServer) ListRatableParticipants(ctx context.Context, req *meetupv
 			ContextNote:     p.ContextNote,
 		})
 	}
-	return &meetupv1.ListRatableParticipantsResponse{Participants: out}, nil
+	traits := meetup.RatingTraits()
+	wireTraits := make([]*meetupv1.RatingTrait, 0, len(traits))
+	for _, t := range traits {
+		wireTraits = append(wireTraits, &meetupv1.RatingTrait{Key: t.Key, Label: t.Label, Emoji: t.Emoji})
+	}
+	return &meetupv1.ListRatableParticipantsResponse{Participants: out, AvailableTraits: wireTraits}, nil
+}
+
+func (s *MeetupServer) SubmitMeetupReview(ctx context.Context, req *meetupv1.SubmitMeetupReviewRequest) (*meetupv1.SubmitMeetupReviewResponse, error) {
+	participants := make([]meetup.ReviewParticipantInput, 0, len(req.GetParticipants()))
+	for _, p := range req.GetParticipants() {
+		participants = append(participants, meetup.ReviewParticipantInput{
+			UserID: p.GetUserId(),
+			Score:  int(p.GetScore()),
+			Traits: p.GetTraits(),
+		})
+	}
+	if err := s.svc.SubmitMeetupReview(ctx, meetup.SubmitMeetupReviewRequest{
+		MeetupID:     req.GetMeetupId(),
+		RaterID:      req.GetRaterUserId(),
+		OverallScore: int(req.GetOverallScore()),
+		Notes:        req.Notes,
+		Participants: participants,
+	}); err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &meetupv1.SubmitMeetupReviewResponse{Success: true}, nil
+}
+
+func (s *MeetupServer) GetMeetupReview(ctx context.Context, req *meetupv1.GetMeetupReviewRequest) (*meetupv1.GetMeetupReviewResponse, error) {
+	review, err := s.svc.GetMeetupReview(ctx, req.GetMeetupId(), req.GetViewerId())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	participants := make([]*meetupv1.ReviewedParticipant, 0, len(review.Participants))
+	for _, p := range review.Participants {
+		participants = append(participants, &meetupv1.ReviewedParticipant{
+			UserId:          p.UserID,
+			FullName:        p.FullName,
+			ProfilePhotoUrl: p.ProfilePhotoURL,
+			Score:           int32(p.Score),
+			Traits:          p.Traits,
+		})
+	}
+	return &meetupv1.GetMeetupReviewResponse{
+		Completed:    review.Completed,
+		OverallScore: int32(review.OverallScore),
+		Notes:        review.Notes,
+		Participants: participants,
+	}, nil
 }
 
 func (s *MeetupServer) SubmitRating(ctx context.Context, req *meetupv1.SubmitRatingRequest) (*meetupv1.SubmitRatingResponse, error) {

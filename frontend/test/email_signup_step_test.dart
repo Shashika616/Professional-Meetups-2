@@ -223,7 +223,7 @@ void main() {
       // tapping VERIFY calls signUpWithEmail directly; the OTP itself and
       // account creation are verified/completed in one CompleteEmailSignup
       // call, there is no separate password step anymore.
-      await tester.enterText(find.byType(TextFormField), '123456');
+      await tester.enterText(find.byType(TextField), '123456');
       await tester.pumpAndSettle();
       await tester.tap(find.text('VERIFY'));
       await tester.pumpAndSettle();

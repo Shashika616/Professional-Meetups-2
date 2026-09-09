@@ -18,6 +18,9 @@ import 'package:professional_connections_platform/features/home/widgets/meetup_c
     show LockedCardHeader;
 import 'package:professional_connections_platform/features/meetups/location_view_page.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/host_meetup_controls.dart';
+import 'package:professional_connections_platform/features/meetups/participants_page.dart';
+import 'package:professional_connections_platform/features/meetups/review/meetup_review_section.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/participants_strip.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/share_with_contacts_sheet.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
@@ -94,6 +97,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
         _safetyState = safetyState;
         _loading = false;
       });
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -111,6 +123,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       if (!mounted) return;
       showSnack(context, 'Request sent.', type: ToastType.success);
       await _load();
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -144,6 +165,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       if (!mounted) return;
       showSnack(context, 'Request withdrawn.', type: ToastType.success);
       await _load();
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -202,6 +232,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
           .acknowledgeSafetyChecklist(widget.meetupId);
       if (!mounted) return;
       setState(() => _safetyState = state);
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -244,6 +283,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
             : '${picked.length} contacts have been told.',
         type: ToastType.success,
       );
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -265,6 +313,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       if (!mounted) return;
       setState(() => _safetyState = state);
       showSnack(context, 'Checked in.', type: ToastType.success);
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -298,6 +355,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       if (!mounted) return;
       setState(() => _safetyState = state);
       showSnack(context, 'Declined.', type: ToastType.success);
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -337,6 +403,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       if (!mounted) return;
       showSnack(context, 'Thanks for the feedback.', type: ToastType.success);
       if (happened) setState(() => _feedbackHappened = true);
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -388,6 +463,44 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     return DateTime.now().isAfter(
       windowStart.subtract(const Duration(minutes: 10)),
     );
+  }
+
+  /// Whether this meetup is finished — over, or called off.
+  ///
+  /// A finished meetup is a different page. Everything below VIEW LOCATION
+  /// on the live page exists to help someone GET to a meetup — the Safety
+  /// Gate, check-in, withdraw, the host's cancel/close controls — and none
+  /// of it means anything once the meetup has happened. Showing it anyway
+  /// was offering a "WITHDRAW REQUEST" for an evening that already
+  /// finished.
+  ///
+  /// What replaces it is the review: the flow if it is still owed, the
+  /// scores themselves once it is done. That also makes this page the place
+  /// a review stays reachable after the home card's 14-day window lapses —
+  /// without it, an unreviewed meetup would become permanently unreviewable.
+  bool get _isPastMeetup {
+    final meetup = _meetup;
+    if (meetup == null) return false;
+    if (meetup.status == MeetupStatus.cancelled) return true;
+    final windowEnd = meetup.windowEnd;
+    return windowEnd != null && DateTime.now().isAfter(windowEnd);
+  }
+
+  /// Whether the meetup has actually begun.
+  ///
+  /// "How did it go?" is gated on this. It used to be gated on nothing, so a
+  /// meetup scheduled for next week offered IT HAPPENED / DIDN'T HAPPEN —
+  /// and IT HAPPENED is what unlocks the rating block, so the host was shown
+  /// a star picker for someone they had not met yet.
+  ///
+  /// windowStart, not windowEnd, so someone can report a no-show without
+  /// sitting out the whole window. No grace period either, unlike
+  /// [_checkInWindowOpen]: checking in slightly early is reasonable,
+  /// reporting on a meetup slightly before it starts is not.
+  bool get _meetupHasStarted {
+    final windowStart = _meetup?.windowStart;
+    if (windowStart == null) return false;
+    return !DateTime.now().isBefore(windowStart);
   }
 
   @override
@@ -486,8 +599,24 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
                 '${meetup.acceptedCount}/${meetup.capacity} confirmed',
                 style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
               ),
+              // Who is actually coming, on the card itself. Self-hides when
+              // there is nobody but the host and nothing to show. Identities
+              // are withheld server-side below trust level 2 — see
+              // ParticipantsStrip.
+              const SizedBox(height: 12),
+              Divider(height: 1, color: AppPalette.hairline),
+              const SizedBox(height: 12),
+              ParticipantsStrip(meetupId: widget.meetupId),
             ],
           ),
+        ),
+        const SizedBox(height: 12),
+        SecondaryButton(
+          label: 'VIEW PARTICIPANTS',
+          height: 40,
+          icon: Icons.groups_outlined,
+          onPressed: () =>
+              ParticipantsPage.open(context, meetupId: widget.meetupId),
         ),
         const SizedBox(height: 12),
         // ADR-029 (round-8 hardening) — LocationViewPage.open owns the gate
@@ -507,60 +636,71 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
           ),
         ),
         const SizedBox(height: 12),
-        if (!meetup.isHostedByMe && meetup.myRequestStatus == null)
-          _buildJoinAction(context, meetup)
-        else if (!meetup.isHostedByMe && meetup.myRequestStatus != null) ...[
-          _RequestStatusBanner(status: meetup.myRequestStatus!),
-          if (_canWithdraw(meetup)) ...[
-            const SizedBox(height: 10),
-            SecondaryButton(
-              label: 'WITHDRAW REQUEST',
-              height: 40,
-              color: AppPalette.danger,
-              borderColor: AppPalette.danger,
-              onPressed: () => _confirmWithdraw(meetup.myRequestId!),
+        // Everything from here down is about GETTING to a meetup. A finished
+        // one gets the review instead — see _isPastMeetup.
+        if (_isPastMeetup) ...[
+          MeetupReviewSection(
+            meetupId: widget.meetupId,
+            hostUserId: meetup.hostUserId,
+            cancelled: meetup.status == MeetupStatus.cancelled,
+          ),
+        ] else ...[
+          if (!meetup.isHostedByMe && meetup.myRequestStatus == null)
+            _buildJoinAction(context, meetup)
+          else if (!meetup.isHostedByMe && meetup.myRequestStatus != null) ...[
+            _RequestStatusBanner(status: meetup.myRequestStatus!),
+            if (_canWithdraw(meetup)) ...[
+              const SizedBox(height: 10),
+              SecondaryButton(
+                label: 'WITHDRAW REQUEST',
+                height: 40,
+                color: AppPalette.danger,
+                borderColor: AppPalette.danger,
+                onPressed: () => _confirmWithdraw(meetup.myRequestId!),
+              ),
+            ],
+          ],
+          // Host-only Cancel/Close actions (ADR-016 + its 2026-08-20
+          // addendum) — extracted into one shared widget, also used by the
+          // "Hosting" tab's request-management screen, so this logic exists
+          // once. Independent of the Safety Gate section below (rating
+          // eligibility stays gated on each participant's own
+          // confirmed-attendance feedback, ADR-015, unaffected by either
+          // action).
+          HostMeetupControls(
+            meetup: meetup,
+            onChanged: (updated) => setState(() => _meetup = updated),
+          ),
+          // Gated on whether *this viewer's own* Safety Gate row was actually
+          // fetched (ADR-024 §2/§3), not meetup.acceptedCount > 0 — the host's
+          // row exists from meetup creation, before any request is accepted,
+          // and a non-participant now correctly never gets one at all.
+          if (_safetyState != null) ...[
+            const SizedBox(height: 24),
+            _SafetyGateSection(
+              safetyState: _safetyState,
+              checkInWindowOpen: _checkInWindowOpen,
+              meetupHasStarted: _meetupHasStarted,
+              onAcknowledgeChecklist: _acknowledgeChecklist,
+              onShareWithContacts: _shareWithContacts,
+              onCheckIn: _checkIn,
+              onDecline: _confirmDecline,
+              onSubmitFeedback: _submitFeedback,
             ),
           ],
-        ],
-        // Host-only Cancel/Close actions (ADR-016 + its 2026-08-20
-        // addendum) — extracted into one shared widget, also used by the
-        // "Hosting" tab's request-management screen, so this logic exists
-        // once. Independent of the Safety Gate section below (rating
-        // eligibility stays gated on each participant's own
-        // confirmed-attendance feedback, ADR-015, unaffected by either
-        // action).
-        HostMeetupControls(
-          meetup: meetup,
-          onChanged: (updated) => setState(() => _meetup = updated),
-        ),
-        // Gated on whether *this viewer's own* Safety Gate row was actually
-        // fetched (ADR-024 §2/§3), not meetup.acceptedCount > 0 — the host's
-        // row exists from meetup creation, before any request is accepted,
-        // and a non-participant now correctly never gets one at all.
-        if (_safetyState != null) ...[
-          const SizedBox(height: 24),
-          _SafetyGateSection(
-            safetyState: _safetyState,
-            checkInWindowOpen: _checkInWindowOpen,
-            onAcknowledgeChecklist: _acknowledgeChecklist,
-            onShareWithContacts: _shareWithContacts,
-            onCheckIn: _checkIn,
-            onDecline: _confirmDecline,
-            onSubmitFeedback: _submitFeedback,
-          ),
-        ],
-        // ADR-020 widens this beyond the original happened-based trigger:
-        // a cancelled meetup makes a previously-accepted requester eligible
-        // to rate the host, and a host is always worth checking since a
-        // withdrawn requester becomes ratable independent of the meetup's
-        // own status/window. RatingPrompt itself self-gates on whatever
-        // ListRatableParticipants actually returns, rendering nothing if
-        // there's still nothing to rate.
-        if (_feedbackHappened ||
-            meetup.status == MeetupStatus.cancelled ||
-            meetup.isHostedByMe) ...[
-          const SizedBox(height: 24),
-          RatingPrompt(meetupId: widget.meetupId),
+          // ADR-020 widens this beyond the original happened-based trigger:
+          // a cancelled meetup makes a previously-accepted requester eligible
+          // to rate the host, and a host is always worth checking since a
+          // withdrawn requester becomes ratable independent of the meetup's
+          // own status/window. RatingPrompt itself self-gates on whatever
+          // ListRatableParticipants actually returns, rendering nothing if
+          // there's still nothing to rate.
+          if (_feedbackHappened ||
+              meetup.status == MeetupStatus.cancelled ||
+              meetup.isHostedByMe) ...[
+            const SizedBox(height: 24),
+            RatingPrompt(meetupId: widget.meetupId),
+          ],
         ],
       ],
     );
@@ -653,6 +793,7 @@ class _SafetyGateSection extends StatelessWidget {
   const _SafetyGateSection({
     required this.safetyState,
     required this.checkInWindowOpen,
+    required this.meetupHasStarted,
     required this.onAcknowledgeChecklist,
     required this.onShareWithContacts,
     required this.onCheckIn,
@@ -662,6 +803,9 @@ class _SafetyGateSection extends StatelessWidget {
 
   final SafetyState? safetyState;
   final bool checkInWindowOpen;
+
+  /// Gates the "How did it go?" card — see `_meetupHasStarted`.
+  final bool meetupHasStarted;
   final VoidCallback onAcknowledgeChecklist;
   final VoidCallback onShareWithContacts;
   final VoidCallback onCheckIn;
@@ -830,49 +974,51 @@ class _SafetyGateSection extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        FlatCard(
-          radius: 12,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'How did it go?',
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
+        if (meetupHasStarted) ...[
+          const SizedBox(height: 12),
+          FlatCard(
+            radius: 12,
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'How did it go?',
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: PrimaryButton(
-                      label: 'IT HAPPENED',
-                      height: 42,
-                      onPressed: () => onSubmitFeedback(
-                        happened: true,
-                        feltSafe: true,
-                        profileAccurate: true,
-                        wouldMeetAgain: true,
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: PrimaryButton(
+                        label: 'IT HAPPENED',
+                        height: 42,
+                        onPressed: () => onSubmitFeedback(
+                          happened: true,
+                          feltSafe: true,
+                          profileAccurate: true,
+                          wouldMeetAgain: true,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: SecondaryButton(
-                      label: 'DIDN\'T HAPPEN',
-                      height: 42,
-                      onPressed: () => onSubmitFeedback(happened: false),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: SecondaryButton(
+                        label: 'DIDN\'T HAPPEN',
+                        height: 42,
+                        onPressed: () => onSubmitFeedback(happened: false),
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ],
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

@@ -873,3 +873,25 @@ func (r *postgresMeetupRepository) claimSweep(
 	}
 	return claimed, nil
 }
+
+func (r *postgresMeetupRepository) ListParticipants(ctx context.Context, meetupID string) ([]MeetupParticipant, error) {
+	id, err := parseUUID(meetupID)
+	if err != nil {
+		return nil, fmt.Errorf("repository: invalid meetup id %q: %w", meetupID, apperror.ErrInvalidInput)
+	}
+	rows, err := r.q.ListMeetupParticipants(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list meetup participants: %w", err)
+	}
+	out := make([]MeetupParticipant, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, MeetupParticipant{
+			UserID:          row.UserID.String(),
+			IsHost:          row.IsHost,
+			FullName:        row.FullName,
+			ProfilePhotoURL: row.ProfilePhotoUrl.String,
+			TrustLevel:      int(row.TrustLevel),
+		})
+	}
+	return out, nil
+}

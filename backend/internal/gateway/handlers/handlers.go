@@ -164,6 +164,8 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /v1/meetups/requests/{id}/withdraw", h.requireAuth(http.HandlerFunc(h.withdrawRequest)))
 	mux.Handle("POST /v1/meetups/requests/{id}/respond", h.requireAuth(http.HandlerFunc(h.respondToRequest)))
 	mux.Handle("POST /v1/meetups/device-token", h.requireAuth(http.HandlerFunc(h.registerDeviceToken)))
+	// The caller's own notification history — user comes from the token.
+	mux.Handle("GET /v1/notifications", h.requireAuth(http.HandlerFunc(h.listNotifications)))
 	mux.Handle("GET /v1/meetups/{id}/safety", h.requireAuth(http.HandlerFunc(h.getSafetyState)))
 	mux.Handle("POST /v1/meetups/{id}/safety/checklist", h.requireAuth(http.HandlerFunc(h.acknowledgeSafetyChecklist)))
 	mux.Handle("POST /v1/meetups/{id}/safety/live-location", h.requireAuth(http.HandlerFunc(h.setLiveLocationOptIn)))
@@ -171,8 +173,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /v1/meetups/{id}/safety/check-in", h.requireAuth(http.HandlerFunc(h.checkIn)))
 	mux.Handle("POST /v1/meetups/{id}/safety/decline", h.requireAuth(http.HandlerFunc(h.declineCheckIn)))
 	mux.Handle("POST /v1/meetups/{id}/feedback", h.requireAuth(http.HandlerFunc(h.submitMeetupFeedback)))
+	mux.Handle("GET /v1/meetups/{id}/participants", h.requireAuth(http.HandlerFunc(h.listMeetupParticipants)))
 	mux.Handle("GET /v1/meetups/{id}/ratings/ratable", h.requireAuth(http.HandlerFunc(h.listRatableParticipants)))
 	mux.Handle("POST /v1/meetups/{id}/ratings", h.requireAuth(http.HandlerFunc(h.submitRating)))
+	// The post-meetup review flow: one write for the whole thing, and a read
+	// of what the caller themselves gave (for a history card).
+	mux.Handle("POST /v1/meetups/{id}/review", h.requireAuth(http.HandlerFunc(h.submitMeetupReview)))
+	mux.Handle("GET /v1/meetups/{id}/review", h.requireAuth(http.HandlerFunc(h.getMeetupReview)))
 
 	// billing (Phase 3) routes: registered, 503 until that module exists.
 	// See unavailable.go.

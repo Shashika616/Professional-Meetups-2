@@ -98,6 +98,15 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
           builder: (context) => MeetupDetailPage(meetupId: meetup.id),
         ),
       );
+    } on MeetupSessionExpiredException {
+      // A 401 means the session itself is gone, so every later call
+      // fails too. Falling through to the generic catch below would
+      // show an error the user can only retry forever; signing out is
+      // the only thing that recovers. Mirrors the AuthService
+      // SessionExpiredException idiom in profile_page.dart.
+      if (mounted) {
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      }
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -121,69 +130,86 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
     final trustLevel =
         ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AppBackground(
-        imageOpacity: 0.35,
-        child: SafeArea(
-          child: Column(
-            children: [
-              _Header(onBack: _goBack),
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: switch (_step) {
-                    _Step.intent => _IntentStep(
-                      trustLevel: trustLevel,
-                      selected: _draft.intent,
-                      onPick: (intent) {
-                        _draft.intent = intent;
-                        _goNext();
-                      },
-                    ),
-                    _Step.timing => _TimingStep(
-                      initialStart: _draft.windowStart,
-                      initialEnd: _draft.windowEnd,
-                      onPick: (windowStart, windowEnd) {
-                        _draft.windowStart = windowStart;
-                        _draft.windowEnd = windowEnd;
-                        _goNext();
-                      },
-                    ),
-                    // MapLocationStep, not the commented-out _LocationStep
-                    // stopgap below — frontend/meetup-scheduling-PLAN.md's
-                    // 2026-08-18 testing addendum (Stadia Maps, provisional,
-                    // see TESTING-NOTES.md). Provider-neutral name on
-                    // purpose: swapping providers later means writing a new
-                    // widget, not renaming this call site again.
-                    _Step.location => MapLocationStep(
-                      onSubmit: (lat, lng, label) {
-                        _draft.locationLat = lat;
-                        _draft.locationLng = lng;
-                        _draft.locationLabel = label;
-                        _goNext();
-                      },
-                    ),
-                    _Step.capacity => _CapacityStep(
-                      initial: _draft.capacity,
-                      onSubmit: (capacity) {
-                        _draft.capacity = capacity;
-                        _goNext();
-                      },
-                    ),
-                    _Step.review => _ReviewStep(
-                      intent: _draft.intent!,
-                      windowStart: _draft.windowStart!,
-                      windowEnd: _draft.windowEnd!,
-                      locationLabel: _draft.locationLabel,
-                      capacity: _draft.capacity,
-                      submitting: _submitting,
-                      onConfirm: _submit,
-                    ),
-                  },
+    // The OS back gesture used to pop the whole five-step wizard, throwing
+    // away a part-filled draft — the in-app back button has always stepped
+    // back one at a time. This makes the gesture do what the button does.
+    //
+    // canPop is true only on the first step, where leaving the flow really
+    // is the right outcome; every later step is handled by _goBack().
+    //
+    // onPopInvokedWithResult, not onPopInvoked: the latter is deprecated in
+    // this SDK (Flutter 3.47.0, see pop_scope.dart's @Deprecated) and
+    // WillPopScope is gone entirely.
+    return PopScope<void>(
+      canPop: _sequence.indexOf(_step) == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _goBack();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AppBackground(
+          imageOpacity: 0.35,
+          child: SafeArea(
+            child: Column(
+              children: [
+                _Header(onBack: _goBack),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: switch (_step) {
+                      _Step.intent => _IntentStep(
+                        trustLevel: trustLevel,
+                        selected: _draft.intent,
+                        onPick: (intent) {
+                          _draft.intent = intent;
+                          _goNext();
+                        },
+                      ),
+                      _Step.timing => _TimingStep(
+                        initialStart: _draft.windowStart,
+                        initialEnd: _draft.windowEnd,
+                        onPick: (windowStart, windowEnd) {
+                          _draft.windowStart = windowStart;
+                          _draft.windowEnd = windowEnd;
+                          _goNext();
+                        },
+                      ),
+                      // MapLocationStep, not the commented-out _LocationStep
+                      // stopgap below — frontend/meetup-scheduling-PLAN.md's
+                      // 2026-08-18 testing addendum (Stadia Maps, provisional,
+                      // see TESTING-NOTES.md). Provider-neutral name on
+                      // purpose: swapping providers later means writing a new
+                      // widget, not renaming this call site again.
+                      _Step.location => MapLocationStep(
+                        onSubmit: (lat, lng, label) {
+                          _draft.locationLat = lat;
+                          _draft.locationLng = lng;
+                          _draft.locationLabel = label;
+                          _goNext();
+                        },
+                      ),
+                      _Step.capacity => _CapacityStep(
+                        initial: _draft.capacity,
+                        onSubmit: (capacity) {
+                          _draft.capacity = capacity;
+                          _goNext();
+                        },
+                      ),
+                      _Step.review => _ReviewStep(
+                        intent: _draft.intent!,
+                        windowStart: _draft.windowStart!,
+                        windowEnd: _draft.windowEnd!,
+                        locationLabel: _draft.locationLabel,
+                        capacity: _draft.capacity,
+                        submitting: _submitting,
+                        onConfirm: _submit,
+                      ),
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

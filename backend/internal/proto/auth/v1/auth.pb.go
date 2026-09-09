@@ -1433,10 +1433,14 @@ type AddTrustedContactRequest struct {
 	Name   string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	// At least one of phone_number/email is required — enforced server-side,
 	// mirroring the DB CHECK constraint (migration 0009).
-	PhoneNumber   string `protobuf:"bytes,3,opt,name=phone_number,json=phoneNumber,proto3" json:"phone_number,omitempty"`
-	Email         string `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PhoneNumber string `protobuf:"bytes,3,opt,name=phone_number,json=phoneNumber,proto3" json:"phone_number,omitempty"`
+	Email       string `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
+	// ADR-003 — set by the gateway from the verified JWT's trust_level claim,
+	// never a client-supplied value. AddTrustedContact/TriggerSOS require
+	// Level 2, the same floor as joining a meetup.
+	CallerTrustLevel int32 `protobuf:"varint,5,opt,name=caller_trust_level,json=callerTrustLevel,proto3" json:"caller_trust_level,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *AddTrustedContactRequest) Reset() {
@@ -1495,6 +1499,13 @@ func (x *AddTrustedContactRequest) GetEmail() string {
 		return x.Email
 	}
 	return ""
+}
+
+func (x *AddTrustedContactRequest) GetCallerTrustLevel() int32 {
+	if x != nil {
+		return x.CallerTrustLevel
+	}
+	return 0
 }
 
 type TrustedContactResponse struct {
@@ -1763,8 +1774,10 @@ type TriggerSOSRequest struct {
 	ContextMessage string                 `protobuf:"bytes,2,opt,name=context_message,json=contextMessage,proto3" json:"context_message,omitempty"` // optional — meetup title/location/time, or empty
 	Latitude       float64                `protobuf:"fixed64,3,opt,name=latitude,proto3" json:"latitude,omitempty"`
 	Longitude      float64                `protobuf:"fixed64,4,opt,name=longitude,proto3" json:"longitude,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// ADR-003 — see AddTrustedContactRequest.caller_trust_level.
+	CallerTrustLevel int32 `protobuf:"varint,5,opt,name=caller_trust_level,json=callerTrustLevel,proto3" json:"caller_trust_level,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TriggerSOSRequest) Reset() {
@@ -1821,6 +1834,13 @@ func (x *TriggerSOSRequest) GetLatitude() float64 {
 func (x *TriggerSOSRequest) GetLongitude() float64 {
 	if x != nil {
 		return x.Longitude
+	}
+	return 0
+}
+
+func (x *TriggerSOSRequest) GetCallerTrustLevel() int32 {
+	if x != nil {
+		return x.CallerTrustLevel
 	}
 	return 0
 }
@@ -1965,12 +1985,13 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x03lat\x18\x02 \x01(\x01R\x03lat\x12\x10\n" +
 	"\x03lng\x18\x03 \x01(\x01R\x03lng\";\n" +
 	"\x1fUpdateLastKnownLocationResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x80\x01\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xae\x01\n" +
 	"\x18AddTrustedContactRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fphone_number\x18\x03 \x01(\tR\vphoneNumber\x12\x14\n" +
-	"\x05email\x18\x04 \x01(\tR\x05email\"\xac\x01\n" +
+	"\x05email\x18\x04 \x01(\tR\x05email\x12,\n" +
+	"\x12caller_trust_level\x18\x05 \x01(\x05R\x10callerTrustLevel\"\xac\x01\n" +
 	"\x16TrustedContactResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
@@ -1986,12 +2007,13 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
 	"contact_id\x18\x02 \x01(\tR\tcontactId\"8\n" +
 	"\x1cRemoveTrustedContactResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x8f\x01\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xbd\x01\n" +
 	"\x11TriggerSOSRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12'\n" +
 	"\x0fcontext_message\x18\x02 \x01(\tR\x0econtextMessage\x12\x1a\n" +
 	"\blatitude\x18\x03 \x01(\x01R\blatitude\x12\x1c\n" +
-	"\tlongitude\x18\x04 \x01(\x01R\tlongitude\"A\n" +
+	"\tlongitude\x18\x04 \x01(\x01R\tlongitude\x12,\n" +
+	"\x12caller_trust_level\x18\x05 \x01(\x05R\x10callerTrustLevel\"A\n" +
 	"\x12TriggerSOSResponse\x12+\n" +
 	"\x11contacts_notified\x18\x01 \x01(\x05R\x10contactsNotified*\x95\x01\n" +
 	"\x15IdentityProviderProto\x12!\n" +

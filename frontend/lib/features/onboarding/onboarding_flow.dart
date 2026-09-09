@@ -9,7 +9,9 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/brand_marks.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/features/onboarding/age_confirmation_step.dart';
 import 'package:professional_connections_platform/features/onboarding/email_signup_step.dart';
@@ -317,10 +319,25 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             // Guideline 4.8's real placement requirement, not a style
             // choice) by construction rather than by eyeballing two
             // different button styles.
+            // NEUTRAL SURFACE, COLOURED MARK.
+            //
+            // These were candyBlue-filled with monochrome glyphs. Both brand
+            // programmes (Apple's HIG, Google's Sign-In branding) expect the
+            // provider's own logo on a plain light or dark button, and a
+            // four-colour mark on a tinted fill reads as muddy regardless of
+            // the rules. The card surface plus a hairline is the standard
+            // treatment and works on both themes.
+            //
+            // They stay the visually dominant pair through fill and
+            // elevation, not colour: the alternatives below are outlined
+            // with no fill at all.
             if (isIOS) ...[
               PrimaryButton(
                 label: 'CONTINUE WITH APPLE',
-                icon: Icons.apple,
+                iconWidget: AppleMark(size: 20, color: AppPalette.textPrimary),
+                fillColor: AppPalette.card,
+                foregroundColor: AppPalette.textPrimary,
+                borderColor: AppPalette.hairline,
                 isLoading: _busy,
                 onPressed: _continueWithApple,
               ),
@@ -328,13 +345,20 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
               PrimaryButton(
                 key: const Key('continueWithLinkedIn'),
                 label: 'CONTINUE WITH LINKEDIN',
+                iconWidget: const LinkedInMark(size: 20),
+                fillColor: AppPalette.card,
+                foregroundColor: AppPalette.textPrimary,
+                borderColor: AppPalette.hairline,
                 isLoading: _busy,
                 onPressed: _continueWithLinkedIn,
               ),
             ] else ...[
               PrimaryButton(
                 label: 'CONTINUE WITH GOOGLE',
-                icon: Icons.g_mobiledata_rounded,
+                iconWidget: const GoogleMark(size: 20),
+                fillColor: AppPalette.card,
+                foregroundColor: AppPalette.textPrimary,
+                borderColor: AppPalette.hairline,
                 isLoading: _busy,
                 onPressed: _continueWithGoogle,
               ),
@@ -342,56 +366,55 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
               PrimaryButton(
                 key: const Key('continueWithLinkedIn'),
                 label: 'CONTINUE WITH LINKEDIN',
+                iconWidget: const LinkedInMark(size: 20),
+                fillColor: AppPalette.card,
+                foregroundColor: AppPalette.textPrimary,
+                borderColor: AppPalette.hairline,
                 isLoading: _busy,
                 onPressed: _continueWithLinkedIn,
               ),
             ],
-            const SizedBox(height: 16),
-            Center(
-              child: GestureDetector(
-                onTap: _busy ? null : _openEmailSignup,
-                child: Text(
-                  'Sign up with email',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: AppPalette.textSecondary,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            // Visually subordinate to the three real signup paths, on
-            // purpose: a guest account is a genuine entry point but the
-            // weakest one, and the product intent (ADR-033 § 1) is that a
-            // guest's view is deliberately reduced precisely so signing up
-            // properly is the attractive option.
+            const SizedBox(height: 18),
+            // A divider, so the OAuth buttons read as one group and the two
+            // other ways in read as alternatives rather than as fine print
+            // trailing off the bottom of the screen.
+            const _OrDivider(),
+            const SizedBox(height: 14),
+            // PROMOTED FROM A 13px TEXT LINK. Email signup is a real, equal
+            // way to create an account — it just isn't the one-tap one — so
+            // it now looks like a button. Outlined rather than filled keeps
+            // the OAuth pair visually primary without making this one look
+            // like fine print.
+            // BOTH ARE REAL BUTTONS NOW, each with a leading icon.
             //
-            // No caption of its own — what a guest gives up is stated once,
-            // in _trustMicrocopy below, rather than in a second block of
-            // prose. This section is fixed-height above the fold, and
-            // stacking another paragraph here overflowed it.
-            Center(
-              child: GestureDetector(
-                key: const Key('continueAsGuest'),
-                onTap: _busy ? null : _continueAsGuest,
-                child: Padding(
-                  // Matches the "Sign up with email" link directly above,
-                  // rather than a TextButton: same visual weight for the same
-                  // kind of secondary action, and TextButton's 48px minimum
-                  // tap target overflowed this fixed-height section.
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    'Continue as Guest',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: AppPalette.textSecondary,
-                    ),
-                  ),
-                ),
-              ),
+            // They were 13px text links — the guest one without even an
+            // underline, so nothing marked it as tappable, and its tap
+            // target was about half the 44px minimum. "Weakest entry point"
+            // (ADR-033 §1 keeps a guest's view deliberately reduced) was
+            // being rendered as "almost invisible", which is a different
+            // thing and cost real signups.
+            //
+            // The hierarchy is now carried by FILL rather than by size:
+            // filled OAuth buttons, then an accent-outlined email button,
+            // then a plain-outlined guest button. All four are obviously
+            // controls; only one tier looks like the default.
+            SecondaryButton(
+              key: const Key('signUpWithEmail'),
+              label: 'SIGN UP WITH EMAIL',
+              icon: Icons.mail_outline_rounded,
+              height: 52,
+              color: AppPalette.candyBlue,
+              borderColor: AppPalette.candyBlue.withValues(alpha: 0.55),
+              onPressed: _busy ? null : _openEmailSignup,
+            ),
+            const SizedBox(height: 10),
+            SecondaryButton(
+              key: const Key('continueAsGuest'),
+              label: 'CONTINUE AS GUEST',
+              icon: Icons.explore_outlined,
+              height: 52,
+              color: AppPalette.textPrimary,
+              onPressed: _busy ? null : _continueAsGuest,
             ),
           ],
         ),
@@ -478,6 +501,35 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
           height: 1.4,
         ),
       ),
+    );
+  }
+}
+
+/// A hairline with "or" set into it, separating the one-tap sign-in buttons
+/// above from the two other ways in below.
+///
+/// Exists because those two used to trail off the bottom as unlabelled small
+/// text, which read as a footnote rather than as a choice.
+class _OrDivider extends StatelessWidget {
+  const _OrDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    final line = Expanded(
+      child: Divider(color: AppPalette.hairline, height: 1),
+    );
+    return Row(
+      children: [
+        line,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text(
+            'or',
+            style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+          ),
+        ),
+        line,
+      ],
     );
   }
 }

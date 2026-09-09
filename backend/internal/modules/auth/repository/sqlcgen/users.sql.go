@@ -137,12 +137,108 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (AuthUse
 	return i, err
 }
 
+const deleteAbandonedGuests = `-- name: DeleteAbandonedGuests :execrows
+DELETE FROM auth.users
+WHERE id IN (
+  SELECT u.id FROM auth.users u
+  WHERE u.is_guest = true
+    AND u.updated_at < $1::timestamptz
+    AND NOT EXISTS (
+      SELECT 1 FROM auth.refresh_tokens rt WHERE rt.user_id = u.id
+    )
+  LIMIT $2
+)
+`
+
+type DeleteAbandonedGuestsParams struct {
+	AbandonedBefore pgtype.Timestamptz `json:"abandoned_before"`
+	BatchSize       int32              `json:"batch_size"`
+}
+
+// Guest-account cleanup (plan 14 Part B). A guest signs up, never verifies,
+// eventually signs out — and the row sits there forever with no way to reach
+// it again, since a guest account has no email, phone or LinkedIn to sign
+// back in with.
+//
+// Three conditions, all required:
+//   - is_guest = true — a HARD exclusion. is_guest only ever flips to false
+//     (nothing sets it back), so a real account can never become eligible
+//     here no matter how long it sits unused.
+//   - no refresh_tokens row at all — an anti-join, not a stored "signed out"
+//     flag. refresh_tokens is already the source of truth for "can this
+//     account still authenticate"; a second derivable column would be free
+//     to drift out of sync with it. Note this means ANY row blocks deletion,
+//     including a dead one: the refresh-token sweep in the same tick removes
+//     those first, so an account becomes eligible only once its last token
+//     has been swept.
+//   - updated_at older than the retention window — the same grace period the
+//     refresh-token sweep uses, so a just-abandoned account stays
+//     inspectable for the same length of time a just-expired token does.
+//
+// Batched by id the same way DeleteExpiredRefreshTokens is, and for the same
+// reason: the caller loops until a batch comes back short, so no single
+// statement holds a long lock.
+func (q *Queries) DeleteAbandonedGuests(ctx context.Context, arg DeleteAbandonedGuestsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAbandonedGuests, arg.AbandonedBefore, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at FROM auth.users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (AuthUser, error) {
 	row := q.db.QueryRow(ctx, getUserByID, id)
+	var i AuthUser
+	err := row.Scan(
+		&i.ID,
+		&i.LinkedinSub,
+		&i.FullName,
+		&i.ProfilePhotoUrl,
+		&i.Headline,
+		&i.TrustLevel,
+		&i.AccountStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PhoneNumber,
+		&i.PersonalEmail,
+		&i.LegalName,
+		&i.Address,
+		&i.CompanyDomain,
+		&i.WorkEmailVerified,
+		&i.WorkEmailVerifiedAt,
+		&i.AgeConfirmedOver18,
+		&i.AgeConfirmedAt,
+		&i.WorkEmailHash,
+		&i.RatingAverage,
+		&i.RatingCount,
+		&i.RatingUpdatedAt,
+		&i.LastLocationLat,
+		&i.LastLocationLng,
+		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByIDForUpdate = `-- name: GetUserByIDForUpdate :one
+SELECT id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at FROM auth.users WHERE id = $1 FOR UPDATE
+`
+
+// The read half of every trust-level write (gap-tracker #17). FOR UPDATE
+// holds a row lock for the rest of the enclosing transaction, so a
+// concurrent verification step for the same user either already committed
+// (and this read sees it) or blocks until this one commits (and so sees
+// this write). Without it both callers compute trust_level from the same
+// pre-write snapshot and the later write silently under-stamps it.
+func (q *Queries) GetUserByIDForUpdate(ctx context.Context, id uuid.UUID) (AuthUser, error) {
+	row := q.db.QueryRow(ctx, getUserByIDForUpdate, id)
 	var i AuthUser
 	err := row.Scan(
 		&i.ID,

@@ -132,6 +132,11 @@ func (r *postgresRatingRepository) Submit(ctx context.Context, meetupID, raterID
 		RaterUserID: rater,
 		RatedUserID: rated,
 		Score:       int16(score),
+		// Explicitly empty, never nil: the column is NOT NULL and the INSERT
+		// names it, so the DEFAULT '{}' never applies. This path is the
+		// out-of-band single rating (cancelled-meetup host, withdrawn
+		// requester) — it has no trait picker behind it.
+		Traits: []string{},
 	}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {

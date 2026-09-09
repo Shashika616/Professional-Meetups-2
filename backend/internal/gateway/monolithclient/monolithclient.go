@@ -122,11 +122,11 @@ type Client interface {
 
 	UpdateLastKnownLocation(ctx context.Context, userID string, lat, lng float64) error
 
-	AddTrustedContact(ctx context.Context, userID, name, phoneNumber, email string) (TrustedContact, error)
+	AddTrustedContact(ctx context.Context, userID, name, phoneNumber, email string, callerTrustLevel int32) (TrustedContact, error)
 	ListTrustedContacts(ctx context.Context, userID string) ([]TrustedContact, error)
 	RemoveTrustedContact(ctx context.Context, userID, contactID string) error
 	// TriggerSOS returns how many trusted contacts were actually alerted.
-	TriggerSOS(ctx context.Context, userID, contextMessage string, lat, lng float64) (contactsNotified int32, err error)
+	TriggerSOS(ctx context.Context, userID, contextMessage string, lat, lng float64, callerTrustLevel int32) (contactsNotified int32, err error)
 
 	// --- meetup module (Phase 2) — same connection, same interceptor ---
 	CreateMeetup(ctx context.Context, hostUserID string, hostTrustLevel int32, intent string, windowStart, windowEnd int64, lat, lng float64, label string, capacity int32) (Meetup, error)
@@ -147,7 +147,11 @@ type Client interface {
 	CheckIn(ctx context.Context, meetupID, userID string) (SafetyState, error)
 	DeclineCheckIn(ctx context.Context, meetupID, userID, reason string) (SafetyState, error)
 	SubmitMeetupFeedback(ctx context.Context, meetupID, userID string, happened bool, feltSafe, profileAccurate, wouldMeetAgain *bool, notes *string) error
-	ListRatableParticipants(ctx context.Context, meetupID, viewerID string) ([]RatableParticipant, error)
+	ListNotifications(ctx context.Context, userID string) ([]UserNotification, error)
+	ListMeetupParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (MeetupParticipants, error)
+	ListRatableParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (RatableParticipants, error)
+	SubmitMeetupReview(ctx context.Context, meetupID, raterUserID string, overallScore int32, notes *string, participants []ReviewParticipantInput) error
+	GetMeetupReview(ctx context.Context, meetupID, viewerID string) (MeetupReview, error)
 	SubmitRating(ctx context.Context, meetupID, raterUserID, ratedUserID string, score int32) error
 	CloseMeetup(ctx context.Context, meetupID, hostUserID string) (Meetup, error)
 	CancelMeetup(ctx context.Context, meetupID, hostUserID, reason string) error
@@ -487,9 +491,10 @@ func (c *grpcClient) UpdateLastKnownLocation(ctx context.Context, userID string,
 	return err
 }
 
-func (c *grpcClient) AddTrustedContact(ctx context.Context, userID, name, phoneNumber, email string) (TrustedContact, error) {
+func (c *grpcClient) AddTrustedContact(ctx context.Context, userID, name, phoneNumber, email string, callerTrustLevel int32) (TrustedContact, error) {
 	resp, err := c.auth.AddTrustedContact(ctx, &authv1.AddTrustedContactRequest{
 		UserId: userID, Name: name, PhoneNumber: phoneNumber, Email: email,
+		CallerTrustLevel: callerTrustLevel,
 	})
 	if err != nil {
 		return TrustedContact{}, err
@@ -516,9 +521,10 @@ func (c *grpcClient) RemoveTrustedContact(ctx context.Context, userID, contactID
 	return err
 }
 
-func (c *grpcClient) TriggerSOS(ctx context.Context, userID, contextMessage string, lat, lng float64) (int32, error) {
+func (c *grpcClient) TriggerSOS(ctx context.Context, userID, contextMessage string, lat, lng float64, callerTrustLevel int32) (int32, error) {
 	resp, err := c.auth.TriggerSOS(ctx, &authv1.TriggerSOSRequest{
 		UserId: userID, ContextMessage: contextMessage, Latitude: lat, Longitude: lng,
+		CallerTrustLevel: callerTrustLevel,
 	})
 	if err != nil {
 		return 0, err

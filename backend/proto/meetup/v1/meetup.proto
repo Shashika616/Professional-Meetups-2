@@ -124,6 +124,16 @@ service MeetupService {
   // accepted requesters, excluding self), each flagged with whether the
   // caller already rated them. Empty (not an error) if the caller isn't a
   // participant.
+  // Who is on a meetup: its host plus everyone accepted. Identities are
+  // withheld below trust level 2 — withheld on the SERVER, not blurred on
+  // the client, so the names are never on the wire at all.
+  rpc ListMeetupParticipants(ListMeetupParticipantsRequest) returns (ListMeetupParticipantsResponse);
+
+  // The caller's in-app notification history, newest first, bounded by the
+  // same retention window that trims the outbox — so the list can never show
+  // a row that is about to be swept.
+  rpc ListNotifications(ListNotificationsRequest) returns (ListNotificationsResponse);
+
   rpc ListRatableParticipants(ListRatableParticipantsRequest) returns (ListRatableParticipantsResponse);
 
   // Records rater_user_id's score for rated_user_id on meetup_id. Rejects
@@ -138,6 +148,19 @@ service MeetupService {
   // out-of-range score. All three branches write into the exact same
   // rating pool — never a separate one per trigger.
   rpc SubmitRating(SubmitRatingRequest) returns (SubmitRatingResponse);
+
+  // The post-meetup review flow's single write: the overall score for the
+  // meetup, an optional note, and a score plus traits for every other
+  // participant. All-or-nothing — ratings are immutable, so a partially
+  // applied review could never be finished on a retry.
+  //
+  // This is the only call that marks a meetup reviewed, which is what takes
+  // it off the caller's home list.
+  rpc SubmitMeetupReview(SubmitMeetupReviewRequest) returns (SubmitMeetupReviewResponse);
+
+  // Reads back what the CALLER themselves submitted — never another rater's
+  // scores. Backs the "see the ratings you gave" view on a history card.
+  rpc GetMeetupReview(GetMeetupReviewRequest) returns (GetMeetupReviewResponse);
 
   // Host-only "meetup is done" action (ADR-016), reviving meetup_status's
   // previously-unused COMPLETED value. Rejects with Forbidden if the
@@ -499,9 +522,65 @@ message SubmitMeetupFeedbackResponse {
   bool success = 1;
 }
 
+message ListNotificationsRequest {
+  string user_id = 1; // set by the gateway from the verified JWT
+}
+
+message ListNotificationsResponse {
+  repeated UserNotification notifications = 1;
+}
+
+message UserNotification {
+  string id = 1;
+  string title = 2;
+  string body = 3;
+  // Both lifted out of the push's own `data` payload, so an in-app row can
+  // deep-link exactly where the tapped banner would have.
+  string type = 4;
+  string meetup_id = 5;
+  int64 created_at = 6; // unix seconds
+  // False while the push is still queued. It is already a real notification
+  // for this user, so the list shows it rather than hiding it until sent.
+  bool delivered = 7;
+}
+
+message ListMeetupParticipantsRequest {
+  string meetup_id = 1;
+  string viewer_id = 2;          // set by the gateway from the verified JWT
+  int32 viewer_trust_level = 3;  // set by the gateway from the verified JWT
+}
+
+message ListMeetupParticipantsResponse {
+  repeated MeetupParticipant participants = 1;
+  // True when identities were withheld. Sent explicitly so the client can
+  // render the placeholder treatment deliberately, rather than inferring it
+  // from empty strings that might equally mean "display cache not synced".
+  bool redacted = 2;
+  // The real number of people either way — a viewer below the floor is
+  // still told HOW MANY are coming.
+  int32 total_count = 3;
+}
+
+message MeetupParticipant {
+  // Empty for a redacted entry, along with name and photo: an id is a
+  // stable handle, and keeping it would let a guest correlate the same
+  // person across meetups and rebuild the graph without ever seeing a name.
+  string user_id = 1;
+  bool is_host = 2;
+  string full_name = 3;
+  string profile_photo_url = 4;
+  int32 trust_level = 5;
+}
+
 message ListRatableParticipantsRequest {
   string meetup_id = 1;
   string viewer_id = 2; // set by the gateway from the verified JWT
+  // Set by the gateway from the verified JWT, same as
+  // ListMeetupParticipantsRequest above. Used for a deliberately PARTIAL
+  // redaction here — only trust_level is withheld below the identity floor,
+  // never the name or photo; see rating.go for why full parity would break
+  // the rating flow.
+  int32 viewer_trust_level = 3;
 }
 
 message RatableParticipant {
@@ -522,6 +601,63 @@ message RatableParticipant {
 
 message ListRatableParticipantsResponse {
   repeated RatableParticipant participants = 1;
+  // The trait vocabulary, server-owned so it can grow without an app
+  // release and so what gets stored is always something the server named.
+  // Returned here because this is the response the review screen renders
+  // its trait pickers from.
+  repeated RatingTrait available_traits = 2;
+}
+
+// One selectable personality trait. Clients render emoji + label and send
+// back key; key is the only part ever stored.
+message RatingTrait {
+  string key = 1;
+  string label = 2;
+  string emoji = 3;
+}
+
+message SubmitMeetupReviewRequest {
+  string meetup_id = 1;
+  string rater_user_id = 2; // set by the gateway from the verified JWT
+  int32 overall_score = 3;  // 1-5, about the MEETUP, not any person on it
+  optional string notes = 4;
+  repeated ReviewParticipant participants = 5;
+}
+
+message ReviewParticipant {
+  string user_id = 1;
+  int32 score = 2; // 1-5
+  // Trait keys from the server's own vocabulary. Validated server-side —
+  // these end up displayed against a named real person, so an arbitrary
+  // string from a modified client would be text one user writes onto
+  // another user's profile.
+  repeated string traits = 3;
+}
+
+message SubmitMeetupReviewResponse {
+  bool success = 1;
+}
+
+message GetMeetupReviewRequest {
+  string meetup_id = 1;
+  string viewer_id = 2; // set by the gateway from the verified JWT
+}
+
+message GetMeetupReviewResponse {
+  // False when the caller has not finished the review flow — the client
+  // shows the flow rather than the result.
+  bool completed = 1;
+  int32 overall_score = 2;
+  optional string notes = 3;
+  repeated ReviewedParticipant participants = 4;
+}
+
+message ReviewedParticipant {
+  string user_id = 1;
+  string full_name = 2;
+  string profile_photo_url = 3;
+  int32 score = 4;
+  repeated string traits = 5;
 }
 
 message SubmitRatingRequest {

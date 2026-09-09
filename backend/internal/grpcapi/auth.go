@@ -338,10 +338,11 @@ func trustedContactToProto(c auth.TrustedContact) *authv1.TrustedContactResponse
 
 func (s *AuthServer) AddTrustedContact(ctx context.Context, req *authv1.AddTrustedContactRequest) (*authv1.TrustedContactResponse, error) {
 	contact, err := s.svc.AddTrustedContact(ctx, auth.AddTrustedContactRequest{
-		UserID:      req.GetUserId(),
-		Name:        req.GetName(),
-		PhoneNumber: req.GetPhoneNumber(),
-		Email:       req.GetEmail(),
+		UserID:           req.GetUserId(),
+		Name:             req.GetName(),
+		PhoneNumber:      req.GetPhoneNumber(),
+		Email:            req.GetEmail(),
+		CallerTrustLevel: int(req.GetCallerTrustLevel()),
 	})
 	if err != nil {
 		return nil, apperror.ToGRPCStatus(err)
@@ -373,10 +374,11 @@ func (s *AuthServer) RemoveTrustedContact(ctx context.Context, req *authv1.Remov
 
 func (s *AuthServer) TriggerSOS(ctx context.Context, req *authv1.TriggerSOSRequest) (*authv1.TriggerSOSResponse, error) {
 	result, err := s.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
-		UserID:         req.GetUserId(),
-		ContextMessage: req.GetContextMessage(),
-		Latitude:       req.GetLatitude(),
-		Longitude:      req.GetLongitude(),
+		UserID:           req.GetUserId(),
+		ContextMessage:   req.GetContextMessage(),
+		Latitude:         req.GetLatitude(),
+		Longitude:        req.GetLongitude(),
+		CallerTrustLevel: int(req.GetCallerTrustLevel()),
 	})
 	if err != nil {
 		return nil, apperror.ToGRPCStatus(err)

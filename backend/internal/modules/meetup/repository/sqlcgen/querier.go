@@ -217,6 +217,10 @@ type Querier interface {
 	// implies either both commit or neither does. A crash between them is not a
 	// window that has to be tolerated; it is a state the database will not
 	// produce.
+	//
+	// user_id is the RECIPIENT, carried alongside the resolved tokens purely so
+	// the in-app notification list can ask "what was sent to me" (migration
+	// 0009). Delivery itself still uses fcm_tokens only and never reads this.
 	EnqueueNotification(ctx context.Context, arg EnqueueNotificationParams) error
 	// Idempotent create-if-missing — called once per participant, at meetup
 	// creation for the host and at accept-time for each accepted requester
@@ -254,6 +258,7 @@ type Querier interface {
 	// Plain, no join — used only inside AcceptRequest's transaction to lock the
 	// row and re-check status/capacity, host display info is irrelevant there.
 	GetMeetupByIDForUpdate(ctx context.Context, id uuid.UUID) (MeetupMeetup, error)
+	GetMeetupFeedback(ctx context.Context, arg GetMeetupFeedbackParams) (MeetupMeetupFeedback, error)
 	// Plain, no join — used inside Accept's transaction where requester
 	// display info is irrelevant, and as the base row write queries (Accept/
 	// Reject/Withdraw) RETURNING against. Callers needing display info should
@@ -295,6 +300,20 @@ type Querier interface {
 	// list (not just fcm_token) so the caller can group rows back by user
 	// without a second lookup.
 	ListDeviceTokensForUsers(ctx context.Context, userIds []uuid.UUID) ([]MeetupDeviceToken, error)
+	// Meetups this user took part in whose window has ended and which they have
+	// not finished reviewing. Bounded by a cutoff so an ignored review does not
+	// sit on Home forever (see service.reviewWindow).
+	ListMeetupIDsAwaitingReview(ctx context.Context, arg ListMeetupIDsAwaitingReviewParams) ([]uuid.UUID, error)
+	// The people on a meetup: its host, plus everyone whose request was
+	// accepted. Ordered host-first, then by name, so the list reads the same way
+	// every time it is fetched.
+	//
+	// Deliberately NOT scoped to a viewer. Who may see WHAT of this is a policy
+	// question the service layer answers (see ListMeetupParticipants there) —
+	// this query answers only "who is on this meetup". Mixing the two here would
+	// put a trust rule in SQL where nobody reviewing the trust ladder would
+	// think to look for it.
+	ListMeetupParticipants(ctx context.Context, meetupID uuid.UUID) ([]ListMeetupParticipantsRow, error)
 	// Keyset continuation of ListMeetupsByHostFirstPage — same
 	// (created_at, id) < (cursor) shape as
 	// ListOpenMeetupsByIntentAfterCursor.
@@ -319,6 +338,19 @@ type Querier interface {
 	// reasoning as ListMeetupsByHostFirstPage above, applied to the
 	// requested-meetups side of the same pre-existing completeness ceiling.
 	ListMeetupsRequestedByUserFirstPage(ctx context.Context, arg ListMeetupsRequestedByUserFirstPageParams) ([]ListMeetupsRequestedByUserFirstPageRow, error)
+	// What the viewer themselves submitted on this meetup — the read behind
+	// "see the ratings we gave" on a history card. Only ever the viewer's own
+	// rows (rater_user_id = viewer): a rating is private to the person who gave
+	// it, and this must never become a way to read what others scored someone.
+	ListMyMeetupRatings(ctx context.Context, arg ListMyMeetupRatingsParams) ([]ListMyMeetupRatingsRow, error)
+	// The in-app notification list. Bounded by `since`, which the caller sets to
+	// the same retention window the cleanup job uses — so the list can never
+	// show a row that is about to vanish, and the two windows cannot drift.
+	//
+	// Dead-lettered rows are excluded: they were never delivered to anyone, so
+	// showing them would be telling the user about a notification they did not
+	// get.
+	ListNotificationsForUser(ctx context.Context, arg ListNotificationsForUserParams) ([]ListNotificationsForUserRow, error)
 	// Keyset pagination on (created_at, id) — cursorCreatedAt/cursorID are the
 	// last row of the previous page, so this resumes strictly after it. Row
 	// comparison (a, b) < (c, d) is a single index-friendly condition, not a
@@ -477,6 +509,17 @@ type Querier interface {
 	// layer (both states are visible together there), not here.
 	SetDeclined(ctx context.Context, arg SetDeclinedParams) (MeetupSafetyState, error)
 	SetLiveLocationOptIn(ctx context.Context, arg SetLiveLocationOptInParams) (MeetupSafetyState, error)
+	// The review flow's own write: the overall 1-5 for the meetup plus the
+	// optional note, and the completion stamp. Separate from
+	// UpsertMeetupFeedback (the safety questions) because the two are answered
+	// at different moments by different screens, and a review must never
+	// silently clear a felt_safe answer given earlier.
+	//
+	// happened is forced true: reaching the end of the review flow IS the
+	// statement that it happened, and leaving it null would make the row fail
+	// HasConfirmedMeetupHappened and so refuse the very ratings being submitted
+	// alongside it.
+	SetMeetupOverallReview(ctx context.Context, arg SetMeetupOverallReviewParams) (MeetupMeetupFeedback, error)
 	// Upserts by token, not by user — a token identifies one physical device
 	// install; re-registering it under a different account reassigns
 	// ownership rather than leaving a stale row.

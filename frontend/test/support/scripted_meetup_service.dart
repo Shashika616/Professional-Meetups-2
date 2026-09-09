@@ -98,7 +98,11 @@ class ScriptedMeetupService implements MeetupService {
   final Meetup? _meetupDetail;
   final SafetyState? _safetyState;
   final List<RatableParticipant> _ratableParticipants;
-  final List<Meetup> _activeMeetups;
+  List<Meetup> _activeMeetups;
+
+  /// Lets a test move the active list on the way the server would — e.g. a
+  /// reviewed meetup dropping out of it.
+  set activeMeetups(List<Meetup> value) => _activeMeetups = value;
 
   String? lastRequestToJoinMeetupId;
   String? lastRespondToRequestId;
@@ -363,6 +367,83 @@ class ScriptedMeetupService implements MeetupService {
   Future<List<RatableParticipant>> listRatableParticipants(
     String meetupId,
   ) async => _ratableParticipants;
+
+  /// The attendee list this fake serves. Defaults to empty, which makes the
+  /// strip self-hide — most tests are not about participants.
+  MeetupParticipants participants = const MeetupParticipants();
+
+  @override
+  Future<MeetupParticipants> listMeetupParticipants(String meetupId) async =>
+      participants;
+
+  /// The notification history this fake serves, newest-first as the server
+  /// returns it.
+  List<AppNotification> notifications = const [];
+
+  /// Thrown by listNotifications when set — for the failure-path tests.
+  Object? notificationsError;
+
+  int listNotificationsCallCount = 0;
+
+  @override
+  Future<List<AppNotification>> listNotifications() async {
+    listNotificationsCallCount++;
+    final error = notificationsError;
+    if (error != null) throw error;
+    return notifications;
+  }
+
+  @override
+  Future<RatableParticipants> listRatableParticipantsWithTraits(
+    String meetupId,
+  ) async => RatableParticipants(
+    participants: _ratableParticipants,
+    availableTraits: availableTraits,
+  );
+
+  /// The review flow's trait vocabulary. Defaults to a small real-shaped
+  /// set so a test that doesn't care about traits still renders pickers.
+  List<RatingTrait> availableTraits = const [
+    RatingTrait(key: 'cheerful', label: 'Cheerful', emoji: '☀️'),
+    RatingTrait(key: 'great_listener', label: 'Great listener', emoji: '👂'),
+    RatingTrait(key: 'insightful', label: 'Insightful', emoji: '💡'),
+  ];
+
+  /// What the last submitMeetupReview carried, and how many times it ran.
+  int submitReviewCallCount = 0;
+  int? lastReviewOverallScore;
+  String? lastReviewNotes;
+  List<ReviewParticipantInput> lastReviewParticipants = const [];
+
+  /// Thrown by submitMeetupReview when set — for the failure-path tests.
+  Object? submitReviewError;
+
+  /// What getMeetupReview returns.
+  MeetupReview meetupReview = const MeetupReview(completed: false);
+
+  /// Runs after a successful submitMeetupReview, so a test can move the
+  /// scripted world forward the way the real server would — the meetup
+  /// leaving the active list, getMeetupReview starting to answer.
+  void Function()? onSubmitReview;
+
+  @override
+  Future<void> submitMeetupReview(
+    String meetupId, {
+    required int overallScore,
+    String? notes,
+    required List<ReviewParticipantInput> participants,
+  }) async {
+    submitReviewCallCount++;
+    lastReviewOverallScore = overallScore;
+    lastReviewNotes = notes;
+    lastReviewParticipants = participants;
+    final error = submitReviewError;
+    if (error != null) throw error;
+    onSubmitReview?.call();
+  }
+
+  @override
+  Future<MeetupReview> getMeetupReview(String meetupId) async => meetupReview;
 
   @override
   Future<void> submitRating(

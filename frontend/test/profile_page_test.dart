@@ -18,6 +18,8 @@ import 'package:professional_connections_platform/features/verification/personal
 import 'package:professional_connections_platform/features/verification/phone_verification_page.dart';
 
 import 'support/fake_secure_storage_platform.dart';
+import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
+import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
 
 class _FakeAuthService implements AuthService {
   // ADR-002 § 3. Unused by this test — every fake in test/ implements the
@@ -734,6 +736,56 @@ void main() {
       // One decimal place, from the real average rather than a placeholder.
       expect(find.text('4.8'), findsOneWidget);
       expect(find.text('L2'), findsOneWidget);
+    });
+  });
+
+  // Every one of these rows used to respond only where a glyph was painted
+  // — the label or the chevron — with dead space between them, because the
+  // GestureDetector defaulted to deferToChild over a Row that is mostly
+  // transparent padding.
+  group('a preference row is tappable across its whole width', () {
+    /// Taps the row's empty middle: past the title text, well short of the
+    /// trailing chevron. Under deferToChild this hits nothing.
+    Future<void> tapRowGap(WidgetTester tester, String title) async {
+      final row = find.ancestor(
+        of: find.text(title),
+        matching: find.byType(GestureDetector),
+      );
+      expect(row, findsWidgets);
+      final box = tester.getRect(row.first);
+      await tester.tapAt(Offset(box.right - 60, box.center.dy));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('Privacy Controls opens from the gap', (tester) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_appWith(_FakeAuthService()));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Privacy Controls'));
+      await tester.pumpAndSettle();
+
+      await tapRowGap(tester, 'Privacy Controls');
+      expect(find.byType(PrivacyControlsPage), findsOneWidget);
+    });
+
+    testWidgets('Notifications opens from the gap, and is no longer '
+        '"Coming soon"', (tester) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(_appWith(_FakeAuthService()));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Notifications'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('SOON'), findsNothing);
+
+      await tapRowGap(tester, 'Notifications');
+      expect(find.byType(NotificationsPage), findsOneWidget);
     });
   });
 }

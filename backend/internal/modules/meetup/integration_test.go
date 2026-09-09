@@ -12,6 +12,7 @@ package meetup_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -1236,6 +1237,20 @@ func TestSafetyGate_StepOrderAndTerminalStates(t *testing.T) {
 	}
 }
 
+// backdateMeetup moves a meetup's window into the past. CreateMeetup rejects
+// a past window_start, so anything testing post-meetup behaviour creates a
+// valid future meetup and then backdates it in SQL — the approach this
+// package's lifecycle tests already use.
+func backdateMeetup(t *testing.T, h *harness, meetupID string) {
+	t.Helper()
+	if _, err := h.pool.Exec(context.Background(), `
+		UPDATE meetup.meetups
+		SET window_start = now() - interval '3 hours', window_end = now() - interval '1 hour'
+		WHERE id = $1`, meetupID); err != nil {
+		t.Fatalf("backdate meetup window: %v", err)
+	}
+}
+
 // --- ratings -----------------------------------------------------------
 
 // TestListRatableParticipants_RejectsNonParticipant covers the IDOR the
@@ -1272,7 +1287,30 @@ func TestListRatableParticipants_RejectsNonParticipant(t *testing.T) {
 		t.Errorf("an outsider saw %d participant(s), want 0 — this is the participant-enumeration IDOR", len(got))
 	}
 
-	// A real participant sees the others, excluding themselves.
+	// Even the HOST sees nobody yet. The meetup is still open and scheduled
+	// for later, so there is no eligibility branch under which the host
+	// could rate this requester — and this endpoint must agree with
+	// SubmitRating, which would reject the score. It previously returned
+	// the requester here, which the client renders as a live star picker:
+	// a host looking at a meetup days away was invited to rate someone they
+	// had not met, and the tap failed after the irreversible-rating
+	// confirmation.
+	got, err = h.svc.ListRatableParticipants(ctx, meetup.ListRatableParticipantsRequest{MeetupID: m.ID, ViewerID: host})
+	if err != nil {
+		t.Fatalf("ListRatableParticipants(host, before it happened): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("host saw %+v before the meetup happened, want none", got)
+	}
+
+	// Once the host confirms it happened, the requester is ratable —
+	// excluding the viewer themselves.
+	backdateMeetup(t, h, m.ID)
+	if err := h.svc.SubmitMeetupFeedback(ctx, meetup.SubmitMeetupFeedbackRequest{
+		MeetupID: m.ID, UserID: host, Happened: true,
+	}); err != nil {
+		t.Fatalf("SubmitMeetupFeedback: %v", err)
+	}
 	got, err = h.svc.ListRatableParticipants(ctx, meetup.ListRatableParticipantsRequest{MeetupID: m.ID, ViewerID: host})
 	if err != nil {
 		t.Fatalf("ListRatableParticipants(host): %v", err)
@@ -1280,6 +1318,115 @@ func TestListRatableParticipants_RejectsNonParticipant(t *testing.T) {
 	if len(got) != 1 || got[0].UserID != requester {
 		t.Errorf("host saw %+v, want exactly the requester", got)
 	}
+
+	// The outsider check again, now that a real eligibility branch is open:
+	// the IDOR guard must not depend on the list happening to be empty.
+	got, err = h.svc.ListRatableParticipants(ctx, meetup.ListRatableParticipantsRequest{MeetupID: m.ID, ViewerID: outsider})
+	if err != nil {
+		t.Fatalf("ListRatableParticipants(outsider, post-feedback): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("an outsider saw %d participant(s), want 0", len(got))
+	}
+}
+
+// A row with Happened=true is what unlocks rating everyone on a meetup
+// (SubmitRating's first eligibility branch), so this write is the one that
+// has to be guarded, not just the rating itself.
+func TestSubmitMeetupFeedback_RequiresAStartedMeetupAndAParticipant(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	requester := newUserID(t, h)
+	outsider := newUserID(t, h)
+
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	r, _ := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: requester, RequesterTrustLevel: 2})
+	if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{RequestID: r.ID, HostUserID: host, Accept: true}); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	// createMeetup schedules into the future, so this is a meetup that has
+	// not started. "How did it go?" has no honest answer yet.
+	err := h.svc.SubmitMeetupFeedback(ctx, meetup.SubmitMeetupFeedbackRequest{
+		MeetupID: m.ID, UserID: host, Happened: true,
+	})
+	if !errors.Is(err, apperror.ErrConflict) {
+		t.Errorf("feedback on a future meetup: error = %v, want ErrConflict", err)
+	}
+
+	// And it left nothing behind that would unlock rating.
+	got, err := h.svc.ListRatableParticipants(ctx, meetup.ListRatableParticipantsRequest{MeetupID: m.ID, ViewerID: host})
+	if err != nil {
+		t.Fatalf("ListRatableParticipants: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("host saw %+v after a rejected feedback write, want none", got)
+	}
+
+	backdateMeetup(t, h, m.ID)
+
+	if err := h.svc.SubmitMeetupFeedback(ctx, meetup.SubmitMeetupFeedbackRequest{
+		MeetupID: m.ID, UserID: outsider, Happened: true,
+	}); !errors.Is(err, apperror.ErrForbidden) {
+		t.Errorf("feedback from a non-participant: error = %v, want ErrForbidden", err)
+	}
+
+	if err := h.svc.SubmitMeetupFeedback(ctx, meetup.SubmitMeetupFeedbackRequest{
+		MeetupID: m.ID, UserID: host, Happened: true,
+	}); err != nil {
+		t.Errorf("feedback from the host on a started meetup: %v", err)
+	}
+}
+
+// The two branches that have nothing to do with the meetup happening —
+// both must survive the eligibility filter, since neither is covered by
+// HasConfirmedHappened.
+func TestListRatableParticipants_EligibilityBranches(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	t.Run("a cancelled meetup's host stays ratable by an accepted requester", func(t *testing.T) {
+		host := newUserID(t, h)
+		requester := newUserID(t, h)
+		m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+		r, _ := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: requester, RequesterTrustLevel: 2})
+		if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{RequestID: r.ID, HostUserID: host, Accept: true}); err != nil {
+			t.Fatalf("accept: %v", err)
+		}
+		if err := h.svc.CancelMeetup(ctx, meetup.CancelMeetupRequest{MeetupID: m.ID, HostUserID: host, Reason: "something came up"}); err != nil {
+			t.Fatalf("CancelMeetup: %v", err)
+		}
+
+		got, err := h.svc.ListRatableParticipants(ctx, meetup.ListRatableParticipantsRequest{MeetupID: m.ID, ViewerID: requester})
+		if err != nil {
+			t.Fatalf("ListRatableParticipants: %v", err)
+		}
+		if len(got) != 1 || got[0].UserID != host {
+			t.Errorf("accepted requester saw %+v, want the cancelled meetup's host", got)
+		}
+	})
+
+	t.Run("a withdrawn requester stays ratable by the host", func(t *testing.T) {
+		host := newUserID(t, h)
+		requester := newUserID(t, h)
+		m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+		r, _ := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: requester, RequesterTrustLevel: 2})
+		if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{RequestID: r.ID, HostUserID: host, Accept: true}); err != nil {
+			t.Fatalf("accept: %v", err)
+		}
+		if err := h.svc.WithdrawRequest(ctx, meetup.WithdrawRequestRequest{RequestID: r.ID, RequesterID: requester, Note: "sorry"}); err != nil {
+			t.Fatalf("WithdrawRequest: %v", err)
+		}
+
+		got, err := h.svc.ListRatableParticipants(ctx, meetup.ListRatableParticipantsRequest{MeetupID: m.ID, ViewerID: host})
+		if err != nil {
+			t.Fatalf("ListRatableParticipants: %v", err)
+		}
+		if len(got) != 1 || got[0].UserID != requester {
+			t.Errorf("host saw %+v, want the withdrawn requester", got)
+		}
+	})
 }
 
 // TestSubmitRating_EligibilityAndCachePublish covers the rating rules and the
@@ -1316,6 +1463,7 @@ func TestSubmitRating_EligibilityAndCachePublish(t *testing.T) {
 	}
 
 	// Confirm attendance, then rate.
+	backdateMeetup(t, h, m.ID)
 	if err := h.svc.SubmitMeetupFeedback(ctx, meetup.SubmitMeetupFeedbackRequest{
 		MeetupID: m.ID, UserID: host, Happened: true,
 	}); err != nil {

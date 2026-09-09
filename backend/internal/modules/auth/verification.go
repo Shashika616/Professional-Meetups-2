@@ -72,14 +72,15 @@ func (s *service) VerifyPhoneCode(ctx context.Context, req VerifyCodeRequest) (S
 		return SessionResult{}, err
 	}
 
-	user, err := s.users.GetByID(ctx, req.UserID)
-	if err != nil {
-		return SessionResult{}, err
-	}
-	hypothetical := afterVerification(user)
-	hypothetical.PhoneNumber = req.Target
-
-	persisted, err := s.users.UpdatePhoneNumber(ctx, req.UserID, req.Target, computeTrustLevel(hypothetical))
+	// No pre-read: the repository locks the row and hands the current
+	// snapshot to this closure, so the trust level is computed from the row
+	// as it exists at write time rather than from one read before the call
+	// (gap-tracker #17). The phone number itself is applied to that
+	// snapshot by the repository; afterVerification supplies the is_guest
+	// change this same statement makes.
+	persisted, err := s.users.UpdatePhoneNumber(ctx, req.UserID, req.Target, func(u repository.User) int {
+		return computeTrustLevel(afterVerification(u))
+	})
 	if err != nil {
 		return SessionResult{}, err
 	}
@@ -110,14 +111,9 @@ func (s *service) VerifyPersonalEmailCode(ctx context.Context, req VerifyCodeReq
 		return SessionResult{}, err
 	}
 
-	user, err := s.users.GetByID(ctx, req.UserID)
-	if err != nil {
-		return SessionResult{}, err
-	}
-	hypothetical := afterVerification(user)
-	hypothetical.PersonalEmail = req.Target
-
-	persisted, err := s.users.UpdatePersonalEmail(ctx, req.UserID, req.Target, computeTrustLevel(hypothetical))
+	persisted, err := s.users.UpdatePersonalEmail(ctx, req.UserID, req.Target, func(u repository.User) int {
+		return computeTrustLevel(afterVerification(u))
+	})
 	if err != nil {
 		return SessionResult{}, err
 	}
@@ -138,15 +134,16 @@ func (s *service) SubmitPersonalDetails(ctx context.Context, req SubmitPersonalD
 		return SessionResult{}, fmt.Errorf("address is too long: %w", apperror.ErrInvalidInput)
 	}
 
-	user, err := s.requireLinkedIn(ctx, req.UserID)
-	if err != nil {
+	// The result is discarded, not the call: requireLinkedIn is the
+	// LinkedIn prerequisite gate, and only its returned row (which fed
+	// `hypothetical`) is now redundant.
+	if _, err := s.requireLinkedIn(ctx, req.UserID); err != nil {
 		return SessionResult{}, err
 	}
-	hypothetical := afterVerification(user)
-	hypothetical.LegalName = req.LegalName
-	hypothetical.Address = req.Address
 
-	persisted, err := s.users.UpdatePersonalDetails(ctx, req.UserID, req.LegalName, req.Address, computeTrustLevel(hypothetical))
+	persisted, err := s.users.UpdatePersonalDetails(ctx, req.UserID, req.LegalName, req.Address, func(u repository.User) int {
+		return computeTrustLevel(afterVerification(u))
+	})
 	if err != nil {
 		return SessionResult{}, err
 	}
@@ -253,17 +250,16 @@ func (s *service) VerifyCorporateEmailCode(ctx context.Context, req VerifyCodeRe
 		return SessionResult{}, err
 	}
 
-	// CompanyName is set on the hypothetical too, not just the persisted row
-	// (ADR-002 §2): Level 3 now requires it, so a trust level computed
+	// company_domain/work_email_verified/company_name are applied to the
+	// locked snapshot by the repository before this closure runs (ADR-002
+	// §2): Level 3 requires the company name, so a trust level computed
 	// without it would come out as 2 while the row being written actually
-	// satisfies 3 — the value stored in trust_level has to be computed from
-	// exactly the row this statement is about to produce.
-	hypothetical := afterVerification(user)
-	hypothetical.CompanyDomain = domain
-	hypothetical.WorkEmailVerified = true
-	hypothetical.CompanyName = companyName
-
-	persisted, err := s.users.UpdateWorkEmailVerified(ctx, req.UserID, domain, true, time.Now(), workEmailHash, companyName, computeTrustLevel(hypothetical))
+	// satisfies 3. `user` above is kept — it still feeds the reuse-abuse
+	// check and the unverified-company-claim insert — it just no longer
+	// supplies the snapshot the trust level is computed from.
+	persisted, err := s.users.UpdateWorkEmailVerified(ctx, req.UserID, domain, true, time.Now(), workEmailHash, companyName, func(u repository.User) int {
+		return computeTrustLevel(afterVerification(u))
+	})
 	if err != nil {
 		return SessionResult{}, err
 	}

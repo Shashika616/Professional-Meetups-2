@@ -59,6 +59,12 @@ type AddTrustedContactRequest struct {
 	// ErrInvalidInput rather than a raw constraint-violation error.
 	PhoneNumber string
 	Email       string
+	// CallerTrustLevel comes from the JWT via the gateway, never from the
+	// client. Read by the auth service's gate (ADR-003) BEFORE it delegates
+	// here — this package deliberately does not check it itself, for the
+	// same reason the validator is injected rather than duplicated: this
+	// stays a plain CRUD/alerting layer.
+	CallerTrustLevel int
 }
 
 // RemoveTrustedContactRequest removes one contact belonging to UserID.
@@ -73,6 +79,8 @@ type TriggerSOSRequest struct {
 	ContextMessage string // optional — meetup title/location/time, or empty
 	Latitude       float64
 	Longitude      float64
+	// CallerTrustLevel — see AddTrustedContactRequest.CallerTrustLevel.
+	CallerTrustLevel int
 }
 
 // TriggerSOSResult reports how many of the caller's trusted contacts were

@@ -8,7 +8,8 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
-import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
+import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
+import 'package:professional_connections_platform/features/meetups/review/meetup_review_page.dart';
 
 import 'support/scripted_meetup_service.dart';
 
@@ -115,40 +116,171 @@ void main() {
     },
   );
 
-  testWidgets(
-    'once windowEnd passes, the card converts in place to the existing '
-    'RatingPrompt component instead of a second prompt UI',
-    (tester) async {
-      final now = DateTime.now();
-      final justEnded = _meetup(
-        id: 'ended',
-        hostFullName: 'Just Ended Host',
-        windowStart: now.subtract(const Duration(hours: 1)),
-        windowEnd: now.subtract(const Duration(minutes: 1)),
-      );
-      final service = ScriptedMeetupService(
-        activeMeetups: [justEnded],
-        ratableParticipants: [
-          const RatableParticipant(
-            userId: 'host-ended',
-            fullName: 'Just Ended Host',
-            trustLevel: 2,
-          ),
-        ],
-      );
+  testWidgets('once windowEnd passes, the card asks for a review — keeping the '
+      "meetup's own identity, not swapping itself for a bare star picker", (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final justEnded = _meetup(
+      id: 'ended',
+      hostFullName: 'Just Ended Host',
+      windowStart: now.subtract(const Duration(hours: 1)),
+      windowEnd: now.subtract(const Duration(minutes: 1)),
+    );
+    final service = ScriptedMeetupService(
+      activeMeetups: [justEnded],
+      ratableParticipants: [
+        const RatableParticipant(
+          userId: 'host-ended',
+          fullName: 'Just Ended Host',
+          trustLevel: 2,
+        ),
+      ],
+    );
 
-      await tester.pumpWidget(_appWith(service));
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
 
-      expect(find.byType(RatingPrompt), findsOneWidget);
-      expect(find.text('RATE WHO YOU MET'), findsOneWidget);
-    },
-  );
+    expect(find.text('Share your thoughts about this meetup'), findsOneWidget);
+    // The card no longer opens the rating UI inline. A naked star picker
+    // with no context does not say which meetup it is about or what
+    // pressing it commits you to — the review is its own screen now.
+    expect(
+      find.text('RATE WHO YOU MET'),
+      findsNothing,
+      reason: 'the ratings step lives inside the review flow',
+    );
+  });
+
+  testWidgets('finishing the review takes the card off Home — without a '
+      'manual refresh', (tester) async {
+    final now = DateTime.now();
+    final justEnded = _meetup(
+      id: 'ended-refresh',
+      hostFullName: 'Just Ended Host',
+      windowStart: now.subtract(const Duration(hours: 1)),
+      windowEnd: now.subtract(const Duration(minutes: 1)),
+    );
+    late final ScriptedMeetupService service;
+    service = ScriptedMeetupService(activeMeetups: [justEnded])
+      // What the real server does: a reviewed meetup stops being returned.
+      ..onSubmitReview = () => service.activeMeetups = const [];
+
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Share your thoughts about this meetup'));
+    await tester.pumpAndSettle();
+
+    final slider = tester.getRect(find.byType(ExperienceSlider));
+    await tester.tapAt(Offset(slider.center.dx, slider.center.dy));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SUBMIT'));
+    await tester.pumpAndSettle();
+
+    expect(service.submitReviewCallCount, 1);
+    expect(
+      find.text('Share your thoughts about this meetup'),
+      findsNothing,
+      reason: 'the card must not survive the review that completed it',
+    );
+  });
+
+  testWidgets('the review card names WHICH meetup it is asking about — host, '
+      'time and place, not just the ask', (tester) async {
+    final now = DateTime.now();
+    final justEnded = _meetup(
+      id: 'ended-details',
+      hostFullName: 'Grace Hopper',
+      windowStart: now.subtract(const Duration(hours: 2)),
+      windowEnd: now.subtract(const Duration(minutes: 5)),
+    );
+    final service = ScriptedMeetupService(activeMeetups: [justEnded]);
+
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    // Scoped to the CARD. The host name also appears in the ACTIVE MEETUPS
+    // row below, so an unscoped finder would pass even with the card's own
+    // details deleted — which is exactly what a control run showed.
+    final card = find.ancestor(
+      of: find.text('Share your thoughts about this meetup'),
+      matching: find.byType(FlatCard),
+    );
+    expect(card, findsWidgets);
+
+    Finder onCard(String text) =>
+        find.descendant(of: card.first, matching: find.text(text));
+
+    // It used to show the intent and the ask and nothing else, so someone
+    // with two finished meetups in the deck could not tell the cards apart
+    // or know what they were about to rate.
+    expect(onCard('Grace Hopper'), findsOneWidget);
+    expect(onCard('Colombo Fort Cafe'), findsOneWidget);
+    expect(onCard(justEnded.formattedWindow), findsOneWidget);
+    expect(onCard('REVIEW'), findsOneWidget);
+  });
+
+  testWidgets('two finished meetups are told apart by their own details', (
+    tester,
+  ) async {
+    final now = DateTime.now();
+    final service = ScriptedMeetupService(
+      activeMeetups: [
+        _meetup(
+          id: 'ended-a',
+          hostFullName: 'Grace Hopper',
+          windowStart: now.subtract(const Duration(hours: 2)),
+          windowEnd: now.subtract(const Duration(minutes: 5)),
+        ),
+        _meetup(
+          id: 'ended-b',
+          hostFullName: 'Ada Lovelace',
+          windowStart: now.subtract(const Duration(hours: 5)),
+          windowEnd: now.subtract(const Duration(hours: 3)),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    // Each card names its own host, so the two are distinguishable in the
+    // deck rather than being two identical prompts.
+    final cards = find.ancestor(
+      of: find.text('Share your thoughts about this meetup'),
+      matching: find.byType(FlatCard),
+    );
+    expect(
+      find.descendant(of: cards.first, matching: find.text('Grace Hopper')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('tapping the review card opens the review flow', (tester) async {
+    final now = DateTime.now();
+    final justEnded = _meetup(
+      id: 'ended-tap',
+      hostFullName: 'Just Ended Host',
+      windowStart: now.subtract(const Duration(hours: 1)),
+      windowEnd: now.subtract(const Duration(minutes: 1)),
+    );
+    final service = ScriptedMeetupService(activeMeetups: [justEnded]);
+
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Share your thoughts about this meetup'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(MeetupReviewPage), findsOneWidget);
+    expect(find.text('How was your experience?'), findsOneWidget);
+  });
 
   testWidgets(
     'the plain ACTIVE MEETUPS row shows COMPLETED for a windowEnd-passed '
-    'meetup, agreeing with the persistent card above it flipping to '
-    'RatingPrompt, instead of a stale OPEN badge (ADR-030, round-9: the '
+    'meetup, agreeing with the persistent card above it asking for a '
+    'review, instead of a stale OPEN badge (ADR-030, round-9: the '
     'reconciled persistent-card/list-badge inconsistency)',
     (tester) async {
       final now = DateTime.now();
@@ -163,8 +295,11 @@ void main() {
       await tester.pumpWidget(_appWith(service));
       await tester.pumpAndSettle();
 
-      // The persistent card converted to RatingPrompt (unchanged behavior)...
-      expect(find.byType(RatingPrompt), findsOneWidget);
+      // The persistent card is asking for a review...
+      expect(
+        find.text('Share your thoughts about this meetup'),
+        findsOneWidget,
+      );
       // ...and the same meetup's row below now agrees: COMPLETED, not the
       // server's still-open status (the poller hasn't ticked yet in this
       // fixture — status stays MeetupStatus.open, ScriptedMeetupService

@@ -133,9 +133,12 @@ func (s *service) LinkIdentityToUser(ctx context.Context, userID string, provide
 	}
 
 	if provider == FederatedProviderLinkedIn {
-		hypothetical := afterVerification(user)
-		hypothetical.LinkedInSub = subject
-		_, err := s.users.UpdateLinkedInSub(ctx, userID, subject, computeTrustLevel(hypothetical))
+		// The linkedin_sub is applied to the locked row by the repository
+		// before this runs; afterVerification supplies the is_guest change
+		// the same statement makes (gap-tracker #17).
+		_, err := s.users.UpdateLinkedInSub(ctx, userID, subject, func(u repository.User) int {
+			return computeTrustLevel(afterVerification(u))
+		})
 		return err
 	}
 
@@ -158,8 +161,12 @@ func (s *service) LinkIdentityToUser(ctx context.Context, userID string, provide
 	if !user.IsGuest {
 		return nil
 	}
-	hypothetical := afterVerification(user)
-	_, err = s.users.ClearGuestFlag(ctx, userID, computeTrustLevel(hypothetical))
+	// The `user` read above is kept only for the !user.IsGuest short-circuit
+	// just above — a skip-the-write optimisation, not part of the race fix.
+	// It no longer supplies the snapshot the trust level is computed from.
+	_, err = s.users.ClearGuestFlag(ctx, userID, func(u repository.User) int {
+		return computeTrustLevel(afterVerification(u))
+	})
 	return err
 }
 
@@ -225,9 +232,9 @@ func (s *service) SignUpOrRecoverWithEmail(
 	// proved control via OTP) — a head start toward Level 2 later, but not
 	// toward Level 1 by itself (computeTrustLevel still returns 0 here
 	// since linkedin_sub is empty).
-	hypothetical := afterVerification(created)
-	hypothetical.PersonalEmail = email
-	withEmail, err := s.users.UpdatePersonalEmail(ctx, created.ID, email, computeTrustLevel(hypothetical))
+	withEmail, err := s.users.UpdatePersonalEmail(ctx, created.ID, email, func(u repository.User) int {
+		return computeTrustLevel(afterVerification(u))
+	})
 	if err != nil {
 		return repository.User{}, false, err
 	}

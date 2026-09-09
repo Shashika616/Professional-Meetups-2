@@ -94,9 +94,25 @@ SELECT EXISTS(
 );
 
 -- name: CreateMeetupRating :one
-INSERT INTO meetup.meetup_user_ratings (meetup_id, rater_user_id, rated_user_id, score)
-VALUES ($1, $2, $3, $4)
+INSERT INTO meetup.meetup_user_ratings (meetup_id, rater_user_id, rated_user_id, score, traits)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
+
+-- name: ListMyMeetupRatings :many
+-- What the viewer themselves submitted on this meetup — the read behind
+-- "see the ratings we gave" on a history card. Only ever the viewer's own
+-- rows (rater_user_id = viewer): a rating is private to the person who gave
+-- it, and this must never become a way to read what others scored someone.
+SELECT
+  r.rated_user_id,
+  COALESCE(u.full_name, '') AS full_name,
+  u.profile_photo_url,
+  r.score,
+  r.traits
+FROM meetup.meetup_user_ratings r
+LEFT JOIN meetup.user_display_cache u ON u.user_id = r.rated_user_id
+WHERE r.meetup_id = sqlc.arg(meetup_id) AND r.rater_user_id = sqlc.arg(viewer_id)
+ORDER BY u.full_name;
 
 -- name: ComputeUserRatingAggregate :one
 -- Replaces the old RecomputeUserRating UPDATE (which wrote users.

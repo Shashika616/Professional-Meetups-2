@@ -155,13 +155,51 @@ func (r *postgresUserRepository) Create(ctx context.Context, u NewUser) (User, e
 	return created, nil
 }
 
-func (r *postgresUserRepository) UpdatePhoneNumber(ctx context.Context, userID, phoneNumber string, trustLevel int) (User, error) {
+// lockUserForTrustLevelWrite is the read half of every trust-level write
+// (gap-tracker #17): it takes a row lock inside tx and returns the locked
+// row as a mutable snapshot.
+//
+// Callers apply their own pending field write to that snapshot before
+// handing it to recomputeTrustLevel, so the computed level accounts for
+// every change the statement is ABOUT to make and not merely what is
+// already committed — the same reasoning behind afterVerification's
+// is_guest handling in the service layer.
+//
+// The lock is held until the enclosing transaction commits, which is what
+// serialises two concurrent verification steps for the same user: the
+// second either sees the first's write or waits for it.
+func lockUserForTrustLevelWrite(ctx context.Context, qtx *sqlcgen.Queries, userID string, parsed uuid.UUID, what string) (User, error) {
+	row, err := qtx.GetUserByIDForUpdate(ctx, parsed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, fmt.Errorf("repository: user %q: %w", userID, apperror.ErrNotFound)
+		}
+		return User{}, fmt.Errorf("repository: lock user for %s: %w", what, err)
+	}
+	return userFromRow(row), nil
+}
+
+func (r *postgresUserRepository) UpdatePhoneNumber(ctx context.Context, userID, phoneNumber string, recomputeTrustLevel func(User) int) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
 		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
 	}
 
-	row, err := r.q.UpdateUserPhoneNumber(ctx, sqlcgen.UpdateUserPhoneNumberParams{
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: begin update-phone-number transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	qtx := r.q.WithTx(tx)
+
+	locked, err := lockUserForTrustLevelWrite(ctx, qtx, userID, parsed, "phone number update")
+	if err != nil {
+		return User{}, err
+	}
+	locked.PhoneNumber = phoneNumber
+	trustLevel := recomputeTrustLevel(locked)
+
+	row, err := qtx.UpdateUserPhoneNumber(ctx, sqlcgen.UpdateUserPhoneNumberParams{
 		ID:          parsed,
 		PhoneNumber: textOrNull(phoneNumber),
 		TrustLevel:  int16(trustLevel),
@@ -173,8 +211,13 @@ func (r *postgresUserRepository) UpdatePhoneNumber(ctx context.Context, userID, 
 		}
 		return User{}, fmt.Errorf("repository: update user phone number: %w", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("repository: commit update-phone-number transaction: %w", err)
+	}
 	updated := userFromRow(row)
 
+	// After the commit, never inside the transaction (ADR-001 §4).
 	r.publishProfileUpdated(ctx, updated)
 	return updated, nil
 }
@@ -214,13 +257,27 @@ func (r *postgresUserRepository) UpdateLastKnownLocation(ctx context.Context, us
 	return updated, nil
 }
 
-func (r *postgresUserRepository) UpdatePersonalEmail(ctx context.Context, userID, personalEmail string, trustLevel int) (User, error) {
+func (r *postgresUserRepository) UpdatePersonalEmail(ctx context.Context, userID, personalEmail string, recomputeTrustLevel func(User) int) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
 		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
 	}
 
-	row, err := r.q.UpdateUserPersonalEmail(ctx, sqlcgen.UpdateUserPersonalEmailParams{
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: begin update-personal-email transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	qtx := r.q.WithTx(tx)
+
+	locked, err := lockUserForTrustLevelWrite(ctx, qtx, userID, parsed, "personal email update")
+	if err != nil {
+		return User{}, err
+	}
+	locked.PersonalEmail = personalEmail
+	trustLevel := recomputeTrustLevel(locked)
+
+	row, err := qtx.UpdateUserPersonalEmail(ctx, sqlcgen.UpdateUserPersonalEmailParams{
 		ID:            parsed,
 		PersonalEmail: textOrNull(personalEmail),
 		TrustLevel:    int16(trustLevel),
@@ -232,19 +289,38 @@ func (r *postgresUserRepository) UpdatePersonalEmail(ctx context.Context, userID
 		}
 		return User{}, fmt.Errorf("repository: update user personal email: %w", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("repository: commit update-personal-email transaction: %w", err)
+	}
 	updated := userFromRow(row)
 
 	r.publishProfileUpdated(ctx, updated)
 	return updated, nil
 }
 
-func (r *postgresUserRepository) UpdatePersonalDetails(ctx context.Context, userID, legalName, address string, trustLevel int) (User, error) {
+func (r *postgresUserRepository) UpdatePersonalDetails(ctx context.Context, userID, legalName, address string, recomputeTrustLevel func(User) int) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
 		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
 	}
 
-	row, err := r.q.UpdateUserPersonalDetails(ctx, sqlcgen.UpdateUserPersonalDetailsParams{
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: begin update-personal-details transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	qtx := r.q.WithTx(tx)
+
+	locked, err := lockUserForTrustLevelWrite(ctx, qtx, userID, parsed, "personal details update")
+	if err != nil {
+		return User{}, err
+	}
+	locked.LegalName = legalName
+	locked.Address = address
+	trustLevel := recomputeTrustLevel(locked)
+
+	row, err := qtx.UpdateUserPersonalDetails(ctx, sqlcgen.UpdateUserPersonalDetailsParams{
 		ID:         parsed,
 		LegalName:  textOrNull(legalName),
 		Address:    textOrNull(address),
@@ -253,19 +329,37 @@ func (r *postgresUserRepository) UpdatePersonalDetails(ctx context.Context, user
 	if err != nil {
 		return User{}, fmt.Errorf("repository: update user personal details: %w", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("repository: commit update-personal-details transaction: %w", err)
+	}
 	updated := userFromRow(row)
 
 	r.publishProfileUpdated(ctx, updated)
 	return updated, nil
 }
 
-func (r *postgresUserRepository) UpdateLinkedInSub(ctx context.Context, userID, linkedInSub string, trustLevel int) (User, error) {
+func (r *postgresUserRepository) UpdateLinkedInSub(ctx context.Context, userID, linkedInSub string, recomputeTrustLevel func(User) int) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
 		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
 	}
 
-	row, err := r.q.UpdateUserLinkedInSub(ctx, sqlcgen.UpdateUserLinkedInSubParams{
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: begin update-linkedin-sub transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	qtx := r.q.WithTx(tx)
+
+	locked, err := lockUserForTrustLevelWrite(ctx, qtx, userID, parsed, "linkedin sub update")
+	if err != nil {
+		return User{}, err
+	}
+	locked.LinkedInSub = linkedInSub
+	trustLevel := recomputeTrustLevel(locked)
+
+	row, err := qtx.UpdateUserLinkedInSub(ctx, sqlcgen.UpdateUserLinkedInSubParams{
 		ID:          parsed,
 		LinkedinSub: textOrNull(linkedInSub),
 		TrustLevel:  int16(trustLevel),
@@ -277,6 +371,10 @@ func (r *postgresUserRepository) UpdateLinkedInSub(ctx context.Context, userID, 
 		}
 		return User{}, fmt.Errorf("repository: update user linkedin sub: %w", err)
 	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("repository: commit update-linkedin-sub transaction: %w", err)
+	}
 	updated := userFromRow(row)
 
 	// LinkedIn linking changes trust_level too — the same real
@@ -287,18 +385,37 @@ func (r *postgresUserRepository) UpdateLinkedInSub(ctx context.Context, userID, 
 	return updated, nil
 }
 
-func (r *postgresUserRepository) ClearGuestFlag(ctx context.Context, userID string, trustLevel int) (User, error) {
+func (r *postgresUserRepository) ClearGuestFlag(ctx context.Context, userID string, recomputeTrustLevel func(User) int) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
 		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
 	}
 
-	row, err := r.q.ClearUserGuestFlag(ctx, sqlcgen.ClearUserGuestFlagParams{
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: begin clear-guest-flag transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	qtx := r.q.WithTx(tx)
+
+	// Sets nothing extra on the snapshot: is_guest is the only field this
+	// statement writes, and the caller's own afterVerification applies it.
+	locked, err := lockUserForTrustLevelWrite(ctx, qtx, userID, parsed, "clear guest flag")
+	if err != nil {
+		return User{}, err
+	}
+	trustLevel := recomputeTrustLevel(locked)
+
+	row, err := qtx.ClearUserGuestFlag(ctx, sqlcgen.ClearUserGuestFlagParams{
 		ID:         parsed,
 		TrustLevel: int16(trustLevel),
 	})
 	if err != nil {
 		return User{}, fmt.Errorf("repository: clear user guest flag: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("repository: commit clear-guest-flag transaction: %w", err)
 	}
 	updated := userFromRow(row)
 
@@ -306,13 +423,29 @@ func (r *postgresUserRepository) ClearGuestFlag(ctx context.Context, userID stri
 	return updated, nil
 }
 
-func (r *postgresUserRepository) UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, trustLevel int) (User, error) {
+func (r *postgresUserRepository) UpdateWorkEmailVerified(ctx context.Context, userID, companyDomain string, verified bool, verifiedAt time.Time, workEmailHash, companyName string, recomputeTrustLevel func(User) int) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
 		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
 	}
 
-	row, err := r.q.UpdateUserWorkEmailVerified(ctx, sqlcgen.UpdateUserWorkEmailVerifiedParams{
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: begin update-work-email-verified transaction: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // no-op once committed
+	qtx := r.q.WithTx(tx)
+
+	locked, err := lockUserForTrustLevelWrite(ctx, qtx, userID, parsed, "work email verification")
+	if err != nil {
+		return User{}, err
+	}
+	locked.CompanyDomain = companyDomain
+	locked.WorkEmailVerified = verified
+	locked.CompanyName = companyName
+	trustLevel := recomputeTrustLevel(locked)
+
+	row, err := qtx.UpdateUserWorkEmailVerified(ctx, sqlcgen.UpdateUserWorkEmailVerifiedParams{
 		ID:                  parsed,
 		CompanyDomain:       textOrNull(companyDomain),
 		WorkEmailVerified:   verified,
@@ -327,6 +460,10 @@ func (r *postgresUserRepository) UpdateWorkEmailVerified(ctx context.Context, us
 			return User{}, fmt.Errorf("repository: work email hash already claimed by a different account: %w", apperror.ErrConflict)
 		}
 		return User{}, fmt.Errorf("repository: update user work email verified: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return User{}, fmt.Errorf("repository: commit update-work-email-verified transaction: %w", err)
 	}
 	updated := userFromRow(row)
 
@@ -424,4 +561,19 @@ func userFromRow(row sqlcgen.AuthUser) User {
 		LastLocationLng:       float8PtrOrNil(row.LastLocationLng),
 		LastLocationUpdatedAt: timePtrOrNil(row.LastLocationUpdatedAt),
 	}
+}
+
+func (r *postgresUserRepository) DeleteAbandonedGuests(ctx context.Context, retention time.Duration, batchSize int) (int, error) {
+	if batchSize <= 0 {
+		return 0, fmt.Errorf("repository: guest cleanup batch size must be positive: %w", apperror.ErrInvalidInput)
+	}
+
+	deleted, err := r.q.DeleteAbandonedGuests(ctx, sqlcgen.DeleteAbandonedGuestsParams{
+		AbandonedBefore: toTimestamptz(time.Now().UTC().Add(-retention)),
+		BatchSize:       int32(batchSize),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("repository: delete abandoned guests: %w", err)
+	}
+	return int(deleted), nil
 }

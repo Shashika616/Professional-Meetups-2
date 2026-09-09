@@ -98,10 +98,21 @@ func (s *service) WithdrawRequest(ctx context.Context, req WithdrawRequestReques
 
 	_, err = s.requests.Withdraw(ctx, req.RequestID, req.Note, req.RequesterID,
 		func(ctx context.Context, tx repository.NotifyTx, withdrawn repository.MeetupRequest) error {
+			// Named, not "a requester". Withdraw's returned row carries no
+			// display name (the same gap Create has), so this re-reads the
+			// joined view on the write's own transaction exactly as
+			// RequestToJoin does. A host with several accepted participants
+			// could not act on an anonymous "someone pulled out" — they
+			// could not tell whether the meetup still had enough people, or
+			// who to follow up with.
+			full, err := tx.GetRequestByID(ctx, withdrawn.ID)
+			if err != nil {
+				return err
+			}
 			return queueNotification(ctx, tx, m.HostUserID,
 				TypeRequestWithdrawn,
 				"Request withdrawn",
-				fmt.Sprintf("A requester withdrew from your %s meetup", m.Intent),
+				fmt.Sprintf("%s withdrew from your %s meetup", full.RequesterFullName, m.Intent),
 				map[string]string{"meetup_id": m.ID, "request_id": withdrawn.ID},
 			)
 		})

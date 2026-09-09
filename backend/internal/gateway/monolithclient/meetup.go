@@ -86,6 +86,73 @@ type RatableParticipant struct {
 	ContextNote     *string
 }
 
+// MeetupParticipant is one person on a meetup, as the caller may see them.
+// Identity fields are empty on a redacted response.
+type MeetupParticipant struct {
+	UserID          string
+	IsHost          bool
+	FullName        string
+	ProfilePhotoURL string
+	TrustLevel      int32
+}
+
+// MeetupParticipants is a meetup's attendee list for one viewer.
+type MeetupParticipants struct {
+	Participants []MeetupParticipant
+	Redacted     bool
+	TotalCount   int32
+}
+
+// UserNotification is one row of the caller's in-app notification history.
+type UserNotification struct {
+	ID        string
+	Title     string
+	Body      string
+	Type      string
+	MeetupID  string
+	CreatedAt int64
+	Delivered bool
+}
+
+// RatingTrait is one selectable personality trait, server-owned.
+type RatingTrait struct {
+	Key   string
+	Label string
+	Emoji string
+}
+
+// RatableParticipants is the ratable list plus the trait vocabulary the
+// review screen renders its pickers from — returned together because they
+// are read together.
+type RatableParticipants struct {
+	Participants    []RatableParticipant
+	AvailableTraits []RatingTrait
+}
+
+// ReviewParticipantInput is one person's line in a submitted review.
+type ReviewParticipantInput struct {
+	UserID string
+	Score  int32
+	Traits []string
+}
+
+// MeetupReview is what the caller themselves submitted.
+type MeetupReview struct {
+	Completed    bool
+	OverallScore int32
+	Notes        *string
+	Participants []ReviewedParticipant
+}
+
+// ReviewedParticipant is one rating the caller gave.
+type ReviewedParticipant struct {
+	UserID          string
+	FullName        string
+	ProfilePhotoURL string
+	Score           int32
+	Traits          []string
+}
+
 // --- enum mapping: wire enums to the lowercase strings the REST API and the
 // frontend both use. One place, not duplicated in the handlers. ---
 
@@ -410,22 +477,116 @@ func (c *grpcClient) SubmitMeetupFeedback(
 	return err
 }
 
-func (c *grpcClient) ListRatableParticipants(ctx context.Context, meetupID, viewerID string) ([]RatableParticipant, error) {
-	resp, err := c.meetup.ListRatableParticipants(ctx, &meetupv1.ListRatableParticipantsRequest{
-		MeetupId: meetupID, ViewerId: viewerID,
-	})
+func (c *grpcClient) ListNotifications(ctx context.Context, userID string) ([]UserNotification, error) {
+	resp, err := c.meetup.ListNotifications(ctx, &meetupv1.ListNotificationsRequest{UserId: userID})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]RatableParticipant, 0, len(resp.GetParticipants()))
+	out := make([]UserNotification, 0, len(resp.GetNotifications()))
+	for _, n := range resp.GetNotifications() {
+		out = append(out, UserNotification{
+			ID:        n.GetId(),
+			Title:     n.GetTitle(),
+			Body:      n.GetBody(),
+			Type:      n.GetType(),
+			MeetupID:  n.GetMeetupId(),
+			CreatedAt: n.GetCreatedAt(),
+			Delivered: n.GetDelivered(),
+		})
+	}
+	return out, nil
+}
+
+func (c *grpcClient) ListMeetupParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (MeetupParticipants, error) {
+	resp, err := c.meetup.ListMeetupParticipants(ctx, &meetupv1.ListMeetupParticipantsRequest{
+		MeetupId: meetupID, ViewerId: viewerID, ViewerTrustLevel: viewerTrustLevel,
+	})
+	if err != nil {
+		return MeetupParticipants{}, err
+	}
+	out := MeetupParticipants{
+		Participants: make([]MeetupParticipant, 0, len(resp.GetParticipants())),
+		Redacted:     resp.GetRedacted(),
+		TotalCount:   resp.GetTotalCount(),
+	}
 	for _, p := range resp.GetParticipants() {
-		out = append(out, RatableParticipant{
+		out.Participants = append(out.Participants, MeetupParticipant{
+			UserID:          p.GetUserId(),
+			IsHost:          p.GetIsHost(),
+			FullName:        p.GetFullName(),
+			ProfilePhotoURL: p.GetProfilePhotoUrl(),
+			TrustLevel:      p.GetTrustLevel(),
+		})
+	}
+	return out, nil
+}
+
+func (c *grpcClient) ListRatableParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (RatableParticipants, error) {
+	resp, err := c.meetup.ListRatableParticipants(ctx, &meetupv1.ListRatableParticipantsRequest{
+		MeetupId: meetupID, ViewerId: viewerID, ViewerTrustLevel: viewerTrustLevel,
+	})
+	if err != nil {
+		return RatableParticipants{}, err
+	}
+	out := RatableParticipants{
+		Participants:    make([]RatableParticipant, 0, len(resp.GetParticipants())),
+		AvailableTraits: make([]RatingTrait, 0, len(resp.GetAvailableTraits())),
+	}
+	for _, p := range resp.GetParticipants() {
+		out.Participants = append(out.Participants, RatableParticipant{
 			UserID:          p.GetUserId(),
 			FullName:        p.GetFullName(),
 			ProfilePhotoURL: p.GetProfilePhotoUrl(),
 			TrustLevel:      p.GetTrustLevel(),
 			AlreadyRated:    p.GetAlreadyRated(),
 			ContextNote:     p.ContextNote,
+		})
+	}
+	for _, t := range resp.GetAvailableTraits() {
+		out.AvailableTraits = append(out.AvailableTraits, RatingTrait{
+			Key: t.GetKey(), Label: t.GetLabel(), Emoji: t.GetEmoji(),
+		})
+	}
+	return out, nil
+}
+
+func (c *grpcClient) SubmitMeetupReview(ctx context.Context, meetupID, raterUserID string, overallScore int32, notes *string, participants []ReviewParticipantInput) error {
+	wire := make([]*meetupv1.ReviewParticipant, 0, len(participants))
+	for _, p := range participants {
+		wire = append(wire, &meetupv1.ReviewParticipant{
+			UserId: p.UserID, Score: p.Score, Traits: p.Traits,
+		})
+	}
+	_, err := c.meetup.SubmitMeetupReview(ctx, &meetupv1.SubmitMeetupReviewRequest{
+		MeetupId:     meetupID,
+		RaterUserId:  raterUserID,
+		OverallScore: overallScore,
+		Notes:        notes,
+		Participants: wire,
+	})
+	return err
+}
+
+func (c *grpcClient) GetMeetupReview(ctx context.Context, meetupID, viewerID string) (MeetupReview, error) {
+	resp, err := c.meetup.GetMeetupReview(ctx, &meetupv1.GetMeetupReviewRequest{
+		MeetupId: meetupID, ViewerId: viewerID,
+	})
+	if err != nil {
+		return MeetupReview{}, err
+	}
+	out := MeetupReview{
+		Completed:    resp.GetCompleted(),
+		OverallScore: resp.GetOverallScore(),
+		Notes:        resp.Notes,
+		Participants: make([]ReviewedParticipant, 0, len(resp.GetParticipants())),
+	}
+	for _, p := range resp.GetParticipants() {
+		out.Participants = append(out.Participants, ReviewedParticipant{
+			UserID:          p.GetUserId(),
+			FullName:        p.GetFullName(),
+			ProfilePhotoURL: p.GetProfilePhotoUrl(),
+			Score:           p.GetScore(),
+			Traits:          p.GetTraits(),
 		})
 	}
 	return out, nil

@@ -401,14 +401,16 @@ type MeetupMeetup struct {
 }
 
 type MeetupMeetupFeedback struct {
-	MeetupID        uuid.UUID          `json:"meetup_id"`
-	UserID          uuid.UUID          `json:"user_id"`
-	Happened        bool               `json:"happened"`
-	FeltSafe        pgtype.Bool        `json:"felt_safe"`
-	ProfileAccurate pgtype.Bool        `json:"profile_accurate"`
-	WouldMeetAgain  pgtype.Bool        `json:"would_meet_again"`
-	SubmittedAt     pgtype.Timestamptz `json:"submitted_at"`
-	Notes           pgtype.Text        `json:"notes"`
+	MeetupID          uuid.UUID          `json:"meetup_id"`
+	UserID            uuid.UUID          `json:"user_id"`
+	Happened          bool               `json:"happened"`
+	FeltSafe          pgtype.Bool        `json:"felt_safe"`
+	ProfileAccurate   pgtype.Bool        `json:"profile_accurate"`
+	WouldMeetAgain    pgtype.Bool        `json:"would_meet_again"`
+	SubmittedAt       pgtype.Timestamptz `json:"submitted_at"`
+	Notes             pgtype.Text        `json:"notes"`
+	OverallScore      pgtype.Int2        `json:"overall_score"`
+	ReviewCompletedAt pgtype.Timestamptz `json:"review_completed_at"`
 }
 
 type MeetupMeetupRequest struct {
@@ -429,6 +431,7 @@ type MeetupMeetupUserRating struct {
 	RatedUserID uuid.UUID          `json:"rated_user_id"`
 	Score       int16              `json:"score"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	Traits      []string           `json:"traits"`
 }
 
 type MeetupMeetupsCompletedOutbox struct {
@@ -454,6 +457,7 @@ type MeetupNotificationOutbox struct {
 	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
 	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
 	LastError      pgtype.Text        `json:"last_error"`
+	UserID         pgtype.UUID        `json:"user_id"`
 }
 
 type MeetupSafetyShare struct {
