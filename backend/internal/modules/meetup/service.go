@@ -107,6 +107,9 @@ type Service interface {
 	ListNotifications(ctx context.Context, userID string) ([]UserNotification, error)
 
 	ListMeetupParticipants(ctx context.Context, req ListMeetupParticipantsRequest) (MeetupParticipants, error)
+	// GetMemberActivity gates and returns another member's public profile
+	// history — see member.go.
+	GetMemberActivity(ctx context.Context, viewerID, targetID string) (MemberActivity, error)
 
 	ListRatableParticipants(ctx context.Context, req ListRatableParticipantsRequest) ([]RatableParticipant, error)
 	SubmitRating(ctx context.Context, req SubmitRatingRequest) error
@@ -324,7 +327,7 @@ func (s *service) CreateMeetup(ctx context.Context, req CreateMeetupRequest) (Me
 		return queueNotification(ctx, tx, req.HostUserID,
 			TypeSafetyChecklist,
 			"Review your safety checklist",
-			fmt.Sprintf("Review the safety checklist for your new %s meetup", created.Intent),
+			fmt.Sprintf("Review the safety checklist for your new %s meetup", Intent(created.Intent).DisplayName()),
 			map[string]string{"meetup_id": created.ID},
 		)
 	}); err != nil {
@@ -635,7 +638,7 @@ func (s *service) queueMeetupClosed(ctx context.Context, tx repository.NotifyTx,
 		return err
 	}
 
-	body := fmt.Sprintf("Your %s meetup has ended. Rate your experience!", m.Intent)
+	body := fmt.Sprintf("Your %s meetup has ended. Rate your experience!", Intent(m.Intent).DisplayName())
 	data := map[string]string{"meetup_id": m.ID}
 
 	// The host and the participants get identical copy, so they are queued
@@ -666,7 +669,7 @@ func (s *service) NotifyStartingSoonSweep(ctx context.Context) (int, error) {
 				if _, err := queueNotifications(ctx, tx, recipients,
 					TypeMeetupStartingSoon,
 					"Meetup starting soon",
-					fmt.Sprintf("Your %s meetup starts soon — review your safety checklist.", m.Intent),
+					fmt.Sprintf("Your %s meetup starts soon — review your safety checklist.", Intent(m.Intent).DisplayName()),
 					map[string]string{"meetup_id": m.ID},
 				); err != nil {
 					return err
@@ -740,7 +743,7 @@ func (s *service) CancelMeetup(ctx context.Context, req CancelMeetupRequest) err
 			_, err = queueNotifications(ctx, tx, acceptedRequesters(participants),
 				TypeMeetupCancelled,
 				"Meetup cancelled",
-				fmt.Sprintf("The host cancelled your %s meetup: %s", m.Intent, reason),
+				fmt.Sprintf("The host cancelled your %s meetup: %s", Intent(m.Intent).DisplayName(), reason),
 				map[string]string{"meetup_id": m.ID},
 			)
 			return err
@@ -812,7 +815,7 @@ func (s *service) HandleMeetupCreated(ctx context.Context, payload NearbyNotifyP
 		notified, err = queueNotifications(ctx, tx, recipients,
 			TypeMeetupNearby,
 			"New meetup nearby",
-			fmt.Sprintf("A new %s meetup was just scheduled near you", payload.Intent),
+			fmt.Sprintf("A new %s meetup was just scheduled near you", Intent(payload.Intent).DisplayName()),
 			map[string]string{"meetup_id": payload.MeetupID},
 		)
 		return err
@@ -828,7 +831,7 @@ func (s *service) HandleMeetupCreated(ctx context.Context, payload NearbyNotifyP
 // where it would surface as an opaque enum-cast error.
 func validIntent(i Intent) bool {
 	switch i {
-	case IntentCoffee, IntentLunch, IntentNetworking, IntentMentorship, IntentRideShare, IntentDating:
+	case IntentCoffee, IntentLunch, IntentNetworking, IntentMentorship, IntentRideShare, IntentDating, IntentOuting:
 		return true
 	default:
 		return false

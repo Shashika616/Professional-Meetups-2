@@ -29,6 +29,8 @@ class MeetupReviewSection extends ConsumerStatefulWidget {
     required this.meetupId,
     required this.hostUserId,
     this.cancelled = false,
+    this.cancellationReason,
+    this.viewerIsHost = false,
   });
 
   final String meetupId;
@@ -38,6 +40,14 @@ class MeetupReviewSection extends ConsumerStatefulWidget {
   /// Any ratings already given (a cancelled meetup's host is ratable — ADR-020
   /// §3) still show.
   final bool cancelled;
+
+  /// The host's stated reason, for a cancelled meetup — passed into the
+  /// review flow so the participant sees it before rating.
+  final String? cancellationReason;
+
+  /// The viewer hosts this meetup. A host is never asked to review their
+  /// own cancellation, so on a cancelled meetup they see nothing here.
+  final bool viewerIsHost;
 
   @override
   ConsumerState<MeetupReviewSection> createState() =>
@@ -87,6 +97,9 @@ class _MeetupReviewSectionState extends ConsumerState<MeetupReviewSection> {
         builder: (_) => MeetupReviewPage(
           meetupId: widget.meetupId,
           hostUserId: widget.hostUserId,
+          cancellationReason: widget.cancelled
+              ? (widget.cancellationReason ?? '')
+              : null,
         ),
       ),
     );
@@ -107,23 +120,25 @@ class _MeetupReviewSectionState extends ConsumerState<MeetupReviewSection> {
     if (review != null && review.completed) {
       return _GivenReview(review: review, hostUserId: widget.hostUserId);
     }
-    if (widget.cancelled) {
-      // Nothing to review, and saying so beats an empty gap.
+    if (widget.cancelled && widget.viewerIsHost) {
+      // The host called it off; there is nothing for them to review.
       return const SizedBox.shrink();
     }
-    return _ReviewInvitation(onTap: _openFlow);
+    return _ReviewInvitation(onTap: _openFlow, cancelled: widget.cancelled);
   }
 }
 
 /// The prompt, matching the home card's wording so arriving from either
 /// place feels like the same task.
 class _ReviewInvitation extends StatelessWidget {
-  const _ReviewInvitation({required this.onTap});
+  const _ReviewInvitation({required this.onTap, this.cancelled = false});
 
   final VoidCallback onTap;
+  final bool cancelled;
 
   @override
   Widget build(BuildContext context) {
+    final tone = cancelled ? AppPalette.cancelled : AppPalette.gold;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -131,7 +146,7 @@ class _ReviewInvitation extends StatelessWidget {
         const SizedBox(height: 10),
         FlatCard(
           radius: 12,
-          tint: AppPalette.gold.withValues(alpha: 0.06),
+          tint: tone.withValues(alpha: 0.06),
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -139,14 +154,18 @@ class _ReviewInvitation extends StatelessWidget {
               Row(
                 children: [
                   Icon(
-                    Icons.auto_awesome_rounded,
+                    cancelled
+                        ? Icons.event_busy_rounded
+                        : Icons.auto_awesome_rounded,
                     size: 18,
-                    color: AppPalette.gold,
+                    color: tone,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Share your thoughts about this meetup',
+                      cancelled
+                          ? 'Share your thoughts on this cancellation'
+                          : 'Share your thoughts about this meetup',
                       style: TextStyle(
                         color: AppPalette.textPrimary,
                         fontWeight: FontWeight.w700,
@@ -249,14 +268,28 @@ class _GivenReview extends StatelessWidget {
           const SizedBox(height: 18),
           const SectionLabel('HOW YOU RATED THEM'),
           const SizedBox(height: 10),
-          for (final participant in review.participants)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _RatedPersonRow(
-                participant: participant,
-                isHost: participant.userId == hostUserId,
-              ),
+          // One grouped card, rows divided by hairlines — the same shape as
+          // the participants list, so the two screens that list the same
+          // people look like the same app.
+          FlatCard(
+            radius: 14,
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                for (var i = 0; i < review.participants.length; i++) ...[
+                  if (i > 0)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 72),
+                      child: Container(height: 1, color: AppPalette.hairline),
+                    ),
+                  _RatedPersonRow(
+                    participant: review.participants[i],
+                    isHost: review.participants[i].userId == hostUserId,
+                  ),
+                ],
+              ],
             ),
+          ),
         ],
       ],
     );
@@ -271,110 +304,137 @@ class _RatedPersonRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FlatCard(
-      radius: 12,
-      padding: const EdgeInsets.all(14),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               ProfessionalAvatar(
                 name: participant.fullName,
                 imageUrl: participant.profilePhotoUrl.isEmpty
                     ? null
                     : participant.profilePhotoUrl,
-                size: 34,
+                size: 44,
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Flexible(
-                      child: Text(
-                        participant.fullName,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
+                    Text(
+                      participant.fullName,
+                      softWrap: true,
+                      style: TextStyle(
+                        color: AppPalette.textPrimary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
                       ),
                     ),
-                    if (isHost) ...[
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppPalette.candyBlue.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(5),
-                        ),
-                        child: Text(
-                          'HOST',
+                    const SizedBox(height: 5),
+                    // Static, not a picker: ratings are immutable, so an
+                    // interactive-looking control here would be a lie.
+                    Row(
+                      children: [
+                        for (var i = 1; i <= 5; i++)
+                          Icon(
+                            i <= participant.score
+                                ? Icons.star_rounded
+                                : Icons.star_outline_rounded,
+                            size: 18,
+                            color: i <= participant.score
+                                ? AppPalette.gold
+                                : AppPalette.textSecondary.withValues(
+                                    alpha: 0.4,
+                                  ),
+                          ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '${participant.score}/5',
                           style: TextStyle(
-                            color: AppPalette.candyBlue,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 0.7,
+                            color: AppPalette.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ],
                 ),
               ),
-              // Static, not a picker: ratings are immutable, so an
-              // interactive-looking control here would be a lie.
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (var i = 1; i <= 5; i++)
-                    Icon(
-                      i <= participant.score
-                          ? Icons.star_rounded
-                          : Icons.star_outline_rounded,
-                      size: 16,
-                      color: i <= participant.score
-                          ? AppPalette.gold
-                          : AppPalette.textSecondary.withValues(alpha: 0.4),
+              if (isHost) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.fromLTRB(7, 4, 9, 4),
+                  decoration: BoxDecoration(
+                    color: AppPalette.brandGreen.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: AppPalette.brandGreen.withValues(alpha: 0.35),
                     ),
-                ],
-              ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.star_rounded,
+                        size: 12,
+                        color: AppPalette.brandGreen,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'HOST',
+                        style: TextStyle(
+                          color: AppPalette.brandGreen,
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
           if (participant.traits.isNotEmpty) ...[
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final trait in participant.traits)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppPalette.candyBlue.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Text(
-                      // Rendered from the stored key. The label lives in the
-                      // server's vocabulary and is not stored per rating, so
-                      // this un-slugs it rather than shipping a second copy
-                      // of the list that could drift out of step.
-                      _humanizeTrait(trait),
-                      style: TextStyle(
-                        color: AppPalette.textPrimary,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
+            Padding(
+              padding: const EdgeInsets.only(left: 56),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final trait in participant.traits)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppPalette.candyBlue.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: AppPalette.candyBlue.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Text(
+                        // Rendered from the stored key. The label lives in
+                        // the server's vocabulary and is not stored per
+                        // rating, so this un-slugs it rather than shipping a
+                        // second copy of the list that could drift.
+                        _humanizeTrait(trait),
+                        style: TextStyle(
+                          color: AppPalette.candyBlue,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ],
         ],

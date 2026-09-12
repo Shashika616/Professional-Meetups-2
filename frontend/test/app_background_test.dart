@@ -108,4 +108,39 @@ void main() {
       );
     },
   );
+
+  // The regression that shipped on 2026-09-10: replacing the photo Stack with
+  // a plain `Container(color:, child:)` made the ground size to its CHILD.
+  // Pages whose content fills the viewport looked fine; the email sign-in
+  // step, whose content is short, painted its ground for the top half and let
+  // the rest fall through to bare black.
+  //
+  // Asserts the painted layer covers the whole viewport with deliberately
+  // tiny content - the only shape that catches it.
+  testWidgets('the ground fills the viewport even when the content is short', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: AppBackground(child: SizedBox(height: 40, child: Text('x'))),
+        ),
+      ),
+    );
+
+    final layer = tester.getSize(
+      find.byKey(AppBackground.layerKey, skipOffstage: false),
+    );
+    expect(
+      layer.height,
+      900,
+      reason: 'the ground must cover the viewport, not just the content',
+    );
+    expect(layer.width, 400);
+  });
 }

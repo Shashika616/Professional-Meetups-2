@@ -12,7 +12,12 @@ void main() {
     try {
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: MapLocationStep(onSubmit: (_, _, _) {})),
+          home: Scaffold(
+            // Hosted in a scroll view, as ScheduleFlowPage does.
+            body: SingleChildScrollView(
+              child: MapLocationStep(onSubmit: (_, _, _) {}),
+            ),
+          ),
         ),
       );
       await tester.pump();
@@ -32,7 +37,12 @@ void main() {
     try {
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: MapLocationStep(onSubmit: (_, _, _) {})),
+          home: Scaffold(
+            // Hosted in a scroll view, as ScheduleFlowPage does.
+            body: SingleChildScrollView(
+              child: MapLocationStep(onSubmit: (_, _, _) {}),
+            ),
+          ),
         ),
       );
       await tester.pump();

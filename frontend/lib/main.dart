@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/services/auth_service.dart';
+import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/features/splash/splash_screen.dart';
@@ -94,7 +96,53 @@ void main() async {
   PaintingBinding.instance.imageCache.maximumSize = 100;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 100 << 20; // 100 MB
 
-  runApp(const ProviderScope(child: ProfessionalConnectionsApp()));
+  runApp(
+    ProviderScope(
+      retry: _retryPolicy,
+      child: const ProfessionalConnectionsApp(),
+    ),
+  );
+}
+
+/// When a failed provider is worth trying again, and when it is not.
+///
+/// # WHY THIS EXISTS
+///
+/// Riverpod retries any failed provider on its own, forever, with exponential
+/// backoff. That is right for a flaky network and wrong for a permanent
+/// failure, and the app has already been bitten by the difference once: a
+/// billing endpoint returning 503 because it was not built yet produced a
+/// retry loop that was a third of all traffic to the server.
+///
+/// The same shape showed up again on 2026-09-11 with a dead session. Observed
+/// in the production logs:
+///
+///     19:08:32  /v1/meetups/active  401
+///     19:08:42  /v1/meetups/active  401
+///     19:08:53  /v1/meetups/active  401
+///     19:09:04  /v1/meetups/active  401
+///
+/// A 401 means the refresh token is gone. Retrying it cannot succeed, so the
+/// user sits on a loading skeleton while their phone talks to the server every
+/// ten seconds until the app is closed. Battery, data and server load, all for
+/// a request whose answer will never change.
+///
+/// So: session failures are terminal, everything else keeps Riverpod's default
+/// behaviour. Deliberately NOT a blanket cap on retries — a transient network
+/// blip genuinely should keep trying, and this is the one distinction that is
+/// safe to make centrally without knowing what each provider is for.
+@visibleForTesting
+Duration? retryPolicyForTest(int retryCount, Object error) =>
+    _retryPolicy(retryCount, error);
+
+Duration? _retryPolicy(int retryCount, Object error) {
+  if (error is MeetupSessionExpiredException ||
+      error is SessionExpiredException) {
+    return null;
+  }
+  // Riverpod's own default: 200ms doubling, capped at 6.4s.
+  final ms = 200 * (1 << retryCount);
+  return Duration(milliseconds: ms > 6400 ? 6400 : ms);
 }
 
 /// A [ConsumerWidget] (was `StatelessWidget` before Slice G) so it can
@@ -132,7 +180,7 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
     return MaterialApp(
       key: ValueKey(themeMode),
       debugShowCheckedModeBanner: false,
-      title: 'Professional Connections',
+      title: 'TieHere',
       theme: ThemeData(
         brightness: isLight ? Brightness.light : Brightness.dark,
         useMaterial3: true,
@@ -150,17 +198,63 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
                 surface: AppPalette.surface,
                 onPrimary: AppPalette.onyx,
               ),
+        // The bar itself stays TRANSPARENT so the page background runs
+        // unbroken from top to bottom. A solid brand-blue header was tried and
+        // removed: sliding between pages, a full width colour band appearing
+        // and disappearing made the app feel like several different apps
+        // rather than one.
+        //
+        // The title earns its place through weight and contrast instead, which
+        // is what the reference designs do too: a heavier, fully opaque title
+        // over a plain page reads as a header without needing a slab behind it.
         appBarTheme: AppBarTheme(
           backgroundColor: Colors.transparent,
           elevation: 0,
+          scrolledUnderElevation: 0,
           centerTitle: true,
           titleTextStyle: TextStyle(
             color: AppPalette.textPrimary,
             fontSize: 15,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 2.0,
+            // Heavier and more tracked out than body text, which is what
+            // separates it now that nothing else does.
+            fontWeight: FontWeight.w800,
+            letterSpacing: 2.4,
           ),
           iconTheme: IconThemeData(color: AppPalette.candyBlue),
+        ),
+
+        // Tab selection has to be unmissable.
+        //
+        // Material's defaults gave the selected and unselected labels the same
+        // size and nearly the same colour, so on Events it was genuinely hard
+        // to tell which of "My Meetings" / "Requested Meetings" was active.
+        //
+        // Three signals now, not one: the selected label is LARGER, heavier,
+        // and full contrast, while the unselected is smaller and muted, and a
+        // rounded indicator sits under it. Flutter tweens between the two
+        // label styles as the tab slides, so the size change animates rather
+        // than snapping.
+        tabBarTheme: TabBarThemeData(
+          labelColor: AppPalette.textPrimary,
+          unselectedLabelColor: AppPalette.textSecondary,
+          labelStyle: const TextStyle(
+            fontSize: 15.5,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.2,
+          ),
+          unselectedLabelStyle: const TextStyle(
+            fontSize: 13.5,
+            fontWeight: FontWeight.w500,
+            letterSpacing: 0.2,
+          ),
+          indicatorSize: TabBarIndicatorSize.label,
+          indicator: UnderlineTabIndicator(
+            borderRadius: BorderRadius.circular(3),
+            borderSide: BorderSide(width: 3, color: AppPalette.candyBlue),
+            insets: const EdgeInsets.only(bottom: 6),
+          ),
+          dividerColor: Colors.transparent,
+          overlayColor: WidgetStatePropertyAll<Color>(Colors.transparent),
         ),
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,

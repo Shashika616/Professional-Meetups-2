@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
@@ -27,6 +28,18 @@ enum ExperienceLevel {
   static ExperienceLevel fromScore(int score) =>
       values.firstWhere((v) => v.score == score, orElse: () => okay);
 
+  /// The illustration for this level — the same character at the same
+  /// table, so sliding between levels reads as her mood changing rather
+  /// than as six unrelated pictures. [ExperienceFace.neutralAsset] is the
+  /// sixth, shown before anything is picked.
+  String get imageAsset => switch (this) {
+    ExperienceLevel.veryBad => 'assets/images/review/very_bad.jpg',
+    ExperienceLevel.bad => 'assets/images/review/bad.jpg',
+    ExperienceLevel.okay => 'assets/images/review/okay.jpg',
+    ExperienceLevel.good => 'assets/images/review/good.jpg',
+    ExperienceLevel.excellent => 'assets/images/review/excellent.jpg',
+  };
+
   /// Hue per level, red through green. Deliberately not the palette's own
   /// semantic colours: this is a five-step ramp and `danger`/`verified` are
   /// only two points on it, so the middle would have nothing to use.
@@ -37,172 +50,113 @@ enum ExperienceLevel {
     ExperienceLevel.good => const Color(0xFF56B98A),
     ExperienceLevel.excellent => const Color(0xFF3FA372),
   };
-
-  /// How far the mouth curves: -1 is a full frown, +1 a full smile.
-  double get mouthCurve => switch (this) {
-    ExperienceLevel.veryBad => -1.0,
-    ExperienceLevel.bad => -0.5,
-    ExperienceLevel.okay => 0.0,
-    ExperienceLevel.good => 0.6,
-    ExperienceLevel.excellent => 1.0,
-  };
-
-  /// How wide the eyes open. The happiest face's eyes are largest, the
-  /// unhappiest are narrowed — the detail that stops the three middle faces
-  /// reading as the same drawing with a different mouth.
-  double get eyeOpenness => switch (this) {
-    ExperienceLevel.veryBad => 1.0,
-    ExperienceLevel.bad => 0.45,
-    ExperienceLevel.okay => 0.7,
-    ExperienceLevel.good => 0.85,
-    ExperienceLevel.excellent => 1.0,
-  };
 }
 
-/// A face drawn from two eyes and one curve, animated between levels.
+/// The illustration for the current level, cross-faded as the slider
+/// moves. Replaces a line-drawn face: one character across six scenes
+/// carries the mood far better than two dots and a curve, and a 280ms
+/// fade between them keeps the "one thing changing its mind" feel the
+/// drawn version had.
 ///
-/// Drawn rather than shipped as five images or emoji: the whole point is
-/// that the mouth MOVES as the slider moves, which no static asset can do,
-/// and a system emoji would render differently on every platform in a screen
-/// where it is the largest thing on it.
-///
-/// # WHY ONE ANIMATED VALUE DRIVES THREE PROPERTIES
-///
-/// Mouth curve, eye openness and colour are all functions of the same
-/// thing — where you are on the 1-5 ramp — so this animates the POSITION and
-/// derives the rest. Animating each separately would mean nested builders
-/// rebuilding the same painter two or three times per frame, and would let
-/// the three drift out of step mid-transition, which reads as a face
-/// changing its mouth before its mind.
+/// All six decode at the widget's own pixel size (cacheWidth), and
+/// `gaplessPlayback` holds the outgoing picture until the incoming one
+/// has decoded, so a fast drag never flashes an empty frame.
 class ExperienceFace extends StatelessWidget {
   const ExperienceFace({super.key, required this.level, this.size = 150});
 
-  /// Null before anything is picked — a neutral, greyed face.
+  /// Null before anything is picked — the neutral scene.
   final ExperienceLevel? level;
+
+  /// Width of the picture; height follows the 16:9 landscape crop.
   final double size;
+
+  static const neutralAsset = 'assets/images/review/neutral.jpg';
 
   @override
   Widget build(BuildContext context) {
-    final target = level;
-    return TweenAnimationBuilder<double>(
-      duration: const Duration(milliseconds: 280),
-      curve: Curves.easeOutCubic,
-      // Position on the ramp, 0-4. Neutral sits at the middle stop.
-      tween: Tween(
-        end: (target?.index ?? ExperienceLevel.okay.index).toDouble(),
-      ),
-      builder: (context, position, _) {
-        return SizedBox(
-          width: size,
-          height: size * 0.72,
-          child: CustomPaint(
-            painter: _FacePainter(
-              curve: _lerpAlongRamp(position, (l) => l.mouthCurve),
-              eyeOpenness: _lerpAlongRamp(position, (l) => l.eyeOpenness),
-              // Grey until a choice is made: a coloured face before anyone
-              // has answered would look like an answer.
-              color: target == null
-                  ? AppPalette.textSecondary
-                  : _lerpColorAlongRamp(position),
+    final asset = level?.imageAsset ?? neutralAsset;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final width = size;
+    final height = size * 9 / 16;
+    return Semantics(
+      image: true,
+      label: level?.label ?? 'No rating picked yet',
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              switchInCurve: Curves.easeOutCubic,
+              switchOutCurve: Curves.easeInCubic,
+              layoutBuilder: (current, previous) => Stack(
+                fit: StackFit.expand,
+                children: [...previous, ?current],
+              ),
+              child: Image.asset(
+                asset,
+                key: ValueKey(asset),
+                fit: BoxFit.cover,
+                cacheWidth: (width * dpr).round(),
+                gaplessPlayback: true,
+                excludeFromSemantics: true,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
             ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// Interpolates a per-level scalar at a fractional position on the ramp, so
-/// a transition passes THROUGH the intermediate faces rather than jumping
-/// between two endpoints.
-double _lerpAlongRamp(
-  double position,
-  double Function(ExperienceLevel) select,
-) {
-  final levels = ExperienceLevel.values;
-  final clamped = position.clamp(0.0, (levels.length - 1).toDouble());
-  final lower = clamped.floor();
-  final upper = clamped.ceil();
-  if (lower == upper) return select(levels[lower]);
-  return select(levels[lower]) +
-      (select(levels[upper]) - select(levels[lower])) * (clamped - lower);
-}
-
-Color _lerpColorAlongRamp(double position) {
-  final levels = ExperienceLevel.values;
-  final clamped = position.clamp(0.0, (levels.length - 1).toDouble());
-  final lower = clamped.floor();
-  final upper = clamped.ceil();
-  if (lower == upper) return levels[lower].color;
-  return Color.lerp(levels[lower].color, levels[upper].color, clamped - lower)!;
-}
-
-class _FacePainter extends CustomPainter {
-  _FacePainter({
-    required this.curve,
-    required this.eyeOpenness,
-    required this.color,
-  });
-
-  final double curve;
-  final double eyeOpenness;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
-
-    final eyeW = size.width * 0.19;
-    final eyeH = eyeW * eyeOpenness.clamp(0.28, 1.0);
-    final eyeY = size.height * 0.30;
-    for (final dx in [size.width * 0.30, size.width * 0.70]) {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromCenter(center: Offset(dx, eyeY), width: eyeW, height: eyeH),
-          Radius.circular(eyeW / 2),
+            // No border, no card: the scene dissolves into the page instead
+            // of sitting in a box. An elliptical vignette to the page ground
+            // takes the corners with it — two straight edge fades left a
+            // rectangle you could still see. A plain gradient, no saveLayer.
+            const _Vignette(),
+          ],
         ),
-        paint,
-      );
-    }
-
-    // One quadratic curve whose control point rises and falls with [curve],
-    // so a frown, a flat line and a smile are all the same stroke.
-    final mouthWidth = size.width * 0.44;
-    final mouthY = size.height * 0.74;
-    final stroke = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size.width * 0.075
-      ..strokeCap = StrokeCap.round;
-
-    final left = Offset((size.width - mouthWidth) / 2, mouthY);
-    final right = Offset((size.width + mouthWidth) / 2, mouthY);
-    final control = Offset(
-      size.width / 2,
-      mouthY + curve.clamp(-1.0, 1.0) * size.height * 0.30,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(left.dx, left.dy)
-        ..quadraticBezierTo(control.dx, control.dy, right.dx, right.dy),
-      stroke,
+      ),
     );
   }
-
-  @override
-  bool shouldRepaint(_FacePainter old) =>
-      old.curve != curve ||
-      old.eyeOpenness != eyeOpenness ||
-      old.color != color;
 }
 
-/// The five-stop slider under the face.
+/// Elliptical fade from clear at the centre to the page background at
+/// the edges, so the illustration has no visible boundary.
+class _Vignette extends StatelessWidget {
+  const _Vignette();
+
+  @override
+  Widget build(BuildContext context) {
+    final ground = AppPalette.onyx;
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment.center,
+            radius: 0.72,
+            colors: [
+              ground.withValues(alpha: 0.0),
+              ground.withValues(alpha: 0.0),
+              ground.withValues(alpha: 0.85),
+              ground,
+            ],
+            stops: const [0.0, 0.50, 0.90, 1.0],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Five labelled stops on a track that fills to the chosen one.
 ///
-/// A real [Slider] would be continuous and would need snapping bolted on;
-/// this is five taps and a drag across five stops, which is what the control
-/// actually is.
+/// The old version was five identical grey dots on a grey line — nothing
+/// said which end was good, nothing said what a dot meant until you hit
+/// it, and the dots were 12px targets on a 56px-tall strip. Now:
+///
+///  - The track FILLS from the left to the chosen stop, in the stop's own
+///    colour, so the value reads as a level rather than a point.
+///  - Each stop carries its word underneath, in the level's colour once
+///    it is at or below the chosen one, so the scale explains itself.
+///  - The whole column above each word is the tap target, not the dot.
+///  - Selection snaps with light haptics.
 class ExperienceSlider extends StatelessWidget {
   const ExperienceSlider({
     super.key,
@@ -213,43 +167,93 @@ class ExperienceSlider extends StatelessWidget {
   final ExperienceLevel? value;
   final ValueChanged<ExperienceLevel> onChanged;
 
+  static const _trackHeight = 8.0;
+
   @override
   Widget build(BuildContext context) {
+    final levels = ExperienceLevel.values;
+    final selectedIndex = value?.index;
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final levels = ExperienceLevel.values;
         final step = width / levels.length;
+        // Stop centres sit at the middle of each column; the fill runs
+        // from the first centre to the chosen one.
+        double centreOf(int i) => step * (i + 0.5);
 
         void selectAt(double dx) {
           final index = (dx / step).floor().clamp(0, levels.length - 1);
-          if (levels[index] != value) onChanged(levels[index]);
+          if (levels[index] != value) {
+            HapticFeedback.selectionClick();
+            onChanged(levels[index]);
+          }
         }
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapDown: (d) => selectAt(d.localPosition.dx),
           onHorizontalDragUpdate: (d) => selectAt(d.localPosition.dx),
-          child: SizedBox(
-            height: 56,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: AppPalette.hairline,
-                    borderRadius: BorderRadius.circular(3),
+          child: Semantics(
+            slider: true,
+            value: value?.label ?? 'No rating',
+            child: SizedBox(
+              height: 84,
+              child: Stack(
+                children: [
+                  // Track.
+                  Positioned(
+                    left: centreOf(0),
+                    right: width - centreOf(levels.length - 1),
+                    top: 24 - _trackHeight / 2,
+                    height: _trackHeight,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: AppPalette.hairline,
+                        borderRadius: BorderRadius.circular(_trackHeight / 2),
+                      ),
+                    ),
                   ),
-                ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    for (final level in levels)
-                      _Stop(selected: value == level, color: level.color),
-                  ],
-                ),
-              ],
+                  // Fill, animated in width and colour.
+                  Positioned(
+                    left: centreOf(0),
+                    top: 24 - _trackHeight / 2,
+                    height: _trackHeight,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      width: selectedIndex == null
+                          ? 0
+                          : centreOf(selectedIndex) - centreOf(0),
+                      decoration: BoxDecoration(
+                        color: value?.color ?? AppPalette.hairline,
+                        borderRadius: BorderRadius.circular(_trackHeight / 2),
+                      ),
+                    ),
+                  ),
+                  // Stops with their words.
+                  Row(
+                    children: [
+                      for (final level in levels)
+                        Expanded(
+                          child: _Stop(
+                            level: level,
+                            // Everything up to the choice takes the choice's
+                            // colour — one reading, not a rainbow of the
+                            // levels being passed over.
+                            accent: value?.color ?? level.color,
+                            state: selectedIndex == null
+                                ? _StopState.idle
+                                : level.index < selectedIndex
+                                ? _StopState.passed
+                                : level.index == selectedIndex
+                                ? _StopState.selected
+                                : _StopState.idle,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -258,50 +262,86 @@ class ExperienceSlider extends StatelessWidget {
   }
 }
 
-class _Stop extends StatelessWidget {
-  const _Stop({required this.selected, required this.color});
+enum _StopState { idle, passed, selected }
 
-  final bool selected;
-  final Color color;
+class _Stop extends StatelessWidget {
+  const _Stop({required this.level, required this.accent, required this.state});
+
+  final ExperienceLevel level;
+  final Color accent;
+  final _StopState state;
 
   @override
   Widget build(BuildContext context) {
-    // The springiness lives on the SCALE, not on the AnimatedContainer.
-    //
-    // An overshooting curve (easeOutBack) on a widget that lerps a
-    // BoxShadow drives the interpolation below zero, and BoxShadow.lerp
-    // asserts on a negative blur radius — a real crash on deselect, not
-    // just a test failure. Transforms tolerate overshoot; decorations do
-    // not. So the container eases, and the bounce is a scale on top.
-    return AnimatedScale(
-      duration: const Duration(milliseconds: 240),
-      curve: Curves.easeOutBack,
-      scale: selected ? 1 : 0.92,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-        width: selected ? 34 : 12,
-        height: selected ? 34 : 12,
-        decoration: BoxDecoration(
-          color: selected
-              ? color
-              : AppPalette.textSecondary.withValues(alpha: 0.5),
-          shape: BoxShape.circle,
-          boxShadow: [
-            // Always present, faded to nothing when unselected — lerping
-            // between two shadows keeps every intermediate blur radius
-            // positive, where lerping to null does not.
-            BoxShadow(
-              color: color.withValues(alpha: selected ? 0.45 : 0),
-              blurRadius: 14,
-              spreadRadius: 1,
+    final color = accent;
+    final selected = state == _StopState.selected;
+    final lit = state != _StopState.idle;
+    // The springiness lives on the SCALE, not on the AnimatedContainer:
+    // an overshooting curve on a lerped BoxShadow drives the blur radius
+    // negative and asserts. Transforms tolerate overshoot; decorations
+    // do not.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 48,
+          child: Center(
+            child: AnimatedScale(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutBack,
+              scale: selected ? 1 : 0.9,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                width: selected ? 32 : 16,
+                height: selected ? 32 : 16,
+                decoration: BoxDecoration(
+                  color: lit ? color : AppPalette.card,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: lit ? color : AppPalette.textSecondary,
+                    width: 2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withValues(alpha: selected ? 0.45 : 0),
+                      blurRadius: 14,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+                child: selected
+                    ? const Icon(
+                        Icons.check_rounded,
+                        size: 18,
+                        color: Colors.white,
+                      )
+                    : null,
+              ),
             ),
-          ],
+          ),
         ),
-        child: selected
-            ? const Icon(Icons.check_rounded, size: 18, color: Colors.white)
-            : null,
-      ),
+        AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 200),
+          style: TextStyle(
+            color: selected
+                ? color
+                : lit
+                ? color.withValues(alpha: 0.75)
+                : AppPalette.textSecondary,
+            fontSize: 10.5,
+            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+            letterSpacing: 0.3,
+            height: 1.1,
+          ),
+          child: Text(
+            level.label,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 }

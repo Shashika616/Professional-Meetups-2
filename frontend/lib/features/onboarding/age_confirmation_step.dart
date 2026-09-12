@@ -60,7 +60,7 @@ class _AgeConfirmationStepState extends State<AgeConfirmationStep> {
                     ),
                     const SizedBox(height: 28),
                     Text(
-                      'You must be 18 or older\nto use Professional Meetups.',
+                      'You must be 18 or older\nto use TieHere.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 22,

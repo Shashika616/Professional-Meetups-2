@@ -4,13 +4,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/http_subscription_service.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 
 const _baseUrl = 'http://localhost:8080';
 
 HttpSubscriptionService _serviceWith(http.Client client) =>
-    HttpSubscriptionService(httpClient: client, baseUrl: _baseUrl);
+    HttpSubscriptionService(
+      httpClient: client,
+      baseUrl: _baseUrl,
+      // Authenticated calls now fail fast without one, so every test that
+      // exercises a response body needs a session present.
+      getAccessToken: () async => 'token',
+    );
 
 void main() {
   group('currentStatus', () {
@@ -50,6 +57,43 @@ void main() {
       expect(status.status, SubscriptionLifecycleStatus.none);
       expect(status.isEntitled, isFalse);
     });
+
+    // The billing module is Phase 3 and not built yet: every billing route
+    // answers 503 ("billing is not configured") by design - see the
+    // backend's handlers/unavailable.go.
+    //
+    // Throwing on that was a real, measurable cost. subscriptionStatusProvider
+    // is watched by ProfilePage, which is a keep-alive tab, and Riverpod 3
+    // auto-retries a failed provider with backoff - so a permanent 503
+    // became an endless retry loop: ~8-10 requests/minute for as long as the
+    // app was open, on every device. Confirmed in the deployed service's own
+    // logs, where /v1/billing/subscription was the single busiest endpoint
+    // and 100% of its responses were 503. A request every few seconds also
+    // keeps the Cloud Run instance from ever scaling to zero.
+    //
+    // 503 here does not mean "try again" - it means "this module does not
+    // exist yet", which is exactly the free/none state the domain already
+    // models for a user who has never purchased anything.
+    test(
+      '503 (billing not configured) resolves to free/none, never throws',
+      () async {
+        var calls = 0;
+        final client = MockClient((request) async {
+          calls++;
+          return http.Response(
+            jsonEncode({'error': 'billing is not configured'}),
+            503,
+          );
+        });
+
+        final status = await _serviceWith(client).currentStatus();
+
+        expect(status.tier, SubscriptionTier.free);
+        expect(status.status, SubscriptionLifecycleStatus.none);
+        expect(status.isEntitled, isFalse);
+        expect(calls, 1, reason: 'one call, and nothing to retry');
+      },
+    );
 
     test(
       'non-200 throws SubscriptionException with the server message',
@@ -118,5 +162,27 @@ void main() {
         );
       },
     );
+  });
+
+  group('missing session', () {
+    test('currentStatus fails fast rather than sending an unauthenticated '
+        'request that a provider would retry forever', () async {
+      var requestsSent = 0;
+      final client = MockClient((request) async {
+        requestsSent++;
+        return http.Response('{}', 200);
+      });
+      final service = HttpSubscriptionService(
+        httpClient: client,
+        baseUrl: _baseUrl,
+        getAccessToken: () async => null,
+      );
+
+      await expectLater(
+        service.currentStatus(),
+        throwsA(isA<SessionExpiredException>()),
+      );
+      expect(requestsSent, 0);
+    });
   });
 }

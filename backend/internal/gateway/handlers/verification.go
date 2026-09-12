@@ -199,6 +199,118 @@ func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, profileResponseFromClient(profile))
 }
 
+// publicProfileResponse is what one member may see of ANOTHER: the things
+// the app shows on a card already (name, photo, level, record) plus the
+// three verification FACTS as booleans. It is a separate type from
+// profileResponse on purpose — the private shape carries the phone number,
+// personal email, legal name and address, and the safest way to be sure
+// none of those ever reach a stranger is a response struct with no field
+// to put them in. The client renders the flags as badges ("Professional"
+// for LinkedIn, "Official" for a verified work email, "Phone verified"),
+// never the underlying value.
+type publicProfileResponse struct {
+	UserID            string                 `json:"user_id"`
+	FullName          string                 `json:"full_name"`
+	ProfilePhotoURL   string                 `json:"profile_photo_url"`
+	TrustLevel        int                    `json:"trust_level"`
+	RatingAverage     float64                `json:"rating_average"`
+	RatingCount       int                    `json:"rating_count"`
+	MeetupsCompleted  int                    `json:"meetups_completed"`
+	LinkedInConnected bool                   `json:"linkedin_connected"`
+	WorkEmailVerified bool                   `json:"work_email_verified"`
+	PhoneVerified     bool                   `json:"phone_verified"`
+	RecentMeetups     []memberMeetupResponse `json:"recent_meetups"`
+}
+
+// memberMeetupResponse is one of the member's last few meetups: what,
+// when, where, their role, the turnout, the overall rating, and the
+// written comments. Comment authors are named only where the VIEWER was
+// on that meetup — the monolith blanks them otherwise.
+type memberMeetupResponse struct {
+	ID                     string                        `json:"id"`
+	Intent                 string                        `json:"intent"`
+	Status                 string                        `json:"status"`
+	WindowStartUnixSeconds int64                         `json:"window_start_unix_seconds"`
+	WindowEndUnixSeconds   int64                         `json:"window_end_unix_seconds"`
+	LocationLabel          string                        `json:"location_label"`
+	Hosted                 bool                          `json:"hosted"`
+	ParticipantCount       int32                         `json:"participant_count"`
+	OverallAverage         float64                       `json:"overall_average"`
+	ReviewCount            int32                         `json:"review_count"`
+	ViewerWasIn            bool                          `json:"viewer_was_in"`
+	Comments               []memberMeetupCommentResponse `json:"comments"`
+}
+
+type memberMeetupCommentResponse struct {
+	AuthorName           string `json:"author_name"`
+	Note                 string `json:"note"`
+	WrittenAtUnixSeconds int64  `json:"written_at_unix_seconds"`
+}
+
+// getPublicProfile — GET /v1/users/{id}.
+//
+// Two monolith calls, in this order on purpose. GetMemberActivity is the
+// GATE: it answers PermissionDenied unless the caller shares a meetup with
+// this member or the member hosts one, and that decision is made before the
+// profile is fetched at all — so a caller who may not open a member learns
+// nothing, not even whether the id exists. Only then is the profile read,
+// projected through publicProfileResponse so just the public subset is
+// ever serialised.
+func (h *Handler) getPublicProfile(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	viewerID := middleware.UserIDFromContext(ctx)
+	targetID := r.PathValue("id")
+
+	activity, err := h.monolith.GetMemberActivity(ctx, viewerID, targetID)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	profile, err := h.monolith.GetProfile(ctx, targetID)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	recent := make([]memberMeetupResponse, 0, len(activity.RecentMeetups))
+	for _, mm := range activity.RecentMeetups {
+		comments := make([]memberMeetupCommentResponse, 0, len(mm.Comments))
+		for _, c := range mm.Comments {
+			comments = append(comments, memberMeetupCommentResponse{
+				AuthorName:           c.AuthorName,
+				Note:                 c.Note,
+				WrittenAtUnixSeconds: c.WrittenAtUnixSeconds,
+			})
+		}
+		recent = append(recent, memberMeetupResponse{
+			ID:                     mm.ID,
+			Intent:                 mm.Intent,
+			Status:                 mm.Status,
+			WindowStartUnixSeconds: mm.WindowStartUnixSeconds,
+			WindowEndUnixSeconds:   mm.WindowEndUnixSeconds,
+			LocationLabel:          mm.LocationLabel,
+			Hosted:                 mm.Hosted,
+			ParticipantCount:       mm.ParticipantCount,
+			OverallAverage:         mm.OverallAverage,
+			ReviewCount:            mm.ReviewCount,
+			ViewerWasIn:            mm.ViewerWasIn,
+			Comments:               comments,
+		})
+	}
+	writeJSON(w, http.StatusOK, publicProfileResponse{
+		RecentMeetups:     recent,
+		UserID:            profile.UserID,
+		FullName:          profile.FullName,
+		ProfilePhotoURL:   profile.ProfilePhotoURL,
+		TrustLevel:        profile.TrustLevel,
+		RatingAverage:     profile.RatingAverage,
+		RatingCount:       profile.RatingCount,
+		MeetupsCompleted:  profile.MeetupsCompleted,
+		LinkedInConnected: profile.LinkedInConnected,
+		WorkEmailVerified: profile.WorkEmailVerified,
+		PhoneVerified:     profile.PhoneVerified,
+	})
+}
+
 // profileResponseFromClient is shared by getProfile and
 // completeProfileSetup (handlers.go, ADR-019 §2) — both return the same
 // shape, one conversion, not two near-duplicates that could drift.

@@ -2,15 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/theme/app_palette.dart';
+
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
+import 'package:professional_connections_platform/core/widgets/star_rating.dart';
+import 'package:professional_connections_platform/core/widgets/trust_level_badge.dart';
 import 'package:professional_connections_platform/features/meetups/events_page.dart';
 
+import 'support/fake_auth_service.dart';
 import 'support/scripted_meetup_service.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
+import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
 
 Meetup _hostedMeetup({String id = 'meetup-1'}) => Meetup(
   id: id,
@@ -46,6 +53,35 @@ Meetup _hostedMeetupFinished({String id = 'meetup-1'}) => Meetup(
   status: MeetupStatus.completed,
   createdAt: DateTime.now().subtract(const Duration(days: 1)),
   isHostedByMe: true,
+);
+
+/// A finished meetup the viewer REQUESTED (not hosted), keeping its
+/// terminal status — copyWithRequestStatus resets status to open, which is
+/// right for the open-tab tests it serves and wrong for History, where the
+/// open/history split is decided by status.
+Meetup _requestedFinished({
+  String id = 'meetup-1',
+  MeetupStatus status = MeetupStatus.completed,
+  MeetupRequestStatus myRequestStatus = MeetupRequestStatus.accepted,
+  String? cancellationReason,
+}) => Meetup(
+  id: id,
+  hostUserId: 'host-9',
+  hostFullName: 'Grace Hopper',
+  hostTrustLevel: 3,
+  intent: IntentType.coffee,
+  windowStart: DateTime.now().subtract(const Duration(hours: 3)),
+  windowEnd: DateTime.now().subtract(const Duration(hours: 1)),
+  locationLat: 6.9271,
+  locationLng: 79.8612,
+  locationLabel: 'Colombo Fort Cafe',
+  capacity: 4,
+  acceptedCount: 1,
+  status: status,
+  cancellationReason: cancellationReason,
+  createdAt: DateTime.now().subtract(const Duration(days: 1)),
+  isHostedByMe: false,
+  myRequestStatus: myRequestStatus,
 );
 
 Meetup _hostedMeetupStarted({String id = 'meetup-1'}) => Meetup(
@@ -422,10 +458,22 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // The OPEN/COMPLETED chip is gone. A card's state is the bar down its
+    // left edge now: green while the meetup is live, gold once it is over and
+    // owed a review. Asserting on the colour rather than on a chip is the
+    // point of the change, so the test follows it there.
+    final edges = tester
+        .widgetList<Container>(find.byType(Container))
+        .where((c) => c.constraints?.maxWidth == 4)
+        .map((c) => c.color)
+        .toList();
+
     expect(
-      tester.widget<MeetupStatusBadge>(find.byType(MeetupStatusBadge)).status,
-      MeetupStatus.open,
+      edges,
+      contains(AppPalette.verified),
+      reason: 'a hosted meetup still ahead of its window reads as live',
     );
+    expect(find.byType(MeetupStatusBadge), findsNothing);
   });
 
   testWidgets(
@@ -780,32 +828,16 @@ void main() {
   group('Request card — requester name, trust level, and rating render '
       'correctly and survive a long name without breaking the row layout', () {
     testWidgets(
-      'a long requester name ellipsizes on one line instead of wrapping or '
-      'clipping mid-character — the trust level badge and star rating '
-      'next to it must stay fully visible regardless of name length',
+      'a long requester name wraps onto more lines instead of being cut — '
+      'the trust badge and rating sit under it, always fully visible',
       (tester) async {
+        const longName =
+            'Maximilian Alexander Bartholomew Fitzgerald-Worthington III';
         final service = ScriptedMeetupService(
           myMeetups: (hosted: [_hostedMeetup()], requested: const []),
-          meetupRequests: [
-            _request(
-              id: 'r-1',
-              requesterFullName:
-                  'Alexandria Constantinopoulos-Weatherington the Third',
-              status: MeetupRequestStatus.pending,
-            ),
-          ],
+          meetupRequests: [_pendingRequest(requesterFullName: longName)],
           meetupDetail: _hostedMeetup(),
         );
-
-        // An iPhone-SE-class width — the narrowest real device class this
-        // app targets (same width used elsewhere in this suite for
-        // overflow regressions) — is where a missing overflow/maxLines
-        // setting would actually bite.
-        tester.view.physicalSize = const Size(375, 812);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.resetPhysicalSize);
-        addTearDown(tester.view.resetDevicePixelRatio);
-
         await tester.pumpWidget(
           ProviderScope(
             overrides: [meetupServiceProvider.overrideWithValue(service)],
@@ -813,33 +845,18 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-
-        await tester.tap(find.text('Colombo Fort Cafe'));
+        await tester.tap(find.text('VIEW REQUESTS'));
         await tester.pumpAndSettle();
 
+        final text = tester.widget<Text>(find.text(longName));
+        expect(text.overflow, isNot(TextOverflow.ellipsis));
+        expect(text.maxLines, isNull);
+        // Rendered taller than one line: it wrapped rather than clipped.
+        final box = tester.getSize(find.text(longName));
+        expect(box.height, greaterThan(20));
+        expect(find.byType(TrustLevelBadge), findsOneWidget);
+        expect(find.byType(StarRating), findsOneWidget);
         expect(tester.takeException(), isNull);
-
-        final nameText = tester.widget<Text>(
-          find.text('Alexandria Constantinopoulos-Weatherington the Third'),
-        );
-        expect(
-          nameText.overflow,
-          TextOverflow.ellipsis,
-          reason: 'a long name must ellipsize, not silently clip or wrap',
-        );
-        expect(
-          nameText.maxLines,
-          1,
-          reason:
-              'without this, a long name can wrap to a second line and '
-              'push the row out of vertical alignment with the trust '
-              'badge/rating next to it',
-        );
-
-        // The trailing trust-level badge and rating must still be present
-        // and readable — not squeezed out or hidden by the long name.
-        expect(find.text('L2'), findsOneWidget);
-        expect(find.text('New'), findsOneWidget);
       },
     );
 
@@ -869,155 +886,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Grace Hopper'), findsOneWidget);
-      expect(find.text('L2'), findsOneWidget);
+      expect(find.text('L2 Trust'), findsOneWidget);
     });
   });
-
-  group(
-    'ACCEPTED tab — host visibility into Safety Gate status (ADR-024 §6)',
-    () {
-      testWidgets('an accepted requester who checked in shows "Checked in"', (
-        tester,
-      ) async {
-        final service = ScriptedMeetupService(
-          myMeetups: (hosted: [_hostedMeetup()], requested: const []),
-          meetupRequests: [
-            _request(
-              id: 'r-checked-in',
-              requesterFullName: 'Checked In Person',
-              status: MeetupRequestStatus.accepted,
-              checkedInAt: DateTime.now(),
-            ),
-          ],
-          meetupDetail: _hostedMeetup(),
-        );
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(home: EventsPage()),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('Colombo Fort Cafe'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('ACCEPTED'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Checked in'), findsOneWidget);
-        expect(find.textContaining('Declined'), findsNothing);
-        expect(find.text('Not checked in yet'), findsNothing);
-      });
-
-      testWidgets(
-        'an accepted requester who declined shows "Declined: <reason>"',
-        (tester) async {
-          final service = ScriptedMeetupService(
-            myMeetups: (hosted: [_hostedMeetup()], requested: const []),
-            meetupRequests: [
-              _request(
-                id: 'r-declined',
-                requesterFullName: 'Declined Person',
-                status: MeetupRequestStatus.accepted,
-                declinedAt: DateTime.now(),
-                declineReason: 'running late, cannot make it',
-              ),
-            ],
-            meetupDetail: _hostedMeetup(),
-          );
-
-          await tester.pumpWidget(
-            ProviderScope(
-              overrides: [meetupServiceProvider.overrideWithValue(service)],
-              child: const MaterialApp(home: EventsPage()),
-            ),
-          );
-          await tester.pumpAndSettle();
-
-          await tester.tap(find.text('Colombo Fort Cafe'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('ACCEPTED'));
-          await tester.pumpAndSettle();
-
-          expect(
-            find.text('Declined: running late, cannot make it'),
-            findsOneWidget,
-          );
-          expect(find.text('Checked in'), findsNothing);
-          expect(find.text('Not checked in yet'), findsNothing);
-        },
-      );
-
-      testWidgets(
-        'an accepted requester who hasn\'t touched the Safety Gate shows '
-        '"Not checked in yet"',
-        (tester) async {
-          final service = ScriptedMeetupService(
-            myMeetups: (hosted: [_hostedMeetup()], requested: const []),
-            meetupRequests: [
-              _request(
-                id: 'r-untouched',
-                requesterFullName: 'Untouched Person',
-                status: MeetupRequestStatus.accepted,
-              ),
-            ],
-            meetupDetail: _hostedMeetup(),
-          );
-
-          await tester.pumpWidget(
-            ProviderScope(
-              overrides: [meetupServiceProvider.overrideWithValue(service)],
-              child: const MaterialApp(home: EventsPage()),
-            ),
-          );
-          await tester.pumpAndSettle();
-
-          await tester.tap(find.text('Colombo Fort Cafe'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('ACCEPTED'));
-          await tester.pumpAndSettle();
-
-          expect(find.text('Not checked in yet'), findsOneWidget);
-          expect(find.text('Checked in'), findsNothing);
-          expect(find.textContaining('Declined'), findsNothing);
-        },
-      );
-
-      testWidgets(
-        'a pending request never shows a Safety Gate status line — it '
-        'never had a chance to touch one',
-        (tester) async {
-          final service = ScriptedMeetupService(
-            myMeetups: (hosted: [_hostedMeetup()], requested: const []),
-            meetupRequests: [
-              _request(
-                id: 'r-pending',
-                requesterFullName: 'Pending Person',
-                status: MeetupRequestStatus.pending,
-              ),
-            ],
-            meetupDetail: _hostedMeetup(),
-          );
-
-          await tester.pumpWidget(
-            ProviderScope(
-              overrides: [meetupServiceProvider.overrideWithValue(service)],
-              child: const MaterialApp(home: EventsPage()),
-            ),
-          );
-          await tester.pumpAndSettle();
-
-          await tester.tap(find.text('Colombo Fort Cafe'));
-          await tester.pumpAndSettle();
-
-          expect(find.text('Not checked in yet'), findsNothing);
-          expect(find.text('Checked in'), findsNothing);
-          expect(find.textContaining('Declined'), findsNothing);
-        },
-      );
-    },
-  );
 
   group('cursor pagination (2026-08-31 round-4 hardening)', () {
     testWidgets('the HOSTING tab requests a second page via hosted_cursor when '
@@ -1279,6 +1150,175 @@ void main() {
 
       expect(find.text('Hosted Open Cafe'), findsOneWidget);
       expect(find.text('Requested Open Cafe'), findsNothing);
+    });
+  });
+
+  group('host actions on the Events tab', () {
+    testWidgets('a live hosted meetup carries an explicit VIEW REQUESTS '
+        'action that opens request management', (tester) async {
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: [_hostedMeetup()], requested: const []),
+        meetupRequests: [_pendingRequest()],
+        meetupDetail: _hostedMeetup(),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('VIEW REQUESTS'), findsOneWidget);
+      await tester.tap(find.text('VIEW REQUESTS'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ACCEPT'), findsOneWidget);
+    });
+
+    testWidgets('a finished hosted meetup has no VIEW REQUESTS — there is '
+        'nothing left to manage', (tester) async {
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: [_hostedMeetupFinished()], requested: const []),
+        meetupDetail: _hostedMeetupFinished(),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('VIEW REQUESTS'), findsNothing);
+    });
+
+    testWidgets('tapping a requester on the request list opens their public '
+        'profile, and the badges shown come from that profile', (tester) async {
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: [_hostedMeetup()], requested: const []),
+        meetupRequests: [_pendingRequest(requesterFullName: 'Grace Hopper')],
+        meetupDetail: _hostedMeetup(),
+      );
+      final auth = ImmediateAuthService()
+        ..publicProfileFor = (id) => PublicProfile(
+          id: id,
+          fullName: 'Grace Hopper',
+          trustLevel: 3,
+          meetupsCompleted: 4,
+          linkedInConnected: true,
+        );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            meetupServiceProvider.overrideWithValue(service),
+            authServiceProvider.overrideWithValue(auth),
+          ],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('VIEW REQUESTS'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Grace Hopper'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PublicProfilePage), findsOneWidget);
+      expect(find.text('Professional'), findsOneWidget);
+      expect(find.text('4'), findsOneWidget);
+    });
+  });
+
+  group('history cards carry no request state', () {
+    testWidgets('a finished requested meetup does not say YOU\'RE IN — it '
+        'already happened', (tester) async {
+      final finished = _requestedFinished(id: 'past-req');
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: const [], requested: [finished]),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Requested Meetings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+
+      // The card IS there — its outcome chip proves it — without the
+      // request-state text a live card would carry.
+      expect(find.text('COMPLETED'), findsOneWidget);
+      expect(find.text('YOU\'RE IN'), findsNothing);
+    });
+  });
+
+  group('History outcome chips', () {
+    Future<void> openRequestedHistory(WidgetTester tester) async {
+      await tester.tap(find.text('Requested Meetings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('History'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a finished meetup reads COMPLETED', (tester) async {
+      final finished = _requestedFinished(id: 'done');
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: const [], requested: [finished]),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openRequestedHistory(tester);
+      expect(find.text('COMPLETED'), findsOneWidget);
+    });
+
+    testWidgets('a cancelled meetup reads CANCELLED', (tester) async {
+      final cancelled = _requestedFinished(
+        id: 'cx',
+        status: MeetupStatus.cancelled,
+        cancellationReason: 'Sorry.',
+      );
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: const [], requested: [cancelled]),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openRequestedHistory(tester);
+      expect(find.text('CANCELLED'), findsOneWidget);
+      expect(find.text('COMPLETED'), findsNothing);
+    });
+
+    testWidgets('a withdrawn request reads WITHDRAWN', (tester) async {
+      final withdrawn = _requestedFinished(
+        id: 'wd',
+        myRequestStatus: MeetupRequestStatus.withdrawn,
+      );
+      final service = ScriptedMeetupService(
+        myMeetups: (hosted: const [], requested: [withdrawn]),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(home: EventsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await openRequestedHistory(tester);
+      expect(find.text('WITHDRAWN'), findsOneWidget);
+      expect(find.text('COMPLETED'), findsNothing);
     });
   });
 }

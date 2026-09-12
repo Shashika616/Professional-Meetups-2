@@ -2,6 +2,8 @@ package meetup
 
 import (
 	"context"
+
+	"professional-meetups-monolith/backend/internal/modules/meetup/repository"
 )
 
 // participantIdentityFloor is the trust level at which a viewer may see WHO
@@ -69,7 +71,8 @@ func (s *service) ListMeetupParticipants(ctx context.Context, req ListMeetupPart
 	// Fails closed on a meetup that does not exist, and keeps this endpoint
 	// from becoming an id-probe that answers differently for real and
 	// invented meetups.
-	if _, err := s.meetups.GetByID(ctx, req.MeetupID, req.ViewerID); err != nil {
+	m, err := s.meetups.GetByID(ctx, req.MeetupID, req.ViewerID)
+	if err != nil {
 		return MeetupParticipants{}, err
 	}
 
@@ -78,13 +81,26 @@ func (s *service) ListMeetupParticipants(ctx context.Context, req ListMeetupPart
 		return MeetupParticipants{}, err
 	}
 
+	// Identities are for the people IN the meetup: its host, and anyone the
+	// host has accepted. Everyone else — whatever their trust level — gets
+	// the count, the shape, and the host, and nothing about the rest. The
+	// trust floor still applies on top: a below-floor viewer who somehow
+	// held an accepted request would still not see the list.
+	inMeetup := m.HostUserID == req.ViewerID ||
+		(m.MyRequestStatus != nil && *m.MyRequestStatus == repository.RequestStatusAccepted)
 	out := MeetupParticipants{
 		Participants: make([]MeetupParticipant, 0, len(rows)),
 		TotalCount:   len(rows),
-		Redacted:     req.ViewerTrustLevel < participantIdentityFloor,
+		Redacted:     !inMeetup || req.ViewerTrustLevel < participantIdentityFloor,
 	}
+	// The host stays named in a redacted list for anyone who can see the
+	// meetup in full (visibilityFloor): a would-be joiner has to be able to
+	// judge who they are asking, and the host's profile is open to them
+	// anyway (see GetMemberActivity). A guest below that floor does not see
+	// who hosts on the card either, so they do not see it here.
+	hostNamed := req.ViewerTrustLevel >= visibilityFloor
 	for _, row := range rows {
-		if out.Redacted {
+		if out.Redacted && !(row.IsHost && hostNamed) {
 			out.Participants = append(out.Participants, MeetupParticipant{IsHost: row.IsHost})
 			continue
 		}

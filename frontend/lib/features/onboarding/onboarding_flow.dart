@@ -7,6 +7,7 @@ import 'package:professional_connections_platform/core/models/user_profile.dart'
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/cafe_scene.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/brand_marks.dart';
@@ -284,7 +285,6 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: AppBackground(
-        imageOpacity: 0.35,
         child: switch (_step) {
           _OnboardingStep.ageConfirmation => AgeConfirmationStep(
             onContinue: _onAgeConfirmed,
@@ -310,8 +310,6 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(child: _welcomeStep()),
-            const SizedBox(height: 16),
-            _trustMicrocopy(),
             const SizedBox(height: 20),
             // Co-equal buttons — same PrimaryButton widget/height for both,
             // differing only in icon/label/handler, so Apple's button is
@@ -429,77 +427,51 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     // slack to get away with a plain Center; it no longer does, and a short
     // phone would have hit the same overflow eventually regardless. At normal
     // sizes nothing scrolls and it renders identically.
+    // Heading first, then the picture. The generic handshake icon that used
+    // to lead this screen said nothing the words below it did not already say
+    // better, and it pushed the actual promise down the page. Reading order
+    // now matches the hierarchy: what this is, then what it looks like, then
+    // how to get in.
     return SingleChildScrollView(
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: AppPalette.candyBlue.withValues(alpha: 0.3),
-                  width: 2,
-                ),
-              ),
-              child: Icon(
-                Icons.handshake_outlined,
-                size: 64,
-                color: AppPalette.candyBlue,
-              ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const SizedBox(height: 8),
+          Text(
+            'Connect Beyond\nThe Office.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color: AppPalette.textPrimary,
+              height: 1.2,
+              letterSpacing: -0.5,
             ),
-            const SizedBox(height: 32),
-            Text(
-              'Connect Beyond\nThe Office.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 32,
-                fontWeight: FontWeight.w800,
-                color: AppPalette.textPrimary,
-                height: 1.2,
-                letterSpacing: -0.5,
-              ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Meet verified professionals in real life.\nYour next coffee, mentor, or co-founder is nearby.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 14,
+              color: AppPalette.textSecondary,
+              height: 1.5,
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Meet verified professionals in real life.\nYour next coffee, mentor, or co-founder is nearby.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: AppPalette.textSecondary,
-                height: 1.5,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// ADR-014's microcopy — replaces the old LinkedIn-only trust copy, since
-  /// LinkedIn is now optional-at-signup rather than mandatory. States
-  /// plainly that skipping LinkedIn keeps the account restricted, and that
-  /// it can be connected later from Profile (`ProfilePage`'s "Connect
-  /// LinkedIn" banner, Step 7) — not a dead end.
-  ///
-  /// Extended by ADR-002 § 6 to cover the guest option in the same
-  /// paragraph, rather than giving that button a caption of its own: this
-  /// whole block sits in a fixed-height section above the nav bar, and the
-  /// two explanations are the same explanation at different strengths.
-  Widget _trustMicrocopy() {
-    return SizedBox(
-      width: double.infinity,
-      child: Text(
-        'Signing in without LinkedIn keeps your account more restricted, connect it '
-        'anytime from your profile to unlock matching and meetups. Continuing as a '
-        'guest lets you browse, but host names and times stay hidden.',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          fontSize: 11,
-          color: AppPalette.textSecondary,
-          height: 1.4,
-        ),
+          ),
+          const SizedBox(height: 22),
+          // Sized off the viewport rather than fixed: this sits above four
+          // buttons and a paragraph, and on a short phone a fixed illustration
+          // is the thing that pushes the sign-in options off screen. Clamped
+          // so it neither disappears on small displays nor balloons on a
+          // tablet.
+          Builder(
+            builder: (context) {
+              final h = MediaQuery.sizeOf(context).height;
+              return CafeScene(height: (h * 0.26).clamp(150.0, 260.0));
+            },
+          ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
   }

@@ -1,4 +1,5 @@
 import 'package:professional_connections_platform/core/models/auth_session.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
@@ -10,6 +11,20 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 /// (e.g. MatchesPage's fire-and-forget updateLastKnownLocation, ADR-021
 /// §3) isn't what the test is actually about.
 class ImmediateAuthService implements AuthService {
+  /// Settable so a widget test can script what another member's profile
+  /// looks like; defaults to a plain Level-2 member with a phone badge.
+  PublicProfile Function(String userId) publicProfileFor = (id) =>
+      PublicProfile(
+        id: id,
+        fullName: 'Member $id',
+        trustLevel: 2,
+        phoneVerified: true,
+      );
+
+  @override
+  Future<PublicProfile> getPublicProfile(String userId) async =>
+      publicProfileFor(userId);
+
   // ADR-002 § 3.
   @override
   Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>

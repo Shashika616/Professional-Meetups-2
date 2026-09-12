@@ -33,6 +33,18 @@ class AppPalette {
   }
 
   static Color get onyx => isLight ? _Light.onyx : _Dark.onyx;
+
+  /// The two brand colours, sampled from the TieHere mark itself rather than
+  /// eyeballed: the blue and green of the interlocked figures. They are the
+  /// same in both themes - a brand colour that shifts with the theme is not a
+  /// brand colour - so they sit here rather than in the _Dark/_Light pair.
+  ///
+  /// Reserved for brand moments (the wordmark, the launch screen). The
+  /// existing candyBlue/steelBlue ramp still owns ordinary UI accents; mixing
+  /// the two would make every screen look like a logo.
+  static const Color brandBlue = Color(0xFF0075F6);
+  static const Color brandGreen = Color(0xFF34C24C);
+
   static Color get surface => isLight ? _Light.surface : _Dark.surface;
   static Color get card => isLight ? _Light.card : _Dark.card;
   static Color get candyBlue => isLight ? _Light.candyBlue : _Dark.candyBlue;
@@ -44,6 +56,11 @@ class AppPalette {
       isLight ? _Light.textSecondary : _Dark.textSecondary;
   static Color get verified => isLight ? _Light.verified : _Dark.verified;
   static Color get danger => isLight ? _Light.danger : _Dark.danger;
+
+  /// A cancelled meetup's state colour: the card edge, chip and headline
+  /// for a meetup the host called off. Softer than [danger] on purpose —
+  /// this marks a state the user is looking at, not an error they caused.
+  static Color get cancelled => isLight ? _Light.cancelled : _Dark.cancelled;
   static Color get gold => isLight ? _Light.gold : _Dark.gold;
 
   /// The hairline that separates a surface from what is behind it. Was
@@ -83,8 +100,19 @@ class _Dark {
   static const Color deepBlue = Color(0xFF274050);
   static const Color textPrimary = Color(0xFFEDF2F6);
   static const Color textSecondary = Color(0xFF93A1AC);
-  static const Color verified = Color(0xFF4ADE80);
+
+  /// Was 0xFF4ADE80 in dark and 0xFF1E9A56 in light: two different greens for
+  /// the same idea, neither of them the brand's. Both are now [brandGreen], so
+  /// the tick beside a verified field is literally the same green as the
+  /// "Here" in the wordmark.
+  ///
+  /// It is the SAME value in both themes on purpose. A brand colour that
+  /// shifts with the theme is not a brand colour, and this one is only ever
+  /// used as a fill or an icon, never as body text, so it does not need the
+  /// darker light-mode variant it used to have.
+  static const Color verified = AppPalette.brandGreen;
   static const Color danger = Color(0xFFE5484D);
+  static const Color cancelled = Color(0xFFE8747A);
   static const Color gold = Color(0xFFE5B93D);
   static const Color hairline = Color(0x26FFFFFF);
 }
@@ -112,8 +140,9 @@ class _Light {
   static const Color deepBlue = Color(0xFFD9E7EC);
   static const Color textPrimary = Color(0xFF12181C);
   static const Color textSecondary = Color(0xFF5B6670);
-  static const Color verified = Color(0xFF1E9A56);
+  static const Color verified = AppPalette.brandGreen;
   static const Color danger = Color(0xFFC7373D);
+  static const Color cancelled = Color(0xFFD9666C);
   static const Color gold = Color(0xFFB68A1E);
   static const Color hairline = Color(0x1F12181C);
 }

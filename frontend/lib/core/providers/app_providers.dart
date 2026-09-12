@@ -170,16 +170,42 @@ final openMeetupsProvider = FutureProvider.autoDispose
     .family<
       PagedResult<Meetup>,
       ({IntentType? intent, double viewerLat, double viewerLng, int withinDays})
-    >(
-      (ref, key) => ref
+    >((ref, key) {
+      return ref
           .watch(meetupServiceProvider)
           .listOpenMeetups(
             intent: key.intent,
             viewerLat: key.viewerLat,
             viewerLng: key.viewerLng,
             withinDays: key.withinDays,
-          ),
-    );
+          );
+    });
+
+/// A meetup's participant list, keyed by meetup id.
+///
+/// # WHY THIS PROVIDER EXISTS AT ALL
+///
+/// It did not, until 2026-09-10. `ParticipantsStrip` and `ParticipantsPage`
+/// each called `meetupService.listMeetupParticipants()` directly from their
+/// own `initState`, which made this the only data fetch in the app outside
+/// Riverpod - and therefore the only one with no cache, no de-duplication and
+/// no way to invalidate. Opening a meetup and then its participant list
+/// fetched the same rows twice, about a second apart, every time.
+///
+/// Routing both through one family fixes that whatever the second mount was:
+/// the second widget gets the first one's result instead of a second request.
+/// It also means a future "refresh after someone joins" is one `invalidate`
+/// away rather than a rebuild hunt.
+final meetupParticipantsProvider = FutureProvider.autoDispose
+    .family<MeetupParticipants, String>((ref, meetupId) {
+      // Plain autoDispose is enough to collapse the double-fetch this
+      // replaced, and that is worth spelling out because it looks like it
+      // should not be. ParticipantsPage is PUSHED over the detail page rather
+      // than replacing it, so the route underneath stays in the tree and
+      // ParticipantsStrip keeps watching. The two overlap, one request serves
+      // both, and nothing has to be kept alive past the last listener.
+      return ref.watch(meetupServiceProvider).listMeetupParticipants(meetupId);
+    });
 
 /// The signed-in user's hosted + requested meetups — "My Meetups"
 /// (frontend/meetup-scheduling-PLAN.md Step 8). Only ever the *first* page
@@ -223,10 +249,22 @@ final trustedContactsProvider =
 /// without it, every relaunch would force a fresh LinkedIn login, defeating
 /// the point of a 30-day refresh token.
 class AuthSessionState {
-  const AuthSessionState({this.session, this.profile});
+  const AuthSessionState({
+    this.session,
+    this.profile,
+    this.signedOutByUser = false,
+  });
 
   final AuthSession? session;
   final UserProfile? profile;
+
+  /// True on the logged-out state that a deliberate sign-out produced, so
+  /// AppShell's safety-net listener can tell it from a session that died
+  /// (forceSignOut) — only the latter deserves a "session expired" notice.
+  /// ProfilePage navigates to the landing page itself in this case; the
+  /// listener must neither race it with a second push nor explain a
+  /// departure the user chose.
+  final bool signedOutByUser;
 
   /// A stored refresh token is the actual "logged in" signal — the short
   /// (15 min) access token being expired doesn't mean the session is gone,
@@ -460,7 +498,7 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
       }
     }
     await ref.read(sessionStorageProvider).clearSession();
-    state = const AsyncData(AuthSessionState());
+    state = const AsyncData(AuthSessionState(signedOutByUser: true));
   }
 
   /// Called when a caller catches `SessionExpiredException` from an

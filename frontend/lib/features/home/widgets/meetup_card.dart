@@ -5,10 +5,9 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
-import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
+import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
-import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/core/widgets/star_rating.dart';
@@ -64,115 +63,228 @@ class MeetupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final full = meetup.acceptedCount >= meetup.capacity;
+    // Full by EITHER measure: the counts, or the server having already
+    // flipped the meetup to `full`. Those two can disagree — the server marks
+    // a meetup full on its own rules, and a redacted or stale count is not a
+    // reliable second opinion — and the card used to trust only the counts.
+    //
+    // That was survivable while a status chip sat on the card announcing
+    // "FULL" independently. With the chip replaced by the state edge, which
+    // encodes live/over/cancelled and not fullness, the counts became the
+    // ONLY signal, and a server-full meetup with a stale count would have
+    // offered REQUEST TO JOIN for a meetup nobody can join.
+    final full =
+        meetup.acceptedCount >= meetup.capacity ||
+        meetup.status == MeetupStatus.full;
     final locked = meetup.lockedForViewer;
+    // Green while the meetup is still ahead, gold once its window has passed,
+    // muted if cancelled. Same three states, same two colours, same left edge
+    // as the ACTIVE MEETUPS rows on Home and the cards on Events, so one
+    // meetup does not change vocabulary between the three screens that show
+    // it. The OPEN chip that used to sit on the right is gone with it.
+    final end = meetup.windowEnd;
+    final over = end != null && DateTime.now().isAfter(end);
+    final edge = switch (meetup.status) {
+      MeetupStatus.cancelled => AppPalette.textSecondary,
+      _ when over => AppPalette.gold,
+      _ => AppPalette.verified,
+    };
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: GestureDetector(
         onTap: locked ? () => _handleLockedTap(context) : onTap,
-        child: FlatCard(
-          radius: 12,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (locked)
-                LockedCardHeader(locationLabel: meetup.locationLabel)
-              else
-                _CardHeader(meetup: meetup),
-              const SizedBox(height: 14),
-              // WHEN and WHERE, as their own labelled lines.
-              //
-              // The time used to sit in a grey pill between the intent and
-              // the joined count, and the place was a caption under the
-              // host's name — so the two facts that decide whether someone
-              // can actually come were the least legible things on the card.
-              // They now lead, with the time in the primary text colour
-              // because it is the one a user scans for.
-              // Both rows are skipped entirely on a locked card, and for
-              // different reasons: the time is redacted by ADR-028 so there
-              // is nothing to show, and the location is already rendered by
-              // LockedCardHeader — the guest tier deliberately keeps it
-              // (ADR-002 §5), so repeating it here would print the same
-              // address twice.
-              if (!locked) ...[
-                _DetailRow(
-                  icon: Icons.event_outlined,
-                  text: meetup.formattedWindow,
-                  emphasised: true,
-                ),
-                const SizedBox(height: 6),
-                _DetailRow(
-                  icon: Icons.place_outlined,
-                  text: meetup.locationLabel ?? 'Location unavailable',
-                ),
-                const SizedBox(height: 14),
-              ],
-              Row(
-                children: [
-                  Expanded(
-                    child: Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _tag(meetup.intent.label),
-                        _tag(
-                          '${meetup.acceptedCount}/${meetup.capacity} JOINED',
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: FlatCard(
+            radius: 14,
+            padding: EdgeInsets.zero,
+            child: Stack(
+              children: [
+                // The intent's scene, faint, down the right side — see
+                // IntentBackdrop for why it is drawn without a saveLayer.
+                IntentBackdrop(intent: meetup.intent),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(width: 4, color: edge),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (locked)
+                                LockedCardHeader(
+                                  locationLabel: meetup.locationLabel,
+                                )
+                              else
+                                _CardHeader(meetup: meetup),
+                              const SizedBox(height: 14),
+                              // WHEN and WHERE, as their own labelled lines.
+                              //
+                              // The time used to sit in a grey pill between the intent and
+                              // the joined count, and the place was a caption under the
+                              // host's name — so the two facts that decide whether someone
+                              // can actually come were the least legible things on the card.
+                              // They now lead, with the time in the primary text colour
+                              // because it is the one a user scans for.
+                              // Both rows are skipped entirely on a locked card, and for
+                              // different reasons: the time is redacted by ADR-028 so there
+                              // is nothing to show, and the location is already rendered by
+                              // LockedCardHeader — the guest tier deliberately keeps it
+                              // (ADR-002 §5), so repeating it here would print the same
+                              // address twice.
+                              if (!locked) ...[
+                                _DetailRow(
+                                  icon: Icons.event_outlined,
+                                  text: meetup.formattedWindow,
+                                  emphasised: true,
+                                ),
+                                const SizedBox(height: 6),
+                                _DetailRow(
+                                  icon: Icons.place_outlined,
+                                  text:
+                                      meetup.locationLabel ??
+                                      'Location unavailable',
+                                ),
+                                const SizedBox(height: 14),
+                              ],
+                              // The status chip used to close this row. It is the left edge
+                              // now, so what remains is the two facts a chip cannot carry:
+                              // what kind of meetup it is, and how full it is.
+                              // The viewer's own relationship to the meetup
+                              // (hosting it, or where their request stands) is a
+                              // fact about the card, so it sits with the other
+                              // facts as a chip — not below them in a box that
+                              // reads as a button nothing happens on tapping.
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  _tag(meetup.intent.label),
+                                  _tag(
+                                    '${meetup.acceptedCount}/${meetup.capacity} JOINED',
+                                  ),
+                                  if (!locked && meetup.isHostedByMe)
+                                    const _StatusChip(
+                                      icon: Icons.star_rounded,
+                                      label: 'YOU\'RE HOSTING',
+                                      tone: _StatusTone.host,
+                                    )
+                                  else if (!locked &&
+                                      meetup.myRequestStatus != null)
+                                    _StatusChip(
+                                      icon: switch (meetup.myRequestStatus!) {
+                                        MeetupRequestStatus.pending =>
+                                          Icons.hourglass_top_rounded,
+                                        MeetupRequestStatus.accepted =>
+                                          Icons.check_circle_rounded,
+                                        MeetupRequestStatus.rejected =>
+                                          Icons.cancel_rounded,
+                                        MeetupRequestStatus.withdrawn =>
+                                          Icons.undo_rounded,
+                                      },
+                                      label: switch (meetup.myRequestStatus!) {
+                                        MeetupRequestStatus.pending =>
+                                          'REQUEST PENDING',
+                                        MeetupRequestStatus.accepted =>
+                                          'YOU\'RE IN',
+                                        MeetupRequestStatus.rejected =>
+                                          'REQUEST DECLINED',
+                                        MeetupRequestStatus.withdrawn =>
+                                          'WITHDRAWN',
+                                      },
+                                      tone: switch (meetup.myRequestStatus!) {
+                                        MeetupRequestStatus.pending =>
+                                          _StatusTone.pending,
+                                        MeetupRequestStatus.accepted =>
+                                          _StatusTone.accepted,
+                                        MeetupRequestStatus.rejected =>
+                                          _StatusTone.declined,
+                                        MeetupRequestStatus.withdrawn =>
+                                          _StatusTone.muted,
+                                      },
+                                    ),
+                                ],
+                              ),
+                              // Only a real action gets a button. A viewer who is
+                              // hosting, or has already asked, has nothing to press
+                              // here, so the row ends and VIEW LOCATION follows.
+                              if (locked) ...[
+                                const SizedBox(height: 14),
+                                PrimaryButton(
+                                  label: 'REQUEST TO JOIN',
+                                  height: 42,
+                                  onPressed: () => _handleLockedTap(context),
+                                ),
+                              ] else if (!meetup.isHostedByMe &&
+                                  meetup.myRequestStatus == null) ...[
+                                const SizedBox(height: 14),
+                                PrimaryButton(
+                                  label: full ? 'FULL' : 'REQUEST TO JOIN',
+                                  height: 42,
+                                  onPressed: full ? null : onRequestToJoin,
+                                ),
+                              ] else
+                                const SizedBox(height: 6),
+                              const SizedBox(height: 4),
+                              // A quiet text action under the primary one, as in the
+                              // reference: two equally-weighted outlined buttons stacked read
+                              // as a choice between equals, and this is not one. Joining is
+                              // the point of the card; looking at the map is a detail.
+                              //
+                              // ADR-029 (round-8 hardening) — same lockedForViewer gate as
+                              // every other action here (LocationViewPage.open handles the
+                              // toast+redirect itself), shown regardless of hosting/request
+                              // state.
+                              // An outlined, full-width secondary action with
+                              // a pin — bare grey caps text read as a caption,
+                              // not as something to press. Still quieter than
+                              // the filled primary above it.
+                              OutlinedButton.icon(
+                                onPressed: () => LocationViewPage.open(
+                                  context,
+                                  meetup,
+                                  viewerTrustLevel: viewerTrustLevel,
+                                ),
+                                icon: Icon(
+                                  Icons.location_on_outlined,
+                                  size: 16,
+                                  color: AppPalette.candyBlue,
+                                ),
+                                label: Text(
+                                  'VIEW LOCATION',
+                                  style: TextStyle(
+                                    color: AppPalette.candyBlue,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  minimumSize: const Size.fromHeight(40),
+                                  side: BorderSide(
+                                    color: AppPalette.candyBlue.withValues(
+                                      alpha: 0.45,
+                                    ),
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  MeetupStatusBadge(status: meetup.status),
-                ],
-              ),
-              const SizedBox(height: 14),
-              if (locked)
-                PrimaryButton(
-                  label: 'REQUEST TO JOIN',
-                  height: 42,
-                  onPressed: () => _handleLockedTap(context),
-                )
-              else if (meetup.isHostedByMe)
-                _StatusPill(
-                  label: 'YOU\'RE HOSTING',
-                  color: AppPalette.candyBlue,
-                )
-              else if (meetup.myRequestStatus != null)
-                _StatusPill(
-                  label: switch (meetup.myRequestStatus!) {
-                    MeetupRequestStatus.pending => 'REQUEST PENDING',
-                    MeetupRequestStatus.accepted => 'YOU\'RE IN',
-                    MeetupRequestStatus.rejected => 'REQUEST DECLINED',
-                    MeetupRequestStatus.withdrawn => 'WITHDRAWN',
-                  },
-                  color: switch (meetup.myRequestStatus!) {
-                    MeetupRequestStatus.pending => AppPalette.candyBlue,
-                    MeetupRequestStatus.accepted => AppPalette.verified,
-                    MeetupRequestStatus.rejected => AppPalette.danger,
-                    MeetupRequestStatus.withdrawn => AppPalette.textSecondary,
-                  },
-                )
-              else
-                PrimaryButton(
-                  label: full ? 'FULL' : 'REQUEST TO JOIN',
-                  height: 42,
-                  onPressed: full ? null : onRequestToJoin,
                 ),
-              const SizedBox(height: 10),
-              // ADR-029 (round-8 hardening) — same lockedForViewer gate as
-              // every other action on this card (LocationViewPage.open
-              // handles the toast+redirect itself), shown regardless of
-              // hosting/request state.
-              SecondaryButton(
-                label: 'VIEW LOCATION',
-                height: 38,
-                onPressed: () => LocationViewPage.open(
-                  context,
-                  meetup,
-                  viewerTrustLevel: viewerTrustLevel,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -225,25 +337,33 @@ class _CardHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              // Three stacked lines, none of which may truncate: the name
+              // wraps onto a second line if it must; the trust badge and
+              // rating sit under it; the verification badges under those.
+              // The old single row put the name, badge and stars side by
+              // side and cut the name off with an ellipsis whenever the
+              // three did not fit — a person's name is the one thing on
+              // the card that must never be abbreviated.
+              Text(
+                // hostFullName is only ever null for a locked meetup
+                // (ADR-028) — _MeetupCard never mounts this widget in
+                // that case, so this is always real data here.
+                meetup.hostFullName!,
+                softWrap: true,
+                style: TextStyle(
+                  color: AppPalette.textPrimary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  height: 1.2,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Flexible(
-                    child: Text(
-                      // hostFullName is only ever null for a locked meetup
-                      // (ADR-028) — _MeetupCard never mounts this widget in
-                      // that case, so this is always real data here.
-                      meetup.hostFullName!,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: AppPalette.textPrimary,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
                   TrustLevelBadge(trustLevel: meetup.hostTrustLevel),
-                  const SizedBox(width: 6),
                   StarRating(
                     average: meetup.hostRatingAverage,
                     count: meetup.hostRatingCount,
@@ -296,8 +416,6 @@ class _DetailRow extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: emphasised
                   ? AppPalette.textPrimary
@@ -369,8 +487,6 @@ class LockedCardHeader extends StatelessWidget {
               // The location — present for a guest (ADR-002 § 5), so shown.
               Text(
                 locationLabel ?? 'Location unavailable',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: AppPalette.textSecondary, fontSize: 11),
               ),
               const SizedBox(height: 6),
@@ -390,32 +506,53 @@ class LockedCardHeader extends StatelessWidget {
   }
 }
 
-class _StatusPill extends StatelessWidget {
-  const _StatusPill({required this.label, required this.color});
+enum _StatusTone { host, pending, accepted, declined, muted }
 
+/// The viewer's relationship to the meetup as a chip in the tag row — same
+/// shape as the intent/joined tags so it reads as one more fact, with an
+/// icon and a tone so it still reads at a glance.
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.icon,
+    required this.label,
+    required this.tone,
+  });
+
+  final IconData icon;
   final String label;
-  final Color color;
+  final _StatusTone tone;
 
   @override
   Widget build(BuildContext context) {
+    final color = switch (tone) {
+      _StatusTone.host => AppPalette.brandGreen,
+      _StatusTone.pending => AppPalette.candyBlue,
+      _StatusTone.accepted => AppPalette.verified,
+      _StatusTone.declined => AppPalette.danger,
+      _StatusTone.muted => AppPalette.textSecondary,
+    };
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.fromLTRB(8, 5, 10, 5),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
-        color: color.withValues(alpha: 0.08),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
-      child: Center(
-        child: Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-            fontSize: 11,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 9,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

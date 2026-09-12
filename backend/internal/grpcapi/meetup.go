@@ -31,6 +31,7 @@ var intentFromProto = map[meetupv1.Intent]meetup.Intent{
 	meetupv1.Intent_INTENT_MENTORSHIP: meetup.IntentMentorship,
 	meetupv1.Intent_INTENT_RIDE_SHARE: meetup.IntentRideShare,
 	meetupv1.Intent_INTENT_DATING:     meetup.IntentDating,
+	meetupv1.Intent_INTENT_OUTING:     meetup.IntentOuting,
 }
 
 var intentToProto = map[meetup.Intent]meetupv1.Intent{
@@ -40,6 +41,7 @@ var intentToProto = map[meetup.Intent]meetupv1.Intent{
 	meetup.IntentMentorship: meetupv1.Intent_INTENT_MENTORSHIP,
 	meetup.IntentRideShare:  meetupv1.Intent_INTENT_RIDE_SHARE,
 	meetup.IntentDating:     meetupv1.Intent_INTENT_DATING,
+	meetup.IntentOuting:     meetupv1.Intent_INTENT_OUTING,
 }
 
 var statusToProto = map[meetup.Status]meetupv1.MeetupStatus{
@@ -424,6 +426,39 @@ func (s *MeetupServer) ListMeetupParticipants(ctx context.Context, req *meetupv1
 		Redacted:     result.Redacted,
 		TotalCount:   int32(result.TotalCount),
 	}, nil
+}
+
+func (s *MeetupServer) GetMemberActivity(ctx context.Context, req *meetupv1.GetMemberActivityRequest) (*meetupv1.GetMemberActivityResponse, error) {
+	activity, err := s.svc.GetMemberActivity(ctx, req.GetViewerId(), req.GetTargetId())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	out := make([]*meetupv1.MemberMeetup, 0, len(activity.RecentMeetups))
+	for _, mm := range activity.RecentMeetups {
+		comments := make([]*meetupv1.MemberMeetupComment, 0, len(mm.Comments))
+		for _, c := range mm.Comments {
+			comments = append(comments, &meetupv1.MemberMeetupComment{
+				AuthorName:           c.AuthorName,
+				Note:                 c.Note,
+				WrittenAtUnixSeconds: c.WrittenAt.Unix(),
+			})
+		}
+		out = append(out, &meetupv1.MemberMeetup{
+			Id:                     mm.ID,
+			Intent:                 intentToProto[mm.Intent],
+			Status:                 statusToProto[mm.Status],
+			WindowStartUnixSeconds: mm.WindowStart.Unix(),
+			WindowEndUnixSeconds:   mm.WindowEnd.Unix(),
+			LocationLabel:          mm.LocationLabel,
+			Hosted:                 mm.Hosted,
+			ParticipantCount:       int32(mm.ParticipantCount),
+			OverallAverage:         mm.OverallAverage,
+			ReviewCount:            int32(mm.ReviewCount),
+			ViewerWasIn:            mm.ViewerWasIn,
+			Comments:               comments,
+		})
+	}
+	return &meetupv1.GetMemberActivityResponse{RecentMeetups: out}, nil
 }
 
 func (s *MeetupServer) ListRatableParticipants(ctx context.Context, req *meetupv1.ListRatableParticipantsRequest) (*meetupv1.ListRatableParticipantsResponse, error) {

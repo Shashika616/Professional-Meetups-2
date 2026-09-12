@@ -206,7 +206,10 @@ class _AppShellState extends ConsumerState<AppShell>
     ) {
       final wasLoggedIn = previous?.value?.isLoggedIn ?? false;
       final isLoggedIn = next.value?.isLoggedIn ?? false;
-      if (wasLoggedIn && !isLoggedIn) {
+      // A sign-out the user chose is ProfilePage's to navigate, and it
+      // needs no explanation — this net is for sessions that died.
+      final byUser = next.value?.signedOutByUser ?? false;
+      if (wasLoggedIn && !isLoggedIn && !byUser) {
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
             builder: (context) => const LandingPage(sessionExpired: true),

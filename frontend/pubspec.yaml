@@ -142,7 +142,10 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
-    - assets/images/watch/
+    - assets/images/brand/
+    - assets/images/landing/
+    - assets/images/schedule/
+    - assets/images/review/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark counterpart of values/launch_colors.xml - see that file. -->
+<resources>
+    <color name="launch_ground">#FF020202</color>
+</resources>

@@ -128,7 +128,11 @@ func (s *service) filterRatable(ctx context.Context, req ListRatableParticipants
 	if err != nil {
 		return nil, err
 	}
-	if !time.Now().Before(m.WindowEnd) {
+	// A cancelled meetup never takes this shortcut, whatever the clock
+	// says: nobody met, so the only person offerable is the host, and only
+	// to an accepted participant — which is exactly what the eligibility
+	// filter below produces.
+	if m.Status != repository.MeetupStatusCancelled && !time.Now().Before(m.WindowEnd) {
 		return participants, nil
 	}
 

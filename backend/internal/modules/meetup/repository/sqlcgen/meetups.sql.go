@@ -952,6 +952,11 @@ WITH deduped AS (
   ) ratings ON true
   LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = $4
   WHERE m.status = 'open'
+    -- Same clock filter as ListOpenMeetupsFirstPage, and it has to be here
+    -- too: a predicate that held on page 1 but not on page 2 would let an
+    -- ended meetup reappear the moment the user scrolled. See that query for
+    -- why the status column alone is not enough.
+    AND m.window_end > now()
     -- Both filters below are OPTIONAL and default to today's exact
     -- behaviour when unset, so every pre-existing caller is unaffected.
     --
@@ -1100,6 +1105,22 @@ WITH deduped AS (
   ) ratings ON true
   LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = $2
   WHERE m.status = 'open'
+    -- A meetup whose window has ENDED is not browsable, whatever its status
+    -- column still says. This is NOT redundant with the auto-close sweep --
+    -- it is what keeps this list correct when the sweep has not run.
+    --
+    -- On 2026-09-10 a production meetup whose window ended at 11:15 was not
+    -- closed until 13:08, because Cloud Run scales to zero and the lifecycle
+    -- poller only advances while a container exists. For 1h53m it sat in the
+    -- browse list, still presented as joinable. Filtering on status alone
+    -- makes this read path depend on a background job having run; filtering
+    -- on the clock as well makes it self-consistent, and demotes the sweep
+    -- back to bookkeeping and notifications rather than a correctness
+    -- dependency of the browse screen.
+    --
+    -- window_END, deliberately, not window_start: a meetup already underway
+    -- is still joinable and must stay listed.
+    AND m.window_end > now()
     -- Both filters below are OPTIONAL and default to today's exact
     -- behaviour when unset, so every pre-existing caller is unaffected.
     --

@@ -90,7 +90,6 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
       extendBodyBehindAppBar: true,
       appBar: AppBar(title: const Text('SIGN IN')),
       body: AppBackground(
-        imageOpacity: 0.35,
         child: SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),

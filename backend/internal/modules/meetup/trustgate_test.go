@@ -26,6 +26,7 @@ func TestRequiredTrustLevelToJoin(t *testing.T) {
 		{IntentMentorship, 2},
 		{IntentRideShare, 4},
 		{IntentDating, 4},
+		{IntentOuting, 2},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.intent), func(t *testing.T) {
@@ -50,6 +51,7 @@ func TestRequiredTrustLevelToHost(t *testing.T) {
 		{IntentMentorship, 3},
 		{IntentRideShare, 4},
 		{IntentDating, 4},
+		{IntentOuting, 3},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.intent), func(t *testing.T) {
@@ -66,7 +68,7 @@ func TestRequiredTrustLevelToHost(t *testing.T) {
 // property over every intent rather than re-listing the numbers, so a future
 // edit to either function cannot break it silently.
 func TestHostBarIsNeverBelowJoinBar(t *testing.T) {
-	for _, intent := range []Intent{IntentCoffee, IntentLunch, IntentNetworking, IntentMentorship, IntentRideShare, IntentDating} {
+	for _, intent := range []Intent{IntentCoffee, IntentLunch, IntentNetworking, IntentMentorship, IntentRideShare, IntentDating, IntentOuting} {
 		join := requiredTrustLevelToJoin(intent)
 		host := requiredTrustLevelToHost(intent)
 		if host < join {

@@ -28,7 +28,21 @@ const (
 	IntentMentorship Intent = "mentorship"
 	IntentRideShare  Intent = "ride_share"
 	IntentDating     Intent = "dating"
+	IntentOuting     Intent = "outing"
 )
+
+// DisplayName is the intent as it should read inside a sentence shown to a
+// person — notification bodies interpolate it. The wire value is not that:
+// "ride_share" carries an underscore. Mirrors the frontend's IntentType.label (in
+// sentence case); a rename on one side must be made on the other.
+func (i Intent) DisplayName() string {
+	switch i {
+	case IntentRideShare:
+		return "ride share"
+	default:
+		return string(i)
+	}
+}
 
 // Status is a meetup's lifecycle state.
 type Status string

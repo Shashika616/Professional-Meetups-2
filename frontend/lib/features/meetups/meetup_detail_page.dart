@@ -9,8 +9,10 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
+import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
-import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
@@ -18,7 +20,6 @@ import 'package:professional_connections_platform/features/home/widgets/meetup_c
     show LockedCardHeader;
 import 'package:professional_connections_platform/features/meetups/location_view_page.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/host_meetup_controls.dart';
-import 'package:professional_connections_platform/features/meetups/participants_page.dart';
 import 'package:professional_connections_platform/features/meetups/review/meetup_review_section.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/participants_strip.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
@@ -50,7 +51,6 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   /// eligibility just changed, rather than rendering it unconditionally
   /// from page load and leaving it stuck with a stale empty fetch (ADR-020
   /// §4 widens the other two triggers — see [_buildContent]).
-  bool _feedbackHappened = false;
 
   @override
   void initState() {
@@ -148,22 +148,49 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   /// Requester-side withdraw (ADR-020 §4) — both pending and accepted
   /// requests are withdrawable. The note is optional context shown to the
   /// host, who may rate the requester once for the withdrawal.
-  Future<void> _confirmWithdraw(String requestId) async {
-    final note = await showDialog<String>(
-      context: context,
-      // Returns null on BACK/dismiss, or the (possibly empty) note text on
-      // WITHDRAW — a plain bool wouldn't carry the note back out, so the
-      // dialog itself resolves the confirm/note-capture into one value.
-      builder: (context) => const _WithdrawNoteDialog(),
-    );
-    if (note == null) return;
+  /// Two different things, one endpoint (the server tells them apart by
+  /// the request's state, and so does this):
+  ///
+  ///  - A PENDING request is CANCELLED: the host has not answered, nobody
+  ///    is told, nothing is recorded, and the user may ask again. A plain
+  ///    yes/no — there is no host to leave a note for.
+  ///  - An ACCEPTED request is WITHDRAWN (ADR-020 §4): the host planned
+  ///    around this person and is told who backed out, with an optional
+  ///    note. That is the dialog with the text field.
+  Future<void> _confirmWithdraw(
+    String requestId, {
+    required bool pending,
+  }) async {
+    final String? note;
+    if (pending) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => const _CancelRequestDialog(),
+      );
+      if (confirmed != true) return;
+      note = '';
+    } else {
+      note = await showDialog<String>(
+        context: context,
+        // Returns null on BACK/dismiss, or the (possibly empty) note text
+        // on WITHDRAW — a plain bool wouldn't carry the note back out, so
+        // the dialog itself resolves the confirm/note-capture into one
+        // value.
+        builder: (context) => const _WithdrawNoteDialog(),
+      );
+      if (note == null) return;
+    }
     if (!mounted) return;
     try {
       await ref
           .read(meetupServiceProvider)
           .withdrawRequest(requestId, note: note.isEmpty ? null : note);
       if (!mounted) return;
-      showSnack(context, 'Request withdrawn.', type: ToastType.success);
+      showSnack(
+        context,
+        pending ? 'Request cancelled.' : 'Request withdrawn.',
+        type: ToastType.success,
+      );
       await _load();
     } on MeetupSessionExpiredException {
       // A 401 means the session itself is gone, so every later call
@@ -208,7 +235,16 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     final trustLevel =
         ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
     if (!meetup.lockedForViewer && meetup.intent.canJoin(trustLevel)) {
-      return PrimaryButton(label: 'REQUEST TO JOIN', onPressed: _requestToJoin);
+      return PrimaryButton(
+        label: 'REQUEST TO JOIN',
+        onPressed: () async {
+          // Who is hosting, before anything is sent.
+          if (!await showJoinConfirmationSheet(context, meetup: meetup)) {
+            return;
+          }
+          await _requestToJoin();
+        },
+      );
     }
     return PrimaryButton(
       label: 'REQUEST TO JOIN',
@@ -305,136 +341,6 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     }
   }
 
-  Future<void> _checkIn() async {
-    try {
-      final state = await ref
-          .read(meetupServiceProvider)
-          .checkIn(widget.meetupId);
-      if (!mounted) return;
-      setState(() => _safetyState = state);
-      showSnack(context, 'Checked in.', type: ToastType.success);
-    } on MeetupSessionExpiredException {
-      // A 401 means the session itself is gone, so every later call
-      // fails too. Falling through to the generic catch below would
-      // show an error the user can only retry forever; signing out is
-      // the only thing that recovers. Mirrors the AuthService
-      // SessionExpiredException idiom in profile_page.dart.
-      if (mounted) {
-        ref.read(authSessionProvider.notifier).forceSignOut();
-      }
-    } catch (error) {
-      if (mounted) {
-        showSnack(
-          context,
-          error is MeetupException
-              ? error.message
-              : 'Something went wrong. Please try again.',
-          type: ToastType.error,
-        );
-      }
-    }
-  }
-
-  /// Decline the safety checklist/check-in stage with a required reason
-  /// (ADR-024 §4) — the required-reason dialog mirrors
-  /// `host_meetup_controls.dart`'s `_CancelReasonDialog` (same pattern
-  /// ADR-020 already established, not a second one). The backend rejects
-  /// this outright if the caller already checked in (mutual exclusion);
-  /// that surfaces as a normal error toast like any other rejection here.
-  Future<void> _confirmDecline() async {
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (context) => const _DeclineReasonDialog(),
-    );
-    if (reason == null) return;
-    if (!mounted) return;
-    try {
-      final state = await ref
-          .read(meetupServiceProvider)
-          .declineCheckIn(widget.meetupId, reason);
-      if (!mounted) return;
-      setState(() => _safetyState = state);
-      showSnack(context, 'Declined.', type: ToastType.success);
-    } on MeetupSessionExpiredException {
-      // A 401 means the session itself is gone, so every later call
-      // fails too. Falling through to the generic catch below would
-      // show an error the user can only retry forever; signing out is
-      // the only thing that recovers. Mirrors the AuthService
-      // SessionExpiredException idiom in profile_page.dart.
-      if (mounted) {
-        ref.read(authSessionProvider.notifier).forceSignOut();
-      }
-    } catch (error) {
-      if (mounted) {
-        showSnack(
-          context,
-          error is MeetupException
-              ? error.message
-              : 'Something went wrong. Please try again.',
-          type: ToastType.error,
-        );
-      }
-    }
-  }
-
-  Future<void> _submitFeedback({
-    required bool happened,
-    bool? feltSafe,
-    bool? profileAccurate,
-    bool? wouldMeetAgain,
-  }) async {
-    // Second, optional step (ADR-016) — a free-text note after the
-    // happened/didn't-happen choice. Neither Save nor Skip (nor dismissing
-    // the sheet) blocks reaching the actual submit call below; only Save
-    // with real text carries a non-null value through.
-    final notes = await _showFeedbackNoteSheet();
-    if (!mounted) return;
-    try {
-      await ref
-          .read(meetupServiceProvider)
-          .submitMeetupFeedback(
-            widget.meetupId,
-            happened: happened,
-            feltSafe: feltSafe,
-            profileAccurate: profileAccurate,
-            wouldMeetAgain: wouldMeetAgain,
-            notes: notes,
-          );
-      if (!mounted) return;
-      showSnack(context, 'Thanks for the feedback.', type: ToastType.success);
-      if (happened) setState(() => _feedbackHappened = true);
-    } on MeetupSessionExpiredException {
-      // A 401 means the session itself is gone, so every later call
-      // fails too. Falling through to the generic catch below would
-      // show an error the user can only retry forever; signing out is
-      // the only thing that recovers. Mirrors the AuthService
-      // SessionExpiredException idiom in profile_page.dart.
-      if (mounted) {
-        ref.read(authSessionProvider.notifier).forceSignOut();
-      }
-    } catch (error) {
-      if (mounted) {
-        showSnack(
-          context,
-          error is MeetupException
-              ? error.message
-              : 'Something went wrong. Please try again.',
-          type: ToastType.error,
-        );
-      }
-    }
-  }
-
-  Future<String?> _showFeedbackNoteSheet() {
-    final controller = TextEditingController();
-    return showModalBottomSheet<String?>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _FeedbackNoteSheet(controller: controller),
-    ).whenComplete(controller.dispose);
-  }
-
   /// Both pending and accepted requests are withdrawable (ADR-020 §4,
   /// mirrors the backend's own widened precondition) — [myRequestId] is
   /// only ever set alongside [myRequestStatus], but the null-check is kept
@@ -444,26 +350,6 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       meetup.myRequestId != null &&
       (meetup.myRequestStatus == MeetupRequestStatus.pending ||
           meetup.myRequestStatus == MeetupRequestStatus.accepted);
-
-  // Every meetup has a real window now, "today" included (ADR-016) — no
-  // more isToday-means-always-open special case. Opens 10 minutes before
-  // windowStart, same grace period as before. windowStart can be null
-  // (ADR-028 — GetMeetup redacts too as of round-5/6 hardening); in
-  // practice this getter is only ever read once `_safetyState != null`
-  // (build(), below), which itself only happens for a real participant —
-  // ADR-028's round-6 participation exception means GetMeetup never
-  // redacts a participant's own meetup, so a null windowStart shouldn't
-  // reach here today. Handled defensively anyway (check-in unavailable,
-  // not a crash) rather than relying on that chain staying true forever.
-  bool get _checkInWindowOpen {
-    final meetup = _meetup;
-    if (meetup == null) return true;
-    final windowStart = meetup.windowStart;
-    if (windowStart == null) return false;
-    return DateTime.now().isAfter(
-      windowStart.subtract(const Duration(minutes: 10)),
-    );
-  }
 
   /// Whether this meetup is finished — over, or called off.
   ///
@@ -486,21 +372,28 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     return windowEnd != null && DateTime.now().isAfter(windowEnd);
   }
 
-  /// Whether the meetup has actually begun.
+  /// Whether the viewer was actually ON this meetup.
   ///
-  /// "How did it go?" is gated on this. It used to be gated on nothing, so a
-  /// meetup scheduled for next week offered IT HAPPENED / DIDN'T HAPPEN —
-  /// and IT HAPPENED is what unlocks the rating block, so the host was shown
-  /// a star picker for someone they had not met yet.
+  /// [_isPastMeetup] answers "is this over", which is a question about the
+  /// CLOCK. It says nothing about the viewer, and for a while this page
+  /// treated the two as the same question: the review section was gated on
+  /// `_isPastMeetup` alone, so any authenticated user who opened any finished
+  /// meetup from the browse list was invited to review it. Reported from the
+  /// deployed app by someone who had never requested to join.
   ///
-  /// windowStart, not windowEnd, so someone can report a no-show without
-  /// sitting out the whole window. No grace period either, unlike
-  /// [_checkInWindowOpen]: checking in slightly early is reasonable,
-  /// reporting on a meetup slightly before it starts is not.
-  bool get _meetupHasStarted {
-    final windowStart = _meetup?.windowStart;
-    if (windowStart == null) return false;
-    return !DateTime.now().isBefore(windowStart);
+  /// The server was never fooled - SubmitMeetupReview calls requireParticipant
+  /// and ListRatableParticipants hands a non-participant an empty roster - so
+  /// nothing false could be written. What was broken was the offer: a control
+  /// that cannot work, on a meetup that is none of your business.
+  ///
+  /// Mirrors the server's own definition of a participant deliberately (host,
+  /// or an ACCEPTED requester). Pending is not enough: a request that was
+  /// never answered before the meetup ended means the person did not go.
+  bool get _viewerIsParticipant {
+    final meetup = _meetup;
+    if (meetup == null) return false;
+    return meetup.isHostedByMe ||
+        meetup.myRequestStatus == MeetupRequestStatus.accepted;
   }
 
   @override
@@ -528,122 +421,231 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     );
   }
 
+  /// Green while the meetup is still ahead, gold once its window has passed,
+  /// muted if cancelled. Identical rule to `_MyMeetupTile` on Events and
+  /// `_ActiveMeetupRow` on Home, so one meetup keeps one colour wherever it
+  /// is shown.
+  Color _stateEdgeColor(Meetup meetup) {
+    final end = meetup.windowEnd;
+    final over = end != null && DateTime.now().isAfter(end);
+    return switch (meetup.status) {
+      MeetupStatus.cancelled => AppPalette.cancelled,
+      _ when over => AppPalette.gold,
+      _ => AppPalette.verified,
+    };
+  }
+
   Widget _buildContent(BuildContext context, Meetup meetup) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       children: [
-        FlatCard(
-          radius: 12,
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      meetup.intent.label,
-                      style: TextStyle(
-                        color: AppPalette.candyBlue,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.4,
+        // The same shell as the Home and Events cards: a state bar down the
+        // left edge instead of a status chip on the right. This page is where
+        // a user lands FROM those cards, so it arriving with different
+        // vocabulary was the most jarring inconsistency of the three.
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: FlatCard(
+            radius: 14,
+            padding: EdgeInsets.zero,
+            child: Stack(
+              children: [
+                IntentBackdrop(intent: meetup.intent),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Container(width: 4, color: _stateEdgeColor(meetup)),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 32,
+                                    height: 32,
+                                    decoration: BoxDecoration(
+                                      color: _stateEdgeColor(
+                                        meetup,
+                                      ).withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(9),
+                                    ),
+                                    child: Icon(
+                                      meetup.intent.icon,
+                                      size: 16,
+                                      color: _stateEdgeColor(meetup),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      meetup.intent.label.toUpperCase(),
+                                      style: TextStyle(
+                                        color: AppPalette.textSecondary,
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 1.3,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              // lockedForViewer (ADR-028, round-5 hardening) — GetMeetup
+                              // now redacts the same way ListOpenMeetups does, so
+                              // hostFullName/locationLabel/the window can genuinely be
+                              // absent here. Reuses the shared LockedCardHeader
+                              // rather than a second lock-treatment widget. Currently
+                              // unreachable through any in-app navigation path (a locked
+                              // card's tap redirects at the card level, never opening this
+                              // page) — handled anyway so this doesn't force-unwrap into a
+                              // crash the moment that stops being true (e.g. a
+                              // notification deep link).
+                              if (meetup.lockedForViewer)
+                                LockedCardHeader(
+                                  locationLabel: meetup.locationLabel,
+                                )
+                              else ...[
+                                Text(
+                                  meetup.formattedWindow,
+                                  style: TextStyle(
+                                    color: AppPalette.textPrimary,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  meetup.locationLabel!,
+                                  style: TextStyle(
+                                    color: AppPalette.textSecondary,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () => PublicProfilePage.open(
+                                    context,
+                                    userId: meetup.hostUserId,
+                                    initialName: meetup.hostFullName,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Flexible(
+                                        child: Text(
+                                          'Hosted by ${meetup.hostFullName!} • L${meetup.hostTrustLevel} Trust',
+                                          style: TextStyle(
+                                            color: AppPalette.textSecondary,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ),
+                                      Icon(
+                                        Icons.chevron_right_rounded,
+                                        size: 16,
+                                        color: AppPalette.textSecondary,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              const SizedBox(height: 4),
+                              // accepted_count/capacity are never redacted (ADR-028 § 1).
+                              Text(
+                                '${meetup.acceptedCount}/${meetup.capacity} confirmed',
+                                style: TextStyle(
+                                  color: AppPalette.textSecondary,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              // Who is actually coming, on the card itself. Self-hides when
+                              // there is nobody but the host and nothing to show. Identities
+                              // are withheld server-side below trust level 2 — see
+                              // ParticipantsStrip.
+                              const SizedBox(height: 12),
+                              Divider(height: 1, color: AppPalette.hairline),
+                              const SizedBox(height: 12),
+                              ParticipantsStrip(
+                                meetupId: widget.meetupId,
+                                meetup: meetup,
+                                finished:
+                                    meetup.status == MeetupStatus.completed ||
+                                    _isPastMeetup,
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
-                  MeetupStatusBadge(status: meetup.status),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // lockedForViewer (ADR-028, round-5 hardening) — GetMeetup
-              // now redacts the same way ListOpenMeetups does, so
-              // hostFullName/locationLabel/the window can genuinely be
-              // absent here. Reuses the shared LockedCardHeader
-              // rather than a second lock-treatment widget. Currently
-              // unreachable through any in-app navigation path (a locked
-              // card's tap redirects at the card level, never opening this
-              // page) — handled anyway so this doesn't force-unwrap into a
-              // crash the moment that stops being true (e.g. a
-              // notification deep link).
-              if (meetup.lockedForViewer)
-                LockedCardHeader(locationLabel: meetup.locationLabel)
-              else ...[
-                Text(
-                  meetup.formattedWindow,
-                  style: TextStyle(
-                    color: AppPalette.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  meetup.locationLabel!,
-                  style: TextStyle(
-                    color: AppPalette.textSecondary,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Hosted by ${meetup.hostFullName!} • Level ${meetup.hostTrustLevel}',
-                  style: TextStyle(
-                    color: AppPalette.textSecondary,
-                    fontSize: 12,
+                    ],
                   ),
                 ),
               ],
-              const SizedBox(height: 4),
-              // accepted_count/capacity are never redacted (ADR-028 § 1).
-              Text(
-                '${meetup.acceptedCount}/${meetup.capacity} confirmed',
-                style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-              ),
-              // Who is actually coming, on the card itself. Self-hides when
-              // there is nobody but the host and nothing to show. Identities
-              // are withheld server-side below trust level 2 — see
-              // ParticipantsStrip.
-              const SizedBox(height: 12),
-              Divider(height: 1, color: AppPalette.hairline),
-              const SizedBox(height: 12),
-              ParticipantsStrip(meetupId: widget.meetupId),
-            ],
+            ),
           ),
         ),
-        const SizedBox(height: 12),
-        SecondaryButton(
-          label: 'VIEW PARTICIPANTS',
-          height: 40,
-          icon: Icons.groups_outlined,
-          onPressed: () =>
-              ParticipantsPage.open(context, meetupId: widget.meetupId),
-        ),
-        const SizedBox(height: 12),
+        if (meetup.status == MeetupStatus.cancelled) ...[
+          const SizedBox(height: 14),
+          _CancelledBanner(reason: meetup.cancellationReason ?? ''),
+        ],
+        const SizedBox(height: 14),
+        // Two peers, side by side, not a stack of full width outlines.
+        //
+        // These were 40pt hairline-bordered bars spanning the page, one above
+        // the other, which read as disabled rows rather than as things to
+        // press. They are the same KIND of action as each other and neither is
+        // the page's main one, so they belong on one line sharing the width,
+        // with an icon each to make them scannable without reading.
+        //
         // ADR-029 (round-8 hardening) — LocationViewPage.open owns the gate
-        // itself (toast + redirect), so this button is shown regardless of
-        // hosting/request state and regardless of trust level. The trust
-        // level is passed rather than re-derived there: this page already
-        // has it, and a widget that navigates should not be reaching into
-        // the session to decide whether it may.
-        SecondaryButton(
-          label: 'VIEW LOCATION',
-          height: 40,
-          onPressed: () => LocationViewPage.open(
-            context,
-            meetup,
-            viewerTrustLevel:
-                ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0,
-          ),
+        // itself (toast + redirect), so its button is shown regardless of
+        // hosting/request state and regardless of trust level. The trust level
+        // is passed rather than re-derived there: this page already has it,
+        // and a widget that navigates should not be reaching into the session
+        // to decide whether it may.
+        // The participants strip on the card above is the way into the
+        // guest list — a second PARTICIPANTS tile here did the same thing.
+        Row(
+          children: [
+            Expanded(
+              child: _ActionTile(
+                icon: Icons.place_outlined,
+                label: 'LOCATION',
+                onTap: () => LocationViewPage.open(
+                  context,
+                  meetup,
+                  viewerTrustLevel:
+                      ref
+                          .watch(authSessionProvider)
+                          .value
+                          ?.profile
+                          ?.trustLevel ??
+                      0,
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         // Everything from here down is about GETTING to a meetup. A finished
         // one gets the review instead — see _isPastMeetup.
         if (_isPastMeetup) ...[
-          MeetupReviewSection(
-            meetupId: widget.meetupId,
-            hostUserId: meetup.hostUserId,
-            cancelled: meetup.status == MeetupStatus.cancelled,
-          ),
+          // Non-participants get NOTHING here, not a disabled review: the
+          // join/withdraw controls in the else-branch are equally wrong for a
+          // finished meetup, so a stranger viewing one correctly sees the
+          // details and nothing actionable.
+          if (_viewerIsParticipant)
+            MeetupReviewSection(
+              meetupId: widget.meetupId,
+              hostUserId: meetup.hostUserId,
+              cancelled: meetup.status == MeetupStatus.cancelled,
+              cancellationReason: meetup.cancellationReason,
+              viewerIsHost: meetup.isHostedByMe,
+            ),
         ] else ...[
           if (!meetup.isHostedByMe && meetup.myRequestStatus == null)
             _buildJoinAction(context, meetup)
@@ -651,13 +653,28 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
             _RequestStatusBanner(status: meetup.myRequestStatus!),
             if (_canWithdraw(meetup)) ...[
               const SizedBox(height: 10),
-              SecondaryButton(
-                label: 'WITHDRAW REQUEST',
-                height: 40,
-                color: AppPalette.danger,
-                borderColor: AppPalette.danger,
-                onPressed: () => _confirmWithdraw(meetup.myRequestId!),
-              ),
+              // Before the host answers, taking the request back is a
+              // cancellation — quieter, and in the neutral colour: nothing
+              // is being broken, nobody is let down. After acceptance it
+              // is a withdrawal, and the red says so.
+              if (meetup.myRequestStatus == MeetupRequestStatus.pending)
+                SecondaryButton(
+                  label: 'CANCEL REQUEST',
+                  height: 40,
+                  color: AppPalette.textSecondary,
+                  borderColor: AppPalette.hairline,
+                  onPressed: () =>
+                      _confirmWithdraw(meetup.myRequestId!, pending: true),
+                )
+              else
+                SecondaryButton(
+                  label: 'WITHDRAW REQUEST',
+                  height: 40,
+                  color: AppPalette.danger,
+                  borderColor: AppPalette.danger,
+                  onPressed: () =>
+                      _confirmWithdraw(meetup.myRequestId!, pending: false),
+                ),
             ],
           ],
           // Host-only Cancel/Close actions (ADR-016 + its 2026-08-20
@@ -679,13 +696,8 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
             const SizedBox(height: 24),
             _SafetyGateSection(
               safetyState: _safetyState,
-              checkInWindowOpen: _checkInWindowOpen,
-              meetupHasStarted: _meetupHasStarted,
               onAcknowledgeChecklist: _acknowledgeChecklist,
               onShareWithContacts: _shareWithContacts,
-              onCheckIn: _checkIn,
-              onDecline: _confirmDecline,
-              onSubmitFeedback: _submitFeedback,
             ),
           ],
           // ADR-020 widens this beyond the original happened-based trigger:
@@ -695,8 +707,16 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
           // own status/window. RatingPrompt itself self-gates on whatever
           // ListRatableParticipants actually returns, rendering nothing if
           // there's still nothing to rate.
-          if (_feedbackHappened ||
-              meetup.status == MeetupStatus.cancelled ||
+          // _feedbackHappened used to be the first term here. It was set by
+          // the IT HAPPENED button and by nothing else, so with that prompt
+          // removed it could never become true again and the condition was
+          // exactly what is left below. Dropping a provably-false term is
+          // behaviour preserving; leaving a flag that can never flip is not.
+          //
+          // A participant of a finished meetup still reaches rating, through
+          // MeetupReviewSection further up this page rather than through a
+          // confirmation prompt.
+          if (meetup.status == MeetupStatus.cancelled ||
               meetup.isHostedByMe) ...[
             const SizedBox(height: 24),
             RatingPrompt(meetupId: widget.meetupId),
@@ -785,45 +805,33 @@ class _RequestStatusBanner extends StatelessWidget {
   }
 }
 
-/// The Safety Gate sub-flow: checklist → optional live-location → check-in
-/// → post-meetup feedback, in that order (Safety UX Flows.md's step order,
-/// also enforced server-side — CheckIn rejects if the checklist hasn't
-/// been acknowledged yet).
+/// The Safety Gate sub-flow: the checklist, then telling a trusted contact.
+///
+/// It used to run checklist -> live-location -> check-in -> post-meetup
+/// feedback. The last two are gone: they asked the user to confirm things the
+/// app cannot verify, and between them the page asked about one meeting three
+/// times. What remains is the half that does something FOR the user rather
+/// than asking something OF them.
+///
+/// Backing out is not lost with them: WITHDRAW REQUEST above handles it, and
+/// handles it properly, since a withdrawal actually leaves the meetup and
+/// tells the host. DECLINE only ever wrote a safety flag.
 class _SafetyGateSection extends StatelessWidget {
   const _SafetyGateSection({
     required this.safetyState,
-    required this.checkInWindowOpen,
-    required this.meetupHasStarted,
     required this.onAcknowledgeChecklist,
     required this.onShareWithContacts,
-    required this.onCheckIn,
-    required this.onDecline,
-    required this.onSubmitFeedback,
   });
 
   final SafetyState? safetyState;
-  final bool checkInWindowOpen;
 
-  /// Gates the "How did it go?" card — see `_meetupHasStarted`.
-  final bool meetupHasStarted;
   final VoidCallback onAcknowledgeChecklist;
   final VoidCallback onShareWithContacts;
-  final VoidCallback onCheckIn;
-  final VoidCallback onDecline;
-  final void Function({
-    required bool happened,
-    bool? feltSafe,
-    bool? profileAccurate,
-    bool? wouldMeetAgain,
-  })
-  onSubmitFeedback;
 
   @override
   Widget build(BuildContext context) {
     final acknowledged = safetyState?.checklistAcknowledged ?? false;
     final sharedCount = safetyState?.sharedWithContactIds.length ?? 0;
-    final checkedIn = safetyState?.checkedIn ?? false;
-    final declined = safetyState?.declined ?? false;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -919,107 +927,133 @@ class _SafetyGateSection extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        FlatCard(
-          radius: 12,
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        // The CHECK IN card and the "How did it go?" prompt used to sit here.
+        //
+        // Both removed on request. Check-in asked the user to confirm they had
+        // arrived somewhere the app cannot verify, and the happened/didn't
+        // happen prompt asked the same question a second time from the other
+        // end. Neither gated anything a user could not do anyway, and together
+        // they made the page ask three times about one meeting.
+        //
+        // What is NOT removed: the checklist above and the trusted-contact
+        // card. Those do something for the user rather than asking something
+        // of them.
+      ],
+    );
+  }
+}
+
+/// A square-ish tappable tile: icon above a short label.
+///
+/// Deliberately not [SecondaryButton]. That widget is a wide, quiet bar built
+/// for one full-width action at the bottom of a form; used twice in a row for
+/// two peer actions it reads as a list of disabled rows. This has a filled
+/// surface, a real border and an icon, so it looks like something you press.
+/// The cancellation, on the meetup's own page: the state and the host's
+/// words. Same soft red as the card edge; the reason quoted because it is
+/// the host's, not the app's.
+class _CancelledBanner extends StatelessWidget {
+  const _CancelledBanner({required this.reason});
+
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = AppPalette.cancelled;
+    final text = reason.trim();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Text(
-                'Check in',
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
+              Icon(Icons.event_busy_rounded, size: 16, color: tone),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'CANCELLED BY THE HOST',
+                  style: TextStyle(
+                    color: tone,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              if (checkedIn)
-                const _DoneRow('Checked in')
-              else if (declined)
-                _DeclinedRow(reason: safetyState?.declineReason)
-              else ...[
-                if (!acknowledged)
-                  Text(
-                    'Acknowledge the checklist above first.',
-                    style: TextStyle(
-                      color: AppPalette.textSecondary,
-                      fontSize: 12,
-                    ),
-                  )
-                else if (!checkInWindowOpen)
-                  Text(
-                    'Check-in opens 10 minutes before the meetup.',
-                    style: TextStyle(
-                      color: AppPalette.textSecondary,
-                      fontSize: 12,
-                    ),
-                  )
-                else
-                  PrimaryButton(
-                    label: 'CHECK IN',
-                    height: 44,
-                    onPressed: onCheckIn,
-                  ),
-                const SizedBox(height: 8),
-                SecondaryButton(
-                  label: 'DECLINE',
-                  height: 40,
-                  color: AppPalette.danger,
-                  borderColor: AppPalette.danger,
-                  onPressed: onDecline,
-                ),
-              ],
             ],
           ),
-        ),
-        if (meetupHasStarted) ...[
-          const SizedBox(height: 12),
-          FlatCard(
-            radius: 12,
-            padding: const EdgeInsets.all(16),
+          const SizedBox(height: 8),
+          Text(
+            text.isEmpty ? 'No reason was given.' : '\u201C$text\u201D',
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontSize: 13.5,
+              fontStyle: text.isEmpty ? FontStyle.normal : FontStyle.italic,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: AppPalette.card,
+      borderRadius: BorderRadius.circular(14),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        // A visible press state. The old bordered bars gave none, which is
+        // half of why they did not read as buttons.
+        splashColor: AppPalette.candyBlue.withValues(alpha: 0.10),
+        highlightColor: AppPalette.candyBlue.withValues(alpha: 0.06),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppPalette.hairline),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
+                Icon(icon, size: 20, color: AppPalette.candyBlue),
+                const SizedBox(height: 7),
                 Text(
-                  'How did it go?',
+                  label,
                   style: TextStyle(
                     color: AppPalette.textPrimary,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
                   ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: PrimaryButton(
-                        label: 'IT HAPPENED',
-                        height: 42,
-                        onPressed: () => onSubmitFeedback(
-                          happened: true,
-                          feltSafe: true,
-                          profileAccurate: true,
-                          wouldMeetAgain: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: SecondaryButton(
-                        label: 'DIDN\'T HAPPEN',
-                        height: 42,
-                        onPressed: () => onSubmitFeedback(happened: false),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
           ),
-        ],
-      ],
+        ),
+      ),
     );
   }
 }
@@ -1081,112 +1115,6 @@ class _DoneRow extends StatelessWidget {
 /// (a static row, no longer offering check-in), danger-colored like every
 /// other cancelled/withdrawn state already shown elsewhere in this app,
 /// not a new visual language.
-class _DeclinedRow extends StatelessWidget {
-  const _DeclinedRow({required this.reason});
-
-  final String? reason;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(Icons.cancel, size: 16, color: AppPalette.danger),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            (reason == null || reason!.isEmpty)
-                ? 'Declined'
-                : 'Declined: $reason',
-            style: TextStyle(
-              color: AppPalette.danger,
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// The "add a note" step after the happened/didn't-happen choice (ADR-016)
-/// — entirely optional, both Save and Skip (and dismissing the sheet
-/// itself) proceed to the real feedback submission; only Save with
-/// non-empty text carries a note through.
-class _FeedbackNoteSheet extends StatelessWidget {
-  const _FeedbackNoteSheet({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-      ),
-      child: FlatCard(
-        radius: 12,
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Add a note (optional)',
-              style: TextStyle(
-                color: AppPalette.textPrimary,
-                fontWeight: FontWeight.w700,
-                fontSize: 15,
-              ),
-            ),
-            const SizedBox(height: 12),
-            FlatCard(
-              radius: 12,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: TextField(
-                controller: controller,
-                maxLines: 4,
-                style: TextStyle(color: AppPalette.textPrimary, fontSize: 14),
-                decoration: InputDecoration(
-                  border: InputBorder.none,
-                  hintText: 'Anything worth remembering about this meetup?',
-                  hintStyle: TextStyle(color: AppPalette.textSecondary),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: SecondaryButton(
-                    label: 'SKIP',
-                    height: 44,
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: PrimaryButton(
-                    label: 'SAVE',
-                    height: 44,
-                    onPressed: () {
-                      final text = controller.text.trim();
-                      Navigator.pop(context, text.isEmpty ? null : text);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 /// The withdraw-confirmation-with-optional-note dialog (ADR-020 §4), split
 /// out as its own [StatefulWidget] for the same reason
@@ -1197,6 +1125,61 @@ class _FeedbackNoteSheet extends StatelessWidget {
 /// `dispose()` ties disposal to the widget's actual removal instead.
 /// Resolves to null on BACK/dismiss, or the (possibly empty) note text on
 /// WITHDRAW.
+/// Confirmation for cancelling a still-pending request. No note field:
+/// the host has not acted, is not told, and there is nobody to explain
+/// anything to.
+class _CancelRequestDialog extends StatelessWidget {
+  const _CancelRequestDialog();
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppPalette.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(
+        'CANCEL REQUEST',
+        style: TextStyle(
+          color: AppPalette.textPrimary,
+          fontSize: 13,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.6,
+        ),
+      ),
+      content: Text(
+        'Take back your request to join? The host hasn\'t answered yet, so '
+        'nothing is sent to them. You can request again any time.',
+        style: TextStyle(color: AppPalette.textSecondary, fontSize: 13.5),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: Text(
+            'KEEP IT',
+            style: TextStyle(
+              color: AppPalette.textSecondary,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+              fontSize: 11,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(
+            'CANCEL REQUEST',
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+              fontSize: 11,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _WithdrawNoteDialog extends StatefulWidget {
   const _WithdrawNoteDialog();
 

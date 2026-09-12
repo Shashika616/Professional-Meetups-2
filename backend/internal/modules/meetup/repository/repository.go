@@ -22,6 +22,7 @@ const (
 	IntentMentorship Intent = "mentorship"
 	IntentRideShare  Intent = "ride_share"
 	IntentDating     Intent = "dating"
+	IntentOuting     Intent = "outing"
 )
 
 type MeetupStatus string
@@ -147,6 +148,16 @@ type MeetupRepository interface {
 	// was accepted, host first. Viewer-independent: what a given viewer may
 	// SEE of these people is decided in the service layer, not here.
 	ListParticipants(ctx context.Context, meetupID string) ([]MeetupParticipant, error)
+
+	// CanViewMemberProfile answers whether viewer may open target's public
+	// profile — see member.sql for the rule.
+	CanViewMemberProfile(ctx context.Context, viewerID, targetID string) (bool, error)
+	// ListRecentMeetupsForMember returns target's latest meetups as host or
+	// accepted participant, newest first, at most limit.
+	ListRecentMeetupsForMember(ctx context.Context, viewerID, targetID string, limit int) ([]RecentMemberMeetup, error)
+	// ListReviewComments returns the written review notes on the given
+	// meetups, oldest first within each meetup.
+	ListReviewComments(ctx context.Context, meetupIDs []string) ([]MeetupReviewComment, error)
 	// ListOpen returns open meetups for intent, newest first, cursor-
 	// paginated, within 40km of (viewerLat, viewerLng) (ADR-021 §2). cursor
 	// nil means the first page. Returns one page of at most pageSize
@@ -266,6 +277,10 @@ type MeetupRequestRepository interface {
 	// touching someone else's row.
 	// notify runs inside the write's own transaction (see NotifyTx).
 	Withdraw(ctx context.Context, id, note, requesterID string, notify NotifyRequest) (MeetupRequest, error)
+	// CancelPending deletes a request the host has not acted on. ErrConflict
+	// when the request is no longer pending (accepted → that is a
+	// withdrawal) or does not belong to requesterID.
+	CancelPending(ctx context.Context, id, requesterID string) error
 	// Reject is the host's explicit rejection — distinct from the
 	// capacity-triggered auto-reject inside Accept. Returns
 	// apperror.ErrConflict (wrapped) if the request is not currently
@@ -355,6 +370,35 @@ type MeetupParticipant struct {
 	TrustLevel      int
 }
 
+// RecentMemberMeetup is one row of a member's recent activity, as the
+// member.sql queries return it — the aggregate per meetup, plus whether the
+// VIEWER was on that meetup (which the service uses to decide whether the
+// comment authors below may be named).
+type RecentMemberMeetup struct {
+	ID               string
+	Intent           Intent
+	Status           MeetupStatus
+	WindowStart      time.Time
+	WindowEnd        time.Time
+	LocationLabel    string
+	TargetIsHost     bool
+	ParticipantCount int
+	OverallAverage   float64
+	ReviewCount      int
+	ViewerWasIn      bool
+}
+
+// MeetupReviewComment is one written review note on a meetup, with the
+// author's display name attached; the service decides whether the viewer
+// gets to keep the name.
+type MeetupReviewComment struct {
+	MeetupID   string
+	AuthorID   string
+	AuthorName string
+	Note       string
+	WrittenAt  time.Time
+}
+
 // FeedbackRepository is the persistence boundary for post-meetup feedback
 // (Safety UX Flows.md's five questions — felt_safe/profile_accurate/
 // would_meet_again are nil when happened is false, there's nothing
@@ -402,6 +446,10 @@ type ReviewSubmission struct {
 	OverallScore int
 	Notes        *string
 	Participants []ReviewParticipant
+	// Happened is what the feedback row records: true for a meetup that
+	// took place, false for a cancelled one being reviewed for the
+	// cancellation itself. The service decides; the repository writes it.
+	Happened bool
 }
 
 // ReviewParticipant is one person's line in a review.

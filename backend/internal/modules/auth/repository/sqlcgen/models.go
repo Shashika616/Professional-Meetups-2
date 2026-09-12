@@ -151,6 +151,7 @@ const (
 	MeetupIntentTypeMentorship MeetupIntentType = "mentorship"
 	MeetupIntentTypeRideShare  MeetupIntentType = "ride_share"
 	MeetupIntentTypeDating     MeetupIntentType = "dating"
+	MeetupIntentTypeOuting     MeetupIntentType = "outing"
 )
 
 func (e *MeetupIntentType) Scan(src interface{}) error {

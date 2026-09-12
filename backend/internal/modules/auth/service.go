@@ -446,6 +446,17 @@ func (s *service) startTargetKeyedVerification(
 		return StartVerificationResult{}, err
 	}
 
+	// The signup/login twin of the skip in dispatchVerificationCode: an
+	// allowlisted test address (TEST_OTP_BYPASS_EMAILS) gets no real send.
+	// This site is separate from that one because these two purposes are
+	// target-keyed rather than user-keyed — there is no user row yet at
+	// signup — so they never reach that switch. Both sites are needed; a
+	// skip in only one leaves the other mailing reserved .test domains.
+	if testOTPBypassEmails()[normalizeBypassEmail(target)] {
+		s.logger.Warn(testEmailBypassSkipLogMsg, "purpose", purpose, "target", target, "code", code)
+		return StartVerificationResult{ResendAfterSeconds: int32(otpResendCooldown.Seconds())}, nil
+	}
+
 	if err := s.email.SendVerificationCode(ctx, target, code, email.PurposePersonalEmail); err != nil {
 		s.logger.Error("verification code dispatch failed", "purpose", purpose, "error", err)
 		return StartVerificationResult{}, fmt.Errorf("failed to send verification code, please try again: %w", apperror.ErrInternal)
@@ -516,7 +527,7 @@ func (s *service) verifyAndConsumeTargetKeyedCode(ctx context.Context, purpose r
 		return fmt.Errorf("too many attempts, please request a new code: %w", apperror.ErrInvalidInput)
 	}
 
-	if !otpMatches(pending.CodeHash, code) {
+	if !otpMatches(pending.CodeHash, code, purpose, target) {
 		updated, incErr := s.verificationCodes.IncrementAttemptsByTarget(ctx, purpose, target)
 		if incErr == nil && updated.Attempts >= otpMaxAttempts {
 			_ = s.verificationCodes.DeleteByTarget(ctx, purpose, target)

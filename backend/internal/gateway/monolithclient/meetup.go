@@ -2,7 +2,8 @@ package monolithclient
 
 import (
 	"context"
-	"fmt"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
 )
@@ -163,6 +164,7 @@ var intentToWire = map[meetupv1.Intent]string{
 	meetupv1.Intent_INTENT_MENTORSHIP: "mentorship",
 	meetupv1.Intent_INTENT_RIDE_SHARE: "ride_share",
 	meetupv1.Intent_INTENT_DATING:     "dating",
+	meetupv1.Intent_INTENT_OUTING:     "outing",
 }
 
 var intentFromWire = map[string]meetupv1.Intent{
@@ -172,6 +174,7 @@ var intentFromWire = map[string]meetupv1.Intent{
 	"mentorship": meetupv1.Intent_INTENT_MENTORSHIP,
 	"ride_share": meetupv1.Intent_INTENT_RIDE_SHARE,
 	"dating":     meetupv1.Intent_INTENT_DATING,
+	"outing":     meetupv1.Intent_INTENT_OUTING,
 }
 
 var statusToWire = map[meetupv1.MeetupStatus]string{
@@ -271,7 +274,7 @@ func (c *grpcClient) CreateMeetup(
 ) (Meetup, error) {
 	intentProto, ok := intentFromWire[intent]
 	if !ok {
-		return Meetup{}, fmt.Errorf("monolithclient: unknown intent %q", intent)
+		return Meetup{}, status.Errorf(codes.InvalidArgument, "unknown intent %q", intent)
 	}
 	resp, err := c.meetup.CreateMeetup(ctx, &meetupv1.CreateMeetupRequest{
 		HostUserId:             hostUserID,
@@ -305,7 +308,7 @@ func (c *grpcClient) ListOpenMeetups(
 	if intent != "" {
 		resolved, ok := intentFromWire[intent]
 		if !ok {
-			return nil, "", fmt.Errorf("monolithclient: unknown intent %q", intent)
+			return nil, "", status.Errorf(codes.InvalidArgument, "unknown intent %q", intent)
 		}
 		intentProto = resolved
 	}
@@ -516,6 +519,41 @@ func (c *grpcClient) ListMeetupParticipants(ctx context.Context, meetupID, viewe
 			FullName:        p.GetFullName(),
 			ProfilePhotoURL: p.GetProfilePhotoUrl(),
 			TrustLevel:      p.GetTrustLevel(),
+		})
+	}
+	return out, nil
+}
+
+func (c *grpcClient) GetMemberActivity(ctx context.Context, viewerID, targetID string) (MemberActivity, error) {
+	resp, err := c.meetup.GetMemberActivity(ctx, &meetupv1.GetMemberActivityRequest{
+		ViewerId: viewerID, TargetId: targetID,
+	})
+	if err != nil {
+		return MemberActivity{}, err
+	}
+	out := MemberActivity{RecentMeetups: make([]MemberMeetup, 0, len(resp.GetRecentMeetups()))}
+	for _, mm := range resp.GetRecentMeetups() {
+		comments := make([]MemberMeetupComment, 0, len(mm.GetComments()))
+		for _, cm := range mm.GetComments() {
+			comments = append(comments, MemberMeetupComment{
+				AuthorName:           cm.GetAuthorName(),
+				Note:                 cm.GetNote(),
+				WrittenAtUnixSeconds: cm.GetWrittenAtUnixSeconds(),
+			})
+		}
+		out.RecentMeetups = append(out.RecentMeetups, MemberMeetup{
+			ID:                     mm.GetId(),
+			Intent:                 intentToWire[mm.GetIntent()],
+			Status:                 statusToWire[mm.GetStatus()],
+			WindowStartUnixSeconds: mm.GetWindowStartUnixSeconds(),
+			WindowEndUnixSeconds:   mm.GetWindowEndUnixSeconds(),
+			LocationLabel:          mm.GetLocationLabel(),
+			Hosted:                 mm.GetHosted(),
+			ParticipantCount:       mm.GetParticipantCount(),
+			OverallAverage:         mm.GetOverallAverage(),
+			ReviewCount:            mm.GetReviewCount(),
+			ViewerWasIn:            mm.GetViewerWasIn(),
+			Comments:               comments,
 		})
 	}
 	return out, nil

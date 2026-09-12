@@ -8,6 +8,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
@@ -21,6 +22,17 @@ type Querier interface {
 	// Returns the rejected rows so the caller can notify each requester
 	// (backend/meetup-scheduling-PLAN.md Step E).
 	AutoRejectPendingRequestsForMeetup(ctx context.Context, meetupID uuid.UUID) ([]MeetupMeetupRequest, error)
+	// Queries behind another member's public profile (GET /v1/users/{id}).
+	// Every one takes the VIEWER as well as the target, because what is
+	// visible depends on what the two of them have shared — see
+	// member.go in the service layer for the rule.
+	// True when the viewer may open the target's profile: they are the same
+	// person; the target hosts (or has hosted) a meetup — a host is public by
+	// design, since you must be able to judge them before asking to join; or
+	// the two were both on one meetup as host/accepted. "Shared" deliberately
+	// counts past meetups: once you have sat at a table with someone, their
+	// profile stays open to you.
+	CanViewMemberProfile(ctx context.Context, arg CanViewMemberProfileParams) (pgtype.Bool, error)
 	// reason is required (validated by the service layer, ADR-020 §3) —
 	// accepted participants are notified and gain a new rating-eligibility
 	// path against the host, both handled in the service layer after this
@@ -30,6 +42,16 @@ type Querier interface {
 	// CloseMeetup's own ownership clause exactly; the Go-level check stays,
 	// this doesn't replace it.
 	CancelMeetup(ctx context.Context, arg CancelMeetupParams) (MeetupMeetup, error)
+	// A requester taking back a request the host has not acted on yet. This
+	// is a DELETE, not a status change, and deliberately so: nothing happened
+	// — the host never accepted, no seat was held, nobody is owed a rating —
+	// so there is nothing worth a row. It also keeps the door open: the
+	// UNIQUE (meetup_id, requester_id, status) key means a requester who
+	// cancels, re-requests and cancels again would collide on a second
+	// 'withdrawn' row, where a deleted row leaves nothing to collide with.
+	// Scoped to the requester and to 'pending' in the WHERE, like Withdraw:
+	// an accepted request is a withdrawal (ADR-020 §4), never a cancellation.
+	CancelPendingMeetupRequest(ctx context.Context, arg CancelPendingMeetupRequestParams) (MeetupMeetupRequest, error)
 	// Claims up to batch_size due rows. Deliberately IDENTICAL in shape to
 	// ClaimNotificationOutboxBatch — the proven claiming strategy, not a second
 	// design.
@@ -300,9 +322,19 @@ type Querier interface {
 	// list (not just fcm_token) so the caller can group rows back by user
 	// without a second lookup.
 	ListDeviceTokensForUsers(ctx context.Context, userIds []uuid.UUID) ([]MeetupDeviceToken, error)
-	// Meetups this user took part in whose window has ended and which they have
-	// not finished reviewing. Bounded by a cutoff so an ignored review does not
-	// sit on Home forever (see service.reviewWindow).
+	// Meetups this user still owes a review on, bounded by a cutoff so an
+	// ignored review does not sit on Home forever (see service.reviewWindow).
+	//
+	// Two ways a meetup gets here:
+	//   1. It happened: the window has ended, and the user was its host or an
+	//      accepted participant.
+	//   2. It was CANCELLED by the host while this user held an accepted
+	//      request. The participant gave up an evening on the host's word and
+	//      gets to say how that went (ADR-020 §3's cancellation rating, now
+	//      reached through the ordinary review flow). The host is never asked
+	//      to review their own cancellation. Bounded by cancelled_at rather
+	//      than window_end, since a meetup can be cancelled long before it
+	//      would have started.
 	ListMeetupIDsAwaitingReview(ctx context.Context, arg ListMeetupIDsAwaitingReviewParams) ([]uuid.UUID, error)
 	// The people on a meetup: its host, plus everyone whose request was
 	// accepted. Ordered host-first, then by name, so the list reads the same way
@@ -314,6 +346,10 @@ type Querier interface {
 	// put a trust rule in SQL where nobody reviewing the trust ladder would
 	// think to look for it.
 	ListMeetupParticipants(ctx context.Context, meetupID uuid.UUID) ([]ListMeetupParticipantsRow, error)
+	// The written comments on a set of meetups, oldest first within a meetup.
+	// The author's display name rides along; the service blanks it for a
+	// viewer who was not on that meetup.
+	ListMeetupReviewComments(ctx context.Context, meetupIds []uuid.UUID) ([]ListMeetupReviewCommentsRow, error)
 	// Keyset continuation of ListMeetupsByHostFirstPage — same
 	// (created_at, id) < (cursor) shape as
 	// ListOpenMeetupsByIntentAfterCursor.
@@ -415,6 +451,11 @@ type Querier interface {
 	// real (if narrow) correctness bug: someone ratable would silently not
 	// appear to rate.
 	ListRatableParticipants(ctx context.Context, arg ListRatableParticipantsParams) ([]ListRatableParticipantsRow, error)
+	// The target's last N meetups as host or accepted participant, newest
+	// window first, with the aggregate the profile shows per meetup and whether
+	// the VIEWER was on it too (which decides whether reviewer names below are
+	// shown or withheld).
+	ListRecentMeetupsForMember(ctx context.Context, arg ListRecentMeetupsForMemberParams) ([]ListRecentMeetupsForMemberRow, error)
 	// LEFT JOIN meetup.safety_state (ADR-024 §6) — host visibility into each
 	// accepted participant's check-in status, piggybacking on this query's
 	// existing host-only ListMeetupRequests call site rather than a new
@@ -515,10 +556,11 @@ type Querier interface {
 	// at different moments by different screens, and a review must never
 	// silently clear a felt_safe answer given earlier.
 	//
-	// happened is forced true: reaching the end of the review flow IS the
-	// statement that it happened, and leaving it null would make the row fail
-	// HasConfirmedMeetupHappened and so refuse the very ratings being submitted
-	// alongside it.
+	// happened is written explicitly: true for a meetup that took place —
+	// reaching the end of the review flow IS the statement that it happened,
+	// and null would make the row fail HasConfirmedMeetupHappened and refuse
+	// the very ratings submitted alongside it — and false for a CANCELLED one,
+	// whose review rates the host for cancelling, not an evening that occurred.
 	SetMeetupOverallReview(ctx context.Context, arg SetMeetupOverallReviewParams) (MeetupMeetupFeedback, error)
 	// Upserts by token, not by user — a token identifies one physical device
 	// install; re-registering it under a different account reassigns

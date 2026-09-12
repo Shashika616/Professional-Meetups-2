@@ -7,6 +7,7 @@ import 'package:professional_connections_platform/core/models/auth_session.dart'
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/push_notification_service.dart';
 import 'package:professional_connections_platform/core/services/token_refresher.dart';
@@ -68,6 +69,10 @@ class _UninitializedYieldsNullPushService implements PushNotificationService {
 /// under test never needs the others, and UnimplementedError makes it
 /// obvious if that assumption ever stops holding.
 class _FakeAuthService implements AuthService {
+  @override
+  Future<PublicProfile> getPublicProfile(String userId) =>
+      throw UnimplementedError('not exercised by this test');
+
   // ADR-002 § 3. Unused by this test — every fake in test/ implements the
   // full AuthService surface, so a new method lands here even when the test
   // never calls it.

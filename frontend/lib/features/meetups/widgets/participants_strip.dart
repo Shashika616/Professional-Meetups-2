@@ -19,60 +19,57 @@ import 'package:professional_connections_platform/features/meetups/participants_
 /// to censor. What survives redaction is the COUNT and the shape of the
 /// list, which is the point: a guest should see that real people are really
 /// coming — that is the reason to sign up — without learning who they are.
-class ParticipantsStrip extends ConsumerStatefulWidget {
-  const ParticipantsStrip({super.key, required this.meetupId});
+class ParticipantsStrip extends ConsumerWidget {
+  const ParticipantsStrip({
+    super.key,
+    required this.meetupId,
+    this.meetup,
+    this.finished = false,
+  });
 
   final String meetupId;
 
-  @override
-  ConsumerState<ParticipantsStrip> createState() => _ParticipantsStripState();
-}
+  /// Passed through to the participants page so it opens with the
+  /// meetup's own card at the top — the strip is the page's only entry
+  /// now that the separate PARTICIPANTS tile is gone.
+  final Meetup? meetup;
 
-class _ParticipantsStripState extends ConsumerState<ParticipantsStrip> {
-  MeetupParticipants? _data;
-  bool _loading = true;
+  /// The meetup is over (window ended, cancelled, or closed). The count
+  /// reads "joined" rather than "going": nobody is going anywhere any more,
+  /// and this same strip sits on the page for a historical meetup.
+  final bool finished;
 
   /// How many faces fit on a card before the row starts to crowd the text
   /// beside it; the rest become a "+N".
   static const _maxFaces = 4;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-  }
+  Widget build(BuildContext context, WidgetRef ref) {
+    final viewerTrustLevel =
+        ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    final verb = finished ? 'joined' : 'going';
+    // Was a ConsumerStatefulWidget fetching in initState, which made this and
+    // ParticipantsPage two independent uncached reads of the same rows about a
+    // second apart. Both now watch one family; the second one to mount gets
+    // the first one's result. See meetupParticipantsProvider.
+    final async = ref.watch(meetupParticipantsProvider(meetupId));
 
-  Future<void> _load() async {
-    try {
-      final data = await ref
-          .read(meetupServiceProvider)
-          .listMeetupParticipants(widget.meetupId);
-      if (!mounted) return;
-      setState(() {
-        _data = data;
-        _loading = false;
-      });
-    } on MeetupSessionExpiredException {
-      // A 401 means the session itself is gone, so every later call
-      // fails too. Falling through to the generic catch below would
-      // show an error the user can only retry forever; signing out is
-      // the only thing that recovers. Mirrors the AuthService
-      // SessionExpiredException idiom in profile_page.dart.
-      if (mounted) {
+    // A 401 means the session itself is gone, so every later call fails too.
+    // Showing an error the user can only retry forever helps nobody; signing
+    // out is the only thing that recovers. Mirrors profile_page.dart's idiom.
+    // Deferred to after this frame because build must not mutate providers.
+    if (async.hasError && async.error is MeetupSessionExpiredException) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         ref.read(authSessionProvider.notifier).forceSignOut();
-      }
-    } catch (_) {
-      // Supporting detail on a card that is already useful without it — a
-      // failed read shows nothing rather than an error where faces go.
-      if (!mounted) return;
-      setState(() => _loading = false);
+      });
+      return const SizedBox.shrink();
     }
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    final data = _data;
-    if (_loading || data == null || data.totalCount == 0) {
+    // Supporting detail on a card that is already useful without it - while
+    // loading, or after a failed read, this shows nothing rather than an error
+    // where faces go. Same posture the initState version had.
+    final data = async.value;
+    if (data == null || data.totalCount == 0) {
       return const SizedBox.shrink();
     }
 
@@ -80,7 +77,8 @@ class _ParticipantsStripState extends ConsumerState<ParticipantsStrip> {
     final overflow = data.totalCount - shown.length;
 
     return GestureDetector(
-      onTap: () => ParticipantsPage.open(context, meetupId: widget.meetupId),
+      onTap: () =>
+          ParticipantsPage.open(context, meetupId: meetupId, meetup: meetup),
       behavior: HitTestBehavior.opaque,
       child: Row(
         children: [
@@ -94,7 +92,7 @@ class _ParticipantsStripState extends ConsumerState<ParticipantsStrip> {
                     left: i * 21.0,
                     child: _Face(
                       participant: shown[i],
-                      redacted: data.redacted,
+                      redacted: data.redacted && shown[i].fullName.isEmpty,
                     ),
                   ),
                 if (overflow > 0)
@@ -110,9 +108,12 @@ class _ParticipantsStripState extends ConsumerState<ParticipantsStrip> {
             child: Text(
               data.redacted
                   // Says the number, withholds the names, and says why in
-                  // the one place someone would ask.
-                  ? '${data.totalCount} going · verify to see who'
-                  : '${data.totalCount} going',
+                  // the one place someone would ask — the reason depends on
+                  // whether the viewer is unverified or just not on it.
+                  ? (viewerTrustLevel < 2
+                        ? '${data.totalCount} $verb · verify to see who'
+                        : '${data.totalCount} $verb · join to see who')
+                  : '${data.totalCount} $verb',
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: AppPalette.textSecondary,

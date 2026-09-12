@@ -149,6 +149,9 @@ type Client interface {
 	SubmitMeetupFeedback(ctx context.Context, meetupID, userID string, happened bool, feltSafe, profileAccurate, wouldMeetAgain *bool, notes *string) error
 	ListNotifications(ctx context.Context, userID string) ([]UserNotification, error)
 	ListMeetupParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (MeetupParticipants, error)
+	// GetMemberActivity — another member's recent meetups as the viewer may
+	// see them; PermissionDenied when the viewer may not open that member.
+	GetMemberActivity(ctx context.Context, viewerID, targetID string) (MemberActivity, error)
 	ListRatableParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (RatableParticipants, error)
 	SubmitMeetupReview(ctx context.Context, meetupID, raterUserID string, overallScore int32, notes *string, participants []ReviewParticipantInput) error
 	GetMeetupReview(ctx context.Context, meetupID, viewerID string) (MeetupReview, error)
@@ -575,4 +578,31 @@ func sessionFromProto(resp *authv1.SessionResponse) Session {
 		ProfilePhotoURL: resp.GetProfilePhotoUrl(),
 		TrustLevel:      int(resp.GetTrustLevel()),
 	}
+}
+
+// MemberActivity mirrors meetupv1.GetMemberActivityResponse in gateway
+// terms: wire-format intent/status strings, Unix seconds for times.
+type MemberActivity struct {
+	RecentMeetups []MemberMeetup
+}
+
+type MemberMeetup struct {
+	ID                     string
+	Intent                 string
+	Status                 string
+	WindowStartUnixSeconds int64
+	WindowEndUnixSeconds   int64
+	LocationLabel          string
+	Hosted                 bool
+	ParticipantCount       int32
+	OverallAverage         float64
+	ReviewCount            int32
+	ViewerWasIn            bool
+	Comments               []MemberMeetupComment
+}
+
+type MemberMeetupComment struct {
+	AuthorName           string
+	Note                 string
+	WrittenAtUnixSeconds int64
 }

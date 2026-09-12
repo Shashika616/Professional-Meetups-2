@@ -61,35 +61,100 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
           ),
         ),
         child: SafeArea(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+          // Stack rather than one Column: the mark and wordmark belong on the
+          // optical centre of the screen, while the attribution belongs on the
+          // bottom edge. Putting both in a single centred Column would drag
+          // the logo upward by however tall the attribution is.
+          child: Stack(
             children: [
-              // Big, professional, glowing app icon (no forced circle)
-              const AppIcon(size: 170, radius: 40, glow: true),
-              const SizedBox(height: 28),
-              Text(
-                'PROFESSIONAL\nCONNECTIONS',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 3.0,
-                  height: 1.4,
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const AppIcon(size: 170, radius: 40, glow: true),
+                    const SizedBox(height: 30),
+                    // The wordmark, set exactly as the landing hero and the
+                    // brand sheet set it - mixed case, "Here" in the brand
+                    // green. The old splash shouted PROFESSIONAL\nCONNECTIONS
+                    // in tracked-out caps, which is not how this logo reads.
+                    RichText(
+                      textAlign: TextAlign.center,
+                      text: TextSpan(
+                        style: TextStyle(
+                          fontSize: 34,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.6,
+                          height: 1.05,
+                          color: AppPalette.textPrimary,
+                        ),
+                        children: [
+                          const TextSpan(text: 'Tie'),
+                          TextSpan(
+                            text: 'Here',
+                            style: TextStyle(color: AppPalette.brandGreen),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      "Connect with who's here",
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: AppPalette.textSecondary,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 40),
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: AppPalette.candyBlue.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'Connect Beyond the Office.',
-                style: TextStyle(fontSize: 12, color: AppPalette.textSecondary),
-              ),
-              const SizedBox(height: 44),
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppPalette.candyBlue.withValues(alpha: 0.7),
+              // Maker's mark, bottom-centre, in the place WhatsApp and
+              // Facebook put theirs. Quiet on purpose: it is a signature, not
+              // a second brand competing with the one above it.
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 26),
+                  child: RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'From ',
+                          style: TextStyle(
+                            fontSize: 11,
+                            letterSpacing: 1.4,
+                            color: AppPalette.textSecondary.withValues(
+                              alpha: 0.75,
+                            ),
+                          ),
+                        ),
+                        TextSpan(
+                          // U+00B7 MIDDLE DOT on each side, not full stops -
+                          // these are part of the mark, not sentence
+                          // punctuation, and a period here would read as the
+                          // end of a sentence that never started.
+                          text: '\u00B7SAI\u00B7',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 2.2,
+                            color: AppPalette.textPrimary.withValues(
+                              alpha: 0.85,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ],

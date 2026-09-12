@@ -50,9 +50,17 @@ func (s *service) SubmitMeetupReview(ctx context.Context, req SubmitMeetupReview
 	if err != nil {
 		return err
 	}
-	// Same gate as SubmitMeetupFeedback, and for the same reason: this write
-	// asserts the meetup happened.
-	if time.Now().Before(m.WindowEnd) {
+	cancelled := m.Status == repository.MeetupStatusCancelled
+	switch {
+	case cancelled && m.HostUserID == req.RaterID:
+		// The host cancelled it; there is nothing for them to review and
+		// nobody it would be fair to rate.
+		return fmt.Errorf("meetup: the host of a cancelled meetup does not review it: %w", apperror.ErrForbidden)
+	case !cancelled && time.Now().Before(m.WindowEnd):
+		// Same gate as SubmitMeetupFeedback, and for the same reason: this
+		// write asserts the meetup happened. A CANCELLED meetup is over the
+		// moment it is cancelled, however far off its window was — that is
+		// the case this review exists for.
 		return fmt.Errorf("meetup: %s is not over yet: %w", req.MeetupID, apperror.ErrConflict)
 	}
 
@@ -121,6 +129,7 @@ func (s *service) SubmitMeetupReview(ctx context.Context, req SubmitMeetupReview
 		OverallScore: req.OverallScore,
 		Notes:        req.Notes,
 		Participants: participants,
+		Happened:     !cancelled,
 	})
 }
 

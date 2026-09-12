@@ -2455,3 +2455,141 @@ func TestShareWithContacts_RejectsAnEmptySelection_Integration(t *testing.T) {
 		t.Errorf("error = %v, want ErrInvalidInput", err)
 	}
 }
+
+// TestListOpenMeetups_ExcludesEndedMeetups guards a bug reported from the
+// deployed app on 2026-09-10: a meetup whose window had ended two hours
+// earlier was still in the browse list, still presented as joinable.
+//
+// The cause was that the query filtered on m.status alone. Status is written
+// by the auto-close sweep, and on Cloud Run with minScale 0 that sweep only
+// advances while a container happens to exist — the production meetup in
+// question ended at 11:15 and was not closed until 13:08, when an unrelated
+// request woke an instance. For 1h53m the read path was reporting a finished
+// meetup as open, because it was asking a background job instead of the clock.
+//
+// So this test deliberately reproduces the UN-SWEPT state — window in the
+// past, status still 'open' — and asserts the list excludes it anyway. If
+// someone later "simplifies" the query back to a status check, this fails.
+func TestListOpenMeetups_ExcludesEndedMeetups(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	viewer := newUserID(t, h)
+	host := newUserID(t, h)
+
+	ended := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	live := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+
+	// Backdate the window WITHOUT touching status — the sweep's absence is
+	// the whole point of the scenario.
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE meetup.meetups
+		    SET window_start = now() - interval '3 hours',
+		        window_end   = now() - interval '1 hour'
+		  WHERE id = $1`, ended.ID); err != nil {
+		t.Fatalf("backdating the meetup window: %v", err)
+	}
+
+	// Assert the precondition rather than assuming it. If status had also
+	// flipped to 'closed', this test would still pass — but for the old
+	// reason, and it would stop guarding anything.
+	var status string
+	if err := h.pool.QueryRow(ctx,
+		`SELECT status::text FROM meetup.meetups WHERE id = $1`, ended.ID).Scan(&status); err != nil {
+		t.Fatalf("reading status back: %v", err)
+	}
+	if status != "open" {
+		t.Fatalf("precondition failed: status is %q, want \"open\" — this test is only meaningful while the sweep has NOT run", status)
+	}
+
+	assertList := func(t *testing.T, userID, label string) {
+		t.Helper()
+		result, err := h.svc.ListOpenMeetups(ctx, meetup.ListOpenMeetupsRequest{
+			UserID: userID, Intent: intentPtr(meetup.IntentCoffee),
+			ViewerLat: colomboLat, ViewerLng: colomboLng, ViewerTrustLevel: 4,
+		})
+		if err != nil {
+			t.Fatalf("ListOpenMeetups(%s): %v", label, err)
+		}
+		got := map[string]bool{}
+		for _, m := range result.Meetups {
+			got[m.ID] = true
+		}
+		if got[ended.ID] {
+			t.Errorf("%s: a meetup whose window ended an hour ago is still listed as open", label)
+		}
+		if !got[live.ID] {
+			t.Errorf("%s: the still-live meetup was excluded — the filter is dropping too much", label)
+		}
+	}
+
+	assertList(t, viewer, "stranger")
+	// The host bypasses the radius filter, so it is worth proving the clock
+	// filter is not bypassed along with it — they are separate conditions and
+	// only one of them should be waivable.
+	assertList(t, host, "host")
+}
+
+// TestEndedMeetup_LeavesBrowseButStaysOnParticipantSurfaces is the other half
+// of TestListOpenMeetups_ExcludesEndedMeetups, and exists because the obvious
+// way to get that one passing is to over-filter.
+//
+// "A finished meetup is not discoverable" and "a finished meetup is gone" are
+// different statements, and only the first is wanted. The people who were on
+// it still need it: to review it, and to find it in their own lists. So this
+// asserts both directions on the SAME meetup — absent from the open list,
+// present for its host — which is the pair a future change has to keep true
+// together. Filtering window_end in ListMeetupsByHost or GetMeetupByID would
+// pass the sibling test and fail this one.
+func TestEndedMeetup_LeavesBrowseButStaysOnParticipantSurfaces(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	stranger := newUserID(t, h)
+
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE meetup.meetups
+		    SET window_start = now() - interval '3 hours',
+		        window_end   = now() - interval '1 hour'
+		  WHERE id = $1`, m.ID); err != nil {
+		t.Fatalf("backdating the meetup window: %v", err)
+	}
+
+	// 1. Gone from discovery, for a stranger.
+	open, err := h.svc.ListOpenMeetups(ctx, meetup.ListOpenMeetupsRequest{
+		UserID: stranger, Intent: intentPtr(meetup.IntentCoffee),
+		ViewerLat: colomboLat, ViewerLng: colomboLng, ViewerTrustLevel: 4,
+	})
+	if err != nil {
+		t.Fatalf("ListOpenMeetups: %v", err)
+	}
+	for _, got := range open.Meetups {
+		if got.ID == m.ID {
+			t.Error("an ended meetup is still discoverable in the browse list")
+		}
+	}
+
+	// 2. Still fetchable by id — this is what makes the detail page, and the
+	// review flow on it, reachable at all after the meetup is over.
+	if _, err := h.svc.GetMeetup(ctx, meetup.GetMeetupRequest{
+		MeetupID: m.ID, UserID: host, ViewerTrustLevel: 4,
+	}); err != nil {
+		t.Fatalf("GetMeetup on an ended meetup: %v — the review flow is unreachable without this", err)
+	}
+
+	// 3. Still in the host's own list. EventsPage is built from this, so a
+	// host who cannot find a finished meetup here cannot review it either.
+	hosted, _, err := h.meetups.ListByHost(ctx, host, nil, 0)
+	if err != nil {
+		t.Fatalf("ListByHost: %v", err)
+	}
+	found := false
+	for _, got := range hosted {
+		if got.ID == m.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("an ended meetup vanished from its own host's list — Events would lose it, and with it the review")
+	}
+}

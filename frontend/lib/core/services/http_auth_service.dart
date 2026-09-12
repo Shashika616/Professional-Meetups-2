@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:professional_connections_platform/core/config/app_config.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/oauth_state.dart';
@@ -510,6 +511,28 @@ class HttpAuthService implements AuthService {
   }
 
   @override
+  Future<PublicProfile> getPublicProfile(String userId) async {
+    final headers = await _authHeaders();
+    final response = await _httpClient.get(
+      Uri.parse('$_baseUrl/v1/users/${Uri.encodeComponent(userId)}'),
+      headers: headers,
+    );
+    if (response.statusCode == 200) {
+      return PublicProfile.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    }
+    // 403 is the relationship gate: the server's sentence says why, and the
+    // page shows it as a state rather than an error. Handled here rather
+    // than in the shared mapper so the verification endpoints' own 403
+    // behaviour is untouched.
+    if (response.statusCode == 403) {
+      throw ForbiddenActionException(_errorMessage(response.body));
+    }
+    throw _mapVerificationError(response, on400: AuthNetworkException.new);
+  }
+
+  @override
   Future<UserProfile> completeProfileSetup({
     required String fullName,
     String? companyName,
@@ -686,9 +709,21 @@ class HttpAuthService implements AuthService {
 
   Future<Map<String, String>> _authHeaders() async {
     final token = await _getAccessToken();
+    // No token means the session is gone from storage entirely — not
+    // merely stale, which getValidSession() would have refreshed before
+    // returning. Sending the request without an Authorization header buys
+    // a guaranteed 401 that no refresh can repair (there is no refresh
+    // token left to send), and a provider that retries would keep doing it
+    // forever. Fail here with the same exception a real 401 maps to, so
+    // AppShell's session-expired listener lands the user on LandingPage.
+    if (token == null) {
+      throw const SessionExpiredException(
+        'Your session has expired. Please sign in again.',
+      );
+    }
     return {
       'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
+      'Authorization': 'Bearer $token',
     };
   }
 
@@ -788,7 +823,13 @@ AuthException mapAppleSignInError(SignInWithAppleException error) {
       error.code == AuthorizationErrorCode.canceled) {
     return const SignInCancelledException();
   }
-  debugPrint('Sign in with Apple failed: $error');
+  // Type and code only, never the object: debugPrint survives release
+  // builds, and a platform exception's toString() can carry more than a
+  // log should (same rule as every other catch in this codebase).
+  debugPrint(
+    'Sign in with Apple failed: ${error.runtimeType}'
+    '${error is SignInWithAppleAuthorizationException ? ' ${error.code}' : ''}',
+  );
   return const AuthNetworkException(
     'Sign in with Apple isn’t available right now. Please try again or '
     'use another option.',

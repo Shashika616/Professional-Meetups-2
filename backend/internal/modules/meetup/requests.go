@@ -96,6 +96,21 @@ func (s *service) WithdrawRequest(ctx context.Context, req WithdrawRequestReques
 		return err
 	}
 
+	// Two different things share this entry point, told apart by what the
+	// host has done so far.
+	//
+	// PENDING → a CANCELLATION. The host was told someone asked and has not
+	// answered; the requester changing their mind before that is nobody's
+	// business but theirs. The row is deleted, no notification is queued,
+	// and the requester may ask again later.
+	//
+	// ACCEPTED → a WITHDRAWAL (ADR-020 §4). The host planned around this
+	// person; they are told who backed out, the row stays as 'withdrawn',
+	// and the host may rate the withdrawal.
+	if existing.Status == repository.RequestStatusPending {
+		return s.requests.CancelPending(ctx, req.RequestID, req.RequesterID)
+	}
+
 	_, err = s.requests.Withdraw(ctx, req.RequestID, req.Note, req.RequesterID,
 		func(ctx context.Context, tx repository.NotifyTx, withdrawn repository.MeetupRequest) error {
 			// Named, not "a requester". Withdraw's returned row carries no

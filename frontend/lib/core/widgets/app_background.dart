@@ -2,64 +2,44 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
-/// The app's dark photo background.
+/// The app's page ground: one flat colour, painted once.
 ///
 /// # IT PAINTS ONCE, EVEN WHEN NESTED
 ///
 /// A nested `AppBackground` returns its child untouched, because an ancestor
 /// has already painted the same thing.
 ///
-/// This is not micro-optimisation. Each instance is a full-screen
-/// `Image.asset` wrapped in `Opacity` and `ColorFiltered` — an `Opacity`
-/// over a full-screen subtree forces a `saveLayer`, and so does the colour
-/// filter. Nesting two of them meant every frame of a page transition
-/// composited two off-screen full-screen layers and held two decoded copies
-/// of the same image, on the one tab that did it.
+/// `EventsPage` is why the guard exists: it wraps itself because
+/// `meetup_detail_page.dart` also PUSHES it as a route, and a pushed route is
+/// built under the `Navigator` - which sits ABOVE `AppShell`, so it genuinely
+/// has no background ancestor and must paint its own. Both entry paths stay
+/// correct; the marker below is only found when the page really is inside
+/// another `AppBackground`.
 ///
-/// It also mattered for what the user actually sees. The `Container` below
-/// paints a flat `AppPalette.onyx` fill FIRST, and `Image.asset` renders
-/// nothing until its stream resolves — so an un-resolved background is a
-/// plain grey panel. Two independent image streams are two chances to show
-/// that.
+/// # THIS USED TO BE A PHOTOGRAPH
 ///
-/// `EventsPage` was the only one of the four `AppShell` tabs doing this. It
-/// wraps itself because `meetup_detail_page.dart` also PUSHES it as a route,
-/// and a pushed route is built under the `Navigator` — which sits ABOVE
-/// `AppShell`, so it genuinely has no background ancestor and must paint its
-/// own. Both entry paths stay correct: the marker below is only found when
-/// the page really is inside another `AppBackground`.
+/// It was a full-screen `Image.asset` under an `Opacity` and a
+/// `ColorFiltered`, with a three-stop gradient veil on top to keep text
+/// readable over it, and a per-theme opacity curve because the same photo
+/// read as depth on black and as grey cast on white. Retired with the
+/// TieHere rebrand: the mark is a saturated blue/green figure pair, and a
+/// desaturated stock photo behind it fought the brand rather than supporting
+/// it.
+///
+/// What replaced it is [AppPalette.onyx] itself - the same near-black the
+/// surface ramp is already built from, so the ground and the cards on it come
+/// from one scale instead of two. A brand-navy ground was tried first and
+/// looked wrong: the mark is a saturated blue/green, and a blue ground behind
+/// it muddied both.
+///
+/// It is also cheaper by construction. An `Opacity` over a full-screen
+/// subtree forces a `saveLayer`, and so does a colour filter; both are gone,
+/// along with the decoded full-screen image every route held. What is left is
+/// one `Container` with a colour.
 class AppBackground extends StatelessWidget {
-  const AppBackground({
-    super.key,
-    required this.child,
-    this.imageOpacity = 0.28,
-  });
+  const AppBackground({super.key, required this.child});
 
   final Widget child;
-
-  /// How strongly the photo reads, as authored for the DARK theme.
-  ///
-  /// Light mode scales this down — see [_effectiveImageOpacity]. Callers
-  /// pass one number and get a result that works in both themes, rather than
-  /// each of the eight call sites having to know about the difference.
-  final double imageOpacity;
-
-  /// The photo is a dark, desaturated image, so the same value does not read
-  /// the same on both themes — over near-white it turns to grey cast rather
-  /// than depth.
-  ///
-  /// TUNED TWICE. The first pass took light mode down to a third of the
-  /// authored value AND pushed the veil below to 0.82, because at the time
-  /// several cards were translucent and the photo showed through them as
-  /// murk. Together those two changes made the image invisible.
-  ///
-  /// Those cards are opaque now (FlatCard composites its tint instead of
-  /// replacing the surface), so the photo only ever meets the page
-  /// background. It can afford to be seen: 60% of the authored value, with
-  /// the veil pulled back to roughly dark mode's, gives light mode the same
-  /// texture the dark theme has without the cast that started this.
-  double get _effectiveImageOpacity =>
-      AppPalette.isLight ? imageOpacity * 0.6 : imageOpacity;
 
   /// Marks the painted layer so a test can count how many actually rendered
   /// — the widget count alone cannot tell a painting instance from a
@@ -81,61 +61,25 @@ class AppBackground extends StatelessWidget {
   }
 
   Widget _buildLayer() {
+    // RepaintBoundary is kept even though a flat fill is cheap to repaint:
+    // it stops a repaint anywhere in the page subtree from dirtying the
+    // ground, which is what it was there for before the photo existed.
+    // SizedBox.expand is load-bearing, not decoration.
+    //
+    // `Container(color: x, child: y)` sizes itself to y. On a page whose
+    // content is shorter than the viewport - the email sign-in step, for one -
+    // that meant the ground stopped where the content stopped and the rest of
+    // the screen fell through to bare black, in both themes. The photo version
+    // never showed this because its Stack held `Positioned.fill` children,
+    // which forced expansion as a side effect.
+    //
+    // Expanding first and colouring inside makes filling the viewport the
+    // widget's actual contract rather than something inherited from whatever
+    // happened to be in the tree.
     return RepaintBoundary(
       key: layerKey,
-      child: Container(
-        color: AppPalette.onyx,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: RepaintBoundary(
-                child: ColorFiltered(
-                  colorFilter: const ColorFilter.mode(
-                    Color(0xFF808080),
-                    BlendMode.saturation,
-                  ),
-                  child: Opacity(
-                    opacity: _effectiveImageOpacity,
-                    child: Image.asset(
-                      'assets/images/suit.png',
-                      fit: BoxFit.cover,
-                      cacheWidth: 1080, // Limit cache size
-                      errorBuilder: (context, error, stackTrace) =>
-                          const SizedBox.shrink(),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    stops: const [0.0, 0.5, 1.0],
-                    // Light mode still veils a little harder — content sits
-                    // directly on this and dark-on-light needs more
-                    // separation than light-on-dark — but only a little.
-                    // At 0.82 the photo was gone entirely.
-                    colors: AppPalette.isLight
-                        ? [
-                            AppPalette.onyx.withValues(alpha: 0.55),
-                            AppPalette.onyx.withValues(alpha: 0.80),
-                            AppPalette.onyx,
-                          ]
-                        : [
-                            AppPalette.onyx.withValues(alpha: 0.50),
-                            AppPalette.onyx.withValues(alpha: 0.82),
-                            AppPalette.onyx,
-                          ],
-                  ),
-                ),
-              ),
-            ),
-            Positioned.fill(child: child),
-          ],
-        ),
+      child: SizedBox.expand(
+        child: ColoredBox(color: AppPalette.onyx, child: child),
       ),
     );
   }

@@ -12,8 +12,11 @@ import 'package:professional_connections_platform/core/services/http_auth_servic
 
 const _baseUrl = 'http://localhost:8080';
 
-HttpAuthService _serviceWith(http.Client client) =>
-    HttpAuthService(httpClient: client, baseUrl: _baseUrl);
+HttpAuthService _serviceWith(http.Client client) => HttpAuthService(
+  httpClient: client,
+  baseUrl: _baseUrl,
+  getAccessToken: () async => 'token',
+);
 
 void main() {
   group('completeLinkedInOnboarding', () {
@@ -346,6 +349,28 @@ void main() {
       expect(mapped, isA<AuthNetworkException>());
       expect(mapped.message, isNot(contains('com.google')));
       expect(mapped.message, isNot(contains('exploded')));
+    });
+  });
+
+  group('missing session', () {
+    test('getProfile throws SessionExpiredException without sending a '
+        'request', () async {
+      var requestsSent = 0;
+      final client = MockClient((request) async {
+        requestsSent++;
+        return http.Response('{}', 200);
+      });
+      final service = HttpAuthService(
+        httpClient: client,
+        baseUrl: _baseUrl,
+        getAccessToken: () async => null,
+      );
+
+      await expectLater(
+        service.getProfile(),
+        throwsA(isA<SessionExpiredException>()),
+      );
+      expect(requestsSent, 0);
     });
   });
 }

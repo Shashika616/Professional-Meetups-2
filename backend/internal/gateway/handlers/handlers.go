@@ -107,6 +107,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /v1/verification/corporate-email/start", h.requireAuth(http.HandlerFunc(h.startCorporateEmailVerification)))
 	mux.Handle("POST /v1/verification/corporate-email/verify", h.requireAuth(http.HandlerFunc(h.verifyCorporateEmailCode)))
 	mux.Handle("GET /v1/users/me", h.requireAuth(http.HandlerFunc(h.getProfile)))
+	mux.Handle("GET /v1/users/{id}", h.requireAuth(http.HandlerFunc(h.getPublicProfile)))
 
 	// Trusted contacts + SOS. These live in the auth module, so all four go
 	// through h.monolith's auth methods.
@@ -519,7 +520,14 @@ type errorResponse struct {
 // place this translation happens, not a switch statement per handler.
 func writeGRPCError(w http.ResponseWriter, err error) {
 	st := status.Convert(err)
-	writeError(w, apperror.HTTPStatusFromGRPC(st.Code()), st.Message())
+	code := apperror.HTTPStatusFromGRPC(st.Code())
+	// The raw text stays in the log; the client gets a sentence a person
+	// can act on (apperror.UserMessage). Anything 5xx is logged at error
+	// level — that is the class of failure someone has to go and look at.
+	if code >= http.StatusInternalServerError {
+		slog.Default().Error("upstream error", "grpc_code", st.Code().String(), "error", err)
+	}
+	writeError(w, code, apperror.UserMessage(st.Code(), st.Message()))
 }
 
 func writeError(w http.ResponseWriter, code int, message string) {

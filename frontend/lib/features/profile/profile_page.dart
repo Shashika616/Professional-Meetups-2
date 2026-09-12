@@ -279,7 +279,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
           ),
         ),
         content: Text(
-          'Sign out of Professional Connections?',
+          'Sign out of TieHere?',
           style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
         ),
         actions: [

@@ -20,6 +20,7 @@ import 'package:professional_connections_platform/core/widgets/secondary_button.
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 
 /// How far ahead "Happening Soon" looks. Passed through to the backend's
@@ -33,6 +34,37 @@ import 'package:professional_connections_platform/features/meetups/meetup_detail
 /// / the week after" says anything. "Soon" still holds at a month for a
 /// marketplace where most areas have a handful of meetups.
 const happeningSoonWithinDays = 28;
+
+/// Rounds a viewer coordinate to ~110m before it is used as a cache key.
+///
+/// Full decision, measurements, and the two alternatives deliberately not
+/// taken (a `cos(latitude)` correction, and H3 hexagonal indexing) with a
+/// revisit trigger for each: `docs/decisions/adr-004-viewer-coordinate-quantisation.md`.
+///
+/// # WHY
+///
+/// [openMeetupsProvider] is a `.family` keyed on
+/// `(intent, viewerLat, viewerLng, withinDays)`. A stationary phone's GPS
+/// still drifts a few metres between reads, so raw coordinates minted a
+/// BRAND-NEW key every time - refetching an identical list over the network
+/// and orphaning the previous cache entry.
+///
+/// Seen in the deployed service's own request logs: `/v1/meetups` fetched at
+/// latitudes 6.8705648, 6.8705815, 6.8705842 and 6.8705933 within minutes,
+/// and `intent=lunch` fetched twice 21 seconds apart, because the device
+/// moved about three metres on a desk.
+///
+/// Three decimal places is ~110m, which is far below the distance at which a
+/// meetup's relevance changes, so the results are the same either way - the
+/// cache just stops being thrown away. Walking a real distance still crosses
+/// a boundary and refetches, which is the behaviour worth keeping.
+///
+/// Only the KEY is quantised. `AuthService.updateLastKnownLocation` is still
+/// sent the exact position from the device, so the user's stored location
+/// keeps full precision.
+@visibleForTesting
+double quantiseViewerCoordinate(double value) =>
+    (value * 1000).roundToDouble() / 1000;
 
 /// Home's browse section — the open-meetups list that used to be a whole
 /// separate "Matches" tab.
@@ -173,8 +205,12 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
       if (!mounted) return;
       setState(() {
         _phase = _LocationPhase.ready;
-        _viewerLat = position.latitude;
-        _viewerLng = position.longitude;
+        // Quantised here rather than at each provider call site: these two
+        // fields feed the cache key and nothing else, so doing it once at
+        // the source cannot be half-applied. The un-rounded position is
+        // still what updateLastKnownLocation sends below.
+        _viewerLat = quantiseViewerCoordinate(position.latitude);
+        _viewerLng = quantiseViewerCoordinate(position.longitude);
       });
       unawaited(
         ref
@@ -408,6 +444,10 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
     ({IntentType? intent, double viewerLat, double viewerLng, int withinDays})
     key,
   ) async {
+    // Who is hosting, before anything is sent — the sheet only answers
+    // yes/no; the request itself still goes through the path below.
+    if (!await showJoinConfirmationSheet(context, meetup: meetup)) return;
+    if (!context.mounted) return;
     try {
       await ref.read(meetupServiceProvider).requestToJoin(meetup.id);
       if (!context.mounted) return;

@@ -16,6 +16,8 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/step_hero.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/selected_place_banner.dart';
 
 /// Android's half of [MapLocationStep]'s platform switch (ADR-013 §4's
 /// third correction) — Stadia Maps via `maplibre_gl`, unchanged provider
@@ -123,6 +125,10 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
   }
 
   void _onSearchTextChanged() {
+    // The banner and CONTINUE both derive from the field's text, so any
+    // change to it must rebuild — including the programmatic assignment
+    // that the suppress flag below skips the *search* for.
+    if (mounted) setState(() {});
     if (_suppressNextSearch) {
       _suppressNextSearch = false;
       return;
@@ -336,6 +342,13 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _stepTitle(),
+        // Slimmer than the other steps' banners: the map below is the
+        // real picture on this page and needs the height more.
+        const StepHero(
+          asset: 'assets/images/schedule/location_card.jpg',
+          height: 96,
+        ),
+        const SizedBox(height: 14),
         // Choose a public place — never a stranger's home address
         // (Safety UX Flows.md's pre-meetup safety copy, ADR-013 § 4).
         Text(
@@ -422,6 +435,18 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                // What CONTINUE will actually submit, said out loud. Before
+                // this, "use my current location" lit CONTINUE with no
+                // visible change other than the map recentring — nothing
+                // told the user a place had been chosen, or which. The
+                // typed/picked name is shown when there is one; the
+                // current-location path submits an empty label on purpose
+                // (ADR-029, the server reverse-geocodes it), so that case
+                // says so instead of showing a blank.
+                if (_canContinue) ...[
+                  SelectedPlaceBanner(label: _searchController.text.trim()),
+                  const SizedBox(height: 12),
+                ],
                 OutlinedButton.icon(
                   onPressed: _useCurrentLocation,
                   icon: Icon(

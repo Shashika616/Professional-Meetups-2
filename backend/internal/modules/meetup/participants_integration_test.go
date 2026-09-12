@@ -10,7 +10,7 @@ import (
 // The attendee list is a stronger disclosure than the meetup itself: named
 // professionals, in a known place, at a known time. These tests pin who may
 // read it.
-func TestListMeetupParticipants_RedactsBelowLevelTwo_Integration(t *testing.T) {
+func TestListMeetupParticipants_OnlookerRedaction_Integration(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 
@@ -34,7 +34,9 @@ func TestListMeetupParticipants_RedactsBelowLevelTwo_Integration(t *testing.T) {
 
 	onlooker := newUserID(t, h)
 
-	for _, level := range []int{0, 1} {
+	// Guest tier (below visibilityFloor): nothing identifying at all, host
+	// included — a guest does not see who hosts on the card either.
+	for _, level := range []int{0} {
 		got, err := h.svc.ListMeetupParticipants(ctx, meetup.ListMeetupParticipantsRequest{
 			MeetupID: m.ID, ViewerID: onlooker, ViewerTrustLevel: level,
 		})
@@ -44,21 +46,14 @@ func TestListMeetupParticipants_RedactsBelowLevelTwo_Integration(t *testing.T) {
 		if !got.Redacted {
 			t.Errorf("level %d: Redacted = false, want true", level)
 		}
-		// They still learn that real people are really coming — that is the
-		// reason to sign up (ADR-002 §5).
-		if got.TotalCount != 2 || len(got.Participants) != 2 {
+		if len(got.Participants) != got.TotalCount || got.TotalCount != 2 {
 			t.Errorf("level %d: saw %d of %d, want both counted", level, len(got.Participants), got.TotalCount)
 		}
 		hosts := 0
 		for _, p := range got.Participants {
-			// Blurring on the client is not a privacy control if the names
-			// are on the wire. Nothing identifying may leave the server.
-			if p.FullName != "" || p.ProfilePhotoURL != "" {
+			if p.FullName != "" || p.ProfilePhotoURL != "" || p.TrustLevel != 0 {
 				t.Errorf("level %d: identity leaked: %+v", level, p)
 			}
-			// The id goes too: it is a stable handle that would let a guest
-			// correlate the same person across meetups without ever
-			// learning a name.
 			if p.UserID != "" {
 				t.Errorf("level %d: user id leaked (%q) — the graph is rebuildable from ids alone", level, p.UserID)
 			}
@@ -71,37 +66,31 @@ func TestListMeetupParticipants_RedactsBelowLevelTwo_Integration(t *testing.T) {
 		}
 	}
 
-	// Level 2 is the join bar, and the level at which the guest list opens.
-	got, err := h.svc.ListMeetupParticipants(ctx, meetup.ListMeetupParticipantsRequest{
-		MeetupID: m.ID, ViewerID: onlooker, ViewerTrustLevel: 2,
-	})
-	if err != nil {
-		t.Fatalf("ListMeetupParticipants(level 2): %v", err)
-	}
-	if got.Redacted {
-		t.Fatal("level 2: Redacted = true, want the real list")
-	}
-	byName := map[string]meetup.MeetupParticipant{}
-	for _, p := range got.Participants {
-		byName[p.FullName] = p
-	}
-	if _, ok := byName["Host Person"]; !ok {
-		t.Errorf("level 2 saw %+v, want the host named", got.Participants)
-	}
-	if _, ok := byName["Guest Person"]; !ok {
-		t.Errorf("level 2 saw %+v, want the accepted participant named", got.Participants)
-	}
-	if !byName["Host Person"].IsHost || byName["Guest Person"].IsHost {
-		t.Error("the host flag is on the wrong person")
-	}
-	// Host first, so the list reads the same way every time.
-	if !got.Participants[0].IsHost {
-		t.Error("the host is not first")
+	// Levels 1-3 can see the meetup, so they see who hosts it — and still
+	// nothing about the accepted guest, because they are not on it. (The
+	// full list is for host and accepted participants only; see
+	// TestListMeetupParticipants_OutsidersSeeOnlyTheHost_Integration.)
+	for _, level := range []int{1, 2, 3} {
+		got, err := h.svc.ListMeetupParticipants(ctx, meetup.ListMeetupParticipantsRequest{
+			MeetupID: m.ID, ViewerID: onlooker, ViewerTrustLevel: level,
+		})
+		if err != nil {
+			t.Fatalf("ListMeetupParticipants(level %d): %v", level, err)
+		}
+		if !got.Redacted {
+			t.Errorf("level %d: Redacted = false, want true — an onlooker is not on the meetup", level)
+		}
+		for _, p := range got.Participants {
+			if p.IsHost && p.FullName != "Host Person" {
+				t.Errorf("level %d: host not named: %+v", level, p)
+			}
+			if !p.IsHost && (p.FullName != "" || p.UserID != "") {
+				t.Errorf("level %d: accepted guest leaked to an onlooker: %+v", level, p)
+			}
+		}
 	}
 }
 
-// Only the host and ACCEPTED requesters. A pending request is not an
-// attendee, and publishing one would tell everyone who had applied.
 func TestListMeetupParticipants_ExcludesUnacceptedRequests_Integration(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

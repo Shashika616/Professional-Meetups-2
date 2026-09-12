@@ -29,9 +29,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # The Android emulator to boot/target when more than one is available on
 # this machine (`flutter emulators` currently lists both Pixel_10 and
-# Pixel_8) — Pixel_10 is the one actually wanted for Android runs. Change
-# this if that preference changes later.
-PREFERRED_ANDROID_EMULATOR_ID="Pixel_10"
+# Pixel_8). Pixel_8 is the current preference: it is the one being tested
+# against, and it is the lighter of the two, which matters while the landing
+# page's animated backdrop is being tuned. Change this if that changes.
+PREFERRED_ANDROID_EMULATOR_ID="Pixel_8"
 
 # iOS simulator to boot when none is running — used only by the simctl
 # fallback below, not by `flutter emulators --launch` (which has no

@@ -5,6 +5,7 @@ enum IntentType {
   lunch,
   networking,
   mentorship,
+  outing,
   rideShare,
   dating;
 
@@ -13,8 +14,42 @@ enum IntentType {
     IntentType.lunch => 'LUNCH',
     IntentType.networking => 'NETWORKING',
     IntentType.mentorship => 'MENTORSHIP',
+    // Not 'EVENTS': the bottom tab already carries that word, and the
+    // Home filter chips render every label on the same screen as it.
+    IntentType.outing => 'OUTING',
     IntentType.rideShare => 'RIDE SHARE',
     IntentType.dating => 'DATING',
+  };
+
+  /// One line of intent, shown under the name on the Schedule flow's
+  /// picker cards. Short enough to sit on a half-width card at 11px.
+  String get tagline => switch (this) {
+    IntentType.coffee => 'A quick cup, a new connection',
+    IntentType.lunch => 'Break bread, talk shop',
+    IntentType.networking => 'Grow your circle',
+    IntentType.mentorship => 'Learn from someone a step ahead',
+    IntentType.outing => 'A gig, a game, a night out',
+    IntentType.rideShare => 'Share the road, split the fare',
+    IntentType.dating => 'Connect beyond the office',
+  };
+
+  /// The landing-collage scene that best reads as this intent, reused as
+  /// the picker card's backdrop so the flow shares the landing page's
+  /// visual language instead of introducing new artwork. Chosen by eye
+  /// from the 29 scenes: two colleagues over cups for coffee, a table
+  /// being toasted for lunch, a rooftop mixer for networking, a whiteboard
+  /// session for mentorship, a concert crowd for outing, a candlelit table
+  /// for dating. There is no
+  /// vehicle scene at all, so ride share gets a window onto the street and
+  /// lets its icon do the talking.
+  String get imageAsset => switch (this) {
+    IntentType.coffee => 'assets/images/landing/l13.jpg',
+    IntentType.lunch => 'assets/images/landing/l11.jpg',
+    IntentType.networking => 'assets/images/landing/l14.jpg',
+    IntentType.mentorship => 'assets/images/landing/l10.jpg',
+    IntentType.outing => 'assets/images/landing/l05.jpg',
+    IntentType.rideShare => 'assets/images/landing/l15.jpg',
+    IntentType.dating => 'assets/images/landing/l28.jpg',
   };
 
   IconData get icon => switch (this) {
@@ -22,6 +57,7 @@ enum IntentType {
     IntentType.lunch => Icons.restaurant_outlined,
     IntentType.networking => Icons.work_outline,
     IntentType.mentorship => Icons.school_outlined,
+    IntentType.outing => Icons.celebration_outlined,
     IntentType.rideShare => Icons.directions_car_outlined,
     IntentType.dating => Icons.favorite_border,
   };
@@ -56,6 +92,17 @@ enum IntentType {
     _ => 3,
   };
 
+  /// The trust ladder today is 0–3 (ADR-033 § 5). A required level above
+  /// it is the sentinel for an intent that is deferred rather than gated
+  /// (ADR-004: ride share and dating) — no evidence a user can add reaches
+  /// it. UI that names the level to unlock must not print that sentinel as
+  /// if it were a real rung.
+  static const int highestTrustLevel = 3;
+
+  /// True when hosting this intent is deferred outright (ADR-004), as
+  /// opposed to locked behind a level the user could still earn.
+  bool get hostingDeferred => requiredTrustLevelToHost > highestTrustLevel;
+
   /// Whether [trustLevel] can request to join this intent.
   ///
   /// Deliberately named for the action rather than left as a bare
@@ -78,6 +125,7 @@ enum IntentType {
     IntentType.lunch => 'lunch',
     IntentType.networking => 'networking',
     IntentType.mentorship => 'mentorship',
+    IntentType.outing => 'outing',
     IntentType.rideShare => 'ride_share',
     IntentType.dating => 'dating',
   };
@@ -87,6 +135,7 @@ enum IntentType {
     'lunch' => IntentType.lunch,
     'networking' => IntentType.networking,
     'mentorship' => IntentType.mentorship,
+    'outing' => IntentType.outing,
     'ride_share' => IntentType.rideShare,
     'dating' => IntentType.dating,
     _ => throw FormatException('Unknown intent: $value'),

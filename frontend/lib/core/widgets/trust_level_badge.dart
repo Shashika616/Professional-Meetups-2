@@ -21,8 +21,11 @@ class TrustLevelBadge extends StatelessWidget {
         color: AppPalette.verified.withValues(alpha: 0.10),
         border: Border.all(color: AppPalette.verified.withValues(alpha: 0.30)),
       ),
+      // "L3 Trust", not a bare "L3": on a card between a name and a star
+      // rating a lone letter-digit reads as a code; the word says what the
+      // number is about.
       child: Text(
-        'L$trustLevel',
+        'L$trustLevel Trust',
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w800,

@@ -11,6 +11,7 @@ import 'package:professional_connections_platform/core/models/auth_session.dart'
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/push_notification_service.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
@@ -60,6 +61,10 @@ class _FakePushService implements PushNotificationService {
 /// assumption ever stops holding. Avoids a real HTTP attempt from
 /// HttpAuthService during a widget test.
 class _FakeAuthService implements AuthService {
+  @override
+  Future<PublicProfile> getPublicProfile(String userId) =>
+      throw UnimplementedError('not exercised by this test');
+
   // ADR-002 § 3. Unused by this test — every fake in test/ implements the
   // full AuthService surface, so a new method lands here even when the test
   // never calls it.
@@ -278,12 +283,52 @@ void main() {
 
       // Not the voluntary sign-out confirmation dialog (ProfilePage's Step
       // 12) — this was involuntary, nothing to confirm.
-      expect(find.text('Sign out of Professional Connections?'), findsNothing);
+      expect(find.text('Sign out of TieHere?'), findsNothing);
 
       // Lets the "session expired" toast's own 2.4s auto-dismiss timer
       // (ToastService/_ToastCard) run out before the test ends, so it
       // doesn't get flagged as a pending Timer.
       await tester.pump(const Duration(milliseconds: 2500));
+    },
+  );
+
+  testWidgets(
+    'a sign-out the user chose is NOT treated as an expired session — the '
+    'safety-net listener stays out of it (regression: it raced ProfilePage '
+    'to the landing page and showed "session expired" after a plain sign-out)',
+    (tester) async {
+      final container = ProviderContainer(
+        overrides: [
+          authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
+          authServiceProvider.overrideWithValue(_FakeAuthService()),
+          meetupServiceProvider.overrideWithValue(ImmediateMeetupService()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: AppShell()),
+        ),
+      );
+      await _pumpUntil(
+        tester,
+        () => find.byType(AppShell).evaluate().isNotEmpty,
+      );
+
+      await container.read(authSessionProvider.notifier).signOut();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      // ProfilePage owns this navigation; the listener must not push a
+      // LandingPage of its own, let alone one that announces an expiry.
+      expect(find.byType(LandingPage), findsNothing);
+      expect(find.textContaining('session expired'), findsNothing);
+      expect(
+        container.read(authSessionProvider).value?.signedOutByUser,
+        isTrue,
+      );
     },
   );
 
@@ -729,8 +774,16 @@ void main() {
   group('repeated Home <-> Events <-> Safety navigation', () {
     /// Taps a bottom-nav item and advances past the 280ms animateToPage,
     /// then hands back control with the tree in its just-landed state.
+    // Scoped to the bottom bar: "EVENTS" is also an intent now, so its
+    // filter chip on Home carries the same text and a bare find.text would
+    // be ambiguous.
+    Finder tab(String label) => find.descendant(
+      of: find.byType(AppBottomBar),
+      matching: find.text(label),
+    );
+
     Future<void> tapTab(WidgetTester tester, String label) async {
-      await tester.tap(find.text(label));
+      await tester.tap(tab(label));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
     }
@@ -738,7 +791,7 @@ void main() {
     /// Taps and advances a SINGLE frame — the granularity a transient
     /// one-frame flash would actually show up at.
     Future<void> tapTabOneFrame(WidgetTester tester, String label) async {
-      await tester.tap(find.text(label));
+      await tester.tap(tab(label));
       await tester.pump();
     }
 

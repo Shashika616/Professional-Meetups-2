@@ -142,7 +142,10 @@ func TestTrigger_RequestToJoin_NotifiesHost_Integration(t *testing.T) {
 	assertNotified(t, h, "New join request", map[string]string{f.host: "the host"})
 }
 
-// Row 2: WithdrawRequest -> host, "Request withdrawn".
+// Row 2: WithdrawRequest on an ACCEPTED request -> host, "Request
+// withdrawn". (A withdrawal is only a withdrawal once the host has
+// accepted; taking back a still-pending request is a cancellation and
+// notifies nobody — see TestWithdraw_PendingIsACancellation_Integration.)
 func TestTrigger_WithdrawRequest_NotifiesHost_Integration(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -151,6 +154,11 @@ func TestTrigger_WithdrawRequest_NotifiesHost_Integration(t *testing.T) {
 	r, err := h.svc.RequestToJoin(ctx, requestToJoin(f.meetupID, f.requester))
 	if err != nil {
 		t.Fatalf("RequestToJoin: %v", err)
+	}
+	if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{
+		RequestID: r.ID, HostUserID: f.host, Accept: true,
+	}); err != nil {
+		t.Fatalf("accept: %v", err)
 	}
 	clearOutbox(t, h)
 

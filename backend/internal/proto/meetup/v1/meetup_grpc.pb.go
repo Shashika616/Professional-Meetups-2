@@ -37,6 +37,7 @@ const (
 	MeetupService_DeclineCheckIn_FullMethodName             = "/meetup.v1.MeetupService/DeclineCheckIn"
 	MeetupService_SubmitMeetupFeedback_FullMethodName       = "/meetup.v1.MeetupService/SubmitMeetupFeedback"
 	MeetupService_ListMeetupParticipants_FullMethodName     = "/meetup.v1.MeetupService/ListMeetupParticipants"
+	MeetupService_GetMemberActivity_FullMethodName          = "/meetup.v1.MeetupService/GetMemberActivity"
 	MeetupService_ListNotifications_FullMethodName          = "/meetup.v1.MeetupService/ListNotifications"
 	MeetupService_ListRatableParticipants_FullMethodName    = "/meetup.v1.MeetupService/ListRatableParticipants"
 	MeetupService_SubmitRating_FullMethodName               = "/meetup.v1.MeetupService/SubmitRating"
@@ -162,6 +163,11 @@ type MeetupServiceClient interface {
 	// withheld below trust level 2 — withheld on the SERVER, not blurred on
 	// the client, so the names are never on the wire at all.
 	ListMeetupParticipants(ctx context.Context, in *ListMeetupParticipantsRequest, opts ...grpc.CallOption) (*ListMeetupParticipantsResponse, error)
+	// Another member's public-profile history, gated by relationship: a
+	// viewer may open a member who hosts a meetup, or with whom they share
+	// (or shared) one as host/accepted participant. Anyone else gets
+	// PERMISSION_DENIED — the endpoint is not a directory.
+	GetMemberActivity(ctx context.Context, in *GetMemberActivityRequest, opts ...grpc.CallOption) (*GetMemberActivityResponse, error)
 	// The caller's in-app notification history, newest first, bounded by the
 	// same retention window that trims the outbox — so the list can never show
 	// a row that is about to be swept.
@@ -394,6 +400,16 @@ func (c *meetupServiceClient) ListMeetupParticipants(ctx context.Context, in *Li
 	return out, nil
 }
 
+func (c *meetupServiceClient) GetMemberActivity(ctx context.Context, in *GetMemberActivityRequest, opts ...grpc.CallOption) (*GetMemberActivityResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetMemberActivityResponse)
+	err := c.cc.Invoke(ctx, MeetupService_GetMemberActivity_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *meetupServiceClient) ListNotifications(ctx context.Context, in *ListNotificationsRequest, opts ...grpc.CallOption) (*ListNotificationsResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListNotificationsResponse)
@@ -580,6 +596,11 @@ type MeetupServiceServer interface {
 	// withheld below trust level 2 — withheld on the SERVER, not blurred on
 	// the client, so the names are never on the wire at all.
 	ListMeetupParticipants(context.Context, *ListMeetupParticipantsRequest) (*ListMeetupParticipantsResponse, error)
+	// Another member's public-profile history, gated by relationship: a
+	// viewer may open a member who hosts a meetup, or with whom they share
+	// (or shared) one as host/accepted participant. Anyone else gets
+	// PERMISSION_DENIED — the endpoint is not a directory.
+	GetMemberActivity(context.Context, *GetMemberActivityRequest) (*GetMemberActivityResponse, error)
 	// The caller's in-app notification history, newest first, bounded by the
 	// same retention window that trims the outbox — so the list can never show
 	// a row that is about to be swept.
@@ -685,6 +706,9 @@ func (UnimplementedMeetupServiceServer) SubmitMeetupFeedback(context.Context, *S
 }
 func (UnimplementedMeetupServiceServer) ListMeetupParticipants(context.Context, *ListMeetupParticipantsRequest) (*ListMeetupParticipantsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMeetupParticipants not implemented")
+}
+func (UnimplementedMeetupServiceServer) GetMemberActivity(context.Context, *GetMemberActivityRequest) (*GetMemberActivityResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetMemberActivity not implemented")
 }
 func (UnimplementedMeetupServiceServer) ListNotifications(context.Context, *ListNotificationsRequest) (*ListNotificationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListNotifications not implemented")
@@ -1052,6 +1076,24 @@ func _MeetupService_ListMeetupParticipants_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MeetupService_GetMemberActivity_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetMemberActivityRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).GetMemberActivity(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_GetMemberActivity_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).GetMemberActivity(ctx, req.(*GetMemberActivityRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MeetupService_ListNotifications_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListNotificationsRequest)
 	if err := dec(in); err != nil {
@@ -1256,6 +1298,10 @@ var MeetupService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListMeetupParticipants",
 			Handler:    _MeetupService_ListMeetupParticipants_Handler,
+		},
+		{
+			MethodName: "GetMemberActivity",
+			Handler:    _MeetupService_GetMemberActivity_Handler,
 		},
 		{
 			MethodName: "ListNotifications",

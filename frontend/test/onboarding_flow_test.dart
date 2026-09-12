@@ -13,16 +13,22 @@ import 'package:professional_connections_platform/core/models/auth_session.dart'
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
 import 'package:professional_connections_platform/core/widgets/brand_marks.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/cafe_scene.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
 
 import 'support/fake_meetup_service.dart';
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  @override
+  Future<PublicProfile> getPublicProfile(String userId) =>
+      throw UnimplementedError('not exercised by this test');
+
   /// ADR-002 § 3's guest path. Records its own call count separately from
   /// [callCount] so a test can prove the guest button hit THIS method and
   /// not one of the three real signup paths.
@@ -392,21 +398,31 @@ void main() {
     expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
   });
 
-  testWidgets('ADR-014 microcopy renders on the choose-method step', (
-    tester,
-  ) async {
+  // The trust paragraph that used to sit here is gone. It explained the
+  // LinkedIn and guest limits in a block of 11pt text above the buttons, and
+  // it was the densest thing on a screen whose only job is to get someone in.
+  // The illustration took its place. The limits still exist and are still
+  // enforced server side; they are explained where a user meets them rather
+  // than pre emptively at the door.
+  testWidgets('the choose-method step shows the illustration, not a wall of '
+      'trust copy', (tester) async {
     await tester.pumpWidget(_appWith(_FakeAuthService.success(_testSession)));
     await tester.pumpAndSettle();
     await _confirmAge(tester);
 
+    expect(find.byType(CafeScene), findsOneWidget);
+    expect(
+      find.textContaining('Without LinkedIn you can browse'),
+      findsNothing,
+    );
     expect(
       find.textContaining('keeps your account more restricted'),
-      findsOneWidget,
+      findsNothing,
     );
-    // CHANGED: was 'Sign up with email', a 13px text link. Both alternative
-    // entry points are real, icon-bearing buttons now — the labels went
-    // uppercase to match every other button in the app.
+
+    // The entry points themselves must all survive the layout change.
     expect(find.text('SIGN UP WITH EMAIL'), findsOneWidget);
+    expect(find.text('CONTINUE AS GUEST'), findsOneWidget);
   });
 
   testWidgets(

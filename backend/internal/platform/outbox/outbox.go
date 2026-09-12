@@ -92,7 +92,26 @@ const (
 	// cannot cover: a nudge coalesced away under load, a backoff deadline
 	// coming due with no new writes happening, and rows that piled up while
 	// the process was down.
-	DefaultTickInterval = 2 * time.Second
+	//
+	// # WHY 30s AND NOT SOMETHING TIGHTER
+	//
+	// This loop runs once per CONTAINER, not once per deployment. Cloud Run
+	// scales horizontally and every instance runs the whole binary, so ten
+	// instances mean ten of these tickers, each issuing a ClaimBatch (and a
+	// CountPending, when an observer is attached) against the same table.
+	// SKIP LOCKED keeps that CORRECT — the losers claim nothing — but it
+	// makes them cheap, not free: each is still a real round trip to
+	// Postgres. At the 2s this used to be, that is a per-instance floor of
+	// roughly one query a second that no user asked for, and it grows with
+	// container count rather than with load.
+	//
+	// 30s costs nothing in exchange. It backstops a retry ladder running
+	// from DefaultBaseDelay (5s) to DefaultMaxDelay (10min), so it stays an
+	// order of magnitude finer than the deadlines it exists to catch, and it
+	// is not in the path of any notification a user actually waits on.
+	// TestRun_WakeTriggersADrain pins exactly that: it sets this to an hour
+	// and delivery still happens, because Wake is what drives it.
+	DefaultTickInterval = 30 * time.Second
 
 	// DefaultBaseDelay and DefaultMaxDelay bound exponential backoff.
 	DefaultBaseDelay = 5 * time.Second

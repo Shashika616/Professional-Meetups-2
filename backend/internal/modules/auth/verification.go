@@ -397,11 +397,47 @@ func (s *service) startVerification(
 func (s *service) dispatchVerificationCode(ctx context.Context, purpose repository.VerificationPurpose, target, code string) error {
 	switch purpose {
 	case repository.VerificationPurposePhone:
+		// Skip the real send for an allowlisted test number (Plan 17). The
+		// Twilio call is already known to fail for these — Dialog/Etisalat/
+		// Hutchison reject long-code SMS with 21612 until the Alphanumeric
+		// Sender ID registration completes — so making it anyway costs an
+		// API call, puts a 21612 in the logs that reads like a live
+		// incident, and returns ErrInternal to a client that is about to
+		// verify successfully with the fixed code regardless.
+		//
+		// The real generated code is logged alongside, exactly as
+		// LoggingSmsSender already does when Twilio is unconfigured: if the
+		// fixed code ever stops working for an unrelated reason, the real
+		// one is still recoverable from `gcloud run services logs read`.
+		//
+		// The `purpose ==` test is redundant inside this case — kept because
+		// it makes the condition self-explanatory if this is ever
+		// restructured away from a switch, and costs nothing.
+		if purpose == repository.VerificationPurposePhone && testOTPBypassPhones()[target] {
+			s.logger.Warn("TEST_OTP_BYPASS_PHONES: real SMS send skipped for allowlisted test number; fixed test code and the real generated code (below) both work", "target", target, "code", code)
+			return nil
+		}
 		return s.sms.SendVerificationCode(ctx, target, code)
-	case repository.VerificationPurposePersonalEmail:
+	case repository.VerificationPurposePersonalEmail, repository.VerificationPurposeCorporateEmail:
+		// Skip the real send for an allowlisted test address
+		// (TEST_OTP_BYPASS_EMAILS). Unlike the phone case above, the send
+		// would SUCCEED — these addresses are on reserved .test domains, so
+		// Gmail would accept the message and then bounce it into nothing.
+		// Making the call anyway spends SMTP quota, and a bounce loop against
+		// an undeliverable domain is exactly the sort of thing that gets a
+		// sending address rate-limited.
+		//
+		// The real generated code is logged alongside for the same reason it
+		// is on the phone path: if the fixed code stops working for an
+		// unrelated reason, the real one stays recoverable from the logs.
+		if testOTPBypassEmails()[normalizeBypassEmail(target)] {
+			s.logger.Warn(testEmailBypassSkipLogMsg, "purpose", purpose, "target", target, "code", code)
+			return nil
+		}
+		if purpose == repository.VerificationPurposeCorporateEmail {
+			return s.email.SendVerificationCode(ctx, target, code, email.PurposeCorporateEmail)
+		}
 		return s.email.SendVerificationCode(ctx, target, code, email.PurposePersonalEmail)
-	case repository.VerificationPurposeCorporateEmail:
-		return s.email.SendVerificationCode(ctx, target, code, email.PurposeCorporateEmail)
 	default:
 		return fmt.Errorf("auth: unknown verification purpose %q", purpose)
 	}
@@ -434,7 +470,7 @@ func (s *service) verifyAndConsumeCode(ctx context.Context, userID string, purpo
 		return fmt.Errorf("too many attempts, please request a new code: %w", apperror.ErrInvalidInput)
 	}
 
-	if !otpMatches(pending.CodeHash, code) {
+	if !otpMatches(pending.CodeHash, code, purpose, target) {
 		updated, incErr := s.verificationCodes.IncrementAttempts(ctx, userID, purpose)
 		if incErr == nil && updated.Attempts >= otpMaxAttempts {
 			_ = s.verificationCodes.Delete(ctx, userID, purpose)

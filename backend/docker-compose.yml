@@ -113,6 +113,10 @@ services:
       # direction for a flag that weakens authentication. The monolith logs a
       # WARN on every startup while it is set to "true".
       ALLOW_TEST_OTP_BYPASS: ${ALLOW_TEST_OTP_BYPASS:-}
+      # The allowlists the flag gates. Empty unless set in .env — with no
+      # entries the bypass matches nobody even when the flag is on.
+      TEST_OTP_BYPASS_PHONES: ${TEST_OTP_BYPASS_PHONES:-}
+      TEST_OTP_BYPASS_EMAILS: ${TEST_OTP_BYPASS_EMAILS:-}
       # Shared secret the monolith requires on every incoming gRPC call
       # (ADR-001's 2026-09-04 correction). Same .env value as the gateway's
       # MONOLITH_SHARED_SECRET below — one source, so they can't drift.

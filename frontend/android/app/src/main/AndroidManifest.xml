@@ -5,10 +5,20 @@
          manifest declaration is still required. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- android:icon is @mipmap/ic_launcher, NOT @drawable/app_icon.
+         The generated project pointed it at a plain drawable, which meant
+         every density bucket in mipmap-* and the adaptive icon in
+         mipmap-anydpi-v26 were ignored by the launcher: the old artwork kept
+         showing regardless of what was generated. roundIcon covers launchers
+         that ask for the round variant.
+
+         XML comments cannot sit inside a start tag, which is why this one is
+         here rather than beside the attribute it describes. -->
     <application
-        android:label="professional_connections_platform"
+        android:label="TieHere"
         android:name="${applicationName}"
-        android:icon="@drawable/app_icon">
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

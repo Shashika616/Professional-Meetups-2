@@ -461,3 +461,25 @@ func meetupRequestFromRow(row sqlcgen.MeetupMeetupRequest) MeetupRequest {
 		WithdrawalNote: stringPtrOrNil(row.WithdrawalNote),
 	}
 }
+
+func (r *postgresMeetupRequestRepository) CancelPending(ctx context.Context, id, requesterID string) error {
+	parsed, err := parseUUID(id)
+	if err != nil {
+		return fmt.Errorf("repository: invalid request id %q: %w", id, apperror.ErrInvalidInput)
+	}
+	requester, err := parseUUID(requesterID)
+	if err != nil {
+		return fmt.Errorf("repository: invalid requester id %q: %w", requesterID, apperror.ErrInvalidInput)
+	}
+	// No transaction and no notification hook: a cancellation queues
+	// nothing for anyone. The WHERE's status/requester scoping makes an
+	// already-accepted or foreign request a zero-row delete, reported as
+	// the same conflict Withdraw reports for an unwithdrawable one.
+	if _, err := r.q.CancelPendingMeetupRequest(ctx, sqlcgen.CancelPendingMeetupRequestParams{ID: parsed, RequesterID: requester}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("repository: request %s is not a pending request of this user: %w", id, apperror.ErrConflict)
+		}
+		return fmt.Errorf("repository: cancel pending request: %w", err)
+	}
+	return nil
+}

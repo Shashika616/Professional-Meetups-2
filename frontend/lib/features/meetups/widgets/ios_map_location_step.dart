@@ -8,6 +8,8 @@ import 'package:geolocator/geolocator.dart' as geolocator;
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/step_hero.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/selected_place_banner.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/ios_local_search.dart';
 
 /// iOS's half of [MapLocationStep]'s platform switch (ADR-013 §4's third
@@ -59,6 +61,10 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   }
 
   void _onSearchTextChanged() {
+    // The banner and CONTINUE both derive from the field's text, so any
+    // change must rebuild — including the programmatic assignment the
+    // suppress flag below skips the *search* for.
+    if (mounted) setState(() {});
     if (_suppressNextSearch) {
       _suppressNextSearch = false;
       return;
@@ -232,6 +238,13 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _stepTitle(),
+        // Same banner as the Android step — the provider differs, the
+        // page's look must not. Slim, since the map is the real picture.
+        const StepHero(
+          asset: 'assets/images/schedule/location_card.jpg',
+          height: 96,
+        ),
+        const SizedBox(height: 14),
         // Choose a public place — never a stranger's home address
         // (Safety UX Flows.md's pre-meetup safety copy, ADR-013 § 4). Same
         // copy as the Android implementation — this requirement doesn't
@@ -301,6 +314,13 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
                   ),
                 ),
                 const SizedBox(height: 12),
+                // What CONTINUE will submit, said out loud — same banner as
+                // the Android step (see SelectedPlaceBanner for the
+                // current-location wording).
+                if (_canContinue) ...[
+                  SelectedPlaceBanner(label: _searchController.text.trim()),
+                  const SizedBox(height: 12),
+                ],
                 OutlinedButton.icon(
                   onPressed: _useCurrentLocation,
                   icon: Icon(

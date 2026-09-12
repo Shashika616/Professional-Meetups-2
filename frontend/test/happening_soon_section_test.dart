@@ -257,6 +257,13 @@ void main() {
       await tester.tap(find.text('REQUEST TO JOIN'));
       await tester.pumpAndSettle();
 
+      // The host's profile sheet comes first now; nothing is sent until it
+      // is confirmed.
+      expect(service.lastRequestToJoinMeetupId, isNull);
+      expect(find.text('YOUR HOST'), findsOneWidget);
+      await tester.tap(find.text('CONFIRM & SEND REQUEST'));
+      await tester.pumpAndSettle();
+
       expect(service.lastRequestToJoinMeetupId, 'meetup-42');
       expect(find.byType(VerificationChecklistPage), findsNothing);
     });
@@ -293,6 +300,8 @@ void main() {
 
         await tester.tap(find.text('REQUEST TO JOIN'));
         await tester.pumpAndSettle();
+        await tester.tap(find.text('CONFIRM & SEND REQUEST'));
+        await tester.pumpAndSettle();
 
         expect(service.lastRequestToJoinMeetupId, 'meetup-42');
         expect(find.text('Request sent.'), findsOneWidget);
@@ -316,10 +325,12 @@ void main() {
     );
 
     testWidgets(
-      'the browse card shows the meetup\'s own lifecycle status badge, '
-      'additively alongside the JOINED count (ADR-016 addendum)',
+      'a meetup the SERVER has marked full reads as full on the card, even '
+      'when its accepted count says otherwise (ADR-016 addendum)',
       (tester) async {
         _useTallViewport(tester);
+        // 0 of 4 accepted, but the server says full. The two can disagree,
+        // and the server is the one that decides.
         final service = ScriptedMeetupService(
           openMeetups: [_meetup(status: MeetupStatus.full)],
         );
@@ -327,17 +338,13 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        expect(
-          tester
-              .widget<MeetupStatusBadge>(
-                find.descendant(
-                  of: find.byType(HappeningSoonSection),
-                  matching: find.byType(MeetupStatusBadge),
-                ),
-              )
-              .status,
-          MeetupStatus.full,
-        );
+        // The status chip that used to carry this is gone; the card's state
+        // edge encodes live/over/cancelled, not fullness. The action button
+        // is what says it now, and it is the better place: it stops the user
+        // asking to join something nobody can join.
+        expect(find.text('FULL'), findsOneWidget);
+        expect(find.text('REQUEST TO JOIN'), findsNothing);
+        expect(find.byType(MeetupStatusBadge), findsNothing);
       },
     );
 
@@ -542,23 +549,30 @@ void main() {
   group(
     '40km geo-visibility (ADR-021) — carried over from the browse page',
     () {
-      testWidgets(
-        'a successful location read passes those exact coordinates into '
-        'listOpenMeetups',
-        (tester) async {
-          _useTallViewport(tester);
-          final service = ScriptedMeetupService(openMeetups: const []);
-          GeolocatorPlatform.instance = FakeGeolocatorPlatform(
-            position: testPosition(lat: 6.9271, lng: 79.8612),
-          );
+      testWidgets('a successful location read passes those coordinates into '
+          'listOpenMeetups, quantised to the ~110m cache key', (tester) async {
+        _useTallViewport(tester);
+        final service = ScriptedMeetupService(openMeetups: const []);
+        GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+          position: testPosition(lat: 6.9271, lng: 79.8612),
+        );
 
-          await tester.pumpWidget(_appWith(service, trustLevel: 2));
-          await tester.pumpAndSettle();
+        await tester.pumpWidget(_appWith(service, trustLevel: 2));
+        await tester.pumpAndSettle();
 
-          expect(service.lastListOpenMeetupsViewerLat, 6.9271);
-          expect(service.lastListOpenMeetupsViewerLng, 79.8612);
-        },
-      );
+        // Was asserted as the raw 6.9271/79.8612. Now quantised, so a few
+        // metres of GPS drift cannot mint a new cache key and refetch an
+        // identical list - see quantiseViewerCoordinate. 110m is
+        // negligible against ADR-021's 40km visibility radius.
+        expect(
+          service.lastListOpenMeetupsViewerLat,
+          quantiseViewerCoordinate(6.9271),
+        );
+        expect(
+          service.lastListOpenMeetupsViewerLng,
+          quantiseViewerCoordinate(79.8612),
+        );
+      });
 
       testWidgets(
         'updateLastKnownLocation is called exactly once per successful '
@@ -800,7 +814,10 @@ void main() {
         expect(service.listOpenMeetupsCursors.last, 'cursor-1');
         expect(service.lastListOpenMeetupsIntent, isNull);
         expect(service.lastListOpenMeetupsWithinDays, happeningSoonWithinDays);
-        expect(service.lastListOpenMeetupsViewerLat, 6.9271);
+        expect(
+          service.lastListOpenMeetupsViewerLat,
+          quantiseViewerCoordinate(6.9271),
+        );
         expect(find.text('2/5 JOINED'), findsOneWidget);
       },
     );
@@ -958,11 +975,18 @@ void main() {
       tester,
     ) async {
       _useTallViewport(tester);
+      // "Next week" by the calendar, whatever today's weekday: a fixed
+      // +9 days lands two weeks out when the suite runs on a weekend.
+      final now = DateTime.now();
+      final daysToNextWednesday = (DateTime.monday - now.weekday + 7) + 2;
+      // Day 0 and day 1 must both stay in THIS week too, so from a Sunday
+      // the second meetup is placed later the same day.
+      final secondDay = now.weekday == DateTime.sunday ? 0 : 1;
       final service = ScriptedMeetupService(
         openMeetups: [
           atDay(0, id: 'a'),
-          atDay(1, id: 'b'),
-          atDay(9, id: 'c'),
+          atDay(secondDay, id: 'b'),
+          atDay(daysToNextWednesday, id: 'c'),
         ],
       );
 
@@ -1365,5 +1389,51 @@ void main() {
         await tester.pumpAndSettle();
       },
     );
+  });
+
+  // A stationary phone's GPS drifts by a few metres between reads, and
+  // openMeetupsProvider is a .family keyed on (intent, lat, lng, withinDays)
+  // - so raw coordinates minted a brand-new cache key on every jitter,
+  // refetching an identical list and orphaning the previous entry.
+  //
+  // Observed live: /v1/meetups fetched at lat 6.8705648, 6.8705815,
+  // 6.8705842 and 6.8705933 within minutes, and intent=lunch fetched twice
+  // 21 seconds apart purely because the coordinates moved ~3 metres.
+  group('viewer coordinates are quantised for the cache key', () {
+    test('drift of a few metres maps to the same key', () {
+      // The exact latitudes seen in the deployed service's request logs.
+      const drifted = [6.8705648, 6.8705815, 6.8705842, 6.8705933];
+      final keys = drifted.map(quantiseViewerCoordinate).toSet();
+
+      expect(
+        keys,
+        hasLength(1),
+        reason: 'four readings ~3m apart must share one cache key, not four',
+      );
+    });
+
+    test('a real move still produces a different key', () {
+      // ~1km apart: genuinely somewhere else, and the list should refetch.
+      expect(
+        quantiseViewerCoordinate(6.8705),
+        isNot(quantiseViewerCoordinate(6.8805)),
+      );
+    });
+
+    test('quantisation is to ~110m, and stays near the true position', () {
+      // Never shifts the coordinate by more than half a step, so the
+      // server-side distance sort is unaffected at meetup scale.
+      for (final value in [6.8705648, 79.9084248, -33.8688, 0.0]) {
+        expect(
+          (quantiseViewerCoordinate(value) - value).abs(),
+          lessThan(0.0005),
+        );
+      }
+    });
+
+    test('negative coordinates round correctly, not toward zero', () {
+      expect(quantiseViewerCoordinate(-33.86881), closeTo(-33.869, 1e-9));
+      expect(quantiseViewerCoordinate(-0.00051), closeTo(-0.001, 1e-9));
+    });
   });
 }

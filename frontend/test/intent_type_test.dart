@@ -16,6 +16,7 @@ void main() {
       expect(IntentType.lunch.requiredTrustLevelToJoin, 2);
       expect(IntentType.networking.requiredTrustLevelToJoin, 2);
       expect(IntentType.mentorship.requiredTrustLevelToJoin, 2);
+      expect(IntentType.outing.requiredTrustLevelToJoin, 2);
     });
 
     test('deferred intents need Level 4', () {
@@ -37,6 +38,7 @@ void main() {
       expect(IntentType.lunch.requiredTrustLevelToHost, 3);
       expect(IntentType.networking.requiredTrustLevelToHost, 3);
       expect(IntentType.mentorship.requiredTrustLevelToHost, 3);
+      expect(IntentType.outing.requiredTrustLevelToHost, 3);
     });
 
     test('deferred intents stay at Level 4 for both actions (ADR-004)', () {
@@ -78,6 +80,46 @@ void main() {
           greaterThanOrEqualTo(intent.requiredTrustLevelToJoin),
           reason: '${intent.label}: host bar is below the join bar',
         );
+      }
+    });
+  });
+
+  group('outing intent (new, ordinary gate)', () {
+    test('round-trips through the wire format the backend enum uses', () {
+      expect(IntentType.outing.wireValue, 'outing');
+      expect(IntentType.fromWire('outing'), IntentType.outing);
+    });
+
+    test('is unlocked like the ordinary four, not deferred', () {
+      expect(IntentType.outing.hostingDeferred, isFalse);
+      expect(IntentType.outing.canJoin(2), isTrue);
+      expect(IntentType.outing.canHost(3), isTrue);
+      expect(IntentType.outing.canHost(2), isFalse);
+    });
+
+    test('only ride share and dating are deferred', () {
+      expect(IntentType.values.where((i) => i.hostingDeferred), [
+        IntentType.rideShare,
+        IntentType.dating,
+      ]);
+    });
+
+    test('every intent has a label, tagline, icon and a real image asset', () {
+      for (final i in IntentType.values) {
+        expect(i.label, isNotEmpty);
+        expect(i.tagline, isNotEmpty);
+        expect(i.imageAsset, startsWith('assets/images/landing/l'));
+      }
+      // Distinct from the EVENTS bottom tab, which shares Home with the
+      // intent filter chips. The wire value is 'outing' too (migration 0011).
+      expect(IntentType.outing.label, 'OUTING');
+      expect(IntentType.outing.label, isNot('EVENTS'));
+      expect(IntentType.outing.imageAsset, 'assets/images/landing/l05.jpg');
+    });
+
+    test('every wire value round-trips', () {
+      for (final i in IntentType.values) {
+        expect(IntentType.fromWire(i.wireValue), i);
       }
     });
   });

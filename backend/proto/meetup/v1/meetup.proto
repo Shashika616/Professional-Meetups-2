@@ -129,6 +129,12 @@ service MeetupService {
   // the client, so the names are never on the wire at all.
   rpc ListMeetupParticipants(ListMeetupParticipantsRequest) returns (ListMeetupParticipantsResponse);
 
+  // Another member's public-profile history, gated by relationship: a
+  // viewer may open a member who hosts a meetup, or with whom they share
+  // (or shared) one as host/accepted participant. Anyone else gets
+  // PERMISSION_DENIED — the endpoint is not a directory.
+  rpc GetMemberActivity(GetMemberActivityRequest) returns (GetMemberActivityResponse);
+
   // The caller's in-app notification history, newest first, bounded by the
   // same retention window that trims the outbox — so the list can never show
   // a row that is about to be swept.
@@ -192,6 +198,8 @@ enum Intent {
   INTENT_MENTORSHIP = 4;
   INTENT_RIDE_SHARE = 5;
   INTENT_DATING = 6;
+  // Group outings — a gig, a match, a party. Ordinary gate (join 2 / host 3).
+  INTENT_OUTING = 7;
 }
 
 enum MeetupStatus {
@@ -559,6 +567,40 @@ message ListMeetupParticipantsResponse {
   // The real number of people either way — a viewer below the floor is
   // still told HOW MANY are coming.
   int32 total_count = 3;
+}
+
+message GetMemberActivityRequest {
+  string viewer_id = 1;  // set by the gateway from the verified JWT
+  string target_id = 2;
+}
+
+message GetMemberActivityResponse {
+  repeated MemberMeetup recent_meetups = 1;
+}
+
+// One meetup on a member's profile: what it was, their role, the turnout,
+// how it was rated overall, and the written comments about it.
+message MemberMeetup {
+  string id = 1;
+  Intent intent = 2;
+  MeetupStatus status = 3;
+  int64 window_start_unix_seconds = 4;
+  int64 window_end_unix_seconds = 5;
+  string location_label = 6;
+  bool hosted = 7;
+  int32 participant_count = 8;
+  double overall_average = 9;
+  int32 review_count = 10;
+  // The viewer was host/accepted on this meetup, so comment authors are
+  // named; otherwise author_name below is empty on every comment.
+  bool viewer_was_in = 11;
+  repeated MemberMeetupComment comments = 12;
+}
+
+message MemberMeetupComment {
+  string author_name = 1;  // empty unless viewer_was_in
+  string note = 2;
+  int64 written_at_unix_seconds = 3;
 }
 
 message MeetupParticipant {

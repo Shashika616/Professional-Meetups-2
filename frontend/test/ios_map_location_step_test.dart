@@ -11,6 +11,9 @@ import 'support/fake_geolocator_platform.dart';
 
 const _channel = MethodChannel('professionalconnections/ios_local_search');
 
+// Every step is mounted inside a SingleChildScrollView here because that is
+// exactly how ScheduleFlowPage hosts it (schedule_flow.dart) — the step's
+// content is taller than a bare test viewport and is designed to scroll.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -35,7 +38,11 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        home: Scaffold(body: IosMapLocationStep(onSubmit: (_, _, _) {})),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: IosMapLocationStep(onSubmit: (_, _, _) {}),
+          ),
+        ),
       ),
     );
     await tester.pump();
@@ -92,12 +99,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: IosMapLocationStep(
-              onSubmit: (lat, lng, label) {
-                submittedLat = lat;
-                submittedLng = lng;
-                submittedLabel = label;
-              },
+            body: SingleChildScrollView(
+              child: IosMapLocationStep(
+                onSubmit: (lat, lng, label) {
+                  submittedLat = lat;
+                  submittedLng = lng;
+                  submittedLabel = label;
+                },
+              ),
             ),
           ),
         ),
@@ -119,6 +128,8 @@ void main() {
       await tester.pump();
       await tester.pump();
 
+      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.pump();
       await tester.tap(find.text('CONTINUE'));
       await tester.pump();
 
@@ -162,7 +173,11 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: IosMapLocationStep(onSubmit: (_, _, _) {})),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: IosMapLocationStep(onSubmit: (_, _, _) {}),
+            ),
+          ),
         ),
       );
       await tester.pump();
@@ -227,11 +242,13 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: IosMapLocationStep(
-              onSubmit: (lat, lng, _) {
-                submittedLat = lat;
-                submittedLng = lng;
-              },
+            body: SingleChildScrollView(
+              child: IosMapLocationStep(
+                onSubmit: (lat, lng, _) {
+                  submittedLat = lat;
+                  submittedLng = lng;
+                },
+              ),
             ),
           ),
         ),
@@ -251,6 +268,8 @@ void main() {
 
       expect(find.text('Department of Coffee'), findsWidgets);
 
+      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.pump();
       await tester.tap(find.text('CONTINUE'));
       await tester.pump();
 
@@ -277,7 +296,11 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: IosMapLocationStep(onSubmit: (_, _, _) => submitted = true),
+            body: SingleChildScrollView(
+              child: IosMapLocationStep(
+                onSubmit: (_, _, _) => submitted = true,
+              ),
+            ),
           ),
         ),
       );
@@ -298,6 +321,8 @@ void main() {
       // scrim while the dropdown is open — before the scrim, this tap
       // reached CONTINUE directly, which is exactly the bug being fixed
       // (submitting instead of picking a completion).
+      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.pump();
       await tester.tap(find.text('CONTINUE'), warnIfMissed: false);
       await tester.pump();
 
@@ -328,7 +353,11 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: IosMapLocationStep(onSubmit: (_, _, _) {})),
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: IosMapLocationStep(onSubmit: (_, _, _) {}),
+            ),
+          ),
         ),
       );
       await tester.pump();
@@ -356,12 +385,14 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: IosMapLocationStep(
-              onSubmit: (lat, lng, label) {
-                submittedLat = lat;
-                submittedLng = lng;
-                submittedLabel = label;
-              },
+            body: SingleChildScrollView(
+              child: IosMapLocationStep(
+                onSubmit: (lat, lng, label) {
+                  submittedLat = lat;
+                  submittedLng = lng;
+                  submittedLabel = label;
+                },
+              ),
             ),
           ),
         ),
@@ -380,9 +411,13 @@ void main() {
         'Search for a cafe, restaurant, or venue',
       );
       expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+      // The selection is read back under the map instead of a blank field.
+      expect(find.text('Your current location'), findsOneWidget);
 
       // CONTINUE must still be enabled even with an empty field — using
       // current location is itself enough to unlock it.
+      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.pump();
       await tester.tap(find.text('CONTINUE'));
       await tester.pump();
 

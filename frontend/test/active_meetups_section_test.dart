@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/theme/app_palette.dart';
+
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -18,6 +20,9 @@ Meetup _meetup({
   required String hostFullName,
   required DateTime windowStart,
   required DateTime windowEnd,
+  String locationLabel = 'Colombo Fort Cafe',
+  MeetupStatus status = MeetupStatus.open,
+  String? cancellationReason,
 }) => Meetup(
   id: id,
   hostUserId: 'host-$id',
@@ -28,10 +33,11 @@ Meetup _meetup({
   windowEnd: windowEnd,
   locationLat: 6.9271,
   locationLng: 79.8612,
-  locationLabel: 'Colombo Fort Cafe',
+  locationLabel: locationLabel,
   capacity: 4,
   acceptedCount: 1,
-  status: MeetupStatus.open,
+  status: status,
+  cancellationReason: cancellationReason,
   createdAt: DateTime.now(),
 );
 
@@ -116,6 +122,41 @@ void main() {
     },
   );
 
+  testWidgets(
+    'the carousel grows to fit a long address instead of overflowing — its '
+    'height comes from the cards, not a constant (regression: a fixed 176 '
+    'overflowed by 5px the moment an address wrapped)',
+    (tester) async {
+      final now = DateTime.now();
+      const longAddress =
+          'Ellis Street & Stockton Street, Ellis Street, Union Square, '
+          'San Francisco, California, United States of America';
+      final first = _meetup(
+        id: 'first',
+        hostFullName: 'First Host',
+        windowStart: now.subtract(const Duration(minutes: 40)),
+        windowEnd: now.subtract(const Duration(minutes: 1)),
+        locationLabel: longAddress,
+      );
+      final second = _meetup(
+        id: 'second',
+        hostFullName: 'Second Host',
+        windowStart: now.subtract(const Duration(minutes: 10)),
+        windowEnd: now.add(const Duration(hours: 2)),
+      );
+      final service = ScriptedMeetupService(activeMeetups: [first, second]);
+
+      await tester.pumpWidget(_appWith(service));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(PageView), findsOneWidget);
+      final pageHeight = tester.getSize(find.byType(PageView)).height;
+      // Tall enough for a wrapped address plus the review prompt.
+      expect(pageHeight, greaterThan(176));
+    },
+  );
+
   testWidgets('once windowEnd passes, the card asks for a review — keeping the '
       "meetup's own identity, not swapping itself for a bare star picker", (
     tester,
@@ -172,9 +213,14 @@ void main() {
     await tester.tap(find.text('Share your thoughts about this meetup'));
     await tester.pumpAndSettle();
 
+    // The picture above is full-width now, so the slider can sit below a
+    // bare test viewport — scroll it in before reading its rect.
+    await tester.ensureVisible(find.byType(ExperienceSlider));
+    await tester.pumpAndSettle();
     final slider = tester.getRect(find.byType(ExperienceSlider));
     await tester.tapAt(Offset(slider.center.dx, slider.center.dy));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('SUBMIT'));
     await tester.tap(find.text('SUBMIT'));
     await tester.pumpAndSettle();
 
@@ -277,37 +323,56 @@ void main() {
     expect(find.text('How was your experience?'), findsOneWidget);
   });
 
-  testWidgets(
-    'the plain ACTIVE MEETUPS row shows COMPLETED for a windowEnd-passed '
-    'meetup, agreeing with the persistent card above it asking for a '
-    'review, instead of a stale OPEN badge (ADR-030, round-9: the '
-    'reconciled persistent-card/list-badge inconsistency)',
-    (tester) async {
-      final now = DateTime.now();
-      final justEnded = _meetup(
-        id: 'ended-2',
-        hostFullName: 'Another Ended Host',
-        windowStart: now.subtract(const Duration(hours: 1)),
-        windowEnd: now.subtract(const Duration(minutes: 1)),
-      );
-      final service = ScriptedMeetupService(activeMeetups: [justEnded]);
+  testWidgets('the plain ACTIVE MEETUPS row marks a windowEnd-passed meetup as '
+      'awaiting review, agreeing with the persistent card above it, instead '
+      'of reading as still live (ADR-030, round-9: the reconciled '
+      'persistent-card/list-badge inconsistency)', (tester) async {
+    final now = DateTime.now();
+    final justEnded = _meetup(
+      id: 'ended-2',
+      hostFullName: 'Another Ended Host',
+      windowStart: now.subtract(const Duration(hours: 1)),
+      windowEnd: now.subtract(const Duration(minutes: 1)),
+    );
+    final service = ScriptedMeetupService(activeMeetups: [justEnded]);
 
-      await tester.pumpWidget(_appWith(service));
-      await tester.pumpAndSettle();
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
 
-      // The persistent card is asking for a review...
-      expect(
-        find.text('Share your thoughts about this meetup'),
-        findsOneWidget,
-      );
-      // ...and the same meetup's row below now agrees: COMPLETED, not the
-      // server's still-open status (the poller hasn't ticked yet in this
-      // fixture — status stays MeetupStatus.open, ScriptedMeetupService
-      // never flips it).
-      expect(find.text('COMPLETED'), findsOneWidget);
-      expect(find.text('OPEN'), findsNothing);
-    },
-  );
+    // The persistent card is asking for a review...
+    expect(find.text('Share your thoughts about this meetup'), findsOneWidget);
+    // ...and the same meetup's row below agrees, using the state EDGE that
+    // replaced the OPEN/COMPLETED chip: the bar down the row's left side is
+    // painted gold (awaiting review) rather than green (live).
+    //
+    // Asserting on the colour rather than on a word is the whole reason the
+    // chip went away, so the test has to follow it there. The row's own
+    // status still comes from _effectiveStatus, not the server's stale
+    // MeetupStatus.open, which is what this test has always been about.
+    final edges = tester
+        .widgetList<Container>(
+          find.descendant(
+            of: find.byType(ActiveMeetupsSection),
+            matching: find.byType(Container),
+          ),
+        )
+        .where((c) => c.constraints?.maxWidth == 4)
+        .map((c) => c.color)
+        .toList();
+
+    expect(
+      edges,
+      contains(AppPalette.gold),
+      reason: 'an ended, unreviewed meetup must carry the gold edge',
+    );
+    expect(
+      edges,
+      isNot(contains(AppPalette.verified)),
+      reason: 'it is over, so nothing here should read as live',
+    );
+    expect(find.text('COMPLETED'), findsNothing);
+    expect(find.text('OPEN'), findsNothing);
+  });
 
   testWidgets(
     'the 30s Timer.periodic tick only recomputes local state — it must '
@@ -451,5 +516,77 @@ void main() {
         );
       },
     );
+  });
+
+  group('a cancelled meetup awaiting the participant\'s review', () {
+    Meetup cancelledTomorrow() => _meetup(
+      id: 'cx',
+      hostFullName: 'Grace Hopper',
+      windowStart: DateTime.now().add(const Duration(days: 1)),
+      windowEnd: DateTime.now().add(const Duration(days: 1, hours: 2)),
+      status: MeetupStatus.cancelled,
+      cancellationReason: 'Came down with something, so sorry.',
+    );
+
+    testWidgets('gets its own CANCELLED section above Happening Now, with '
+        'the host\'s reason and a review prompt; it is not in the live deck '
+        'and its row in Active Meetups is marked', (tester) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final live = _meetup(
+        id: 'live',
+        hostFullName: 'Live Host',
+        windowStart: DateTime.now().subtract(const Duration(minutes: 5)),
+        windowEnd: DateTime.now().add(const Duration(hours: 1)),
+      );
+      final service = ScriptedMeetupService(
+        activeMeetups: [live, cancelledTomorrow()],
+      );
+      await tester.pumpWidget(_appWith(service));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CANCELLED'), findsWidgets);
+      expect(
+        find.text('\u201CCame down with something, so sorry.\u201D'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Share your thoughts on this cancellation'),
+        findsOneWidget,
+      );
+      // The section order: CANCELLED before HAPPENING NOW.
+      final cancelledY = tester.getTopLeft(find.text('CANCELLED').first).dy;
+      final nowY = tester.getTopLeft(find.text('HAPPENING NOW')).dy;
+      expect(cancelledY, lessThan(nowY));
+      // The live deck holds only the live meetup.
+      expect(find.byType(PageView), findsNothing);
+      // And the Active Meetups row says so.
+      expect(find.text('CANCELLED \u00B7 COFFEE'), findsOneWidget);
+    });
+
+    testWidgets('tapping the prompt opens the review flow framed as a '
+        'cancellation', (tester) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final service = ScriptedMeetupService(
+        activeMeetups: [cancelledTomorrow()],
+      );
+      await tester.pumpWidget(_appWith(service));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Share your thoughts on this cancellation'));
+      await tester.pumpAndSettle();
+
+      final page = tester.widget<MeetupReviewPage>(
+        find.byType(MeetupReviewPage),
+      );
+      expect(page.cancellationReason, 'Came down with something, so sorry.');
+      expect(
+        find.text('THIS MEETUP WAS CANCELLED BY THE HOST'),
+        findsOneWidget,
+      );
+    });
   });
 }

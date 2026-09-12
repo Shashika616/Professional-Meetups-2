@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/models/auth_session.dart'
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
@@ -22,6 +23,10 @@ import 'package:professional_connections_platform/features/notifications/notific
 import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
 
 class _FakeAuthService implements AuthService {
+  @override
+  Future<PublicProfile> getPublicProfile(String userId) =>
+      throw UnimplementedError('not exercised by this test');
+
   // ADR-002 § 3. Unused by this test — every fake in test/ implements the
   // full AuthService surface, so a new method lands here even when the test
   // never calls it.
@@ -358,10 +363,7 @@ void main() {
 
         await _tapSignOutTrigger(tester);
 
-        expect(
-          find.text('Sign out of Professional Connections?'),
-          findsOneWidget,
-        );
+        expect(find.text('Sign out of TieHere?'), findsOneWidget);
         expect(auth.logoutCallCount, 0);
         expect(find.byType(ProfilePage), findsOneWidget);
 
@@ -387,7 +389,7 @@ void main() {
       expect(find.byType(ProfilePage), findsOneWidget);
       expect(find.byType(LandingPage), findsNothing);
       // The dialog itself is gone, not just invisible.
-      expect(find.text('Sign out of Professional Connections?'), findsNothing);
+      expect(find.text('Sign out of TieHere?'), findsNothing);
 
       final storage = SecureSessionStorage(
         storage: const FlutterSecureStorage(),
@@ -735,6 +737,7 @@ void main() {
       expect(find.text('7'), findsOneWidget);
       // One decimal place, from the real average rather than a placeholder.
       expect(find.text('4.8'), findsOneWidget);
+      // The stat tile prints the level over its own TRUST label.
       expect(find.text('L2'), findsOneWidget);
     });
   });

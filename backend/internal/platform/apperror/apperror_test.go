@@ -127,3 +127,44 @@ func TestHTTPStatusFromGRPC(t *testing.T) {
 		})
 	}
 }
+
+// UserMessage is the last thing between a service error and an error toast
+// on a phone. Developer prefixes, sentinel suffixes and snake_case names
+// must not survive it, and server-side failures must never carry their
+// raw text.
+func TestUserMessage(t *testing.T) {
+	cases := []struct {
+		code codes.Code
+		raw  string
+		want string
+	}{
+		{codes.InvalidArgument, "meetup: window_start can't be in the past: invalid input",
+			"Start time can't be in the past."},
+		{codes.InvalidArgument, "meetup: window_end must be after window_start: invalid input",
+			"End time must be after start time."},
+		{codes.InvalidArgument, "meetup: capacity must be between 1 and 20: invalid input",
+			"Capacity must be between 1 and 20."},
+		{codes.InvalidArgument, `unknown intent "events"`, `Unknown intent "events".`},
+		{codes.PermissionDenied, "meetup: hosting a coffee meetup requires trust level 3 (you are 2): forbidden",
+			"Hosting a coffee meetup requires trust level 3 (you are 2)."},
+		{codes.NotFound, "meetup: not found", "We couldn't find that."},
+		{codes.NotFound, "auth: refresh token: not found", "We couldn't find that."},
+		{codes.Unauthenticated, "auth: unauthorized", "Please sign in again."},
+		{codes.Unauthenticated, "auth: access token expired: unauthorized", "Please sign in again."},
+		{codes.ResourceExhausted, "auth: too many otp requests: rate limited",
+			"Too many attempts. Please wait a moment and try again."},
+		{codes.AlreadyExists, "meetup: already requested to join: conflict", "Already requested to join."},
+		// Server-side classes never expose their text.
+		{codes.Unknown, `monolithclient: unknown intent "events"`,
+			"Something went wrong on our side. Please try again in a moment."},
+		{codes.Internal, "pq: connection refused to 10.0.0.5:5432",
+			"Something went wrong on our side. Please try again in a moment."},
+		{codes.Unavailable, "transport is closing",
+			"Something went wrong on our side. Please try again in a moment."},
+	}
+	for _, c := range cases {
+		if got := UserMessage(c.code, c.raw); got != c.want {
+			t.Errorf("UserMessage(%v, %q)\n got  %q\n want %q", c.code, c.raw, got, c.want)
+		}
+	}
+}

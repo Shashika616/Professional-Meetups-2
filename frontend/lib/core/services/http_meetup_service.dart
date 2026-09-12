@@ -431,9 +431,21 @@ class HttpMeetupService implements MeetupService {
 
   Future<Map<String, String>> _authHeaders() async {
     final token = await _getAccessToken();
+    // No token means the session is gone from storage entirely — not
+    // merely stale, which getValidSession() would have refreshed before
+    // returning. Sending the request without an Authorization header buys
+    // a guaranteed 401 that no refresh can repair (there is no refresh
+    // token left to send), and a provider that retries would keep doing it
+    // forever. Fail here with the same exception a real 401 maps to, so
+    // AppShell's session-expired listener lands the user on LandingPage.
+    if (token == null) {
+      throw const MeetupSessionExpiredException(
+        'Your session has expired. Please sign in again.',
+      );
+    }
     return {
       'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
+      'Authorization': 'Bearer $token',
     };
   }
 }

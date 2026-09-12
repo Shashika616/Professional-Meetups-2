@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'package:professional_connections_platform/core/config/app_config.dart';
+import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 
 /// Real [SubscriptionService] wired to the gateway's `/v1/billing/*` REST
@@ -39,6 +40,32 @@ class HttpSubscriptionService implements SubscriptionService {
   @override
   Future<SubscriptionStatus> currentStatus() async {
     final response = await _authenticatedGet('/v1/billing/subscription');
+
+    // 503 means the billing module does not exist yet - it is Phase 3, and
+    // every billing route answers 503 by design until it lands (see the
+    // backend's handlers/unavailable.go). That is NOT a transient failure
+    // to retry: it is a permanent, expected answer for now.
+    //
+    // Throwing here was expensive. subscriptionStatusProvider is watched by
+    // ProfilePage, a keep-alive tab, and Riverpod 3 auto-retries a failed
+    // provider with backoff - so the permanent 503 became an endless retry
+    // loop at roughly 8-10 requests/minute per device, for as long as the
+    // app stayed open. In the deployed service's logs it was the single
+    // busiest endpoint, with a 100% failure rate, and a request every few
+    // seconds is also enough to stop Cloud Run ever scaling to zero.
+    //
+    // free/none is the honest answer, not a fudge: it is the same state the
+    // backend synthesizes for someone who has never purchased anything, and
+    // "no billing module" and "no subscription" entitle the user to exactly
+    // the same thing. isEntitled stays false either way, so nothing is
+    // unlocked by this.
+    if (response.statusCode == 503) {
+      return const SubscriptionStatus(
+        tier: SubscriptionTier.free,
+        status: SubscriptionLifecycleStatus.none,
+      );
+    }
+
     return SubscriptionStatus.fromJson(_decodeOrThrow(response));
   }
 
@@ -112,9 +139,21 @@ class HttpSubscriptionService implements SubscriptionService {
 
   Future<Map<String, String>> _authHeaders() async {
     final token = await _getAccessToken();
+    // No token means the session is gone from storage entirely — not
+    // merely stale, which getValidSession() would have refreshed before
+    // returning. Sending the request without an Authorization header buys
+    // a guaranteed 401 that no refresh can repair (there is no refresh
+    // token left to send), and a provider that retries would keep doing it
+    // forever. Fail here with the same exception a real 401 maps to, so
+    // AppShell's session-expired listener lands the user on LandingPage.
+    if (token == null) {
+      throw const SessionExpiredException(
+        'Your session has expired. Please sign in again.',
+      );
+    }
     return {
       'Content-Type': 'application/json',
-      if (token != null) 'Authorization': 'Bearer $token',
+      'Authorization': 'Bearer $token',
     };
   }
 }

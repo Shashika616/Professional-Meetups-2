@@ -1,0 +1,12 @@
+-- A seventh intent, "events" — a group outing to a concert, a game, a party.
+-- Gated like the four ordinary intents (join at Level 2, host at Level 3;
+-- see trustgate.go), not deferred like ride_share/dating.
+--
+-- Deliberately NOT wrapped in BEGIN/COMMIT: ALTER TYPE ... ADD VALUE is the
+-- one DDL that PostgreSQL restricts inside a transaction block (the new
+-- label cannot be used until the enclosing transaction commits, and older
+-- releases refused it outright). IF NOT EXISTS keeps a re-run harmless.
+--
+-- The label is appended, so existing enum ordinals are unchanged and every
+-- stored row keeps meaning exactly what it meant.
+ALTER TYPE meetup.intent_type ADD VALUE IF NOT EXISTS 'events';

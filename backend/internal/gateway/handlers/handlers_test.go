@@ -34,6 +34,11 @@ import (
 type fakeMonolith struct {
 	monolithclient.Client // embedded: any method a test doesn't need panics loudly rather than silently no-op'ing
 
+	activity    monolithclient.MemberActivity
+	activityErr error
+	gotViewerID string
+	gotTargetID string
+
 	session monolithclient.Session
 	profile monolithclient.Profile
 	err     error
@@ -71,6 +76,11 @@ func (f *fakeMonolith) RefreshSession(_ context.Context, refreshToken string) (m
 func (f *fakeMonolith) RevokeSession(_ context.Context, refreshToken string) error {
 	f.gotRefreshToken = refreshToken
 	return f.err
+}
+
+func (f *fakeMonolith) GetMemberActivity(_ context.Context, viewerID, targetID string) (monolithclient.MemberActivity, error) {
+	f.gotViewerID, f.gotTargetID = viewerID, targetID
+	return f.activity, f.activityErr
 }
 
 func (f *fakeMonolith) GetProfile(_ context.Context, userID string) (monolithclient.Profile, error) {
@@ -468,17 +478,26 @@ func TestRemoveTrustedContact_UsesPathIDAndTokenUser(t *testing.T) {
 // --- error mapping ------------------------------------------------------
 
 func TestGRPCErrorsMapToTheirHTTPStatus(t *testing.T) {
+	// The body is the status message made fit for a person
+	// (apperror.UserMessage): client-facing codes keep their sentence in
+	// sentence case; server-side codes get one fixed sentence and never
+	// their raw text, which may carry implementation detail.
+	const serverSide = "Something went wrong on our side. Please try again in a moment."
 	cases := []struct {
-		code codes.Code
-		want int
+		code     codes.Code
+		want     int
+		wantBody string
 	}{
-		{codes.InvalidArgument, http.StatusBadRequest},
-		{codes.Unauthenticated, http.StatusUnauthorized},
-		{codes.PermissionDenied, http.StatusForbidden},
-		{codes.NotFound, http.StatusNotFound},
-		{codes.AlreadyExists, http.StatusConflict},
-		{codes.ResourceExhausted, http.StatusTooManyRequests},
-		{codes.Internal, http.StatusInternalServerError},
+		{codes.InvalidArgument, http.StatusBadRequest, "Boom."},
+		{codes.PermissionDenied, http.StatusForbidden, "Boom."},
+		{codes.AlreadyExists, http.StatusConflict, "Boom."},
+		// Not-found, sign-in and rate-limit classes always get their own
+		// sentence — service text there names internals, not advice.
+		{codes.Unauthenticated, http.StatusUnauthorized, "Please sign in again."},
+		{codes.NotFound, http.StatusNotFound, "We couldn't find that."},
+		{codes.ResourceExhausted, http.StatusTooManyRequests,
+			"Too many attempts. Please wait a moment and try again."},
+		{codes.Internal, http.StatusInternalServerError, serverSide},
 	}
 
 	for _, tc := range cases {
@@ -489,8 +508,8 @@ func TestGRPCErrorsMapToTheirHTTPStatus(t *testing.T) {
 			if rec.Code != tc.want {
 				t.Errorf("status = %d, want %d", rec.Code, tc.want)
 			}
-			if got := decodeBody(t, rec)["error"]; got != "boom" {
-				t.Errorf("error body = %v, want the status message", got)
+			if got := decodeBody(t, rec)["error"]; got != tc.wantBody {
+				t.Errorf("error body = %v, want %q", got, tc.wantBody)
 			}
 		})
 	}
@@ -707,5 +726,114 @@ func init() {
 	// called on a method a test forgot to implement.
 	if _, ok := any(&fakeMonolith{}).(monolithclient.Client); !ok {
 		panic(fmt.Sprintf("fakeMonolith no longer satisfies monolithclient.Client: %v", errors.New("interface drift")))
+	}
+}
+
+// TestGetPublicProfile_ExposesBadgesButNeverContactDetails is the guard for
+// the one property that matters about GET /v1/users/{id}: another member
+// sees the record and the verification FACTS, and nothing that identifies
+// the person beyond their name and photo. The fixture deliberately fills
+// every private field so a regression that starts serialising one of them
+// fails here rather than in production.
+func TestGetPublicProfile_ExposesBadgesButNeverContactDetails(t *testing.T) {
+	s := newTestServer(t)
+	s.monolith.profile = monolithclient.Profile{
+		UserID:            "user-2",
+		FullName:          "Grace Hopper",
+		ProfilePhotoURL:   "https://cdn.example/grace.jpg",
+		TrustLevel:        3,
+		RatingAverage:     4.5,
+		RatingCount:       12,
+		MeetupsCompleted:  9,
+		LinkedInConnected: true,
+		WorkEmailVerified: true,
+		PhoneVerified:     true,
+		// Private — must not appear.
+		PhoneNumber:   "+94771234567",
+		PersonalEmail: "grace@example.com",
+		LegalName:     "Grace Brewster Murray Hopper",
+		Address:       "1 Navy Yard",
+		CompanyDomain: "navy.mil",
+		CompanyName:   "US Navy",
+	}
+
+	s.monolith.activity = monolithclient.MemberActivity{RecentMeetups: []monolithclient.MemberMeetup{{
+		ID: "m-1", Intent: "coffee", Status: "completed", Hosted: true,
+		ParticipantCount: 3, OverallAverage: 4.5, ReviewCount: 2, ViewerWasIn: false,
+		Comments: []monolithclient.MemberMeetupComment{{AuthorName: "", Note: "Great chat."}},
+	}}}
+
+	rec := s.do(http.MethodGet, "/v1/users/user-2", "", s.tokenFor(t, "user-1", 2))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if s.monolith.gotUserID != "user-2" {
+		t.Errorf("looked up %q, want the path id user-2", s.monolith.gotUserID)
+	}
+	if s.monolith.gotViewerID != "user-1" || s.monolith.gotTargetID != "user-2" {
+		t.Errorf("activity gate asked for (%q → %q), want (user-1 → user-2)", s.monolith.gotViewerID, s.monolith.gotTargetID)
+	}
+
+	body := decodeBody(t, rec)
+	for k, want := range map[string]any{
+		"full_name": "Grace Hopper", "trust_level": float64(3),
+		"rating_average": 4.5, "rating_count": float64(12), "meetups_completed": float64(9),
+		"linkedin_connected": true, "work_email_verified": true, "phone_verified": true,
+	} {
+		if got := body[k]; got != want {
+			t.Errorf("%s = %v, want %v", k, got, want)
+		}
+	}
+	for _, private := range []string{
+		"phone_number", "personal_email", "legal_name", "address",
+		"company_domain", "company_name", "personal_email_verified",
+		"personal_details_complete", "is_guest",
+	} {
+		if _, present := body[private]; present {
+			t.Errorf("public profile serialises %q — that field must never leave the owner's own /users/me", private)
+		}
+	}
+	recent, _ := body["recent_meetups"].([]any)
+	if len(recent) != 1 {
+		t.Fatalf("recent_meetups = %v, want the one meetup", body["recent_meetups"])
+	}
+	mm := recent[0].(map[string]any)
+	if mm["intent"] != "coffee" || mm["hosted"] != true || mm["overall_average"] != 4.5 {
+		t.Errorf("recent meetup = %v, want coffee/hosted/4.5", mm)
+	}
+	if c := mm["comments"].([]any)[0].(map[string]any); c["note"] != "Great chat." || c["author_name"] != "" {
+		t.Errorf("comment = %v, want the note with an empty author for an outsider", c)
+	}
+
+	// Belt and braces: the raw values must not be anywhere in the body.
+	raw := rec.Body.String()
+	for _, leak := range []string{"+94771234567", "grace@example.com", "Brewster", "Navy Yard", "navy.mil"} {
+		if strings.Contains(raw, leak) {
+			t.Errorf("public profile body contains private value %q", leak)
+		}
+	}
+}
+
+// A viewer who may not open a member gets 403 with a sentence, and the
+// profile itself is never fetched — the gate runs first, so not even the
+// existence of the id is confirmed.
+func TestGetPublicProfile_ForbiddenWhenNoSharedMeetup(t *testing.T) {
+	s := newTestServer(t)
+	s.monolith.activityErr = status.Error(codes.PermissionDenied,
+		"meetup: you can see a member's profile once you share a meetup with them: forbidden")
+	s.monolith.profile = monolithclient.Profile{UserID: "user-2", FullName: "Grace Hopper", PhoneNumber: "+94771234567"}
+
+	rec := s.do(http.MethodGet, "/v1/users/user-2", "", s.tokenFor(t, "user-1", 2))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", rec.Code)
+	}
+	if got := decodeBody(t, rec)["error"]; got != "You can see a member's profile once you share a meetup with them." {
+		t.Errorf("error = %v", got)
+	}
+	if s.monolith.gotUserID == "user-2" {
+		t.Error("profile was fetched despite the gate refusing — the gate must run first")
+	}
+	if strings.Contains(rec.Body.String(), "Grace") || strings.Contains(rec.Body.String(), "+94") {
+		t.Error("a forbidden response carried profile data")
 	}
 }

@@ -34,6 +34,7 @@ class MeetupReviewPage extends ConsumerStatefulWidget {
     super.key,
     required this.meetupId,
     required this.hostUserId,
+    this.cancellationReason,
   });
 
   final String meetupId;
@@ -41,6 +42,14 @@ class MeetupReviewPage extends ConsumerStatefulWidget {
   /// Used only to badge the host in the participant list — the read of who
   /// can be rated comes from the server.
   final String hostUserId;
+
+  /// Set when the meetup was CANCELLED by its host and this is the
+  /// participant's review of that: the page says so up front, quotes the
+  /// host's reason, and the people step (the server offers only the host
+  /// for a cancelled meetup) is framed as rating the host rather than
+  /// "who did you meet". Null for an ordinary post-meetup review. An empty
+  /// string means cancelled with no reason given.
+  final String? cancellationReason;
 
   @override
   ConsumerState<MeetupReviewPage> createState() => _MeetupReviewPageState();
@@ -260,8 +269,14 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
       child: Column(
         children: [
           const SizedBox(height: 8),
+          if (widget.cancellationReason != null) ...[
+            _CancelledNotice(reason: widget.cancellationReason!),
+            const SizedBox(height: 22),
+          ],
           Text(
-            'How was your experience?',
+            widget.cancellationReason != null
+                ? 'How was this for you?'
+                : 'How was your experience?',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: AppPalette.textPrimary,
@@ -270,10 +285,15 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
               height: 1.25,
             ),
           ),
-          const SizedBox(height: 36),
+          SizedBox(height: widget.cancellationReason != null ? 24 : 36),
           // The face morphs and its word cross-fades, so dragging the
           // slider reads as one thing changing its mind.
-          ExperienceFace(level: level),
+          // Full width: the scene is a landscape, and the room, table and
+          // window are part of what carries the mood.
+          LayoutBuilder(
+            builder: (context, c) =>
+                ExperienceFace(level: level, size: c.maxWidth),
+          ),
           const SizedBox(height: 24),
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 200),
@@ -335,7 +355,9 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Who did you meet?',
+            widget.cancellationReason != null
+                ? 'Rate the host'
+                : 'Who did you meet?',
             style: TextStyle(
               color: AppPalette.textPrimary,
               fontSize: 22,
@@ -344,7 +366,9 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Rate everyone to finish. Traits are optional.',
+            widget.cancellationReason != null
+                ? 'Nobody met, so only the host is rated. Traits are optional.'
+                : 'Rate everyone to finish. Traits are optional.',
             style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
           ),
           const SizedBox(height: 18),
@@ -396,6 +420,62 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
 }
 
 /// Two dots, so the flow says how long it is before someone starts it.
+/// The cancellation, stated before anything is asked: what the state is,
+/// and what the host said. The reason is shown as a quotation because it
+/// is the host's words, not the app's.
+class _CancelledNotice extends StatelessWidget {
+  const _CancelledNotice({required this.reason});
+
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final tone = AppPalette.cancelled;
+    final text = reason.trim();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.event_busy_rounded, size: 16, color: tone),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'THIS MEETUP WAS CANCELLED BY THE HOST',
+                  style: TextStyle(
+                    color: tone,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            text.isEmpty ? 'No reason was given.' : '\u201C$text\u201D',
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontSize: 13.5,
+              fontStyle: text.isEmpty ? FontStyle.normal : FontStyle.italic,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StepIndicator extends StatelessWidget {
   const _StepIndicator({required this.step});
 

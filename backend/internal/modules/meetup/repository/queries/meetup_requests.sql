@@ -104,3 +104,17 @@ RETURNING *;
 UPDATE meetup.meetup_requests SET status = 'withdrawn', resolved_at = now(), withdrawal_note = $2
 WHERE id = $1 AND requester_id = $3 AND status IN ('pending', 'accepted')
 RETURNING *;
+
+-- name: CancelPendingMeetupRequest :one
+-- A requester taking back a request the host has not acted on yet. This
+-- is a DELETE, not a status change, and deliberately so: nothing happened
+-- — the host never accepted, no seat was held, nobody is owed a rating —
+-- so there is nothing worth a row. It also keeps the door open: the
+-- UNIQUE (meetup_id, requester_id, status) key means a requester who
+-- cancels, re-requests and cancels again would collide on a second
+-- 'withdrawn' row, where a deleted row leaves nothing to collide with.
+-- Scoped to the requester and to 'pending' in the WHERE, like Withdraw:
+-- an accepted request is a withdrawal (ADR-020 §4), never a cancellation.
+DELETE FROM meetup.meetup_requests
+WHERE id = $1 AND requester_id = $2 AND status = 'pending'
+RETURNING *;

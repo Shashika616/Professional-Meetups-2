@@ -3,12 +3,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
+import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/features/meetups/participants_page.dart';
+import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/participants_strip.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 
+import 'support/fake_auth_service.dart';
 import 'support/scripted_meetup_service.dart';
 
 /// What the server sends a verified (level 2+) viewer.
@@ -53,6 +57,40 @@ Widget _pageIn(ScriptedMeetupService service) => ProviderScope(
   overrides: [meetupServiceProvider.overrideWithValue(service)],
   child: const MaterialApp(home: ParticipantsPage(meetupId: 'meetup-1')),
 );
+
+/// A redacted list as the server now sends it to a verified outsider: the
+/// host named, everyone else blank.
+const _redactedHostNamed = MeetupParticipants(
+  participants: [
+    MeetupParticipant(
+      userId: 'host-1',
+      isHost: true,
+      fullName: 'Grace Hopper',
+      trustLevel: 3,
+    ),
+    MeetupParticipant(isHost: false),
+  ],
+  totalCount: 2,
+  redacted: true,
+);
+
+class _SessionAs extends AuthSessionNotifier {
+  _SessionAs(this.id);
+  final String id;
+  @override
+  Future<AuthSessionState> build() async => AuthSessionState(
+    profile: UserProfile(id: id, fullName: 'Viewer', trustLevel: 2),
+  );
+}
+
+class _SessionAt extends AuthSessionNotifier {
+  _SessionAt(this.level);
+  final int level;
+  @override
+  Future<AuthSessionState> build() async => AuthSessionState(
+    profile: UserProfile(id: 'viewer', fullName: 'Viewer', trustLevel: level),
+  );
+}
 
 void main() {
   group('participants strip', () {
@@ -151,6 +189,120 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(VerificationChecklistPage), findsOneWidget);
+    });
+  });
+
+  group('participant rows open the public profile', () {
+    Widget pageWith(ScriptedMeetupService service, ImmediateAuthService auth) =>
+        ProviderScope(
+          overrides: [
+            meetupServiceProvider.overrideWithValue(service),
+            authServiceProvider.overrideWithValue(auth),
+          ],
+          child: const MaterialApp(
+            home: ParticipantsPage(meetupId: 'meetup-1'),
+          ),
+        );
+
+    testWidgets('tapping a named participant opens their profile', (
+      tester,
+    ) async {
+      final auth = ImmediateAuthService()
+        ..publicProfileFor = (id) =>
+            PublicProfile(id: id, fullName: 'Ada Lovelace', trustLevel: 2);
+      await tester.pumpWidget(
+        pageWith(ScriptedMeetupService()..participants = _named, auth),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Ada Lovelace'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PublicProfilePage), findsOneWidget);
+    });
+
+    testWidgets('a redacted row opens nothing — there is no identity behind '
+        'it to show', (tester) async {
+      final auth = ImmediateAuthService();
+      await tester.pumpWidget(
+        pageWith(ScriptedMeetupService()..participants = _redacted, auth),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(RedactedFace).first);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PublicProfilePage), findsNothing);
+    });
+  });
+
+  group('redaction says the right reason', () {
+    Widget pageAt(int level, MeetupParticipants data) => ProviderScope(
+      overrides: [
+        meetupServiceProvider.overrideWithValue(
+          ScriptedMeetupService()..participants = data,
+        ),
+        authServiceProvider.overrideWithValue(ImmediateAuthService()),
+        authSessionProvider.overrideWith(() => _SessionAt(level)),
+      ],
+      child: const MaterialApp(home: ParticipantsPage(meetupId: 'meetup-1')),
+    );
+
+    testWidgets('below Level 2 it is a verification prompt', (tester) async {
+      await tester.pumpWidget(pageAt(1, _redacted));
+      await tester.pumpAndSettle();
+      expect(find.text('Verify to see who’s coming'), findsOneWidget);
+      expect(find.text('GET VERIFIED'), findsOneWidget);
+      expect(find.text('Join to see who\'s coming'), findsNothing);
+    });
+
+    testWidgets('at Level 2+ it says join — there is nothing to verify', (
+      tester,
+    ) async {
+      await tester.pumpWidget(pageAt(2, _redactedHostNamed));
+      await tester.pumpAndSettle();
+      expect(find.text('Join to see who\'s coming'), findsOneWidget);
+      expect(find.text('GET VERIFIED'), findsNothing);
+    });
+
+    testWidgets('a named host row in a redacted list is shown and opens the '
+        'host profile; the blank rows stay blurred and inert', (tester) async {
+      await tester.pumpWidget(pageAt(2, _redactedHostNamed));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Grace Hopper'), findsOneWidget);
+      expect(find.byType(RedactedFace), findsOneWidget);
+
+      await tester.tap(find.text('Grace Hopper'));
+      await tester.pumpAndSettle();
+      expect(find.byType(PublicProfilePage), findsOneWidget);
+    });
+  });
+
+  group('role tags and the viewer', () {
+    testWidgets('the signed-in user\'s own row carries a YOU tag; the host '
+        'row carries HOST; no open-spot rows are drawn', (tester) async {
+      final auth = ImmediateAuthService();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            meetupServiceProvider.overrideWithValue(
+              ScriptedMeetupService()..participants = _named,
+            ),
+            authServiceProvider.overrideWithValue(auth),
+            // The fake session's profile id is guest-1 — Ada's row.
+            authSessionProvider.overrideWith(() => _SessionAs('guest-1')),
+          ],
+          child: const MaterialApp(
+            home: ParticipantsPage(meetupId: 'meetup-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('HOST'), findsOneWidget);
+      expect(find.text('YOU'), findsOneWidget);
+      expect(find.text('Open spot'), findsNothing);
     });
   });
 }

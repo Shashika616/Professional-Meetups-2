@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/models/auth_session.dart'
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -21,6 +22,10 @@ import 'support/fake_secure_storage_platform.dart';
 /// Level 2 is satisfied by default because that is this page's normal
 /// precondition — it is reached by a user who can already join meetups.
 class _FakeAuthService implements AuthService {
+  @override
+  Future<PublicProfile> getPublicProfile(String userId) =>
+      throw UnimplementedError('not exercised by this test');
+
   _FakeAuthService({
     this.levelTwoDone = true,
     this.companyName = '',

@@ -89,11 +89,24 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
     if (active.isEmpty) return const SizedBox.shrink();
 
     final now = DateTime.now();
+    // A cancelled meetup is on this list for one reason: the host called
+    // it off while this user held an accepted request, and the server is
+    // asking them to review that. It gets its own section above everything
+    // else — it is the most recent thing to have happened to them here —
+    // and never enters the Happening Now deck, which is for meetups that
+    // are going ahead.
+    final cancelled = active
+        .where((m) => m.status == MeetupStatus.cancelled)
+        .toList();
     // windowStart/windowEnd/hostFullName/locationLabel are only ever null
     // for a locked ListOpenMeetups result (ADR-028) — listActiveMeetups()
     // never redacts, so `!` here documents that guarantee.
     final cardEligible = active
-        .where((m) => !now.isBefore(m.windowStart!.subtract(_cardLeadTime)))
+        .where(
+          (m) =>
+              m.status != MeetupStatus.cancelled &&
+              !now.isBefore(m.windowStart!.subtract(_cardLeadTime)),
+        )
         .toList();
 
     return Padding(
@@ -101,6 +114,15 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (cancelled.isNotEmpty) ...[
+            const SectionLabel('CANCELLED'),
+            const SizedBox(height: 16),
+            for (final m in cancelled) ...[
+              _ReviewInvitationCard(meetup: m),
+              const SizedBox(height: 12),
+            ],
+            const SizedBox(height: 12),
+          ],
           if (cardEligible.isNotEmpty) ...[
             const SectionLabel('HAPPENING NOW'),
             const SizedBox(height: 16),
@@ -142,9 +164,10 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
 /// that says "there is more here", and they double as position while
 /// swiping.
 ///
-/// The fixed height dropped from 232 to [_cardHeight]. 232 was well past
-/// what the content needs, which is why the card rendered with a large dead
-/// area under the location line.
+/// The height is no longer a constant at all — see the Stack in build().
+/// (History: it was 232, then a fixed 176 — the first left a large dead
+/// area under the location line, the second overflowed the moment a long
+/// address wrapped onto a second line.)
 class _PersistentMeetupCardSet extends StatefulWidget {
   const _PersistentMeetupCardSet({required this.meetups});
 
@@ -162,8 +185,6 @@ class _PersistentMeetupCardSetState extends State<_PersistentMeetupCardSet> {
   /// Sized for the real content — badge row, host name, window, and a
   /// two-line location — plus slack so a long place name or a larger text
   /// scale does not clip.
-  static const double _cardHeight = 176;
-
   @override
   void dispose() {
     _controller.dispose();
@@ -178,19 +199,40 @@ class _PersistentMeetupCardSetState extends State<_PersistentMeetupCardSet> {
 
     return Column(
       children: [
-        SizedBox(
-          height: _cardHeight,
-          child: PageView.builder(
-            controller: _controller,
-            onPageChanged: (index) => setState(() => _page = index),
-            itemCount: widget.meetups.length,
-            itemBuilder: (context, index) => Padding(
-              // Room for the elevated card's cast shadow, which would
-              // otherwise be clipped by the PageView's own bounds.
-              padding: const EdgeInsets.fromLTRB(2, 2, 2, 10),
-              child: _PersistentMeetupCard(meetup: widget.meetups[index]),
+        // A PageView needs a definite height, and the cards' height now
+        // depends on content (an address wraps rather than truncates). So
+        // the box is sized by the cards themselves: every card is laid out
+        // once, invisibly, in a Stack, and the PageView fills that. No
+        // constant to fall out of date with the card, no overflow when a
+        // venue has a long name. maintainSize keeps the invisible copies in
+        // layout without painting them.
+        Stack(
+          children: [
+            for (final meetup in widget.meetups)
+              Visibility(
+                visible: false,
+                maintainSize: true,
+                maintainAnimation: true,
+                maintainState: true,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(2, 2, 2, 10),
+                  child: _PersistentMeetupCard(meetup: meetup),
+                ),
+              ),
+            Positioned.fill(
+              child: PageView.builder(
+                controller: _controller,
+                onPageChanged: (index) => setState(() => _page = index),
+                itemCount: widget.meetups.length,
+                itemBuilder: (context, index) => Padding(
+                  // Room for the elevated card's cast shadow, which would
+                  // otherwise be clipped by the PageView's own bounds.
+                  padding: const EdgeInsets.fromLTRB(2, 2, 2, 10),
+                  child: _PersistentMeetupCard(meetup: widget.meetups[index]),
+                ),
+              ),
             ),
-          ),
+          ],
         ),
         const SizedBox(height: 4),
         _PageDots(count: widget.meetups.length, current: _page),
@@ -361,8 +403,6 @@ class _PersistentMeetupCard extends StatelessWidget {
                       const SizedBox(height: 12),
                       Text(
                         meetup.hostFullName!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: AppPalette.textPrimary,
                           fontSize: 16,
@@ -393,8 +433,6 @@ class _PersistentMeetupCard extends StatelessWidget {
                           Expanded(
                             child: Text(
                               meetup.locationLabel!,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: AppPalette.textSecondary,
                                 fontSize: 12,
@@ -418,59 +456,214 @@ class _PersistentMeetupCard extends StatelessWidget {
 /// A compact row for the full "Active Meetups" list — same visual language
 /// (FlatCard, palette tokens) as every other card on this page, not a new
 /// style.
+/// One row in ACTIVE MEETUPS.
+///
+/// # THE STATUS IS AN EDGE, NOT A CHIP
+///
+/// This used to end in an OPEN / COMPLETED pill. It read as a label rather
+/// than as state, it competed with the row's own content for the eye, and
+/// "COMPLETED" in muted grey was the least useful thing on a row whose whole
+/// point was that it needed reviewing.
+///
+/// The state is now the bar down the left edge: [AppPalette.verified] while
+/// the meetup is live, [AppPalette.gold] once it is over and owed a review.
+/// Gold is deliberately the same gold as the review invitation card above it,
+/// so the two read as one thread rather than two unrelated highlights.
+///
+/// # LAYOUT
+///
+/// Leading intent icon, title and supporting line, then the time as a block on
+/// the right. The time used to sit under the title as a second grey line,
+/// where it was easy to miss; giving it its own column makes "when" scannable
+/// down a list without reading any of the rows.
 class _ActiveMeetupRow extends StatelessWidget {
   const _ActiveMeetupRow({required this.meetup});
 
   final Meetup meetup;
 
+  static const List<String> _weekdays = <String>[
+    'MON',
+    'TUE',
+    'WED',
+    'THU',
+    'FRI',
+    'SAT',
+    'SUN',
+  ];
+
   @override
   Widget build(BuildContext context) {
+    final status = _effectiveStatus(meetup);
+    final awaitingReview = status == MeetupStatus.completed;
+    final cancelled = status == MeetupStatus.cancelled;
+    final edge = cancelled
+        ? AppPalette.cancelled
+        : awaitingReview
+        ? AppPalette.gold
+        : AppPalette.verified;
+    final start = meetup.windowStart;
+
     return GestureDetector(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => MeetupDetailPage(meetupId: meetup.id),
         ),
       ),
-      child: FlatCard(
-        radius: 12,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        child: Row(
-          children: [
-            Icon(meetup.intent.icon, size: 18, color: AppPalette.candyBlue),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    meetup.hostFullName!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: AppPalette.textPrimary,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: FlatCard(
+          radius: 12,
+          padding: EdgeInsets.zero,
+          child: IntrinsicHeight(
+            child: Row(
+              children: [
+                // The state bar. IntrinsicHeight above is what lets it run the
+                // full height of the row whatever the text wraps to, rather
+                // than being a fixed guess that leaves a gap on tall rows.
+                Container(width: 4, color: edge),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: edge.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            meetup.intent.icon,
+                            size: 18,
+                            color: edge,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                meetup.hostFullName!,
+                                style: TextStyle(
+                                  color: AppPalette.textPrimary,
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              // Intent as its own highlighted line, in the
+                              // row's state colour so it reads with the edge
+                              // bar and the date block; the address on the
+                              // line below with a pin, never run into it.
+                              Text(
+                                cancelled
+                                    ? 'CANCELLED \u00B7 ${meetup.intent.label}'
+                                    : meetup.intent.label,
+                                style: TextStyle(
+                                  color: edge,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.3,
+                                ),
+                              ),
+                              if (meetup.locationLabel != null) ...[
+                                const SizedBox(height: 4),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 1),
+                                      child: Icon(
+                                        Icons.place_outlined,
+                                        size: 13,
+                                        color: AppPalette.textSecondary,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(
+                                        meetup.locationLabel!,
+                                        style: TextStyle(
+                                          color: AppPalette.textSecondary,
+                                          fontSize: 11.5,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (start != null) ...[
+                          const SizedBox(width: 10),
+                          _TimeBlock(start: start, tint: edge),
+                        ],
+                      ],
                     ),
                   ),
-                  Text(
-                    meetup.formattedWindow,
-                    style: TextStyle(
-                      color: AppPalette.textSecondary,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            // _effectiveStatus (round-9), not the raw server status
-            // directly — see its own doc comment. Keeps this row's badge
-            // in agreement with _PersistentMeetupCard's own windowEnd
-            // check above for the same meetup, instead of the two
-            // disagreeing for up to a minute at a time (ADR-025 §4's
-            // lifecycle-poller lag).
-            MeetupStatusBadge(status: _effectiveStatus(meetup)),
-          ],
+          ),
         ),
+      ),
+    );
+  }
+}
+
+/// The right hand "when" block: day, weekday, time, stacked.
+class _TimeBlock extends StatelessWidget {
+  const _TimeBlock({required this.start, required this.tint});
+
+  final DateTime start;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    final hour = start.hour % 12 == 0 ? 12 : start.hour % 12;
+    final minute = start.minute.toString().padLeft(2, '0');
+    final suffix = start.hour < 12 ? 'AM' : 'PM';
+
+    return Container(
+      width: 58,
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppPalette.hairline),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${start.day}',
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              height: 1.0,
+            ),
+          ),
+          const SizedBox(height: 1),
+          Text(
+            _ActiveMeetupRow._weekdays[start.weekday - 1],
+            style: TextStyle(
+              color: tint,
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            '$hour:$minute $suffix',
+            style: TextStyle(color: AppPalette.textSecondary, fontSize: 9.5),
+          ),
+        ],
       ),
     );
   }
@@ -529,6 +722,9 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
         builder: (_) => MeetupReviewPage(
           meetupId: widget.meetup.id,
           hostUserId: widget.meetup.hostUserId,
+          cancellationReason: widget.meetup.status == MeetupStatus.cancelled
+              ? (widget.meetup.cancellationReason ?? '')
+              : null,
         ),
       ),
     );
@@ -543,13 +739,19 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
   @override
   Widget build(BuildContext context) {
     final meetup = widget.meetup;
+    // The same card serves a finished meetup and a cancelled one: same
+    // skeleton, same ask, a different colour and a different first word —
+    // plus, for a cancellation, the host's reason, since that is what the
+    // participant is being asked to weigh.
+    final cancelled = meetup.status == MeetupStatus.cancelled;
+    final tone = cancelled ? AppPalette.cancelled : AppPalette.gold;
     return GestureDetector(
       onTap: _openReview,
       child: FlatCard(
         radius: 14,
         elevated: true,
         border: AppPalette.hairline,
-        tint: AppPalette.gold.withValues(alpha: 0.05),
+        tint: tone.withValues(alpha: 0.05),
         padding: EdgeInsets.zero,
         // Same skeleton as the live card next to it in the carousel — accent
         // bar, chip row, then the meetup's own details — because it IS the
@@ -563,7 +765,7 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
               Container(
                 width: 4,
                 decoration: BoxDecoration(
-                  color: AppPalette.gold,
+                  color: tone,
                   borderRadius: const BorderRadius.horizontal(
                     left: Radius.circular(14),
                   ),
@@ -586,11 +788,11 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: AppPalette.gold,
+                              color: tone,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
-                              'REVIEW',
+                              cancelled ? 'CANCELLED' : 'REVIEW',
                               style: TextStyle(
                                 fontSize: 9,
                                 letterSpacing: 1.0,
@@ -603,8 +805,6 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                           Expanded(
                             child: Text(
                               meetup.intent.label.toUpperCase(),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: AppPalette.textSecondary,
                                 fontSize: 10,
@@ -623,8 +823,6 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                       // about to review.
                       Text(
                         meetup.hostFullName!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: AppPalette.textPrimary,
                           fontSize: 15,
@@ -634,8 +832,6 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                       const SizedBox(height: 3),
                       Text(
                         meetup.formattedWindow,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: AppPalette.textSecondary,
                           fontSize: 12,
@@ -653,8 +849,6 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                           Expanded(
                             child: Text(
                               meetup.locationLabel!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: AppPalette.textSecondary,
                                 fontSize: 12,
@@ -663,6 +857,10 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                           ),
                         ],
                       ),
+                      if (cancelled) ...[
+                        const SizedBox(height: 10),
+                        _HostReason(reason: meetup.cancellationReason ?? ''),
+                      ],
                       const Spacer(),
                       Divider(height: 1, color: AppPalette.hairline),
                       const SizedBox(height: 10),
@@ -691,18 +889,20 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                                     ),
                                   ),
                               child: Icon(
-                                Icons.auto_awesome_rounded,
+                                cancelled
+                                    ? Icons.event_busy_rounded
+                                    : Icons.auto_awesome_rounded,
                                 size: 16,
-                                color: AppPalette.gold,
+                                color: tone,
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Share your thoughts about this meetup',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                              cancelled
+                                  ? 'Share your thoughts on this cancellation'
+                                  : 'Share your thoughts about this meetup',
                               style: TextStyle(
                                 color: AppPalette.textPrimary,
                                 fontSize: 13,
@@ -725,6 +925,37 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The host's cancellation reason on the CANCELLED card — their words, as
+/// a quotation, or an honest "no reason given".
+class _HostReason extends StatelessWidget {
+  const _HostReason({required this.reason});
+
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = reason.trim();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.format_quote_rounded, size: 14, color: AppPalette.cancelled),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text.isEmpty ? 'The host gave no reason.' : '\u201C$text\u201D',
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontSize: 12.5,
+              fontStyle: text.isEmpty ? FontStyle.normal : FontStyle.italic,
+              height: 1.35,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

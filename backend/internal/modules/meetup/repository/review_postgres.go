@@ -60,14 +60,17 @@ func (r *postgresRatingRepository) SubmitReview(ctx context.Context, review Revi
 
 	q := r.q.WithTx(tx)
 
-	// The feedback row first: it carries happened=true, which is the
-	// eligibility fact the ratings below depend on. Same transaction, so
-	// ordering here is about readability rather than visibility.
+	// The feedback row first: for a meetup that happened it carries
+	// happened=true, the eligibility fact the ratings below depend on (a
+	// cancelled meetup's ratings are eligible on other grounds — see
+	// IsEligibleForCancellationRating). Same transaction, so ordering here
+	// is about readability rather than visibility.
 	if _, err := q.SetMeetupOverallReview(ctx, sqlcgen.SetMeetupOverallReviewParams{
 		MeetupID:     meetup,
 		UserID:       rater,
 		OverallScore: int2OrNull(&review.OverallScore),
 		Notes:        stringPtrOrNull(review.Notes),
+		Happened:     review.Happened,
 	}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgCheckViolation {

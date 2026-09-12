@@ -895,3 +895,82 @@ func (r *postgresMeetupRepository) ListParticipants(ctx context.Context, meetupI
 	}
 	return out, nil
 }
+
+func (r *postgresMeetupRepository) CanViewMemberProfile(ctx context.Context, viewerID, targetID string) (bool, error) {
+	viewer, err := parseUUID(viewerID)
+	if err != nil {
+		return false, fmt.Errorf("repository: invalid viewer id %q: %w", viewerID, apperror.ErrInvalidInput)
+	}
+	target, err := parseUUID(targetID)
+	if err != nil {
+		return false, fmt.Errorf("repository: invalid member id %q: %w", targetID, apperror.ErrInvalidInput)
+	}
+	ok, err := r.q.CanViewMemberProfile(ctx, sqlcgen.CanViewMemberProfileParams{ViewerID: viewer, TargetID: target})
+	if err != nil {
+		return false, fmt.Errorf("repository: can view member profile: %w", err)
+	}
+	return ok.Valid && ok.Bool, nil
+}
+
+func (r *postgresMeetupRepository) ListRecentMeetupsForMember(ctx context.Context, viewerID, targetID string, limit int) ([]RecentMemberMeetup, error) {
+	viewer, err := parseUUID(viewerID)
+	if err != nil {
+		return nil, fmt.Errorf("repository: invalid viewer id %q: %w", viewerID, apperror.ErrInvalidInput)
+	}
+	target, err := parseUUID(targetID)
+	if err != nil {
+		return nil, fmt.Errorf("repository: invalid member id %q: %w", targetID, apperror.ErrInvalidInput)
+	}
+	rows, err := r.q.ListRecentMeetupsForMember(ctx, sqlcgen.ListRecentMeetupsForMemberParams{
+		ViewerID: viewer, TargetID: target, PageLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("repository: list recent meetups for member: %w", err)
+	}
+	out := make([]RecentMemberMeetup, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, RecentMemberMeetup{
+			ID:               row.ID.String(),
+			Intent:           Intent(row.Intent),
+			Status:           MeetupStatus(row.Status),
+			WindowStart:      row.WindowStart.Time,
+			WindowEnd:        row.WindowEnd.Time,
+			LocationLabel:    row.LocationLabel,
+			TargetIsHost:     row.TargetIsHost,
+			ParticipantCount: int(row.ParticipantCount),
+			OverallAverage:   row.OverallAverage,
+			ReviewCount:      int(row.ReviewCount),
+			ViewerWasIn:      row.ViewerWasIn,
+		})
+	}
+	return out, nil
+}
+
+func (r *postgresMeetupRepository) ListReviewComments(ctx context.Context, meetupIDs []string) ([]MeetupReviewComment, error) {
+	ids := make([]uuid.UUID, 0, len(meetupIDs))
+	for _, raw := range meetupIDs {
+		id, err := parseUUID(raw)
+		if err != nil {
+			return nil, fmt.Errorf("repository: invalid meetup id %q: %w", raw, apperror.ErrInvalidInput)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return []MeetupReviewComment{}, nil
+	}
+	rows, err := r.q.ListMeetupReviewComments(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("repository: list review comments: %w", err)
+	}
+	out := make([]MeetupReviewComment, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, MeetupReviewComment{
+			MeetupID:   row.MeetupID.String(),
+			AuthorID:   row.AuthorID.String(),
+			AuthorName: row.AuthorName,
+			Note:       row.Notes.String,
+			WrittenAt:  row.ReviewCompletedAt.Time,
+		})
+	}
+	return out, nil
+}

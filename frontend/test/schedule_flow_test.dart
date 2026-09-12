@@ -5,7 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
-import 'package:professional_connections_platform/features/meetups/schedule_flow.dart';
+import 'package:professional_connections_platform/features/meetups/schedule_flow.dart'
+    show ScheduleFlowPage, debugScheduleFlowNowOverride;
 import 'package:professional_connections_platform/features/meetups/widgets/stadia_map_location_step.dart'
     show debugStadiaApiKeyOverride;
 
@@ -30,28 +31,29 @@ Widget _appWith() {
   );
 }
 
-/// Drives the Timing step's FROM or TO time picker: switches from the
-/// default dial to keyboard input mode (far more reliable to drive in a
-/// widget test than tapping dial coordinates), types the 24-hour hour and
-/// minute, then confirms. No AM/PM period control to tap — the picker
-/// forces `alwaysUse24HourFormat` (schedule_flow.dart's `_pickMeetupTime`),
-/// so `hour` is 00–23 and Flutter's own `_TimePickerInput` never renders a
-/// `_DayPeriodControl` in that mode.
+/// Types a strict 24-hour time into the Timing step's FROM or TO field.
+/// The fields are plain `TextField`s keyed `time24h-FROM` / `time24h-TO`
+/// (see `TimeField24h`), so this is a single `enterText` — no dialog, no
+/// keyboard-mode toggle, no OK button. The formatter inserts the colon.
 Future<void> _enterTime(
   WidgetTester tester, {
-  required String hour,
-  required String minute,
+  required String field,
+  required String hhmm,
 }) async {
-  await tester.tap(find.byIcon(Icons.keyboard_outlined));
+  await tester.enterText(find.byKey(ValueKey('time24h-$field')), hhmm);
   await tester.pumpAndSettle();
+}
 
-  final fields = find.byType(TextFormField);
-  await tester.enterText(fields.at(0), hour);
-  await tester.enterText(fields.at(1), minute);
-  await tester.pumpAndSettle();
-
-  await tester.tap(find.text('OK'));
-  await tester.pumpAndSettle();
+/// Pins the timing step's clock to 00:00 of the real calendar day, so that
+/// any time typed below is "later today" no matter when the suite runs —
+/// the step now refuses a start behind the clock, which would otherwise
+/// make `15:00` fail every afternoon and `00:00` fail always. The real
+/// date is kept (not a fixed one) because the DATE card and its test
+/// compare against the actual today.
+void _pinClockToStartOfToday() {
+  final d = DateTime.now();
+  debugScheduleFlowNowOverride = () => DateTime(d.year, d.month, d.day);
+  addTearDown(() => debugScheduleFlowNowOverride = null);
 }
 
 /// Drives Intent → Timing (accepts the default date — today — then picks
@@ -72,6 +74,7 @@ Future<void> _reachCapacityStep(WidgetTester tester) async {
   debugStadiaApiKeyOverride = 'test-key';
   addTearDown(() => debugStadiaApiKeyOverride = null);
 
+  _pinClockToStartOfToday();
   await tester.pumpWidget(_appWith());
   await tester.pumpAndSettle();
 
@@ -86,14 +89,11 @@ Future<void> _reachCapacityStep(WidgetTester tester) async {
   await tester.tap(find.text('OK'));
   await tester.pumpAndSettle();
 
-  await tester.tap(find.text('FROM'));
-  await tester.pumpAndSettle();
-  await _enterTime(tester, hour: '15', minute: '00');
+  await _enterTime(tester, field: 'FROM', hhmm: '1500');
 
-  await tester.tap(find.text('TO'));
-  await tester.pumpAndSettle();
-  await _enterTime(tester, hour: '17', minute: '00');
+  await _enterTime(tester, field: 'TO', hhmm: '1700');
 
+  await tester.ensureVisible(find.text('CONTINUE'));
   await tester.tap(find.text('CONTINUE'));
   await tester.pumpAndSettle();
 
@@ -103,6 +103,7 @@ Future<void> _reachCapacityStep(WidgetTester tester) async {
     'Test Cafe',
   );
   await tester.pump();
+  await tester.ensureVisible(find.text('CONTINUE'));
   await tester.tap(find.text('CONTINUE'));
   await tester.pump();
 
@@ -117,6 +118,7 @@ void main() {
       (tester) async {
         // No debugStadiaApiKeyOverride set — this is the real default
         // (AppConfig.stadiaMapsApiKey empty, no --dart-define passed).
+        _pinClockToStartOfToday();
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
@@ -129,12 +131,9 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('OK'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('FROM'));
-        await tester.pumpAndSettle();
-        await _enterTime(tester, hour: '15', minute: '00');
-        await tester.tap(find.text('TO'));
-        await tester.pumpAndSettle();
-        await _enterTime(tester, hour: '17', minute: '00');
+        await _enterTime(tester, field: 'FROM', hhmm: '1500');
+        await _enterTime(tester, field: 'TO', hhmm: '1700');
+        await tester.ensureVisible(find.text('CONTINUE'));
         await tester.tap(find.text('CONTINUE'));
         await tester.pumpAndSettle();
 
@@ -149,6 +148,7 @@ void main() {
     testWidgets(
       'the Timing step is always shown — no more "Schedule Today" skip',
       (tester) async {
+        _pinClockToStartOfToday();
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
@@ -160,21 +160,22 @@ void main() {
     );
 
     testWidgets('the date field defaults to today, not empty', (tester) async {
+      _pinClockToStartOfToday();
       await tester.pumpWidget(_appWith());
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('COFFEE'));
       await tester.pumpAndSettle();
 
-      final now = DateTime.now();
-      final expected =
-          '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-      expect(find.text(expected), findsOneWidget);
+      // Human-readable now ("Today · Fri 11 Sep"), not the ISO form the
+      // card used to show — but still today, which is the point.
+      expect(find.textContaining('Today · '), findsOneWidget);
     });
 
     testWidgets('CONTINUE stays disabled until both FROM and TO are picked', (
       tester,
     ) async {
+      _pinClockToStartOfToday();
       await tester.pumpWidget(_appWith());
       await tester.pumpAndSettle();
 
@@ -187,9 +188,7 @@ void main() {
         isFalse,
       );
 
-      await tester.tap(find.text('FROM'));
-      await tester.pumpAndSettle();
-      await _enterTime(tester, hour: '15', minute: '00');
+      await _enterTime(tester, field: 'FROM', hhmm: '1500');
 
       // Still disabled — TO not picked yet.
       expect(
@@ -198,9 +197,7 @@ void main() {
         isFalse,
       );
 
-      await tester.tap(find.text('TO'));
-      await tester.pumpAndSettle();
-      await _enterTime(tester, hour: '17', minute: '00');
+      await _enterTime(tester, field: 'TO', hhmm: '1700');
 
       expect(
         tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
@@ -214,26 +211,21 @@ void main() {
         'where users previously got stuck trying to schedule at midnight', (
       tester,
     ) async {
+      _pinClockToStartOfToday();
       await tester.pumpWidget(_appWith());
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('COFFEE'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('FROM'));
-      await tester.pumpAndSettle();
-      await _enterTime(tester, hour: '00', minute: '00');
+      await _enterTime(tester, field: 'FROM', hhmm: '0000');
 
-      // Midnight was accepted and stored — the placeholder is gone, and
-      // it renders as 12:00 AM in this (ambient 12-hour) test locale,
-      // the one time of day that formats that way, distinguishing it
-      // from noon (12:00 PM).
-      expect(find.text('Choose a start time'), findsNothing);
-      expect(find.text('12:00 AM'), findsOneWidget);
+      // Midnight was accepted and reads back as strict 24-hour "00:00" —
+      // never a locale-dependent "12:00 AM", which is the ambiguity this
+      // entry mode exists to remove.
+      expect(find.text('00:00'), findsOneWidget);
 
-      await tester.tap(find.text('TO'));
-      await tester.pumpAndSettle();
-      await _enterTime(tester, hour: '01', minute: '00');
+      await _enterTime(tester, field: 'TO', hhmm: '0100');
 
       expect(
         tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
@@ -243,32 +235,126 @@ void main() {
     });
 
     testWidgets(
-      'an end time before the start time shows an inline error and keeps '
-      'CONTINUE disabled — the real check is server-side, this is fast '
-      'client feedback',
+      'an end time at or before the start on the clock means the NEXT day '
+      '— 22:00 to 01:00 is a valid window ending tomorrow, and the step '
+      'says so out loud',
       (tester) async {
+        _pinClockToStartOfToday();
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
         await tester.tap(find.text('COFFEE'));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('FROM'));
-        await tester.pumpAndSettle();
-        await _enterTime(tester, hour: '17', minute: '00');
+        await _enterTime(tester, field: 'FROM', hhmm: '2200');
+        await _enterTime(tester, field: 'TO', hhmm: '0100');
 
-        await tester.tap(find.text('TO'));
+        expect(find.text('Ends the next day at 01:00.'), findsOneWidget);
+        expect(
+          tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
+              null,
+          isTrue,
+        );
+
+        // And the window handed to the next step really does end tomorrow.
+        await tester.ensureVisible(find.text('CONTINUE'));
+        await tester.tap(find.text('CONTINUE'));
         await tester.pumpAndSettle();
-        await _enterTime(tester, hour: '15', minute: '00');
+        expect(find.text('Where?'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'the same minute for FROM and TO is refused — it would otherwise '
+      'roll over into a 24-hour meetup',
+      (tester) async {
+        _pinClockToStartOfToday();
+        await tester.pumpWidget(_appWith());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('COFFEE'));
+        await tester.pumpAndSettle();
+
+        await _enterTime(tester, field: 'FROM', hhmm: '1500');
+        await _enterTime(tester, field: 'TO', hhmm: '1500');
 
         expect(
-          find.text('End time must be after the start time.'),
+          find.text('End time must be different from the start time.'),
           findsOneWidget,
         );
         expect(
           tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
               null,
           isFalse,
+        );
+      },
+    );
+
+    testWidgets(
+      'a start time already behind the clock today is refused HERE, not '
+      'three steps later by the backend',
+      (tester) async {
+        // Pin the clock to 10:30 today: 09:00 is gone, 10:30 is not.
+        final d = DateTime.now();
+        debugScheduleFlowNowOverride = () =>
+            DateTime(d.year, d.month, d.day, 10, 30, 45);
+        addTearDown(() => debugScheduleFlowNowOverride = null);
+        await tester.pumpWidget(_appWith());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('COFFEE'));
+        await tester.pumpAndSettle();
+
+        await _enterTime(tester, field: 'FROM', hhmm: '0900');
+        await _enterTime(tester, field: 'TO', hhmm: '1100');
+
+        expect(find.textContaining('has already passed today'), findsOneWidget);
+        expect(
+          tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
+              null,
+          isFalse,
+        );
+
+        // Moving the start to the current minute clears it.
+        await _enterTime(tester, field: 'FROM', hhmm: '1030');
+        expect(find.textContaining('has already passed today'), findsNothing);
+        expect(
+          tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
+              null,
+          isTrue,
+        );
+      },
+    );
+
+    testWidgets(
+      'the field will not accept digits that cannot form a 24-hour time',
+      (tester) async {
+        _pinClockToStartOfToday();
+        await tester.pumpWidget(_appWith());
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('COFFEE'));
+        await tester.pumpAndSettle();
+
+        // 25:00 — the "5" is refused after a leading "2", leaving "2".
+        await _enterTime(tester, field: 'FROM', hhmm: '2500');
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('time24h-FROM')))
+              .controller!
+              .text,
+          '2',
+        );
+
+        // 12:60 — the "6" is refused as a first minute digit, leaving "12"
+        // (the colon only appears once a minute digit follows it).
+        await _enterTime(tester, field: 'TO', hhmm: '1260');
+        expect(
+          tester
+              .widget<TextField>(find.byKey(const ValueKey('time24h-TO')))
+              .controller!
+              .text,
+          '12',
         );
       },
     );

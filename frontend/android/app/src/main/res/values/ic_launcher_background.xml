@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The adaptive icon's background plate. White, matching the brand sheet's own
+  app-icon treatment: the mark is a blue/green figure pair that needs a light
+  ground to stay legible, and every launcher composites this behind it at full
+  bleed.
+-->
+<resources>
+    <color name="ic_launcher_background">#FFFFFFFF</color>
+</resources>

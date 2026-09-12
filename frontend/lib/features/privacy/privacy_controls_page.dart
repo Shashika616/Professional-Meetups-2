@@ -10,12 +10,12 @@ import 'package:professional_connections_platform/core/widgets/section_label.dar
 /// # WHY THIS IS A PLACEHOLDER AND NOT A SET OF SWITCHES
 ///
 /// The row in Profile has pointed here since it was written, but nothing was
-/// behind it — a chevron that did nothing when tapped. This gives it a real
+/// behind it: a chevron that did nothing when tapped. This gives it a real
 /// destination.
 ///
 /// It deliberately ships with no controls yet. A privacy toggle is a promise
 /// about what the server does with someone's data, and a switch that renders
-/// but changes nothing is worse than no switch at all — that is the exact
+/// but changes nothing is worse than no switch at all. That is the exact
 /// failure the live-location opt-in already had once (see
 /// `meetup/safety.go`'s ShareWithContacts: "a safety feature that only
 /// appeared to work, which is worse than not offering one").
@@ -30,7 +30,7 @@ class PrivacyControlsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      // See verification_checklist_page.dart — paints the app-bar strip too.
+      // See verification_checklist_page.dart, which paints the app-bar strip too.
       extendBodyBehindAppBar: true,
       appBar: AppBar(title: const Text('PRIVACY CONTROLS')),
       body: AppBackground(
@@ -46,24 +46,26 @@ class PrivacyControlsPage extends StatelessWidget {
                 body:
                     'Your name and photo are shared with other members of a '
                     'meetup once your request is accepted. Members below '
-                    'Level 2 never see who is attending — only how many.',
+                    'Level 2 can see how many people are going, but not who '
+                    'they are.',
               ),
               const SizedBox(height: 10),
               const _FactCard(
                 icon: Icons.place_outlined,
                 title: 'Your location',
                 body:
-                    'Your approximate location is used to find meetups near '
-                    'you, and is only read when you open the browse screen. '
-                    'A meetup’s exact address is shown to its participants.',
+                    'We use your approximate location to find meetups near '
+                    'you, and we only read it while you have the browse '
+                    'screen open. A meetup\'s exact address is shared with '
+                    'the people going to it.',
               ),
               const SizedBox(height: 10),
               const _FactCard(
                 icon: Icons.shield_outlined,
                 title: 'Trusted contacts',
                 body:
-                    'Your trusted contacts are only ever contacted by you — '
-                    'when you share a meetup with them, or trigger SOS. They '
+                    'Nobody contacts your trusted contacts except you, either '
+                    'by sharing a meetup with them or by triggering SOS. They '
                     'are never shown to anyone else on the app.',
               ),
               const SizedBox(height: 10),
@@ -71,9 +73,9 @@ class PrivacyControlsPage extends StatelessWidget {
                 icon: Icons.star_outline_rounded,
                 title: 'Ratings you give',
                 body:
-                    'Scores and traits you give after a meetup are private to '
-                    'you. Others see only their own overall rating, never who '
-                    'gave what.',
+                    'The scores and traits you give after a meetup stay '
+                    'private to you. Everyone sees their own overall rating, '
+                    'but never who gave what.',
               ),
               const SizedBox(height: 24),
               FlatCard(
@@ -103,9 +105,9 @@ class PrivacyControlsPage extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             'Settings to change any of the above will appear '
-                            'here. Until then nothing on this page is '
-                            'adjustable — we would rather show no switch than '
-                            'one that does not do anything.',
+                            'here. Nothing on this page is adjustable yet. '
+                            'We would rather show you no switch at all than '
+                            'one that quietly does nothing.',
                             style: TextStyle(
                               color: AppPalette.textSecondary,
                               fontSize: 12.5,

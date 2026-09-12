@@ -258,12 +258,12 @@ func TestValidateLatLng_ThroughTheModulesOwnUse(t *testing.T) {
 // it — an intent that fell through to a zero value would silently get the
 // most permissive floor.
 func TestValidIntent(t *testing.T) {
-	for _, intent := range []Intent{IntentCoffee, IntentLunch, IntentNetworking, IntentMentorship, IntentRideShare, IntentDating} {
+	for _, intent := range []Intent{IntentCoffee, IntentLunch, IntentNetworking, IntentMentorship, IntentRideShare, IntentDating, IntentOuting} {
 		if !validIntent(intent) {
 			t.Errorf("%q is a real intent but was rejected", intent)
 		}
 	}
-	for _, bad := range []Intent{"", "COFFEE", "coffee ", "rideshare", "ride-share", "hookup", "'; DROP TABLE meetup.meetups; --"} {
+	for _, bad := range []Intent{"", "COFFEE", "coffee ", "rideshare", "ride-share", "events", "OUTING", "hookup", "'; DROP TABLE meetup.meetups; --"} {
 		if validIntent(bad) {
 			t.Errorf("%q was accepted as a valid intent", bad)
 		}
@@ -319,5 +319,30 @@ func fullyPopulatedMeetup() Meetup {
 		Capacity:            4,
 		AcceptedCount:       1,
 		Status:              "open",
+	}
+}
+
+// DisplayName is what notification copy interpolates. Two intents must not
+// read as their wire value: ride_share (underscore) and events (the word is
+// the app's Events tab).
+func TestIntentDisplayName(t *testing.T) {
+	cases := map[Intent]string{
+		IntentCoffee:     "coffee",
+		IntentLunch:      "lunch",
+		IntentNetworking: "networking",
+		IntentMentorship: "mentorship",
+		IntentRideShare:  "ride share",
+		IntentDating:     "dating",
+		IntentOuting:     "outing",
+	}
+	for intent, want := range cases {
+		if got := intent.DisplayName(); got != want {
+			t.Errorf("%q.DisplayName() = %q, want %q", intent, got, want)
+		}
+	}
+	for _, intent := range []Intent{IntentCoffee, IntentLunch, IntentNetworking, IntentMentorship, IntentRideShare, IntentDating, IntentOuting} {
+		if got := intent.DisplayName(); strings.Contains(got, "_") {
+			t.Errorf("%q.DisplayName() = %q leaks a wire form into user copy", intent, got)
+		}
 	}
 }

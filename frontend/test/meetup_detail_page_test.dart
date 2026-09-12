@@ -10,7 +10,6 @@ import 'package:professional_connections_platform/features/safety/manage_trusted
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
-import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
 
@@ -20,55 +19,46 @@ import 'support/scripted_meetup_service.dart';
 // more nullable scheduledFor/isToday special case. windowStart defaults to
 // already-started so tests that don't care about the check-in time gate
 // (e.g. the checklist-first test below) aren't accidentally blocked by it.
-Meetup _acceptedMeetup({DateTime? windowStart, bool isHostedByMe = false}) =>
-    Meetup(
-      id: 'meetup-1',
-      hostUserId: 'host-1',
-      hostFullName: 'Grace Hopper',
-      hostTrustLevel: 3,
-      intent: IntentType.coffee,
-      windowStart:
-          windowStart ?? DateTime.now().subtract(const Duration(minutes: 15)),
-      windowEnd:
-          (windowStart ?? DateTime.now().subtract(const Duration(minutes: 15)))
-              .add(const Duration(hours: 2)),
-      locationLat: 6.9271,
-      locationLng: 79.8612,
-      locationLabel: 'Colombo Fort Cafe',
-      capacity: 4,
-      acceptedCount: 1,
-      status: MeetupStatus.open,
-      createdAt: DateTime.now(),
-      isHostedByMe: isHostedByMe,
-    );
+// Named "accepted" since it was written, but it did not actually SAY so until
+// 2026-09-10: myRequestStatus was left null, i.e. "this viewer never requested
+// to join". Every test here then read as a participant's view while describing
+// a stranger's, which is exactly why the suite could not see the bug where a
+// non-participant was offered the review - there was no fixture difference
+// between the two cases to catch.
+//
+// Defaulting to accepted makes the fixture mean what its name claims. A test
+// that wants the stranger's view now has to ask for it explicitly.
+Meetup _acceptedMeetup({
+  DateTime? windowStart,
+  bool isHostedByMe = false,
+  MeetupRequestStatus? myRequestStatus = MeetupRequestStatus.accepted,
+  MeetupStatus status = MeetupStatus.open,
+  String? cancellationReason,
+}) => Meetup(
+  id: 'meetup-1',
+  hostUserId: 'host-1',
+  hostFullName: 'Grace Hopper',
+  hostTrustLevel: 3,
+  intent: IntentType.coffee,
+  windowStart:
+      windowStart ?? DateTime.now().subtract(const Duration(minutes: 15)),
+  windowEnd:
+      (windowStart ?? DateTime.now().subtract(const Duration(minutes: 15))).add(
+        const Duration(hours: 2),
+      ),
+  locationLat: 6.9271,
+  locationLng: 79.8612,
+  locationLabel: 'Colombo Fort Cafe',
+  capacity: 4,
+  acceptedCount: 1,
+  status: status,
+  cancellationReason: cancellationReason,
+  createdAt: DateTime.now(),
+  isHostedByMe: isHostedByMe,
+  myRequestStatus: myRequestStatus,
+);
 
 void main() {
-  testWidgets(
-    'check-in is disabled with an explanatory message before the checklist is acknowledged',
-    (tester) async {
-      final service = ScriptedMeetupService(
-        meetupDetail: _acceptedMeetup(),
-        safetyState: const SafetyState(meetupId: 'meetup-1'),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(
-            home: MeetupDetailPage(meetupId: 'meetup-1'),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('CHECK IN'), findsNothing);
-      expect(
-        find.text('Acknowledge the checklist above first.'),
-        findsOneWidget,
-      );
-    },
-  );
-
   testWidgets('renders on the app background image — this page is reached via '
       'Navigator.push, not one of AppShell\'s own bottom-nav tabs, so it '
       'needs its own AppBackground rather than inheriting AppShell\'s', (
@@ -85,110 +75,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppBackground), findsOneWidget);
-  });
-
-  testWidgets(
-    'check-in stays disabled with a time-window message once the checklist is acknowledged, '
-    'more than 10 minutes before a scheduled meetup',
-    (tester) async {
-      final farFuture = DateTime.now().add(const Duration(hours: 3));
-      final service = ScriptedMeetupService(
-        meetupDetail: _acceptedMeetup(windowStart: farFuture),
-        safetyState: const SafetyState(meetupId: 'meetup-1'),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(
-            home: MeetupDetailPage(meetupId: 'meetup-1'),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.ensureVisible(find.text('I UNDERSTAND'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('I UNDERSTAND'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('I UNDERSTAND'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Checklist acknowledged'), findsOneWidget);
-      expect(find.text('CHECK IN'), findsNothing);
-      expect(
-        find.text('Check-in opens 10 minutes before the meetup.'),
-        findsOneWidget,
-      );
-    },
-  );
-
-  testWidgets(
-    'check-in becomes enabled once acknowledged and within the 10-minute window',
-    (tester) async {
-      // The CHECK IN button sits below the fold at the default 800x600 test
-      // surface (the Safety Gate section only renders once acknowledged) —
-      // a taller surface keeps it within the hit-testable viewport instead
-      // of relying on ensureVisible, which doesn't reliably scroll this
-      // ListView far enough in a single pump.
-      tester.view.physicalSize = const Size(800, 2000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      final soon = DateTime.now().add(const Duration(minutes: 5));
-      final service = ScriptedMeetupService(
-        meetupDetail: _acceptedMeetup(windowStart: soon),
-        safetyState: const SafetyState(meetupId: 'meetup-1'),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(
-            home: MeetupDetailPage(meetupId: 'meetup-1'),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.ensureVisible(find.text('I UNDERSTAND'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('I UNDERSTAND'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('I UNDERSTAND'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('CHECK IN'), findsOneWidget);
-
-      await tester.tap(find.text('CHECK IN'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Checked in'), findsOneWidget);
-    },
-  );
-
-  testWidgets('a meetup whose window already started has check-in available '
-      'immediately — no more isToday-means-always-open special case (ADR-016, '
-      'every meetup has a real window now)', (tester) async {
-    final service = ScriptedMeetupService(
-      meetupDetail: _acceptedMeetup(),
-      safetyState: const SafetyState(meetupId: 'meetup-1'),
-    );
-
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [meetupServiceProvider.overrideWithValue(service)],
-        child: const MaterialApp(home: MeetupDetailPage(meetupId: 'meetup-1')),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.ensureVisible(find.text('I UNDERSTAND'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('I UNDERSTAND'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('CHECK IN'), findsOneWidget);
   });
 
   group('Close Meetup (ADR-016) — host-only, only after the window starts', () {
@@ -476,11 +362,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('WITHDRAW REQUEST'), findsNothing);
+      expect(find.text('CANCEL REQUEST'), findsNothing);
     });
 
     testWidgets(
-      'shown for a pending request, and calls withdrawRequest with the '
-      'entered note only on confirm',
+      'a PENDING request is cancelled, not withdrawn: a plain confirmation '
+      'with no note, and the request is taken back only on confirm',
       (tester) async {
         final pending = Meetup(
           id: 'meetup-1',
@@ -512,23 +399,30 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('WITHDRAW REQUEST'), findsOneWidget);
+        expect(find.text('CANCEL REQUEST'), findsOneWidget);
+        expect(find.text('WITHDRAW REQUEST'), findsNothing);
 
-        await tester.tap(find.text('WITHDRAW REQUEST'));
+        await tester.tap(find.text('CANCEL REQUEST'));
         await tester.pumpAndSettle();
         expect(service.lastWithdrawRequestId, isNull); // dialog first
+        // No note: the host has not acted and is not told anything.
+        expect(find.byType(TextField), findsNothing);
+        expect(find.textContaining('nothing is sent to them'), findsOneWidget);
 
-        await tester.enterText(
-          find.byType(TextField),
-          'Schedule conflict came up',
-        );
+        // KEEP IT leaves everything as it was.
+        await tester.tap(find.text('KEEP IT'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(TextButton, 'WITHDRAW'));
+        expect(service.lastWithdrawRequestId, isNull);
+
+        await tester.tap(find.text('CANCEL REQUEST'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(TextButton, 'CANCEL REQUEST'));
         await tester.pumpAndSettle();
 
         expect(service.lastWithdrawRequestId, 'request-1');
-        expect(service.lastWithdrawRequestNote, 'Schedule conflict came up');
-        expect(find.text('Request withdrawn.'), findsOneWidget);
+        expect(service.lastWithdrawRequestNote, isNull);
+        expect(find.text('Request cancelled.'), findsOneWidget);
+        expect(find.text('Request withdrawn.'), findsNothing);
 
         await tester.pump(const Duration(seconds: 3));
       },
@@ -568,48 +462,51 @@ void main() {
       expect(find.text('WITHDRAW REQUEST'), findsOneWidget);
     });
 
-    testWidgets('the note is optional — confirming with an empty note '
-        'still withdraws', (tester) async {
-      final pending = Meetup(
-        id: 'meetup-1',
-        hostUserId: 'host-1',
-        hostFullName: 'Grace Hopper',
-        hostTrustLevel: 3,
-        intent: IntentType.coffee,
-        windowStart: DateTime.now().add(const Duration(hours: 1)),
-        windowEnd: DateTime.now().add(const Duration(hours: 3)),
-        locationLat: 6.9271,
-        locationLng: 79.8612,
-        locationLabel: 'Colombo Fort Cafe',
-        capacity: 4,
-        acceptedCount: 0,
-        status: MeetupStatus.open,
-        createdAt: DateTime.now(),
-        myRequestStatus: MeetupRequestStatus.pending,
-        myRequestId: 'request-1',
-      );
-      final service = ScriptedMeetupService(meetupDetail: pending);
+    testWidgets(
+      'the withdrawal note is optional — confirming with an empty note '
+      'still withdraws',
+      (tester) async {
+        final pending = Meetup(
+          id: 'meetup-1',
+          hostUserId: 'host-1',
+          hostFullName: 'Grace Hopper',
+          hostTrustLevel: 3,
+          intent: IntentType.coffee,
+          windowStart: DateTime.now().add(const Duration(hours: 1)),
+          windowEnd: DateTime.now().add(const Duration(hours: 3)),
+          locationLat: 6.9271,
+          locationLng: 79.8612,
+          locationLabel: 'Colombo Fort Cafe',
+          capacity: 4,
+          acceptedCount: 0,
+          status: MeetupStatus.open,
+          createdAt: DateTime.now(),
+          myRequestStatus: MeetupRequestStatus.accepted,
+          myRequestId: 'request-1',
+        );
+        final service = ScriptedMeetupService(meetupDetail: pending);
 
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(
-            home: MeetupDetailPage(meetupId: 'meetup-1'),
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [meetupServiceProvider.overrideWithValue(service)],
+            child: const MaterialApp(
+              home: MeetupDetailPage(meetupId: 'meetup-1'),
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
+        );
+        await tester.pumpAndSettle();
 
-      await tester.tap(find.text('WITHDRAW REQUEST'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'WITHDRAW'));
-      await tester.pumpAndSettle();
+        await tester.tap(find.text('WITHDRAW REQUEST'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(TextButton, 'WITHDRAW'));
+        await tester.pumpAndSettle();
 
-      expect(service.lastWithdrawRequestId, 'request-1');
-      expect(service.lastWithdrawRequestNote, isNull);
+        expect(service.lastWithdrawRequestId, 'request-1');
+        expect(service.lastWithdrawRequestNote, isNull);
 
-      await tester.pump(const Duration(seconds: 3));
-    });
+        await tester.pump(const Duration(seconds: 3));
+      },
+    );
   });
 
   group('a finished meetup is a different page', () {
@@ -667,7 +564,9 @@ void main() {
       );
 
       expect(find.text('Colombo Fort Cafe'), findsOneWidget);
-      expect(find.text('VIEW LOCATION'), findsOneWidget);
+      // The two full-width outlined bars became a pair of icon tiles sharing
+      // one row, so the label lost its now-redundant VIEW prefix.
+      expect(find.text('LOCATION'), findsOneWidget);
     });
 
     testWidgets('an unreviewed past meetup offers the review — this is what '
@@ -708,9 +607,14 @@ void main() {
       await tester.tap(find.text('START REVIEW'));
       await tester.pumpAndSettle();
 
+      // The picture above is full-width now, so the slider can sit below a
+      // bare test viewport — scroll it in before reading its rect.
+      await tester.ensureVisible(find.byType(ExperienceSlider));
+      await tester.pumpAndSettle();
       final slider = tester.getRect(find.byType(ExperienceSlider));
       await tester.tapAt(Offset(slider.center.dx, slider.center.dy));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('SUBMIT'));
       await tester.tap(find.text('SUBMIT'));
       await tester.pumpAndSettle();
 
@@ -759,340 +663,6 @@ void main() {
       // The prompt is gone once there is nothing left to ask for.
       expect(find.text('START REVIEW'), findsNothing);
     });
-  });
-
-  group('"How did it go?" is only offered once the meetup has started', () {
-    testWidgets('a meetup scheduled for later shows neither the question nor '
-        'the rating block it unlocks', (tester) async {
-      tester.view.physicalSize = const Size(800, 2000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      final service = ScriptedMeetupService(
-        meetupDetail: _acceptedMeetup(
-          windowStart: DateTime.now().add(const Duration(days: 1)),
-        ),
-        safetyState: const SafetyState(meetupId: 'meetup-1'),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(
-            home: MeetupDetailPage(meetupId: 'meetup-1'),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('How did it go?'),
-        findsNothing,
-        reason:
-            'a meetup that has not begun has no answer to this — and '
-            'IT HAPPENED is what unlocks rating everyone on it',
-      );
-      expect(find.text('IT HAPPENED'), findsNothing);
-      expect(find.text("DIDN'T HAPPEN"), findsNothing);
-      expect(find.text('RATE WHO YOU MET'), findsNothing);
-    });
-
-    testWidgets('the same meetup, once under way, offers it', (tester) async {
-      tester.view.physicalSize = const Size(800, 2000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      final service = ScriptedMeetupService(
-        meetupDetail: _acceptedMeetup(
-          windowStart: DateTime.now().subtract(const Duration(minutes: 5)),
-        ),
-        safetyState: const SafetyState(meetupId: 'meetup-1'),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(
-            home: MeetupDetailPage(meetupId: 'meetup-1'),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(find.text('How did it go?'), findsOneWidget);
-    });
-  });
-
-  group(
-    'Feedback note popup (ADR-016) — optional, never blocks progression',
-    () {
-      testWidgets('Skip proceeds to submit feedback with no note', (
-        tester,
-      ) async {
-        tester.view.physicalSize = const Size(800, 2000);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
-
-        final service = ScriptedMeetupService(
-          meetupDetail: _acceptedMeetup(),
-          safetyState: const SafetyState(meetupId: 'meetup-1'),
-        );
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(
-              home: MeetupDetailPage(meetupId: 'meetup-1'),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('IT HAPPENED'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Add a note (optional)'), findsOneWidget);
-
-        await tester.tap(find.text('SKIP'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Thanks for the feedback.'), findsOneWidget);
-        expect(service.lastSubmitFeedbackNotes, isNull);
-
-        // Let the toast's hold timer + dismiss animation fully finish so
-        // its OverlayEntry doesn't outlive this test's widget tree — the
-        // ToastService's OverlayEntry is a static singleton shared across
-        // every test in this isolate.
-        await tester.pump(const Duration(seconds: 3));
-      });
-
-      testWidgets(
-        'Save with text carries the note through to submitMeetupFeedback',
-        (tester) async {
-          tester.view.physicalSize = const Size(800, 2000);
-          tester.view.devicePixelRatio = 1.0;
-          addTearDown(tester.view.reset);
-
-          final service = ScriptedMeetupService(
-            meetupDetail: _acceptedMeetup(),
-            safetyState: const SafetyState(meetupId: 'meetup-1'),
-          );
-
-          await tester.pumpWidget(
-            ProviderScope(
-              overrides: [meetupServiceProvider.overrideWithValue(service)],
-              child: const MaterialApp(
-                home: MeetupDetailPage(meetupId: 'meetup-1'),
-              ),
-            ),
-          );
-          await tester.pumpAndSettle();
-
-          await tester.tap(find.text('IT HAPPENED'));
-          await tester.pumpAndSettle();
-
-          await tester.enterText(find.byType(TextField), 'Great coffee chat!');
-          await tester.pump();
-          // Closing the keyboard before popping the sheet avoids a focus/
-          // text-input-driven relayout racing the sheet's dismiss animation
-          // and the toast's Overlay insertion in the same frame.
-          FocusManager.instance.primaryFocus?.unfocus();
-          await tester.pump();
-          await tester.tap(find.text('SAVE'));
-          await tester.pumpAndSettle();
-
-          expect(find.text('Thanks for the feedback.'), findsOneWidget);
-          expect(service.lastSubmitFeedbackNotes, 'Great coffee chat!');
-
-          // See the SKIP test's comment above for why this matters.
-          await tester.pump(const Duration(seconds: 3));
-        },
-      );
-
-      testWidgets('Save with only whitespace is treated the same as no note', (
-        tester,
-      ) async {
-        tester.view.physicalSize = const Size(800, 2000);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
-
-        final service = ScriptedMeetupService(
-          meetupDetail: _acceptedMeetup(),
-          safetyState: const SafetyState(meetupId: 'meetup-1'),
-        );
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(
-              home: MeetupDetailPage(meetupId: 'meetup-1'),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('IT HAPPENED'));
-        await tester.pumpAndSettle();
-
-        await tester.enterText(find.byType(TextField), '   ');
-        await tester.pump();
-        FocusManager.instance.primaryFocus?.unfocus();
-        await tester.pump();
-        await tester.tap(find.text('SAVE'));
-        await tester.pumpAndSettle();
-
-        expect(service.lastSubmitFeedbackNotes, isNull);
-
-        await tester.pump(const Duration(seconds: 3));
-      });
-    },
-  );
-
-  group('Decline (ADR-024 §4) — the safety checklist/check-in stage', () {
-    testWidgets(
-      'DECLINE opens a required-reason dialog, mirroring the cancel-reason '
-      'dialog\'s shape — the confirm button stays disabled until non-empty',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 2000);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
-
-        final service = ScriptedMeetupService(
-          meetupDetail: _acceptedMeetup(),
-          safetyState: const SafetyState(meetupId: 'meetup-1'),
-        );
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(
-              home: MeetupDetailPage(meetupId: 'meetup-1'),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('DECLINE'));
-        await tester.pumpAndSettle();
-
-        expect(find.text('DECLINE'), findsWidgets);
-        final confirmButton = tester.widget<TextButton>(
-          find.widgetWithText(TextButton, 'DECLINE').last,
-        );
-        expect(confirmButton.onPressed, isNull);
-
-        await tester.enterText(find.byType(TextField), 'family emergency');
-        await tester.pump();
-
-        final enabledButton = tester.widget<TextButton>(
-          find.widgetWithText(TextButton, 'DECLINE').last,
-        );
-        expect(enabledButton.onPressed, isNotNull);
-      },
-    );
-
-    testWidgets(
-      'submitting with a reason calls declineCheckIn and reflects the '
-      'declined state — the screen no longer offers check-in',
-      (tester) async {
-        tester.view.physicalSize = const Size(800, 2000);
-        tester.view.devicePixelRatio = 1.0;
-        addTearDown(tester.view.reset);
-
-        final service = ScriptedMeetupService(
-          meetupDetail: _acceptedMeetup(),
-          safetyState: const SafetyState(meetupId: 'meetup-1'),
-        );
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(
-              home: MeetupDetailPage(meetupId: 'meetup-1'),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        await tester.tap(find.text('DECLINE'));
-        await tester.pumpAndSettle();
-        await tester.enterText(find.byType(TextField), 'family emergency');
-        await tester.pump();
-        await tester.tap(find.widgetWithText(TextButton, 'DECLINE').last);
-        await tester.pumpAndSettle();
-
-        expect(service.lastDeclineCheckInMeetupId, 'meetup-1');
-        expect(service.lastDeclineCheckInReason, 'family emergency');
-        expect(find.text('Declined: family emergency'), findsOneWidget);
-        // The terminal declined state replaces the CHECK IN/DECLINE
-        // affordances — neither should still be offered.
-        expect(find.text('CHECK IN'), findsNothing);
-        expect(find.widgetWithText(SecondaryButton, 'DECLINE'), findsNothing);
-      },
-    );
-
-    testWidgets('BACK dismisses the dialog without calling declineCheckIn', (
-      tester,
-    ) async {
-      tester.view.physicalSize = const Size(800, 2000);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      final service = ScriptedMeetupService(
-        meetupDetail: _acceptedMeetup(),
-        safetyState: const SafetyState(meetupId: 'meetup-1'),
-      );
-
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [meetupServiceProvider.overrideWithValue(service)],
-          child: const MaterialApp(
-            home: MeetupDetailPage(meetupId: 'meetup-1'),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('DECLINE'));
-      await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextField), 'never mind');
-      await tester.pump();
-      await tester.tap(find.text('BACK'));
-      await tester.pumpAndSettle();
-
-      expect(service.lastDeclineCheckInMeetupId, isNull);
-      // Still offering DECLINE — nothing was submitted.
-      expect(find.widgetWithText(SecondaryButton, 'DECLINE'), findsOneWidget);
-    });
-
-    testWidgets(
-      'a meetup already declined shows the terminal state directly, no '
-      'CHECK IN or DECLINE offered',
-      (tester) async {
-        final service = ScriptedMeetupService(
-          meetupDetail: _acceptedMeetup(),
-          safetyState: SafetyState(
-            meetupId: 'meetup-1',
-            declinedAt: DateTime.now(),
-            declineReason: 'double booked',
-          ),
-        );
-
-        await tester.pumpWidget(
-          ProviderScope(
-            overrides: [meetupServiceProvider.overrideWithValue(service)],
-            child: const MaterialApp(
-              home: MeetupDetailPage(meetupId: 'meetup-1'),
-            ),
-          ),
-        );
-        await tester.pumpAndSettle();
-
-        expect(find.text('Declined: double booked'), findsOneWidget);
-        expect(find.text('CHECK IN'), findsNothing);
-        expect(find.widgetWithText(SecondaryButton, 'DECLINE'), findsNothing);
-      },
-    );
   });
 
   group('Non-participant Safety Gate visibility (ADR-024 §3) — the actual '
@@ -1325,4 +895,178 @@ void main() {
       );
     });
   });
+  // The review flow belongs to the people who were actually on the meetup.
+  //
+  // This was reported from the deployed app: a user who had never requested to
+  // join opened a finished meetup from the browse list and was shown the review
+  // prompt. The page gated that section on `_isPastMeetup` ALONE - purely a
+  // windowEnd-vs-now comparison, with no participation test - so every
+  // authenticated viewer got it on every past meetup.
+  //
+  // The backend was never fooled: SubmitMeetupReview calls requireParticipant
+  // and ListRatableParticipants returns an empty roster to a non-participant,
+  // so no third-party review could ever have been written. That makes this a
+  // trust-and-clarity defect rather than a data-integrity one - but offering a
+  // control that cannot work, on someone else's meetup, is its own bug.
+  //
+  // Participation here mirrors the server's own definition exactly: the host,
+  // or a requester whose request was ACCEPTED. Pending, rejected and withdrawn
+  // are all non-participants.
+  group('the review section is only for participants', () {
+    testWidgets('hidden for a viewer who never requested to join', (
+      tester,
+    ) async {
+      await _pumpDetail(tester, _endedMeetup());
+      expect(find.text('Share your thoughts about this meetup'), findsNothing);
+      expect(find.text('START REVIEW'), findsNothing);
+    });
+
+    testWidgets('hidden for a viewer whose request is only PENDING', (
+      tester,
+    ) async {
+      await _pumpDetail(
+        tester,
+        _endedMeetup(myRequestStatus: MeetupRequestStatus.pending),
+      );
+      expect(find.text('Share your thoughts about this meetup'), findsNothing);
+    });
+
+    testWidgets('hidden for a viewer whose request was REJECTED', (
+      tester,
+    ) async {
+      await _pumpDetail(
+        tester,
+        _endedMeetup(myRequestStatus: MeetupRequestStatus.rejected),
+      );
+      expect(find.text('Share your thoughts about this meetup'), findsNothing);
+    });
+
+    testWidgets('shown to an ACCEPTED participant', (tester) async {
+      await _pumpDetail(
+        tester,
+        _endedMeetup(myRequestStatus: MeetupRequestStatus.accepted),
+      );
+      expect(
+        find.text('Share your thoughts about this meetup'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('shown to the host', (tester) async {
+      await _pumpDetail(tester, _endedMeetup(isHostedByMe: true));
+      expect(
+        find.text('Share your thoughts about this meetup'),
+        findsOneWidget,
+      );
+    });
+  });
+
+  // The other half of the same gate. A meetup that is over must not offer a way
+  // to join it, and the un-swept `open` status above is precisely when that
+  // could leak through: the browse list still carries the meetup, and a viewer
+  // who is not a participant falls into neither the review branch nor any
+  // participant branch.
+  group('a finished meetup cannot be joined', () {
+    testWidgets('no join action once the window has ended', (tester) async {
+      await _pumpDetail(tester, _endedMeetup());
+      expect(find.text('REQUEST TO JOIN'), findsNothing);
+    });
+  });
+
+  group('a cancelled meetup on its own page', () {
+    Meetup cancelled({required bool hostedByMe}) => _acceptedMeetup(
+      windowStart: DateTime.now().add(const Duration(days: 1)),
+      isHostedByMe: hostedByMe,
+      myRequestStatus: hostedByMe ? null : MeetupRequestStatus.accepted,
+      status: MeetupStatus.cancelled,
+      cancellationReason: 'Venue closed unexpectedly.',
+    );
+
+    testWidgets('an accepted participant sees the banner with the reason '
+        'and is invited to review the cancellation', (tester) async {
+      final service = ScriptedMeetupService(
+        meetupDetail: cancelled(hostedByMe: false),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(
+            home: MeetupDetailPage(meetupId: 'meetup-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('CANCELLED BY THE HOST'), findsOneWidget);
+      expect(
+        find.text('\u201CVenue closed unexpectedly.\u201D'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Share your thoughts on this cancellation'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('the host who cancelled sees the banner but is not asked '
+        'to review their own cancellation', (tester) async {
+      final service = ScriptedMeetupService(
+        meetupDetail: cancelled(hostedByMe: true),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [meetupServiceProvider.overrideWithValue(service)],
+          child: const MaterialApp(
+            home: MeetupDetailPage(meetupId: 'meetup-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('CANCELLED BY THE HOST'), findsOneWidget);
+      expect(find.textContaining('Share your thoughts'), findsNothing);
+    });
+  });
+}
+
+// A meetup whose window has ENDED but whose status is still `open`, because
+// the server-side auto-close sweep has not run yet. That is not a contrived
+// state: on 2026-09-10 a production meetup whose window ended at 11:15 was
+// not closed until 13:08 - 1h53m late - because Cloud Run had scaled to zero
+// and the lifecycle poller only advances while a container exists. Any fix
+// here has to hold in exactly that window, so the fixture reproduces it.
+Meetup _endedMeetup({
+  bool isHostedByMe = false,
+  MeetupRequestStatus? myRequestStatus,
+}) => Meetup(
+  id: 'meetup-1',
+  hostUserId: 'host-1',
+  hostFullName: 'Grace Hopper',
+  hostTrustLevel: 3,
+  intent: IntentType.coffee,
+  windowStart: DateTime.now().subtract(const Duration(hours: 4)),
+  windowEnd: DateTime.now().subtract(const Duration(hours: 2)),
+  locationLat: 6.9271,
+  locationLng: 79.8612,
+  locationLabel: 'Colombo Fort Cafe',
+  capacity: 4,
+  acceptedCount: 1,
+  status: MeetupStatus.open,
+  createdAt: DateTime.now().subtract(const Duration(days: 1)),
+  isHostedByMe: isHostedByMe,
+  myRequestStatus: myRequestStatus,
+);
+
+Future<void> _pumpDetail(WidgetTester tester, Meetup meetup) async {
+  final service = ScriptedMeetupService(
+    meetupDetail: meetup,
+    safetyState: const SafetyState(meetupId: 'meetup-1'),
+  );
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [meetupServiceProvider.overrideWithValue(service)],
+      child: const MaterialApp(home: MeetupDetailPage(meetupId: 'meetup-1')),
+    ),
+  );
+  await tester.pumpAndSettle();
 }

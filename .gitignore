@@ -8,6 +8,9 @@
 /backend/secrets/*.pem
 /backend/secrets/*.key
 /backend/.env
+# Cloud Run service definition — environment-specific, and holds real
+# project/instance identifiers plus non-secret-but-real Twilio values.
+/backend/service.yaml
 !/backend/secrets/.gitkeep
 !/backend/secrets/README.md
 

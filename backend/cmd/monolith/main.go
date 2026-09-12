@@ -21,6 +21,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -118,6 +119,41 @@ func run(logger *slog.Logger) error {
 	// so it can't go unnoticed in a deployed environment's logs.
 	if os.Getenv("ALLOW_TEST_OTP_BYPASS") == "true" {
 		logger.Warn("ALLOW_TEST_OTP_BYPASS is enabled — the fixed code \"123456\" is accepted for every OTP purpose in addition to the real one. This MUST NOT be true outside local development. See TESTING-NOTES.md.")
+	}
+
+	// A SEPARATE warning line for the narrower mechanism (Plan 16), not a
+	// branch of the one above: the two are independent, and either has to be
+	// identifiable on its own in `gcloud run services logs read`.
+	//
+	// The COUNT is logged, never the numbers themselves — there is no reason
+	// to put real phone numbers into log output, and this line fires on every
+	// startup for as long as the var is set.
+	if raw := os.Getenv("TEST_OTP_BYPASS_PHONES"); raw != "" {
+		n := 0
+		for _, p := range strings.Split(raw, ",") {
+			if strings.TrimSpace(p) != "" {
+				n++
+			}
+		}
+		logger.Warn("TEST_OTP_BYPASS_PHONES is set — the fixed code \"123456\" is accepted for phone verification on specific allowlisted numbers, and the real SMS send is skipped for them. Scoped to phone purpose only. See TESTING-NOTES.md.", "allowlisted_numbers", n)
+	}
+
+	// The email twin, again a separate line rather than a branch of either
+	// above. Deliberately louder than the phone one: the phone list exposes
+	// numbers that cannot complete verification anyway, while an allowlisted
+	// EMAIL address is an account anyone knowing the address can sign in as.
+	// That warrants noticing on every boot.
+	//
+	// Count only, never the addresses — the same rule as above, and here it
+	// matters more, since an address in this list IS the credential.
+	if raw := os.Getenv("TEST_OTP_BYPASS_EMAILS"); raw != "" {
+		n := 0
+		for _, e := range strings.Split(raw, ",") {
+			if strings.TrimSpace(e) != "" {
+				n++
+			}
+		}
+		logger.Warn("TEST_OTP_BYPASS_EMAILS is set — the fixed code \"123456\" is accepted for ALL FOUR email verification purposes (signup, login, personal, corporate) on specific allowlisted addresses, and the real email send is skipped for them. Anyone who knows an allowlisted address can sign in as it: every entry must be an unroutable test address, never a deliverable one. See TESTING-NOTES.md.", "allowlisted_addresses", n)
 	}
 
 	pool, err := db.New(ctx, databaseURL)

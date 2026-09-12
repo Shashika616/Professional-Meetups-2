@@ -1,5 +1,6 @@
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
+import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 
 /// Contract for authentication and Level 2/3 verification (ADR-011,
@@ -110,6 +111,12 @@ abstract interface class AuthService {
   /// booleans/derived fields (backend's deliberate choice, Verification
   /// Model § 1).
   Future<UserProfile> getProfile();
+
+  /// Another member's public profile — name, photo, level, record and the
+  /// verification badges. Never their contact details; see
+  /// [PublicProfile]. Throws [NotFoundException]-class errors via the
+  /// usual mapping when the id is unknown.
+  Future<PublicProfile> getPublicProfile(String userId);
 
   /// Backs ADR-019 §2's new mandatory post-auth screen, called once by
   /// every one of the four sign-up/login paths right after auth succeeds.
@@ -467,6 +474,21 @@ class MockAuthService implements AuthService {
   }) async {
     await Future<void>.delayed(latency);
     return UserProfile(id: 'mock-user-1', fullName: fullName, trustLevel: 1);
+  }
+
+  @override
+  Future<PublicProfile> getPublicProfile(String userId) async {
+    await Future<void>.delayed(latency);
+    return PublicProfile(
+      id: userId,
+      fullName: 'Mock Member',
+      trustLevel: 2,
+      ratingAverage: 4.5,
+      ratingCount: 6,
+      meetupsCompleted: 8,
+      linkedInConnected: true,
+      phoneVerified: true,
+    );
   }
 
   @override

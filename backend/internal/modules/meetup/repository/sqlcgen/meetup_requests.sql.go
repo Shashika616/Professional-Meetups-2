@@ -82,6 +82,42 @@ func (q *Queries) AutoRejectPendingRequestsForMeetup(ctx context.Context, meetup
 	return items, nil
 }
 
+const cancelPendingMeetupRequest = `-- name: CancelPendingMeetupRequest :one
+DELETE FROM meetup.meetup_requests
+WHERE id = $1 AND requester_id = $2 AND status = 'pending'
+RETURNING id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_at, withdrawal_note
+`
+
+type CancelPendingMeetupRequestParams struct {
+	ID          uuid.UUID `json:"id"`
+	RequesterID uuid.UUID `json:"requester_id"`
+}
+
+// A requester taking back a request the host has not acted on yet. This
+// is a DELETE, not a status change, and deliberately so: nothing happened
+// — the host never accepted, no seat was held, nobody is owed a rating —
+// so there is nothing worth a row. It also keeps the door open: the
+// UNIQUE (meetup_id, requester_id, status) key means a requester who
+// cancels, re-requests and cancels again would collide on a second
+// 'withdrawn' row, where a deleted row leaves nothing to collide with.
+// Scoped to the requester and to 'pending' in the WHERE, like Withdraw:
+// an accepted request is a withdrawal (ADR-020 §4), never a cancellation.
+func (q *Queries) CancelPendingMeetupRequest(ctx context.Context, arg CancelPendingMeetupRequestParams) (MeetupMeetupRequest, error) {
+	row := q.db.QueryRow(ctx, cancelPendingMeetupRequest, arg.ID, arg.RequesterID)
+	var i MeetupMeetupRequest
+	err := row.Scan(
+		&i.ID,
+		&i.MeetupID,
+		&i.RequesterID,
+		&i.Status,
+		&i.AutoRejected,
+		&i.CreatedAt,
+		&i.ResolvedAt,
+		&i.WithdrawalNote,
+	)
+	return i, err
+}
+
 const countAcceptedRequests = `-- name: CountAcceptedRequests :one
 SELECT count(*) FROM meetup.meetup_requests WHERE meetup_id = $1 AND status = 'accepted'
 `

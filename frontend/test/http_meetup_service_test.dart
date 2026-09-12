@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:professional_connections_platform/core/services/http_meetup_service.dart';
+import 'package:professional_connections_platform/core/services/meetup_service.dart';
 
 const _baseUrl = 'http://localhost:8080';
 
@@ -116,6 +117,37 @@ void main() {
               'the share response drives the "Told N trusted contacts" text '
               'without a refetch, so it must decode too',
         );
+      },
+    );
+  });
+
+  // A session that has gone missing from storage (secure-storage loss across
+  // a reinstall, a cleared keychain) makes getAccessToken return null. Sending
+  // the request anyway, minus the Authorization header, buys a guaranteed 401
+  // that no refresh can fix — there is no refresh token left to send. Fail
+  // before the socket is opened, with the same exception a real 401 maps to,
+  // so AppShell's session-expired listener lands the user on LandingPage
+  // instead of a provider retrying an unauthenticated call forever.
+  group('missing session', () {
+    test(
+      'throws MeetupSessionExpiredException without sending a request',
+      () async {
+        var requestsSent = 0;
+        final client = MockClient((request) async {
+          requestsSent++;
+          return http.Response('{}', 200);
+        });
+        final service = HttpMeetupService(
+          httpClient: client,
+          baseUrl: _baseUrl,
+          getAccessToken: () async => null,
+        );
+
+        await expectLater(
+          service.listOpenMeetups(viewerLat: 0, viewerLng: 0),
+          throwsA(isA<MeetupSessionExpiredException>()),
+        );
+        expect(requestsSent, 0);
       },
     );
   });
