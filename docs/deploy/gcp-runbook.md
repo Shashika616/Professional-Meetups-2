@@ -2,7 +2,7 @@
 
 > **Status 2026-09-15:** the database moved to Supabase and the Cloud SQL
 > instance `meetups-db` was deleted (see §6). Cloud Run `meetups-backend`
-> stays, serving revision `r27` against Supabase (Mumbai). §1–§5 below describe the
+> stays, serving revision `r28b` against Supabase (Mumbai). §1–§5 below describe the
 > Cloud SQL era as it was, so it can be recreated if Supabase is ever left.
 
 Snapshot of the production deployment as it stood before the move (revision
@@ -159,7 +159,7 @@ Client: the mobile app's production gateway URL is set at build time in
 | App connection (Cloud Run) | transaction pooler, IPv4: `postgresql://postgres.<ref>:<pw>@aws-0-ap-south-1.pooler.supabase.com:6543/monolith_db?sslmode=require&default_query_exec_mode=cache_describe&application_name=monolith-cloudrun` — stored as Secret Manager `database-url` version 3 (v1 = old Cloud SQL URL, v2 = the deleted Tokyo project). `cache_describe` keeps pgx compatible with transaction pooling; the app has no session-level SQL. |
 | Admin / migrations | direct connection (IPv6 only on the free tier; works from a Mac on IPv6): `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/monolith_db`. `migrate -path migrations -database '<direct url>' up`. Schema version 12. |
 | Data | full copy of Cloud SQL taken 2026-09-15 (all 20 tables, row counts verified equal). Final Cloud SQL backups kept at `~/Documents/Professional Meetups/backups/` (custom-format `.dump` + plain data `.sql`), outside git. |
-| Cloud Run change | `run.googleapis.com/cloudsql-instances` annotation removed from `service.yaml`; `r23`/`r24` reused the `r22` images; `r25` (2026-09-15) adds email-address validation on the unauthenticated start endpoints. |
+| Cloud Run change | `run.googleapis.com/cloudsql-instances` annotation removed from `service.yaml`; `r23`/`r24` reused the `r22` images; `r25` (2026-09-15) adds email-address validation on the unauthenticated start endpoints; `r28`/`r28b` (2026-09-16) carry ADR-005 (one meetup at a time, logout with `fcm_token`) and the Android notification icon/colour on every push. |
 | Free-tier caveats | project pauses after 7 idle days (unpause in the dashboard); no PITR/backups on free (take `pg_dump` via the direct URL periodically); pooler ~15 server connections shared, 200 client connections. |
 | Latency note | Cloud Run and Supabase are both in Mumbai now; the earlier Tokyo project cost ~70 ms per DB round trip. |
 
