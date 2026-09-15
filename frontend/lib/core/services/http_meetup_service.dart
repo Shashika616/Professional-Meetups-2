@@ -179,6 +179,13 @@ class HttpMeetupService implements MeetupService {
   }
 
   @override
+  Future<void> unregisterDeviceToken(String fcmToken) async {
+    await _authenticatedDelete('/v1/meetups/device-token', {
+      'fcm_token': fcmToken,
+    });
+  }
+
+  @override
   Future<SafetyState> getSafetyState(String meetupId) async {
     final response = await _authenticatedGet('/v1/meetups/$meetupId/safety');
     return SafetyState.fromJson(_decodeOrThrow(response));
@@ -382,6 +389,20 @@ class HttpMeetupService implements MeetupService {
     final headers = await _authHeaders();
     return _send(
       () => _httpClient.post(
+        Uri.parse('$_baseUrl$path'),
+        headers: headers,
+        body: jsonEncode(body),
+      ),
+    );
+  }
+
+  Future<http.Response> _authenticatedDelete(
+    String path,
+    Map<String, Object?> body,
+  ) async {
+    final headers = await _authHeaders();
+    return _send(
+      () => _httpClient.delete(
         Uri.parse('$_baseUrl$path'),
         headers: headers,
         body: jsonEncode(body),

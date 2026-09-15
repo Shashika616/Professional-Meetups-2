@@ -165,6 +165,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /v1/meetups/requests/{id}/withdraw", h.requireAuth(http.HandlerFunc(h.withdrawRequest)))
 	mux.Handle("POST /v1/meetups/requests/{id}/respond", h.requireAuth(http.HandlerFunc(h.respondToRequest)))
 	mux.Handle("POST /v1/meetups/device-token", h.requireAuth(http.HandlerFunc(h.registerDeviceToken)))
+	mux.Handle("DELETE /v1/meetups/device-token", h.requireAuth(http.HandlerFunc(h.unregisterDeviceToken)))
 	// The caller's own notification history — user comes from the token.
 	mux.Handle("GET /v1/notifications", h.requireAuth(http.HandlerFunc(h.listNotifications)))
 	mux.Handle("GET /v1/meetups/{id}/safety", h.requireAuth(http.HandlerFunc(h.getSafetyState)))

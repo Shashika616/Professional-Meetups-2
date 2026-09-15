@@ -969,7 +969,7 @@ void main() {
   group('a finished meetup cannot be joined', () {
     testWidgets('no join action once the window has ended', (tester) async {
       await _pumpDetail(tester, _endedMeetup());
-      expect(find.text('REQUEST TO JOIN'), findsNothing);
+      expect(find.text('I\'M INTERESTED'), findsNothing);
     });
   });
 

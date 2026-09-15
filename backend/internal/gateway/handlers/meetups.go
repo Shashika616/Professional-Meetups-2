@@ -405,6 +405,25 @@ func (h *Handler) registerDeviceToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, successResponse{Success: true})
 }
 
+// unregisterDeviceToken is the sign-out half of registerDeviceToken. The
+// client calls it with its FCM token just before it revokes the session, so
+// the phone stops receiving this account's pushes the moment the user is
+// out, rather than until the next sign-in happens to reassign the token.
+func (h *Handler) unregisterDeviceToken(w http.ResponseWriter, r *http.Request) {
+	var req registerDeviceTokenRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	ctx := r.Context()
+	if err := h.monolith.UnregisterDeviceToken(ctx, middleware.UserIDFromContext(ctx), req.FcmToken); err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, successResponse{Success: true})
+}
+
 // getSafetyState used to call h.monolith.GetSafetyState with no identity at
 // all — the actual authorization gap ADR-024 fixes server-side, but the
 // gateway's own call site was part of it: GetSafetyStateRequest had nowhere

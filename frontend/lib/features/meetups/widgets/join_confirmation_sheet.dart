@@ -8,7 +8,7 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_body.dart';
 
-/// Shown when REQUEST TO JOIN is tapped, before anything is sent: who is
+/// Shown when I'M INTERESTED is tapped, before anything is sent: who is
 /// hosting — their profile, record and badges, and their recent meetups —
 /// with the send as the one action at the bottom. A person deciding whether
 /// to sit at a stranger's table should see the stranger first; a host's
@@ -128,7 +128,7 @@ class _JoinConfirmationSheetState
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   PrimaryButton(
-                    label: 'CONFIRM & SEND REQUEST',
+                    label: 'CONFIRM YOUR INTEREST',
                     onPressed: () => Navigator.of(context).pop(true),
                   ),
                   const SizedBox(height: 6),

@@ -28,6 +28,13 @@ abstract interface class PushNotificationService {
   /// `null` gracefully; it is not an error state.
   Future<String?> currentToken();
 
+  /// Invalidates this device's current push token on the provider side, so
+  /// nothing can push to it until a new token is issued. Called on
+  /// sign-out, after the server has been told to drop the registration:
+  /// the two together mean a signed-out phone goes quiet even if the server
+  /// call was lost. Never throws; a failure here is not the user's problem.
+  Future<void> deleteToken();
+
   /// Incoming push messages, translated to this app's own lightweight
   /// [PushMessage] shape. May never emit — that's the normal, expected
   /// state with [NoOpPushNotificationService] until a real implementation
@@ -97,6 +104,9 @@ class NoOpPushNotificationService implements PushNotificationService {
 
   @override
   Future<String?> currentToken() async => null;
+
+  @override
+  Future<void> deleteToken() async {}
 
   @override
   Stream<PushMessage> get messages => const Stream<PushMessage>.empty();

@@ -53,6 +53,9 @@ class _FakePushService implements PushNotificationService {
   Future<String?> currentToken() async => null;
 
   @override
+  Future<void> deleteToken() async {}
+
+  @override
   Stream<PushMessage> get messages => _messages;
 }
 

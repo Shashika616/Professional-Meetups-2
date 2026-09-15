@@ -89,6 +89,9 @@ service MeetupService {
   // delivery (ADR-013 § 6). Upserts by token, not by user — a token
   // identifies one physical device install.
   rpc RegisterDeviceToken(RegisterDeviceTokenRequest) returns (RegisterDeviceTokenResponse);
+  // Sign-out: the caller stops receiving pushes on this device. Scoped to
+  // the caller's own registration of the token.
+  rpc UnregisterDeviceToken(UnregisterDeviceTokenRequest) returns (UnregisterDeviceTokenResponse);
 
   // Safety Gate sub-flow (ADR-013 § 3, Safety UX Flows.md): checklist
   // acknowledgment, live-location opt-in, check-in, post-meetup feedback.
@@ -453,6 +456,15 @@ message RegisterDeviceTokenRequest {
 }
 
 message RegisterDeviceTokenResponse {
+  bool success = 1;
+}
+
+message UnregisterDeviceTokenRequest {
+  string user_id = 1;  // set by the gateway from the verified JWT
+  string fcm_token = 2;
+}
+
+message UnregisterDeviceTokenResponse {
   bool success = 1;
 }
 

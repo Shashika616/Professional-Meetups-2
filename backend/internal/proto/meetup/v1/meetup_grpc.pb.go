@@ -29,6 +29,7 @@ const (
 	MeetupService_WithdrawRequest_FullMethodName            = "/meetup.v1.MeetupService/WithdrawRequest"
 	MeetupService_RespondToRequest_FullMethodName           = "/meetup.v1.MeetupService/RespondToRequest"
 	MeetupService_RegisterDeviceToken_FullMethodName        = "/meetup.v1.MeetupService/RegisterDeviceToken"
+	MeetupService_UnregisterDeviceToken_FullMethodName      = "/meetup.v1.MeetupService/UnregisterDeviceToken"
 	MeetupService_GetSafetyState_FullMethodName             = "/meetup.v1.MeetupService/GetSafetyState"
 	MeetupService_AcknowledgeSafetyChecklist_FullMethodName = "/meetup.v1.MeetupService/AcknowledgeSafetyChecklist"
 	MeetupService_SetLiveLocationOptIn_FullMethodName       = "/meetup.v1.MeetupService/SetLiveLocationOptIn"
@@ -127,6 +128,9 @@ type MeetupServiceClient interface {
 	// delivery (ADR-013 § 6). Upserts by token, not by user — a token
 	// identifies one physical device install.
 	RegisterDeviceToken(ctx context.Context, in *RegisterDeviceTokenRequest, opts ...grpc.CallOption) (*RegisterDeviceTokenResponse, error)
+	// Sign-out: the caller stops receiving pushes on this device. Scoped to
+	// the caller's own registration of the token.
+	UnregisterDeviceToken(ctx context.Context, in *UnregisterDeviceTokenRequest, opts ...grpc.CallOption) (*UnregisterDeviceTokenResponse, error)
 	// Safety Gate sub-flow (ADR-013 § 3, Safety UX Flows.md): checklist
 	// acknowledgment, live-location opt-in, check-in, post-meetup feedback.
 	// Available once a meetup has at least one accepted request.
@@ -314,6 +318,16 @@ func (c *meetupServiceClient) RegisterDeviceToken(ctx context.Context, in *Regis
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RegisterDeviceTokenResponse)
 	err := c.cc.Invoke(ctx, MeetupService_RegisterDeviceToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *meetupServiceClient) UnregisterDeviceToken(ctx context.Context, in *UnregisterDeviceTokenRequest, opts ...grpc.CallOption) (*UnregisterDeviceTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnregisterDeviceTokenResponse)
+	err := c.cc.Invoke(ctx, MeetupService_UnregisterDeviceToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -560,6 +574,9 @@ type MeetupServiceServer interface {
 	// delivery (ADR-013 § 6). Upserts by token, not by user — a token
 	// identifies one physical device install.
 	RegisterDeviceToken(context.Context, *RegisterDeviceTokenRequest) (*RegisterDeviceTokenResponse, error)
+	// Sign-out: the caller stops receiving pushes on this device. Scoped to
+	// the caller's own registration of the token.
+	UnregisterDeviceToken(context.Context, *UnregisterDeviceTokenRequest) (*UnregisterDeviceTokenResponse, error)
 	// Safety Gate sub-flow (ADR-013 § 3, Safety UX Flows.md): checklist
 	// acknowledgment, live-location opt-in, check-in, post-meetup feedback.
 	// Available once a meetup has at least one accepted request.
@@ -682,6 +699,9 @@ func (UnimplementedMeetupServiceServer) RespondToRequest(context.Context, *Respo
 }
 func (UnimplementedMeetupServiceServer) RegisterDeviceToken(context.Context, *RegisterDeviceTokenRequest) (*RegisterDeviceTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterDeviceToken not implemented")
+}
+func (UnimplementedMeetupServiceServer) UnregisterDeviceToken(context.Context, *UnregisterDeviceTokenRequest) (*UnregisterDeviceTokenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnregisterDeviceToken not implemented")
 }
 func (UnimplementedMeetupServiceServer) GetSafetyState(context.Context, *GetSafetyStateRequest) (*SafetyStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetSafetyState not implemented")
@@ -928,6 +948,24 @@ func _MeetupService_RegisterDeviceToken_Handler(srv interface{}, ctx context.Con
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MeetupServiceServer).RegisterDeviceToken(ctx, req.(*RegisterDeviceTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MeetupService_UnregisterDeviceToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnregisterDeviceTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).UnregisterDeviceToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_UnregisterDeviceToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).UnregisterDeviceToken(ctx, req.(*UnregisterDeviceTokenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1266,6 +1304,10 @@ var MeetupService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterDeviceToken",
 			Handler:    _MeetupService_RegisterDeviceToken_Handler,
+		},
+		{
+			MethodName: "UnregisterDeviceToken",
+			Handler:    _MeetupService_UnregisterDeviceToken_Handler,
 		},
 		{
 			MethodName: "GetSafetyState",

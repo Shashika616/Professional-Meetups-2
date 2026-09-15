@@ -295,6 +295,16 @@ func (s *MeetupServer) RegisterDeviceToken(ctx context.Context, req *meetupv1.Re
 	return &meetupv1.RegisterDeviceTokenResponse{Success: true}, nil
 }
 
+func (s *MeetupServer) UnregisterDeviceToken(ctx context.Context, req *meetupv1.UnregisterDeviceTokenRequest) (*meetupv1.UnregisterDeviceTokenResponse, error) {
+	if err := s.svc.UnregisterDeviceToken(ctx, meetup.UnregisterDeviceTokenRequest{
+		UserID:   req.GetUserId(),
+		FCMToken: req.GetFcmToken(),
+	}); err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &meetupv1.UnregisterDeviceTokenResponse{Success: true}, nil
+}
+
 func (s *MeetupServer) GetSafetyState(ctx context.Context, req *meetupv1.GetSafetyStateRequest) (*meetupv1.SafetyStateResponse, error) {
 	state, err := s.svc.GetSafetyState(ctx, meetup.SafetyStateRequest{
 		MeetupID: req.GetMeetupId(),

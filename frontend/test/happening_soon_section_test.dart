@@ -195,7 +195,7 @@ void main() {
         await tester.pumpAndSettle();
 
         final button = tester.widget<PrimaryButton>(
-          find.widgetWithText(PrimaryButton, 'REQUEST TO JOIN'),
+          find.widgetWithText(PrimaryButton, 'I\'M INTERESTED'),
         );
         expect(button.onPressed, isNotNull);
       },
@@ -212,7 +212,7 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('REQUEST TO JOIN'));
+      await tester.tap(find.text('I\'M INTERESTED'));
       await tester.pumpAndSettle();
 
       expect(service.lastRequestToJoinMeetupId, isNull);
@@ -255,14 +255,14 @@ void main() {
       expect(find.text('Colombo Fort Cafe'), findsOneWidget);
       expect(find.text('Sign up to see who\'s hosting'), findsNothing);
 
-      await tester.tap(find.text('REQUEST TO JOIN'));
+      await tester.tap(find.text('I\'M INTERESTED'));
       await tester.pumpAndSettle();
 
       // The host's profile sheet comes first now; nothing is sent until it
       // is confirmed.
       expect(service.lastRequestToJoinMeetupId, isNull);
       expect(find.text('YOUR HOST'), findsOneWidget);
-      await tester.tap(find.text('CONFIRM & SEND REQUEST'));
+      await tester.tap(find.text('CONFIRM YOUR INTEREST'));
       await tester.pumpAndSettle();
 
       expect(service.lastRequestToJoinMeetupId, 'meetup-42');
@@ -285,11 +285,11 @@ void main() {
       expect(find.text('Grace Hopper'), findsOneWidget);
       expect(find.text('Colombo Fort Cafe'), findsOneWidget);
       expect(find.text('1/4 JOINED'), findsOneWidget);
-      expect(find.text('REQUEST TO JOIN'), findsOneWidget);
+      expect(find.text('I\'M INTERESTED'), findsOneWidget);
     });
 
     testWidgets(
-      'tapping REQUEST TO JOIN calls requestToJoin with the meetup id',
+      'tapping I\'M INTERESTED calls requestToJoin with the meetup id',
       (tester) async {
         _useTallViewport(tester);
         final service = ScriptedMeetupService(
@@ -299,9 +299,9 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('REQUEST TO JOIN'));
+        await tester.tap(find.text('I\'M INTERESTED'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('CONFIRM & SEND REQUEST'));
+        await tester.tap(find.text('CONFIRM YOUR INTEREST'));
         await tester.pumpAndSettle();
 
         expect(service.lastRequestToJoinMeetupId, 'meetup-42');
@@ -321,7 +321,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('FULL'), findsOneWidget);
-        expect(find.text('REQUEST TO JOIN'), findsNothing);
+        expect(find.text('I\'M INTERESTED'), findsNothing);
       },
     );
 
@@ -344,7 +344,7 @@ void main() {
         // is what says it now, and it is the better place: it stops the user
         // asking to join something nobody can join.
         expect(find.text('FULL'), findsOneWidget);
-        expect(find.text('REQUEST TO JOIN'), findsNothing);
+        expect(find.text('I\'M INTERESTED'), findsNothing);
         expect(find.byType(MeetupStatusBadge), findsNothing);
       },
     );
@@ -865,7 +865,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('YOU\'RE HOSTING'), findsOneWidget);
-      expect(find.text('REQUEST TO JOIN'), findsNothing);
+      expect(find.text('I\'M INTERESTED'), findsNothing);
     });
 
     testWidgets('a meetup the viewer already requested shows its request '
@@ -879,7 +879,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('REQUEST PENDING'), findsOneWidget);
-      expect(find.text('REQUEST TO JOIN'), findsNothing);
+      expect(find.text('I\'M INTERESTED'), findsNothing);
     });
 
     testWidgets('an accepted request shows YOU\'RE IN', (tester) async {

@@ -29,3 +29,11 @@ SELECT * FROM meetup.device_tokens WHERE user_id = ANY(sqlc.arg(user_ids)::uuid[
 -- not an error. Two concurrent deliveries can both learn the same token is
 -- dead, and neither should fail because the other got there first.
 DELETE FROM meetup.device_tokens WHERE fcm_token = $1;
+
+-- name: DeleteDeviceTokenForUser :execrows
+-- The sign-out path: removes the caller's OWN registration of a token.
+-- Scoped to user_id as well as token so a signed-out account can never
+-- silence a device that a different account has since claimed (the upsert
+-- above reassigns ownership on sign-in); if the row is no longer theirs,
+-- zero rows match and nothing changes.
+DELETE FROM meetup.device_tokens WHERE fcm_token = $1 AND user_id = $2;

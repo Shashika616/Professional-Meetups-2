@@ -216,15 +216,20 @@ class MeetupCard extends StatelessWidget {
                               if (locked) ...[
                                 const SizedBox(height: 14),
                                 PrimaryButton(
-                                  label: 'REQUEST TO JOIN',
+                                  label: 'I\'M INTERESTED',
                                   height: 42,
                                   onPressed: () => _handleLockedTap(context),
                                 ),
                               ] else if (!meetup.isHostedByMe &&
                                   meetup.myRequestStatus == null) ...[
                                 const SizedBox(height: 14),
+                                // "I'm interested", not "request to join":
+                                // the tap opens the host's profile and asks
+                                // for confirmation before anything is sent,
+                                // so the button names the feeling, and the
+                                // sheet names the commitment.
                                 PrimaryButton(
-                                  label: full ? 'FULL' : 'REQUEST TO JOIN',
+                                  label: full ? 'FULL' : 'I\'M INTERESTED',
                                   height: 42,
                                   onPressed: full ? null : onRequestToJoin,
                                 ),
@@ -363,6 +368,10 @@ class _CardHeader extends StatelessWidget {
                 runSpacing: 6,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
+                  // Says outright that the person named above is the
+                  // host; the chip row lower on the card says where the
+                  // viewer stands (hosting / in / pending).
+                  const _HostTag(),
                   TrustLevelBadge(trustLevel: meetup.hostTrustLevel),
                   StarRating(
                     average: meetup.hostRatingAverage,
@@ -630,6 +639,31 @@ class MeetupsSkeleton extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A small HOST tag next to the host's name in the card header.
+class _HostTag extends StatelessWidget {
+  const _HostTag();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(6, 2, 6, 2),
+      decoration: BoxDecoration(
+        color: AppPalette.textSecondary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        'HOST',
+        style: TextStyle(
+          color: AppPalette.textSecondary,
+          fontSize: 9,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.0,
         ),
       ),
     );

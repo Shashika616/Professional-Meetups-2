@@ -81,6 +81,10 @@ class ImmediateMeetupService implements MeetupService {
       throw UnimplementedError();
 
   @override
+  Future<void> unregisterDeviceToken(String fcmToken) =>
+      throw UnimplementedError();
+
+  @override
   Future<SafetyState> getSafetyState(String meetupId) =>
       throw UnimplementedError();
 

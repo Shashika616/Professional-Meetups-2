@@ -236,7 +236,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
         ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
     if (!meetup.lockedForViewer && meetup.intent.canJoin(trustLevel)) {
       return PrimaryButton(
-        label: 'REQUEST TO JOIN',
+        label: 'I\'M INTERESTED',
         onPressed: () async {
           // Who is hosting, before anything is sent.
           if (!await showJoinConfirmationSheet(context, meetup: meetup)) {
@@ -247,7 +247,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       );
     }
     return PrimaryButton(
-      label: 'REQUEST TO JOIN',
+      label: 'I\'M INTERESTED',
       onPressed: () {
         showSnack(
           context,

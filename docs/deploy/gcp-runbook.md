@@ -2,7 +2,7 @@
 
 > **Status 2026-09-15:** the database moved to Supabase and the Cloud SQL
 > instance `meetups-db` was deleted (see §6). Cloud Run `meetups-backend`
-> stays, serving revision `r26` against Supabase (Mumbai). §1–§5 below describe the
+> stays, serving revision `r27` against Supabase (Mumbai). §1–§5 below describe the
 > Cloud SQL era as it was, so it can be recreated if Supabase is ever left.
 
 Snapshot of the production deployment as it stood before the move (revision

@@ -219,16 +219,21 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
         const SizedBox(height: 18),
         const OrDivider(),
         const SizedBox(height: 14),
-        SecondaryButton(
-          key: const Key('continueWithEmail'),
-          label: 'CONTINUE WITH EMAIL',
-          icon: Icons.mail_outline_rounded,
-          height: 52,
-          color: AppPalette.candyBlue,
-          borderColor: AppPalette.candyBlue.withValues(alpha: 0.55),
-          onPressed: _socialBusy || !_ageConfirmed
-              ? null
-              : () => setState(() => _step = _Step.email),
+        Opacity(
+          // Same dimming as the provider pair above while the box is
+          // unchecked, so all three read as one locked group.
+          opacity: _ageConfirmed ? 1 : 0.45,
+          child: SecondaryButton(
+            key: const Key('continueWithEmail'),
+            label: 'CONTINUE WITH EMAIL',
+            icon: Icons.mail_outline_rounded,
+            height: 52,
+            color: AppPalette.candyBlue,
+            borderColor: AppPalette.candyBlue.withValues(alpha: 0.55),
+            onPressed: _socialBusy || !_ageConfirmed
+                ? null
+                : () => setState(() => _step = _Step.email),
+          ),
         ),
       ],
     );

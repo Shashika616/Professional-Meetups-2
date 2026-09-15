@@ -347,6 +347,14 @@ type RegisterDeviceTokenRequest struct {
 	FCMToken string
 }
 
+// UnregisterDeviceTokenRequest is the sign-out twin of
+// RegisterDeviceTokenRequest: the caller stops receiving pushes on this
+// device. Scoped to the caller, so it can only remove its own registration.
+type UnregisterDeviceTokenRequest struct {
+	UserID   string
+	FCMToken string
+}
+
 // reviewWindow bounds how long a finished meetup keeps asking to be
 // reviewed. After it, the meetup drops off the home list unreviewed and
 // lives only in history.

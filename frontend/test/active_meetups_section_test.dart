@@ -23,6 +23,8 @@ Meetup _meetup({
   String locationLabel = 'Colombo Fort Cafe',
   MeetupStatus status = MeetupStatus.open,
   String? cancellationReason,
+  bool isHostedByMe = false,
+  MeetupRequestStatus? myRequestStatus,
 }) => Meetup(
   id: id,
   hostUserId: 'host-$id',
@@ -38,6 +40,8 @@ Meetup _meetup({
   acceptedCount: 1,
   status: status,
   cancellationReason: cancellationReason,
+  isHostedByMe: isHostedByMe,
+  myRequestStatus: myRequestStatus,
   createdAt: DateTime.now(),
 );
 
@@ -131,6 +135,9 @@ void main() {
       const longAddress =
           'Ellis Street & Stockton Street, Ellis Street, Union Square, '
           'San Francisco, California, United States of America';
+      // Two FINISHED meetups: the review deck is a carousel just like the
+      // live one, and it is the one that carries the long address here.
+      // (A finished and a live meetup no longer share a deck.)
       final first = _meetup(
         id: 'first',
         hostFullName: 'First Host',
@@ -141,8 +148,8 @@ void main() {
       final second = _meetup(
         id: 'second',
         hostFullName: 'Second Host',
-        windowStart: now.subtract(const Duration(minutes: 10)),
-        windowEnd: now.add(const Duration(hours: 2)),
+        windowStart: now.subtract(const Duration(hours: 2)),
+        windowEnd: now.subtract(const Duration(minutes: 5)),
       );
       final service = ScriptedMeetupService(activeMeetups: [first, second]);
 
@@ -323,10 +330,10 @@ void main() {
     expect(find.text('How was your experience?'), findsOneWidget);
   });
 
-  testWidgets('the plain ACTIVE MEETUPS row marks a windowEnd-passed meetup as '
-      'awaiting review, agreeing with the persistent card above it, instead '
-      'of reading as still live (ADR-030, round-9: the reconciled '
-      'persistent-card/list-badge inconsistency)', (tester) async {
+  testWidgets('a windowEnd-passed meetup moves to WAITING FOR YOUR REVIEW '
+      'and leaves the ACTIVE MEETUPS list, so nothing on Home reads as '
+      'still live once it is over (ADR-030 reconciliation, reshaped: three '
+      'decks instead of one deck plus greyed rows)', (tester) async {
     final now = DateTime.now();
     final justEnded = _meetup(
       id: 'ended-2',
@@ -339,16 +346,14 @@ void main() {
     await tester.pumpWidget(_appWith(service));
     await tester.pumpAndSettle();
 
-    // The persistent card is asking for a review...
+    expect(find.text('WAITING FOR YOUR REVIEW'), findsOneWidget);
     expect(find.text('Share your thoughts about this meetup'), findsOneWidget);
-    // ...and the same meetup's row below agrees, using the state EDGE that
-    // replaced the OPEN/COMPLETED chip: the bar down the row's left side is
-    // painted gold (awaiting review) rather than green (live).
-    //
-    // Asserting on the colour rather than on a word is the whole reason the
-    // chip went away, so the test has to follow it there. The row's own
-    // status still comes from _effectiveStatus, not the server's stale
-    // MeetupStatus.open, which is what this test has always been about.
+    expect(find.text('HAPPENING NOW'), findsNothing);
+    // Nothing is live, so there is no Active Meetups list at all; the
+    // finished meetup is named exactly once, on its review card.
+    expect(find.text('ACTIVE MEETUPS'), findsNothing);
+    expect(find.text('Another Ended Host'), findsOneWidget);
+    // No row edge is painted live.
     final edges = tester
         .widgetList<Container>(
           find.descendant(
@@ -359,19 +364,38 @@ void main() {
         .where((c) => c.constraints?.maxWidth == 4)
         .map((c) => c.color)
         .toList();
-
-    expect(
-      edges,
-      contains(AppPalette.gold),
-      reason: 'an ended, unreviewed meetup must carry the gold edge',
-    );
-    expect(
-      edges,
-      isNot(contains(AppPalette.verified)),
-      reason: 'it is over, so nothing here should read as live',
-    );
+    expect(edges, isNot(contains(AppPalette.verified)));
     expect(find.text('COMPLETED'), findsNothing);
     expect(find.text('OPEN'), findsNothing);
+  });
+
+  testWidgets('every card says who hosts and where the viewer stands: a '
+      'live meetup the viewer joined, and one they host', (tester) async {
+    final now = DateTime.now();
+    final joined = _meetup(
+      id: 'joined',
+      hostFullName: 'Grace Hopper',
+      windowStart: now.subtract(const Duration(minutes: 5)),
+      windowEnd: now.add(const Duration(hours: 1)),
+      myRequestStatus: MeetupRequestStatus.accepted,
+    );
+    final mine = _meetup(
+      id: 'mine',
+      hostFullName: 'Me Myself',
+      windowStart: now.add(const Duration(hours: 3)),
+      windowEnd: now.add(const Duration(hours: 4)),
+      isHostedByMe: true,
+    );
+    final service = ScriptedMeetupService(activeMeetups: [joined, mine]);
+
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    // The joined one is in the Happening Now deck AND the list: HOST +
+    // YOU'RE IN on both. The hosted one is only in the list (3h out).
+    expect(find.text('YOU\'RE IN'), findsNWidgets(2));
+    expect(find.text('HOST'), findsNWidgets(2));
+    expect(find.text('YOU\'RE HOSTING'), findsOneWidget);
   });
 
   testWidgets(
@@ -561,8 +585,10 @@ void main() {
       expect(cancelledY, lessThan(nowY));
       // The live deck holds only the live meetup.
       expect(find.byType(PageView), findsNothing);
-      // And the Active Meetups row says so.
-      expect(find.text('CANCELLED \u00B7 COFFEE'), findsOneWidget);
+      // And it is NOT repeated as a row in Active Meetups: that list is
+      // only for meetups still going ahead.
+      expect(find.text('CANCELLED \u00B7 COFFEE'), findsNothing);
+      expect(find.text('ACTIVE MEETUPS'), findsOneWidget);
     });
 
     testWidgets('tapping the prompt opens the review flow framed as a '

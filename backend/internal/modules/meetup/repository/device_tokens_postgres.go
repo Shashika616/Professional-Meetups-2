@@ -48,6 +48,20 @@ func (r *postgresDeviceTokenRepository) ListForUser(ctx context.Context, userID 
 	return tokens, nil
 }
 
+// DeleteForUser removes the caller's own registration of a token; see the
+// query's comment for why it is scoped to both.
+func (r *postgresDeviceTokenRepository) DeleteForUser(ctx context.Context, userID, fcmToken string) error {
+	user, err := parseUUID(userID)
+	if err != nil {
+		return fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+	if _, err := r.q.DeleteDeviceTokenForUser(ctx, sqlcgen.DeleteDeviceTokenForUserParams{FcmToken: fcmToken, UserID: user}); err != nil {
+		// Token deliberately absent from the error, as in DeleteToken below.
+		return fmt.Errorf("repository: delete device token for user: %w", err)
+	}
+	return nil
+}
+
 // DeleteToken removes one dead device token. See the query's comment for
 // why this is keyed by token rather than by user.
 func (r *postgresDeviceTokenRepository) DeleteToken(ctx context.Context, fcmToken string) error {

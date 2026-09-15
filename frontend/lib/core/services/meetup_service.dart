@@ -87,6 +87,12 @@ abstract interface class MeetupService {
 
   Future<void> registerDeviceToken(String fcmToken);
 
+  /// The sign-out twin of [registerDeviceToken]: removes this device's
+  /// registration for the signed-in account so the phone stops receiving
+  /// that account's pushes the moment the user is out. Must be called
+  /// while the session is still valid (before logout revokes it).
+  Future<void> unregisterDeviceToken(String fcmToken);
+
   /// Every Safety Gate call below identifies the caller from the signed-in
   /// session's own token, never a parameter this class exposes — same
   /// discipline as every other authenticated call in this app. Throws
@@ -477,6 +483,11 @@ class MockMeetupService implements MeetupService {
 
   @override
   Future<void> registerDeviceToken(String fcmToken) async {
+    await Future<void>.delayed(latency);
+  }
+
+  @override
+  Future<void> unregisterDeviceToken(String fcmToken) async {
     await Future<void>.delayed(latency);
   }
 

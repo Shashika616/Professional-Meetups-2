@@ -37,6 +37,7 @@ type meetupRecorder struct {
 	gotReviewParticipants []monolithclient.ReviewParticipantInput
 	review                monolithclient.MeetupReview
 	gotFCMToken           string
+	gotUnregisteredToken  string
 	gotWithinDays         int32
 }
 
@@ -90,6 +91,11 @@ func (f *fakeMonolith) WithdrawRequest(_ context.Context, requestID, requesterID
 func (f *fakeMonolith) RespondToRequest(_ context.Context, requestID, hostUserID string, accept bool) (monolithclient.MeetupRequest, error) {
 	f.meetup.gotRequestID, f.meetup.gotUserID, f.meetup.gotAccept = requestID, hostUserID, accept
 	return monolithclient.MeetupRequest{ID: requestID}, f.err
+}
+
+func (f *fakeMonolith) UnregisterDeviceToken(_ context.Context, userID, fcmToken string) error {
+	f.meetup.gotUserID, f.meetup.gotUnregisteredToken = userID, fcmToken
+	return f.err
 }
 
 func (f *fakeMonolith) RegisterDeviceToken(_ context.Context, userID, fcmToken string) error {
@@ -193,6 +199,7 @@ func TestMeetupRoutes_AreWiredAndRequireAuth(t *testing.T) {
 		{http.MethodPost, "/v1/meetups/requests/r1/withdraw", `{"note":"x"}`},
 		{http.MethodPost, "/v1/meetups/requests/r1/respond", `{"accept":true}`},
 		{http.MethodPost, "/v1/meetups/device-token", `{"fcm_token":"t"}`},
+		{http.MethodDelete, "/v1/meetups/device-token", `{"fcm_token":"t"}`},
 		{http.MethodGet, "/v1/meetups/m1/safety", ""},
 		{http.MethodPost, "/v1/meetups/m1/safety/checklist", `{}`},
 		{http.MethodPost, "/v1/meetups/m1/safety/live-location", `{"opt_in":true}`},

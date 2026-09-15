@@ -118,17 +118,22 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
       required Widget mark,
       required VoidCallback onPressed,
     }) {
-      return PrimaryButton(
-        key: key,
-        label: label,
-        iconWidget: mark,
-        fillColor: AppPalette.card,
-        foregroundColor: AppPalette.textPrimary,
-        borderColor: AppPalette.hairline,
-        isLoading: _busy,
-        // Disabled, not hidden, until the attestation is given: the user
-        // sees what confirming unlocks.
-        onPressed: widget.ageConfirmedOver18 ? onPressed : null,
+      // Disabled, not hidden, until the attestation is given: the user
+      // sees what confirming unlocks. Dimmed as a whole, mark and label
+      // included: PrimaryButton's own disabled state only fades the fill,
+      // which on the neutral card surface is invisible in dark mode.
+      return Opacity(
+        opacity: widget.ageConfirmedOver18 ? 1 : 0.45,
+        child: PrimaryButton(
+          key: key,
+          label: label,
+          iconWidget: mark,
+          fillColor: AppPalette.card,
+          foregroundColor: AppPalette.textPrimary,
+          borderColor: AppPalette.hairline,
+          isLoading: _busy,
+          onPressed: widget.ageConfirmedOver18 ? onPressed : null,
+        ),
       );
     }
 

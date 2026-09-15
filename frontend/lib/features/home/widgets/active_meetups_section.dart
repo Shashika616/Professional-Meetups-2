@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/meetup_role_chips.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
@@ -89,24 +90,31 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
     if (active.isEmpty) return const SizedBox.shrink();
 
     final now = DateTime.now();
-    // A cancelled meetup is on this list for one reason: the host called
-    // it off while this user held an accepted request, and the server is
-    // asking them to review that. It gets its own section above everything
-    // else — it is the most recent thing to have happened to them here —
-    // and never enters the Happening Now deck, which is for meetups that
-    // are going ahead.
-    final cancelled = active
-        .where((m) => m.status == MeetupStatus.cancelled)
-        .toList();
+    // THREE STATES, THREE DECKS. Everything the server puts on the active
+    // list is one of: still going ahead (live), finished and owed a review
+    // (waiting), or called off and owed a review (cancelled). Each gets its
+    // own heading so a finished meetup never sits under "Happening Now" and
+    // reads as still on. `_effectiveStatus` is what sorts a live meetup into
+    // "waiting" the moment its window passes, ahead of the server's poller.
+    final cancelled = <Meetup>[];
+    final waitingReview = <Meetup>[];
+    final live = <Meetup>[];
+    for (final m in active) {
+      switch (_effectiveStatus(m)) {
+        case MeetupStatus.cancelled:
+          cancelled.add(m);
+        case MeetupStatus.completed:
+          waitingReview.add(m);
+        case MeetupStatus.open:
+        case MeetupStatus.full:
+          live.add(m);
+      }
+    }
     // windowStart/windowEnd/hostFullName/locationLabel are only ever null
     // for a locked ListOpenMeetups result (ADR-028) — listActiveMeetups()
     // never redacts, so `!` here documents that guarantee.
-    final cardEligible = active
-        .where(
-          (m) =>
-              m.status != MeetupStatus.cancelled &&
-              !now.isBefore(m.windowStart!.subtract(_cardLeadTime)),
-        )
+    final happeningNow = live
+        .where((m) => !now.isBefore(m.windowStart!.subtract(_cardLeadTime)))
         .toList();
 
     return Padding(
@@ -123,30 +131,41 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
             ],
             const SizedBox(height: 12),
           ],
-          if (cardEligible.isNotEmpty) ...[
+          if (happeningNow.isNotEmpty) ...[
             const SectionLabel('HAPPENING NOW'),
             const SizedBox(height: 16),
-            _PersistentMeetupCardSet(meetups: cardEligible),
+            _PersistentMeetupCardSet(meetups: happeningNow),
             const SizedBox(height: 24),
           ],
-          const SectionLabel('ACTIVE MEETUPS'),
-          const SizedBox(height: 16),
-          // Deliberately `Column`/`.map`, not `ListView.builder` (2026-08-31
-          // round-3 hardening, Fix 2 — see frontend/round-3-performance-
-          // hardening-PLAN.md). This whole section is already mounted
-          // inside HomePage's own outer `ListView`; a nested `ListView`
-          // here would need `shrinkWrap: true` +
-          // `NeverScrollableScrollPhysics()` to avoid double-scroll
-          // conflicts, buying nothing for a list the server already scopes
-          // to open/full + unexpired (realistically small) — eager build
-          // here isn't the inconsistency the audit's "used everywhere else"
-          // framing assumed.
-          ...active.map(
-            (m) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _ActiveMeetupRow(meetup: m),
+          if (waitingReview.isNotEmpty) ...[
+            const SectionLabel('WAITING FOR YOUR REVIEW'),
+            const SizedBox(height: 16),
+            _PersistentMeetupCardSet(meetups: waitingReview),
+            const SizedBox(height: 24),
+          ],
+          // Only what is genuinely still active. A finished or cancelled
+          // meetup has its card above; repeating it here as a greyed row
+          // made the list read as a history it is not.
+          if (live.isNotEmpty) ...[
+            const SectionLabel('ACTIVE MEETUPS'),
+            const SizedBox(height: 16),
+            // Deliberately `Column`/`.map`, not `ListView.builder` (2026-08-31
+            // round-3 hardening, Fix 2 — see frontend/round-3-performance-
+            // hardening-PLAN.md). This whole section is already mounted
+            // inside HomePage's own outer `ListView`; a nested `ListView`
+            // here would need `shrinkWrap: true` +
+            // `NeverScrollableScrollPhysics()` to avoid double-scroll
+            // conflicts, buying nothing for a list the server already scopes
+            // to open/full + unexpired (realistically small) — eager build
+            // here isn't the inconsistency the audit's "used everywhere else"
+            // framing assumed.
+            ...live.map(
+              (m) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _ActiveMeetupRow(meetup: m),
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -302,7 +321,11 @@ class _PersistentMeetupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (DateTime.now().isAfter(meetup.windowEnd!)) {
+    // A meetup whose window has passed is sorted into the review deck by
+    // the section's own partition, so this card is only ever live. It
+    // still defers to the review card if it is somehow asked to draw one
+    // (a tick between the partition and the paint).
+    if (_effectiveStatus(meetup) == MeetupStatus.completed) {
       return _ReviewInvitationCard(meetup: meetup);
     }
 
@@ -409,6 +432,11 @@ class _PersistentMeetupCard extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
+                      const SizedBox(height: 6),
+                      // Who is running it and where the viewer stands: the
+                      // title above is the host's name, so the chip only
+                      // says HOST, plus YOU'RE HOSTING / YOU'RE IN.
+                      MeetupRoleChips(meetup: meetup, showHostName: false),
                       const SizedBox(height: 4),
                       Text(
                         meetup.formattedWindow,
@@ -493,6 +521,10 @@ class _ActiveMeetupRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Only live meetups reach this row now; the section's partition sends
+    // finished and cancelled ones to their own decks. The edge colour still
+    // follows _effectiveStatus so a row is never painted live after its
+    // window has passed, in the tick before the partition catches up.
     final status = _effectiveStatus(meetup);
     final awaitingReview = status == MeetupStatus.completed;
     final cancelled = status == MeetupStatus.cancelled;
@@ -568,6 +600,12 @@ class _ActiveMeetupRow extends StatelessWidget {
                                   fontWeight: FontWeight.w800,
                                   letterSpacing: 1.3,
                                 ),
+                              ),
+                              const SizedBox(height: 5),
+                              MeetupRoleChips(
+                                meetup: meetup,
+                                compact: true,
+                                showHostName: false,
                               ),
                               if (meetup.locationLabel != null) ...[
                                 const SizedBox(height: 4),
@@ -829,7 +867,9 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      const SizedBox(height: 3),
+                      const SizedBox(height: 6),
+                      MeetupRoleChips(meetup: meetup, showHostName: false),
+                      const SizedBox(height: 6),
                       Text(
                         meetup.formattedWindow,
                         style: TextStyle(

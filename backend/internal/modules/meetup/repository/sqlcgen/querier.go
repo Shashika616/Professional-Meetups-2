@@ -213,6 +213,12 @@ type Querier interface {
 	// not an error. Two concurrent deliveries can both learn the same token is
 	// dead, and neither should fail because the other got there first.
 	DeleteDeviceToken(ctx context.Context, fcmToken string) error
+	// The sign-out path: removes the caller's OWN registration of a token.
+	// Scoped to user_id as well as token so a signed-out account can never
+	// silence a device that a different account has since claimed (the upsert
+	// above reassigns ownership on sign-in); if the row is no longer theirs,
+	// zero rows match and nothing changes.
+	DeleteDeviceTokenForUser(ctx context.Context, arg DeleteDeviceTokenForUserParams) (int64, error)
 	// Retention for done rows, batched via the id subquery rather than one
 	// unbounded DELETE — same reasoning as DeleteProcessedNotifications. The
 	// caller loops until a batch comes back short.

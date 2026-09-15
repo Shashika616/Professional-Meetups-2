@@ -1862,6 +1862,42 @@ func TestListMyMeetups_And_ListActiveMeetups(t *testing.T) {
 	}
 }
 
+// Sign-out removes the caller's registration and nobody else's: a token a
+// second account has since claimed on the same phone is not touched by
+// the first account signing out, and an empty token is rejected.
+func TestUnregisterDeviceToken_RemovesOnlyOwnRegistration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	first := newUserID(t, h)
+	second := newUserID(t, h)
+
+	if err := h.svc.RegisterDeviceToken(ctx, meetup.RegisterDeviceTokenRequest{UserID: first, FCMToken: "phone-a"}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := h.svc.UnregisterDeviceToken(ctx, meetup.UnregisterDeviceTokenRequest{UserID: first, FCMToken: "phone-a"}); err != nil {
+		t.Fatalf("unregister: %v", err)
+	}
+	if tokens, _ := h.deviceTokens.ListForUser(ctx, first); len(tokens) != 0 {
+		t.Errorf("after sign-out first still has %v, want none", tokens)
+	}
+
+	// Shared phone: second signs in (token reassigned), then first tries to
+	// sign out with the same token. Second must keep receiving pushes.
+	if err := h.svc.RegisterDeviceToken(ctx, meetup.RegisterDeviceTokenRequest{UserID: second, FCMToken: "phone-a"}); err != nil {
+		t.Fatalf("register second: %v", err)
+	}
+	if err := h.svc.UnregisterDeviceToken(ctx, meetup.UnregisterDeviceTokenRequest{UserID: first, FCMToken: "phone-a"}); err != nil {
+		t.Fatalf("unregister by non-owner: %v, want nil (no-op)", err)
+	}
+	if tokens, _ := h.deviceTokens.ListForUser(ctx, second); len(tokens) != 1 {
+		t.Errorf("second's registration was removed by first's sign-out: %v", tokens)
+	}
+
+	if err := h.svc.UnregisterDeviceToken(ctx, meetup.UnregisterDeviceTokenRequest{UserID: first, FCMToken: ""}); !isSentinel(err, apperror.ErrInvalidInput) {
+		t.Errorf("empty token: error = %v, want ErrInvalidInput", err)
+	}
+}
+
 func TestRegisterDeviceToken_UpsertsByToken(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

@@ -409,6 +409,13 @@ func (c *grpcClient) RegisterDeviceToken(ctx context.Context, userID, fcmToken s
 	return err
 }
 
+func (c *grpcClient) UnregisterDeviceToken(ctx context.Context, userID, fcmToken string) error {
+	_, err := c.meetup.UnregisterDeviceToken(ctx, &meetupv1.UnregisterDeviceTokenRequest{
+		UserId: userID, FcmToken: fcmToken,
+	})
+	return err
+}
+
 func (c *grpcClient) GetSafetyState(ctx context.Context, meetupID, userID string) (SafetyState, error) {
 	resp, err := c.meetup.GetSafetyState(ctx, &meetupv1.GetSafetyStateRequest{MeetupId: meetupID, UserId: userID})
 	if err != nil {

@@ -140,6 +140,7 @@ type Client interface {
 	WithdrawRequest(ctx context.Context, requestID, requesterID, note string) error
 	RespondToRequest(ctx context.Context, requestID, hostUserID string, accept bool) (MeetupRequest, error)
 	RegisterDeviceToken(ctx context.Context, userID, fcmToken string) error
+	UnregisterDeviceToken(ctx context.Context, userID, fcmToken string) error
 	GetSafetyState(ctx context.Context, meetupID, userID string) (SafetyState, error)
 	AcknowledgeSafetyChecklist(ctx context.Context, meetupID, userID string) (SafetyState, error)
 	SetLiveLocationOptIn(ctx context.Context, meetupID, userID string, optIn bool) (SafetyState, error)

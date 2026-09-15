@@ -611,6 +611,9 @@ type DeviceTokenRepository interface {
 	// map (not an empty-slice entry) — same "not an error" treatment
 	// ListForUser gives a single user with none.
 	ListForUsers(ctx context.Context, userIDs []string) (map[string][]string, error)
+	// DeleteForUser removes userID's own registration of fcmToken (sign-out).
+	// A token the user no longer owns is left alone; idempotent.
+	DeleteForUser(ctx context.Context, userID, fcmToken string) error
 	// DeleteToken removes a device token FCM has reported as permanently
 	// unregistered (§E2c). Idempotent — deleting an already-absent token is
 	// not an error.

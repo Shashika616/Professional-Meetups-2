@@ -116,6 +116,11 @@ final pushNotificationServiceProvider = Provider<PushNotificationService>((
 ) {
   return FirebasePushNotificationService(
     onTokenRefreshed: (token) {
+      // Only while signed in. FCM issues a fresh token right after
+      // sign-out's deleteToken(), and registering that one would put the
+      // just-signed-out account straight back on this device; a signed-in
+      // session registers its token itself on sign-in/restore.
+      if (ref.read(authSessionProvider).value?.session == null) return;
       unawaited(ref.read(meetupServiceProvider).registerDeviceToken(token));
     },
   );
@@ -491,6 +496,13 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     await future;
     final refreshToken = state.value?.session?.refreshToken;
     if (refreshToken != null) {
+      // Stop the pushes FIRST, while the access token is still valid: the
+      // server drops this device's registration for the account, then the
+      // device drops the token itself. Without this a signed-out phone
+      // kept receiving the account's notifications until the next sign-in
+      // happened to reassign the token. Bounded and best-effort, so a
+      // slow or offline network cannot hold sign-out hostage.
+      await _unregisterPushToken();
       try {
         await ref.read(authServiceProvider).logout(refreshToken);
       } catch (_) {
@@ -499,6 +511,35 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     }
     await ref.read(sessionStorageProvider).clearSession();
     state = const AsyncData(AuthSessionState(signedOutByUser: true));
+  }
+
+  /// Sign-out's push cleanup: server-side unregistration (authenticated,
+  /// so it must run before logout) and then the device-side token delete.
+  /// Each step is independent and swallowed on failure; together they are
+  /// what makes a signed-out phone go quiet.
+  Future<void> _unregisterPushToken() async {
+    final push = ref.read(pushNotificationServiceProvider);
+    String? token;
+    try {
+      token = await push.currentToken();
+    } catch (_) {
+      token = null;
+    }
+    if (token != null) {
+      try {
+        await ref
+            .read(meetupServiceProvider)
+            .unregisterDeviceToken(token)
+            .timeout(const Duration(seconds: 5));
+      } catch (_) {
+        // The device-side delete below still silences the phone.
+      }
+    }
+    try {
+      await push.deleteToken().timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Best-effort by contract.
+    }
   }
 
   /// Called when a caller catches `SessionExpiredException` from an

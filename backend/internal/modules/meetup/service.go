@@ -87,6 +87,10 @@ type Service interface {
 	WithdrawRequest(ctx context.Context, req WithdrawRequestRequest) error
 	RespondToRequest(ctx context.Context, req RespondToRequestRequest) (MeetupRequest, error)
 	RegisterDeviceToken(ctx context.Context, req RegisterDeviceTokenRequest) error
+	// UnregisterDeviceToken removes the caller's registration of a device
+	// token (sign-out). Without it, a signed-out phone kept receiving the
+	// account's pushes until the next sign-in reassigned the token.
+	UnregisterDeviceToken(ctx context.Context, req UnregisterDeviceTokenRequest) error
 
 	// --- Safety Gate: every one of these checks participation first ---
 	GetSafetyState(ctx context.Context, req SafetyStateRequest) (SafetyState, error)
@@ -761,6 +765,13 @@ func (s *service) RegisterDeviceToken(ctx context.Context, req RegisterDeviceTok
 		return fmt.Errorf("meetup: fcm_token is required: %w", apperror.ErrInvalidInput)
 	}
 	return s.deviceTokens.Upsert(ctx, req.UserID, req.FCMToken)
+}
+
+func (s *service) UnregisterDeviceToken(ctx context.Context, req UnregisterDeviceTokenRequest) error {
+	if req.FCMToken == "" {
+		return fmt.Errorf("meetup: fcm_token is required: %w", apperror.ErrInvalidInput)
+	}
+	return s.deviceTokens.DeleteForUser(ctx, req.UserID, req.FCMToken)
 }
 
 // NearbyNotifyPayload is what HandleMeetupCreated needs off the

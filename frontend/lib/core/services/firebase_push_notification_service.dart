@@ -122,6 +122,16 @@ class FirebasePushNotificationService implements PushNotificationService {
   }
 
   @override
+  Future<void> deleteToken() async {
+    try {
+      await _messaging.deleteToken();
+    } catch (_) {
+      // Best-effort by contract: the server-side unregistration is the
+      // primary mechanism; this only removes the token from the device.
+    }
+  }
+
+  @override
   Future<String?> currentToken() async {
     try {
       // iOS-specific gotcha: calling getToken() before the APNs token

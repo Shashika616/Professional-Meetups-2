@@ -23,7 +23,12 @@ import 'support/scripted_meetup_service.dart';
 /// lets a test prove the login/session-restore call site genuinely reaches
 /// `currentToken()`, not just that nothing crashes.
 class _TrackingNoOpPushNotificationService implements PushNotificationService {
+  _TrackingNoOpPushNotificationService({this.token});
+
+  /// What currentToken() answers; null models a device without a token.
+  final String? token;
   int currentTokenCallCount = 0;
+  int deleteTokenCallCount = 0;
 
   @override
   Future<void> initialize() async {}
@@ -31,7 +36,12 @@ class _TrackingNoOpPushNotificationService implements PushNotificationService {
   @override
   Future<String?> currentToken() async {
     currentTokenCallCount++;
-    return null;
+    return token;
+  }
+
+  @override
+  Future<void> deleteToken() async {
+    deleteTokenCallCount++;
   }
 
   @override
@@ -60,6 +70,9 @@ class _UninitializedYieldsNullPushService implements PushNotificationService {
     currentTokenCallCount++;
     return initialized ? 'fcm-token-1' : null;
   }
+
+  @override
+  Future<void> deleteToken() async {}
 
   @override
   Stream<PushMessage> get messages => const Stream<PushMessage>.empty();
@@ -260,6 +273,46 @@ void main() {
       expect(state.session!.accessToken, 'fresh-access-token');
     },
   );
+
+  test('signOut() unregisters this device\'s push token with the server '
+      'BEFORE revoking the session, then deletes the token on the device, '
+      'so a signed-out phone stops receiving the account\'s pushes', () async {
+    final valid = _sessionExpiringIn(const Duration(minutes: 15));
+    await storage.saveSession(valid);
+    final pushService = _TrackingNoOpPushNotificationService(
+      token: 'fcm-device-token',
+    );
+    final meetupService = ScriptedMeetupService();
+    final auth = _FakeAuthService(
+      const UserProfile(id: 'user-1', fullName: 'Ada Lovelace'),
+    );
+
+    final container = ProviderContainer(
+      overrides: [
+        sessionStorageProvider.overrideWithValue(storage),
+        tokenRefresherProvider.overrideWithValue(
+          TokenRefresher(
+            storage: storage,
+            refreshSession: (token) async =>
+                throw StateError('should never be called'),
+          ),
+        ),
+        authServiceProvider.overrideWithValue(auth),
+        pushNotificationServiceProvider.overrideWithValue(pushService),
+        meetupServiceProvider.overrideWithValue(meetupService),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container.read(authSessionProvider.future);
+
+    await container.read(authSessionProvider.notifier).signOut();
+
+    expect(meetupService.unregisterDeviceTokenCallCount, 1);
+    expect(meetupService.lastUnregisteredDeviceToken, 'fcm-device-token');
+    expect(pushService.deleteTokenCallCount, 1);
+    expect(container.read(authSessionProvider).value?.isLoggedIn, isFalse);
+    expect(await storage.loadSession(), isNull);
+  });
 
   test('forceSignOut() moves state from logged-in to a logged-out '
       'AuthSessionState', () async {

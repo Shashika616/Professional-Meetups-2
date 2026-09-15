@@ -29,6 +29,28 @@ func (q *Queries) DeleteDeviceToken(ctx context.Context, fcmToken string) error 
 	return err
 }
 
+const deleteDeviceTokenForUser = `-- name: DeleteDeviceTokenForUser :execrows
+DELETE FROM meetup.device_tokens WHERE fcm_token = $1 AND user_id = $2
+`
+
+type DeleteDeviceTokenForUserParams struct {
+	FcmToken string    `json:"fcm_token"`
+	UserID   uuid.UUID `json:"user_id"`
+}
+
+// The sign-out path: removes the caller's OWN registration of a token.
+// Scoped to user_id as well as token so a signed-out account can never
+// silence a device that a different account has since claimed (the upsert
+// above reassigns ownership on sign-in); if the row is no longer theirs,
+// zero rows match and nothing changes.
+func (q *Queries) DeleteDeviceTokenForUser(ctx context.Context, arg DeleteDeviceTokenForUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDeviceTokenForUser, arg.FcmToken, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listDeviceTokensForUser = `-- name: ListDeviceTokensForUser :many
 SELECT id, user_id, fcm_token, created_at, updated_at FROM meetup.device_tokens WHERE user_id = $1
 `
