@@ -837,3 +837,99 @@ func TestGetPublicProfile_ForbiddenWhenNoSharedMeetup(t *testing.T) {
 		t.Error("a forbidden response carried profile data")
 	}
 }
+
+// TestLogout_UnregistersTheDeviceOnlyForAProvenAccount covers the one
+// request the app makes at sign-out. The refresh token is revoked in every
+// case; the push registration is dropped only when a valid bearer says
+// whose it is, and a failure there never turns the sign-out into an error.
+func TestLogout_UnregistersTheDeviceOnlyForAProvenAccount(t *testing.T) {
+	const body = `{"refresh_token":"rt-1","fcm_token":"fcm-1"}`
+
+	t.Run("bearer present: revoke and unregister", func(t *testing.T) {
+		s := newTestServer(t)
+		rec := s.do(http.MethodPost, "/v1/auth/logout", body, s.tokenFor(t, "user-1", 2))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+		}
+		if s.monolith.gotRefreshToken != "rt-1" {
+			t.Errorf("revoked refresh token = %q, want rt-1", s.monolith.gotRefreshToken)
+		}
+		if s.monolith.meetup.gotUserID != "user-1" || s.monolith.meetup.gotUnregisteredToken != "fcm-1" {
+			t.Errorf("unregister = (%q, %q), want (user-1, fcm-1)",
+				s.monolith.meetup.gotUserID, s.monolith.meetup.gotUnregisteredToken)
+		}
+	})
+
+	t.Run("no bearer: revoke only", func(t *testing.T) {
+		s := newTestServer(t)
+		rec := s.do(http.MethodPost, "/v1/auth/logout", body, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+		}
+		if s.monolith.gotRefreshToken != "rt-1" {
+			t.Errorf("revoked refresh token = %q, want rt-1", s.monolith.gotRefreshToken)
+		}
+		if s.monolith.meetup.gotUnregisteredToken != "" {
+			t.Errorf("device token %q was unregistered with no proven account", s.monolith.meetup.gotUnregisteredToken)
+		}
+	})
+
+	t.Run("expired or forged bearer: revoke only, never 401", func(t *testing.T) {
+		s := newTestServer(t)
+		rec := s.do(http.MethodPost, "/v1/auth/logout", body, "not-a-token")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: a dead access token must not block sign-out", rec.Code)
+		}
+		if s.monolith.meetup.gotUnregisteredToken != "" {
+			t.Errorf("device token %q was unregistered on an invalid bearer", s.monolith.meetup.gotUnregisteredToken)
+		}
+	})
+
+	t.Run("no fcm token: nothing to unregister", func(t *testing.T) {
+		s := newTestServer(t)
+		rec := s.do(http.MethodPost, "/v1/auth/logout", `{"refresh_token":"rt-1"}`, s.tokenFor(t, "user-1", 2))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d", rec.Code)
+		}
+		if s.monolith.meetup.gotUserID != "" {
+			t.Errorf("UnregisterDeviceToken was called with an empty fcm token")
+		}
+	})
+}
+
+// TestScheduleConflict_Is409WithTheMeetupInTheWay pins the one structured
+// error body: the app switches on `code` and renders `conflict`, so both
+// must be there alongside the sentence every other error carries.
+func TestScheduleConflict_Is409WithTheMeetupInTheWay(t *testing.T) {
+	s := newTestServer(t)
+	s.monolith.err = monolithclient.NewScheduleConflictError(
+		monolithclient.Meetup{ID: "busy-1", HostUserID: "user-1", Intent: "coffee", IsHostedByMe: true},
+		status.Error(codes.AlreadyExists, "meetup: you are already hosting a meetup at that time; cancel it or wait until it ends: conflict"),
+	)
+
+	rec := s.do(http.MethodPost, "/v1/meetups", `{"intent":"coffee","capacity":2}`, s.tokenFor(t, "user-1", 4))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (body %s)", rec.Code, rec.Body.String())
+	}
+	got := decodeBody(t, rec)
+	if got["code"] != "schedule_conflict" {
+		t.Errorf("code = %v, want schedule_conflict", got["code"])
+	}
+	if got["error"] != "You are already hosting a meetup at that time; cancel it or wait until it ends." {
+		t.Errorf("error = %v", got["error"])
+	}
+	conflict, _ := got["conflict"].(map[string]any)
+	if conflict["id"] != "busy-1" || conflict["is_hosted_by_me"] != true {
+		t.Errorf("conflict = %v, want the meetup in the way with is_hosted_by_me", got["conflict"])
+	}
+
+	// Every other 409 keeps the flat shape — no code, no conflict.
+	s.monolith.err = status.Error(codes.AlreadyExists, "meetup: meetup m1 is not open: conflict")
+	rec = s.do(http.MethodPost, "/v1/meetups/m1/requests", `{}`, s.tokenFor(t, "user-1", 4))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if got := decodeBody(t, rec); got["code"] != nil || got["conflict"] != nil {
+		t.Errorf("plain conflict carried structured fields: %v", got)
+	}
+}

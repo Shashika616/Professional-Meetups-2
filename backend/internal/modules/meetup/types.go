@@ -39,6 +39,14 @@ func (i Intent) DisplayName() string {
 	switch i {
 	case IntentRideShare:
 		return "ride share"
+	case IntentLunch:
+		// Presented as "meal" (2026-09-15): one intent covers breakfast,
+		// lunch, dinner and the rest, and the app names the sitting from
+		// the meetup's local start time. The wire value stays "lunch" —
+		// it is a Postgres enum value and a client contract. The server
+		// says only "meal" because it does not know the host's time zone,
+		// so it cannot tell dinner from a late-night meal.
+		return "meal"
 	default:
 		return string(i)
 	}

@@ -145,6 +145,12 @@ type harness struct {
 	requests          meetuprepo.MeetupRequestRepository
 	meetups           meetuprepo.MeetupRepository
 
+	// windowSeq spaces the windows createMeetup hands out (see nextWindow):
+	// the one-meetup-at-a-time rule (2026-09-15) rejects a host's second
+	// meetup in the same window, and most tests here create several for
+	// one host without caring when they are.
+	windowSeq atomic.Int64
+
 	// completedOutbox and the wake counter cover the async meetups-completed
 	// recompute (plan 06). completedWakes is incremented by the wake func
 	// handed to the meetup repository, so a test can assert that a
@@ -393,14 +399,27 @@ func newUUID(t *testing.T) string {
 }
 
 // createMeetup makes one meetup at the given coordinates, hosted by host.
+// nextWindow returns a two-hour window that no earlier call on this harness
+// returned: the k-th call starts k*2h after the first, which is an hour
+// out. Every meetup a test creates through createMeetup is therefore
+// scheduled at a distinct time and never trips the one-meetup-at-a-time
+// rule, whichever host it belongs to. Tests about the rule itself, or
+// about a specific time, pass their own window to CreateMeetup.
+func (h *harness) nextWindow() (start, end time.Time) {
+	k := h.windowSeq.Add(1) - 1
+	start = time.Now().Add(time.Hour + time.Duration(k)*2*time.Hour)
+	return start, start.Add(2 * time.Hour)
+}
+
 func (h *harness) createMeetup(t *testing.T, host string, intent meetup.Intent, lat, lng float64) meetup.Meetup {
 	t.Helper()
+	windowStart, windowEnd := h.nextWindow()
 	m, err := h.svc.CreateMeetup(context.Background(), meetup.CreateMeetupRequest{
 		HostUserID:     host,
 		HostTrustLevel: 4, // high enough for every intent
 		Intent:         intent,
-		WindowStart:    time.Now().Add(time.Hour),
-		WindowEnd:      time.Now().Add(3 * time.Hour),
+		WindowStart:    windowStart,
+		WindowEnd:      windowEnd,
 		LocationLat:    lat,
 		LocationLng:    lng,
 		LocationLabel:  "Test Cafe",
@@ -496,9 +515,12 @@ func TestCreateMeetup_TrustGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// A window of its own per case: the allowed rows would otherwise
+			// collide with each other under the one-meetup-at-a-time rule.
+			windowStart, windowEnd := h.nextWindow()
 			_, err := h.svc.CreateMeetup(ctx, meetup.CreateMeetupRequest{
 				HostUserID: host, HostTrustLevel: tc.trustLevel, Intent: tc.intent,
-				WindowStart: time.Now().Add(time.Hour), WindowEnd: time.Now().Add(2 * time.Hour),
+				WindowStart: windowStart, WindowEnd: windowEnd,
 				LocationLat: colomboLat, LocationLng: colomboLng, LocationLabel: "Cafe", Capacity: 2,
 			})
 			if tc.wantErr {
@@ -567,9 +589,10 @@ func TestCreateMeetup_ReverseGeocodesPlaceholderLabel(t *testing.T) {
 	host := newUserID(t, h)
 
 	for _, label := range []string{"", "Current location", "  CURRENT LOCATION  "} {
+		windowStart, windowEnd := h.nextWindow()
 		m, err := h.svc.CreateMeetup(ctx, meetup.CreateMeetupRequest{
 			HostUserID: host, HostTrustLevel: 4, Intent: meetup.IntentCoffee,
-			WindowStart: time.Now().Add(time.Hour), WindowEnd: time.Now().Add(2 * time.Hour),
+			WindowStart: windowStart, WindowEnd: windowEnd,
 			LocationLat: colomboLat, LocationLng: colomboLng, LocationLabel: label, Capacity: 2,
 		})
 		if err != nil {
@@ -906,7 +929,7 @@ func TestRequestAuthzScoping_AtRepositoryLayer(t *testing.T) {
 	_ = requester
 	newPendingRequest := func() string {
 		t.Helper()
-		r, err := h.requests.Create(ctx, m.ID, newUserID(t, h), host, nil)
+		r, err := h.requests.Create(ctx, m.ID, newUserID(t, h), host, nil, nil)
 		if err != nil {
 			t.Fatalf("seed request: %v", err)
 		}
@@ -1540,10 +1563,11 @@ func TestCloseMeetup_HostOnlyAndWindowStarted(t *testing.T) {
 		t.Errorf("closing before the window starts: error = %v, want ErrForbidden", err)
 	}
 
-	// One whose window has started can.
+	// One whose window has started can. It ends before the future one
+	// starts, so the same host may hold both.
 	started, err := h.svc.CreateMeetup(ctx, meetup.CreateMeetupRequest{
 		HostUserID: host, HostTrustLevel: 4, Intent: meetup.IntentCoffee,
-		WindowStart: time.Now().Add(-time.Minute), WindowEnd: time.Now().Add(time.Hour),
+		WindowStart: time.Now().Add(-time.Minute), WindowEnd: time.Now().Add(30 * time.Minute),
 		LocationLat: colomboLat, LocationLng: colomboLng, LocationLabel: "Cafe", Capacity: 2,
 	})
 	if err != nil {

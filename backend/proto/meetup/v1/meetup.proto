@@ -311,6 +311,17 @@ message MeetupResponse {
   bool locked_for_viewer = 25;
 }
 
+// ScheduleConflict rides on the ALREADY_EXISTS status that CreateMeetup and
+// RequestToJoin return when the caller is already committed elsewhere in
+// the requested window (hosting, or with a pending/accepted request) — as a
+// status detail, not a response field, because the call did not succeed.
+// The gateway turns it into the `conflict` object of the 409 body so the
+// app can show WHICH meetup is in the way rather than only a sentence.
+// Always the caller's own meetup, so nothing here is new to them.
+message ScheduleConflict {
+  MeetupResponse meetup = 1;
+}
+
 message ListOpenMeetupsRequest {
   string user_id = 1;
   // INTENT_UNSPECIFIED now means EVERY intent — the home screen's "All"

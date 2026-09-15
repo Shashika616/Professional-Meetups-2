@@ -2,11 +2,53 @@ package monolithclient
 
 import (
 	"context"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
 )
+
+// ScheduleConflictError is what CreateMeetup and RequestToJoin return when
+// the monolith answered ALREADY_EXISTS with a meetupv1.ScheduleConflict
+// detail: the caller is already committed to Meetup in that window. It
+// unwraps to the original status error, so status.Convert and the
+// gateway's code mapping keep working on it unchanged; handlers that want
+// the meetup use errors.As.
+type ScheduleConflictError struct {
+	Meetup Meetup
+	status error
+}
+
+// NewScheduleConflictError pairs the meetup in the way with the status
+// error it arrived on; status must be a gRPC status error so the gateway's
+// code mapping still resolves through Unwrap. Exported for the gateway's
+// handler tests, which fake this client.
+func NewScheduleConflictError(meetup Meetup, status error) *ScheduleConflictError {
+	return &ScheduleConflictError{Meetup: meetup, status: status}
+}
+
+// Error returns the status message alone, not the status error's own
+// "rpc error: code = ..." text: status.FromError takes a wrapping error's
+// Error() as the message when it finds a status underneath, and that
+// message is what the gateway turns into the user-facing sentence.
+func (e *ScheduleConflictError) Error() string { return status.Convert(e.status).Message() }
+func (e *ScheduleConflictError) Unwrap() error { return e.status }
+
+// withScheduleConflict lifts the detail off err, or returns err untouched
+// when it carries none — every other failure keeps its plain status.
+func withScheduleConflict(err error) error {
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.AlreadyExists {
+		return err
+	}
+	for _, detail := range st.Details() {
+		if conflict, ok := detail.(*meetupv1.ScheduleConflict); ok && conflict.GetMeetup() != nil {
+			return NewScheduleConflictError(meetupFromProto(conflict.GetMeetup()), err)
+		}
+	}
+	return err
+}
 
 // The meetup half of the gateway's view of the monolith — same connection,
 // same shared-secret client interceptor, just a second generated stub
@@ -289,7 +331,7 @@ func (c *grpcClient) CreateMeetup(
 		Capacity:               capacity,
 	})
 	if err != nil {
-		return Meetup{}, err
+		return Meetup{}, withScheduleConflict(err)
 	}
 	return meetupFromProto(resp), nil
 }
@@ -380,7 +422,7 @@ func (c *grpcClient) RequestToJoin(ctx context.Context, meetupID, requesterID st
 		MeetupId: meetupID, RequesterId: requesterID, RequesterTrustLevel: requesterTrustLevel,
 	})
 	if err != nil {
-		return MeetupRequest{}, err
+		return MeetupRequest{}, withScheduleConflict(err)
 	}
 	return meetupRequestFromProto(resp), nil
 }

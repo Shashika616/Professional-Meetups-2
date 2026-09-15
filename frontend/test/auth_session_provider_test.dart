@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
@@ -86,12 +88,12 @@ class _FakeAuthService implements AuthService {
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
 
-  // ADR-002 § 3. Unused by this test — every fake in test/ implements the
-  // full AuthService surface, so a new method lands here even when the test
-  // never calls it.
+  // ADR-002 § 3. The shortest route to a fresh session, which the sign-out
+  // tests use to model "someone signed in again" while a revoke is still
+  // in flight.
   @override
-  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
-      throw UnimplementedError();
+  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) async =>
+      _sessionExpiringIn(const Duration(minutes: 15), accessToken: 'guest');
 
   _FakeAuthService(this._profile);
 
@@ -150,8 +152,30 @@ class _FakeAuthService implements AuthService {
   Future<AuthSession> refreshSession(String refreshToken) async =>
       throw UnimplementedError();
 
+  /// Recorded so the sign-out test can check what the one server request
+  /// carried. [logoutStarted] completes when logout is entered and
+  /// [logoutGate] holds it there, which is how the test proves the local
+  /// sign-out never waits on the network.
+  int logoutCallCount = 0;
+  String? lastLogoutRefreshToken;
+  String? lastLogoutAccessToken;
+  String? lastLogoutFcmToken;
+  final logoutStarted = Completer<void>();
+  final logoutGate = Completer<void>();
+
   @override
-  Future<void> logout(String refreshToken) async {}
+  Future<void> logout(
+    String refreshToken, {
+    String? accessToken,
+    String? fcmToken,
+  }) async {
+    logoutCallCount++;
+    lastLogoutRefreshToken = refreshToken;
+    lastLogoutAccessToken = accessToken;
+    lastLogoutFcmToken = fcmToken;
+    if (!logoutStarted.isCompleted) logoutStarted.complete();
+    await logoutGate.future;
+  }
 
   @override
   Future<int> startPhoneVerification(String phoneNumber) async =>
@@ -274,15 +298,66 @@ void main() {
     },
   );
 
-  test('signOut() unregisters this device\'s push token with the server '
-      'BEFORE revoking the session, then deletes the token on the device, '
-      'so a signed-out phone stops receiving the account\'s pushes', () async {
+  test(
+    'signOut() signs out locally at once and, in the background, sends '
+    'ONE logout request carrying the refresh token, the access token and '
+    'this device\'s push token, then deletes the token on the device',
+    () async {
+      final valid = _sessionExpiringIn(const Duration(minutes: 15));
+      await storage.saveSession(valid);
+      final pushService = _TrackingNoOpPushNotificationService(
+        token: 'fcm-device-token',
+      );
+      final auth = _FakeAuthService(
+        const UserProfile(id: 'user-1', fullName: 'Ada Lovelace'),
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          sessionStorageProvider.overrideWithValue(storage),
+          tokenRefresherProvider.overrideWithValue(
+            TokenRefresher(
+              storage: storage,
+              refreshSession: (token) async =>
+                  throw StateError('should never be called'),
+            ),
+          ),
+          authServiceProvider.overrideWithValue(auth),
+          pushNotificationServiceProvider.overrideWithValue(pushService),
+          meetupServiceProvider.overrideWithValue(ScriptedMeetupService()),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(authSessionProvider.future);
+
+      // Returns while the server call is still held open by the gate: the
+      // local sign-out is what the screen waits on, nothing else.
+      await container.read(authSessionProvider.notifier).signOut();
+      expect(container.read(authSessionProvider).value?.isLoggedIn, isFalse);
+      expect(await storage.loadSession(), isNull);
+
+      await auth.logoutStarted.future;
+      expect(auth.logoutCallCount, 1);
+      expect(auth.lastLogoutRefreshToken, valid.refreshToken);
+      expect(auth.lastLogoutAccessToken, valid.accessToken);
+      expect(auth.lastLogoutFcmToken, 'fcm-device-token');
+      // The device-side delete waits for the server call, so a token is
+      // never deleted under a registration the server still holds.
+      expect(pushService.deleteTokenCallCount, 0);
+
+      auth.logoutGate.complete();
+      await pumpEventQueue();
+      expect(pushService.deleteTokenCallCount, 1);
+    },
+  );
+
+  test('signOut() keeps the device token when another session signed in '
+      'before the background revoke finished', () async {
     final valid = _sessionExpiringIn(const Duration(minutes: 15));
     await storage.saveSession(valid);
     final pushService = _TrackingNoOpPushNotificationService(
       token: 'fcm-device-token',
     );
-    final meetupService = ScriptedMeetupService();
     final auth = _FakeAuthService(
       const UserProfile(id: 'user-1', fullName: 'Ada Lovelace'),
     );
@@ -299,19 +374,30 @@ void main() {
         ),
         authServiceProvider.overrideWithValue(auth),
         pushNotificationServiceProvider.overrideWithValue(pushService),
-        meetupServiceProvider.overrideWithValue(meetupService),
+        meetupServiceProvider.overrideWithValue(ScriptedMeetupService()),
       ],
     );
     addTearDown(container.dispose);
     await container.read(authSessionProvider.future);
 
     await container.read(authSessionProvider.notifier).signOut();
+    await auth.logoutStarted.future;
 
-    expect(meetupService.unregisterDeviceTokenCallCount, 1);
-    expect(meetupService.lastUnregisteredDeviceToken, 'fcm-device-token');
-    expect(pushService.deleteTokenCallCount, 1);
-    expect(container.read(authSessionProvider).value?.isLoggedIn, isFalse);
-    expect(await storage.loadSession(), isNull);
+    // A new sign-in lands while the old sign-out's server call is in
+    // flight. (The guest path is the shortest way to a live session here.)
+    await container
+        .read(authSessionProvider.notifier)
+        .guestSignup(ageConfirmedOver18: true);
+    expect(container.read(authSessionProvider).value?.isLoggedIn, isTrue);
+
+    auth.logoutGate.complete();
+    await pumpEventQueue();
+    expect(
+      pushService.deleteTokenCallCount,
+      0,
+      reason:
+          'deleting the token would silence the account that just signed in',
+    );
   });
 
   test('forceSignOut() moves state from logged-in to a logged-out '

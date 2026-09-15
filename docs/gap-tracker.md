@@ -132,6 +132,28 @@ relayed from the reports as-is. Fix designed and handed off same-day:
 
 **Verification note**: all four fixes were confirmed by reading the actual diffs line-by-line (not by trusting the completion report), including the new tests' logic. The backend/frontend test suites themselves could not be *executed* independently in this pass (no Go/Flutter toolchain available in the reviewing environment) — the code and test logic read as correct, but treat "all tests pass" as the implementer's claim, confirmed structurally rather than by a second independent run, until you see the actual `go test`/`flutter test` output yourself.
 
+## Round 7 — schedule-conflict + sign-out review (2026-09-15)
+
+Reviewed the user's own newly-added feature (ADR-005: one-meetup-at-a-time,
+single-request sign-out, meal-sitting display) — two independent
+from-scratch reviews (backend, frontend), lens deliberately different this
+time: duplicate logic, inconsistencies, logical errors, memory leaks,
+network/battery drain, rather than a security pass. The one real bug was
+personally re-verified against source. Fix designed and handed off:
+`docs/plans/19-schedule-conflict-race-fix.md` + Claude Code prompt.
+
+### Backend
+
+39. **`checkScheduleConflict` is check-then-act with no lock — two ordinary concurrent requests defeat the one-meetup-at-a-time rule entirely, High, verified.** `schedule_conflict.go`'s conflict check runs as a plain unlocked SELECT, and both call sites (`CreateMeetup`, `service.go:278`; `RequestToJoin`, `requests.go:32`) run it *before* opening their own separate write transaction — nothing spans the check and the write. Confirmed directly: this is not the narrow same-millisecond race the ADR's Consequences section frames it as; it's reproducible by an ordinary flaky-network retry or two concurrent requests, and it specifically defeats the reason pending requests were made to count (two `RequestToJoin` calls racing past the check both create pending requests, and two hosts accepting independently later reproduces the exact double-booking the feature exists to prevent). **DONE (2026-09-15) — verified directly against source.** `repository.ScheduleGuard`/`ScheduleTx` added; `LockUserSchedule` (`SELECT pg_advisory_xact_lock(hashtext(user_id::text))`) runs as the first statement inside the same transaction `Create` already opens, on the same connection, before the conflict check and the insert — confirmed transaction-scoped (auto-released on commit/rollback, not the session-scoped variant, so no lock leak), and confirmed the service layer's old unlocked pre-check was removed, not left running alongside the new one. New `TestScheduleConflict_ConcurrentCallsSerialize` races real goroutines against the real test-database pool over 6 rounds for both hosting and requesting; confirmed genuine (barrier-released, not sequential) by reading the test directly. Reported control run against the pre-fix code: both concurrent calls won on every round. Post-fix: exactly one wins every round.
+
+40. **The "live meetup" definition (`open`/`full` + `window_end > now()`) is written independently in at least three places with no cross-reference — Medium, verified.** `FindScheduleConflict` (`meetups.sql:535-536`), `ListActiveMeetups`'s `isLive` (`service.go:518-521`), and the related-but-distinct `ListOpenMeetups` browsable filter (`open` only, `meetups.sql:113,185`) all agree today but nothing ties them together, unlike the ST_DWithin-exemption logic elsewhere in the same file which explicitly warns future editors of exactly this drift risk. **DONE (2026-09-15) — verified.** Cross-referencing comments added at all three definitions, naming the other two by location; no SQL refactor, as scoped.
+
+### Frontend
+
+41. **Two low-severity, non-urgent notes from the same pass — tracked, not fixed.** (a) `meetup_card.dart:56`/`meetup_detail_page.dart:258` use the plain `intent.label` rather than the new `intentLabel` (meal-sitting name) in the trust-locked toast — currently harmless since ADR-028 redacts the time in exactly that state, but would silently desync if that redaction rule ever changes. (b) `ScheduleConflictError`'s plain-text fallback doesn't distinguish a pending vs. accepted conflicting request — the real app UI reads the structured field correctly, this only affects a client that ignores it. **OPEN, low priority.**
+
+**Verified clean (no issue found)**: sign-out's background network call (fire-and-forget via a static method with no closure over `this`/`ref`, confirmed it can't crash a disposed notifier; the "skip FCM delete if signed in again" race-avoidance is genuinely implemented and test-covered, not just described) · `MealSitting`'s five time-of-day windows (no gaps/overlaps, not recomputed reactively) · `ScheduleConflictSheet`'s error parsing (single parse site, no duplicate) · `place_search_ui.dart` (no network calls of its own; the actual geocoder debouncing it wraps is untouched) · `OptionalAuth`'s scope (used only by the new logout route, doesn't weaken anything else, no token-validity oracle) · the old `DELETE /v1/meetups/device-token` route (cleanly removed, not orphaned).
+
 ## Process note
 
 Most review rounds to date were reactive — triggered by a specific bug report

@@ -322,13 +322,14 @@ func fullyPopulatedMeetup() Meetup {
 	}
 }
 
-// DisplayName is what notification copy interpolates. Two intents must not
-// read as their wire value: ride_share (underscore) and events (the word is
-// the app's Events tab).
+// DisplayName is what notification copy interpolates. Three intents must
+// not read as their wire value: ride_share (underscore), events (the word
+// is the app's Events tab) and lunch (presented as "meal" since 2026-09-15;
+// the app names the sitting from the local start time, the server cannot).
 func TestIntentDisplayName(t *testing.T) {
 	cases := map[Intent]string{
 		IntentCoffee:     "coffee",
-		IntentLunch:      "lunch",
+		IntentLunch:      "meal",
 		IntentNetworking: "networking",
 		IntentMentorship: "mentorship",
 		IntentRideShare:  "ride share",

@@ -247,3 +247,30 @@ in with `STADIA_MAPS_API_KEY`), implemented in
 `frontend/lib/core/maps/`. iOS is unaffected: Apple MapKit, no key.
 `./build.sh` verifies the selected provider is compiled into a production
 APK.
+
+## One meetup at a time (2026-09-15)
+
+A test account that already hosts, or has a pending/accepted request on, a
+live meetup cannot host or join another one in the same window (ADR-005).
+The seeded L3 Alpha account holds several, so a second meetup "later today"
+often collides with one of them and the app shows the ONE MEETUP AT A TIME
+sheet instead of scheduling. That is the rule working, not a fault: pick a
+window after the existing meetup ends, or open it from the sheet and cancel
+it. The 409 body carries `code: schedule_conflict` and the meetup in the
+way, which is also how the sheet knows what to show.
+
+Verifying it by hand against a local stack:
+
+```bash
+# Host an overlapping meetup as an account that already hosts one
+curl -s -X POST localhost:8080/v1/meetups -H "Authorization: Bearer $AT" \
+  -H 'Content-Type: application/json' \
+  -d '{"intent":"coffee","window_start_unix_seconds":...,"window_end_unix_seconds":...,"location_lat":6.93,"location_lng":79.86,"location_label":"Cafe","capacity":2}'
+# → 409 {"error":"You are already hosting ...","code":"schedule_conflict","conflict":{...}}
+```
+
+The emulator's GPS has not produced a fix since the macOS upgrade, so the
+Happening Soon list is empty there. To reach another host's meetup for the
+join-side check, seed a notification for the test account that points at
+it (`meetup.notification_outbox`, `data.meetup_id`, `processed_at = now()`)
+and open it from the Notifications page.

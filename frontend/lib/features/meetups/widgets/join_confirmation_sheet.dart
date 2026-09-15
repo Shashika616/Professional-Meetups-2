@@ -84,7 +84,7 @@ class _JoinConfirmationSheetState
             ),
             const SizedBox(height: 4),
             Text(
-              '${meetup.intent.label} · ${meetup.formattedWindow}',
+              '${meetup.intentLabel} · ${meetup.formattedWindow}',
               style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
             ),
             const SizedBox(height: 12),

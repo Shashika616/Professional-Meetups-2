@@ -429,11 +429,23 @@ class HttpAuthService implements AuthService {
   }
 
   @override
-  Future<void> logout(String refreshToken) async {
+  Future<void> logout(
+    String refreshToken, {
+    String? accessToken,
+    String? fcmToken,
+  }) async {
+    // The bearer is optional on this route: the server revokes the refresh
+    // token either way and only uses the access token to prove whose push
+    // registration fcm_token is. Sent only when there is something for it
+    // to prove.
     final response = await _httpClient.post(
       Uri.parse('$_baseUrl/v1/auth/logout'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'refresh_token': refreshToken}),
+      headers: {
+        'Content-Type': 'application/json',
+        if (accessToken != null && fcmToken != null)
+          'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode({'refresh_token': refreshToken, 'fcm_token': ?fcmToken}),
     );
     if (response.statusCode != 200) {
       throw AuthNetworkException(_errorMessage(response.body));

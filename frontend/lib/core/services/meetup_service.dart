@@ -85,13 +85,10 @@ abstract interface class MeetupService {
     required bool accept,
   });
 
+  /// Registers this device for the signed-in account's pushes. The
+  /// registration is removed by [AuthService.logout] at sign-out, in the
+  /// same request that revokes the session.
   Future<void> registerDeviceToken(String fcmToken);
-
-  /// The sign-out twin of [registerDeviceToken]: removes this device's
-  /// registration for the signed-in account so the phone stops receiving
-  /// that account's pushes the moment the user is out. Must be called
-  /// while the session is still valid (before logout revokes it).
-  Future<void> unregisterDeviceToken(String fcmToken);
 
   /// Every Safety Gate call below identifies the caller from the signed-in
   /// session's own token, never a parameter this class exposes — same
@@ -248,6 +245,22 @@ class MeetupForbiddenException extends MeetupException {
 /// check-in.
 class MeetupConflictException extends MeetupException {
   const MeetupConflictException(super.message);
+}
+
+/// 409 with `code: schedule_conflict` — the one-meetup-at-a-time rule: the
+/// caller is already hosting, or has asked to join, a meetup whose window
+/// overlaps the one they tried to host or join. [conflict] is that meetup,
+/// as the server sees it for this caller (`isHostedByMe` /
+/// `myRequestStatus` set), so the UI can show it and offer a way out. A
+/// subtype of [MeetupConflictException] so a screen that only handles the
+/// general 409 still gets a sentence.
+class MeetupScheduleConflictException extends MeetupConflictException {
+  const MeetupScheduleConflictException(
+    super.message, {
+    required this.conflict,
+  });
+
+  final Meetup conflict;
 }
 
 /// 404 — the meetup or request no longer exists.
@@ -483,11 +496,6 @@ class MockMeetupService implements MeetupService {
 
   @override
   Future<void> registerDeviceToken(String fcmToken) async {
-    await Future<void>.delayed(latency);
-  }
-
-  @override
-  Future<void> unregisterDeviceToken(String fcmToken) async {
     await Future<void>.delayed(latency);
   }
 

@@ -6,7 +6,6 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
@@ -14,8 +13,8 @@ import 'package:professional_connections_platform/core/maps/map_provider.dart';
 import 'package:professional_connections_platform/core/maps/place_search.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/place_search_ui.dart';
 import 'package:professional_connections_platform/core/widgets/step_hero.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/selected_place_banner.dart';
 
@@ -104,6 +103,8 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   // letting the server reverse-geocode it), so _canContinue needs this
   // separate signal to unlock CONTINUE even while the field stays empty.
   bool _locationPicked = false;
+  // A fix is being fetched: the button shows it and ignores taps.
+  bool _locating = false;
 
   @override
   void initState() {
@@ -243,25 +244,14 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   }
 
   Future<void> _useCurrentLocation() async {
+    if (_locating) return;
+    setState(() => _locating = true);
     try {
-      if (!await Geolocator.isLocationServiceEnabled()) {
-        _showError('Turn on location services to use this.');
-        return;
-      }
-      var permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        _showError(
-          'Location permission was denied. Enable it in Settings to use this.',
-        );
-        return;
-      }
-
-      final position = await Geolocator.getCurrentPosition();
-      if (!mounted) return;
+      // Permission prompt, deadline, last-known fallback and the settings
+      // shortcut all live in resolveCurrentLocationForMap, shared with the
+      // iOS step.
+      final position = await resolveCurrentLocationForMap(context);
+      if (!mounted || position == null) return;
       final here = LatLng(position.latitude, position.longitude);
       setState(() => _pickedLocation = here);
       await _controller?.animateCamera(CameraUpdate.newLatLngZoom(here, 15));
@@ -269,9 +259,9 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
       // submitted; the server resolves a real label from the coordinates
       // if the field stays empty. _locationPicked is what unlocks CONTINUE
       // in that case.
-      setState(() => _locationPicked = true);
-    } catch (_) {
-      _showError('Could not get your current location.');
+      if (mounted) setState(() => _locationPicked = true);
+    } finally {
+      if (mounted) setState(() => _locating = false);
     }
   }
 
@@ -337,12 +327,12 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
           children: [
             Column(
               children: [
-                GlassTextField(
+                PlaceSearchBar(
                   controller: _searchController,
-                  icon: Icons.search_rounded,
                   hint: 'Search for a cafe, restaurant, or venue',
-                  textInputAction: TextInputAction.search,
-                  onFieldSubmitted: _directSearch,
+                  busy: _searching,
+                  onSubmitted: _directSearch,
+                  onCleared: () => setState(() => _results = []),
                 ),
                 const SizedBox(height: 12),
                 ClipRRect(
@@ -407,26 +397,9 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
                   SelectedPlaceBanner(label: _searchController.text.trim()),
                   const SizedBox(height: 12),
                 ],
-                OutlinedButton.icon(
+                UseCurrentLocationButton(
                   onPressed: _useCurrentLocation,
-                  icon: Icon(
-                    Icons.my_location_rounded,
-                    size: 16,
-                    color: AppPalette.candyBlue,
-                  ),
-                  label: Text(
-                    'USE MY CURRENT LOCATION',
-                    style: TextStyle(
-                      color: AppPalette.candyBlue,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.0,
-                    ),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(42),
-                    side: BorderSide(color: AppPalette.hairline),
-                  ),
+                  busy: _locating,
                 ),
                 const SizedBox(height: 20),
                 PrimaryButton(
@@ -442,8 +415,8 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
             // so an overflowing dropdown was rendering visually underneath
             // CONTINUE instead of above it. Tapping the scrim dismisses
             // the dropdown without picking a result, same as any standard
-            // search-then-pick overlay. Starts at top: 56 (the search
-            // field's own height), not Positioned.fill — covering the
+            // search-then-pick overlay. Starts at the search bar's
+            // own height, not Positioned.fill — covering the
             // field too blurred/darkened the text being typed, making it
             // unreadable while the dropdown was open.
             //
@@ -454,10 +427,10 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
             // without this it bled upward into the search field, the step
             // title, and the header above this widget entirely, which is
             // exactly why the field stayed unreadable even after adding
-            // the top: 56 offset above.
+            // the top offset above.
             if (_results.isNotEmpty)
               Positioned(
-                top: 56,
+                top: PlaceSearchBar.height,
                 left: 0,
                 right: 0,
                 bottom: 0,
@@ -474,30 +447,17 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
                   ),
                 ),
               ),
-            if (_searching)
-              Positioned(
-                right: 14,
-                top: 0,
-                height: 56,
-                child: Center(
-                  child: SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppPalette.candyBlue,
-                    ),
-                  ),
-                ),
-              ),
             if (_results.isNotEmpty)
               Positioned(
-                top: 56,
+                top: PlaceSearchBar.height + 6,
                 left: 0,
                 right: 0,
-                child: _ResultsDropdown(
-                  results: _results,
-                  onSelect: _selectResult,
+                child: PlaceSuggestionsDropdown(
+                  suggestions: [
+                    for (final r in _results)
+                      PlaceSuggestion.fromLabel(r.label),
+                  ],
+                  onSelect: (index) => _selectResult(_results[index]),
                 ),
               ),
           ],
@@ -549,62 +509,3 @@ class _NotConfiguredNotice extends StatelessWidget {
     );
   }
 }
-
-class _ResultsDropdown extends StatelessWidget {
-  const _ResultsDropdown({required this.results, required this.onSelect});
-
-  final List<PlaceResult> results;
-  final void Function(PlaceResult result) onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    // Solid, not glass — a blurred/translucent dropdown sitting over the
-    // map made the suggestion text unreadable against whatever terrain
-    // colors were behind it. This needs to read like a standard opaque
-    // dropdown, so it stays legible regardless of what's underneath.
-    return Material(
-      color: AppPalette.card,
-      elevation: 12,
-      shadowColor: Colors.black87,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: AppPalette.hairline),
-      ),
-      clipBehavior: Clip.antiAlias,
-      // Caps the list to roughly 5 visible rows and scrolls internally
-      // beyond that — an unbounded Column here could grow the dropdown
-      // past the whole screen when the geocoder returns a long results list.
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxHeight: _maxVisibleDropdownResults * _dropdownItemHeight,
-        ),
-        child: ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          shrinkWrap: true,
-          itemCount: results.length,
-          itemBuilder: (context, index) {
-            final result = results[index];
-            return ListTile(
-              dense: true,
-              leading: Icon(
-                Icons.place_outlined,
-                size: 18,
-                color: AppPalette.candyBlue,
-              ),
-              title: Text(
-                result.label,
-                style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: () => onSelect(result),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-const _maxVisibleDropdownResults = 5;
-const _dropdownItemHeight = 60.0;

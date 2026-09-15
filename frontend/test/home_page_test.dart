@@ -295,8 +295,12 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(ScheduleFlowPage), findsNothing);
-        // CHANGED (ADR-002 § 4): was 'requires Level 2 trust'.
-        expect(find.textContaining('requires Level 3 trust'), findsOneWidget);
+        // The toast says what to do, not which level: the unlock page it
+        // opens explains the rest.
+        expect(
+          find.textContaining('Verify your account to host'),
+          findsOneWidget,
+        );
         expect(find.byType(HostingUnlockPage), findsOneWidget);
       },
     );

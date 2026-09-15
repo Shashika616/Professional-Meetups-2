@@ -118,6 +118,9 @@ class MemberMeetup {
   final int reviewCount;
   final bool viewerWasIn;
   final List<MemberMeetupComment> comments;
+
+  /// See [Meetup.intentLabel]: the meal intent names its sitting.
+  String get intentLabel => intent.labelFor(windowStart);
 }
 
 @immutable

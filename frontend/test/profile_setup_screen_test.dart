@@ -110,7 +110,11 @@ class _FakeAuthService implements AuthService {
       throw UnimplementedError();
 
   @override
-  Future<void> logout(String refreshToken) async {}
+  Future<void> logout(
+    String refreshToken, {
+    String? accessToken,
+    String? fcmToken,
+  }) async {}
 
   @override
   Future<int> startPhoneVerification(String phoneNumber) async =>

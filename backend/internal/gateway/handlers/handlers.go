@@ -15,6 +15,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -33,8 +34,11 @@ type Handler struct {
 	monolith    monolithclient.Client
 	signer      *jwt.Signer
 	requireAuth func(http.Handler) http.Handler
-	limiter     ratelimit.Limiter
-	logger      *slog.Logger
+	// optionalAuth is requireAuth's lenient twin (middleware.OptionalAuth)
+	// for the one route that is useful both signed in and not: logout.
+	optionalAuth func(http.Handler) http.Handler
+	limiter      ratelimit.Limiter
+	logger       *slog.Logger
 }
 
 // Option configures optional Handler dependencies not every caller (or test
@@ -60,10 +64,11 @@ func WithLogger(logger *slog.Logger) Option {
 // session-issuing route (ADR-001 §6).
 func New(monolith monolithclient.Client, signer *jwt.Signer, verifier *jwt.Verifier, opts ...Option) *Handler {
 	h := &Handler{
-		monolith:    monolith,
-		signer:      signer,
-		requireAuth: middleware.Auth(verifier),
-		logger:      slog.Default(),
+		monolith:     monolith,
+		signer:       signer,
+		requireAuth:  middleware.Auth(verifier),
+		optionalAuth: middleware.OptionalAuth(verifier),
+		logger:       slog.Default(),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -90,7 +95,9 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/auth/email/login/start", h.startEmailLogin)
 	mux.HandleFunc("POST /v1/auth/email/login", h.completeEmailLogin)
 	mux.HandleFunc("POST /v1/auth/refresh", h.refresh)
-	mux.HandleFunc("POST /v1/auth/logout", h.logout)
+	// Logout is unauthenticated (a dead access token must not stop
+	// sign-out) but reads the bearer when it is valid — see logout.
+	mux.Handle("POST /v1/auth/logout", h.optionalAuth(http.HandlerFunc(h.logout)))
 
 	// Authenticated — Profile-initiated linking only.
 	mux.Handle("POST /v1/auth/identities/link", h.requireAuth(http.HandlerFunc(h.linkIdentity)))
@@ -165,7 +172,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /v1/meetups/requests/{id}/withdraw", h.requireAuth(http.HandlerFunc(h.withdrawRequest)))
 	mux.Handle("POST /v1/meetups/requests/{id}/respond", h.requireAuth(http.HandlerFunc(h.respondToRequest)))
 	mux.Handle("POST /v1/meetups/device-token", h.requireAuth(http.HandlerFunc(h.registerDeviceToken)))
-	mux.Handle("DELETE /v1/meetups/device-token", h.requireAuth(http.HandlerFunc(h.unregisterDeviceToken)))
 	// The caller's own notification history — user comes from the token.
 	mux.Handle("GET /v1/notifications", h.requireAuth(http.HandlerFunc(h.listNotifications)))
 	mux.Handle("GET /v1/meetups/{id}/safety", h.requireAuth(http.HandlerFunc(h.getSafetyState)))
@@ -458,6 +464,12 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 
 type logoutRequest struct {
 	RefreshToken string `json:"refresh_token"`
+	// FCMToken is the device's push token, sent so this one request ends
+	// both halves of a sign-out: the refresh token is revoked, and the
+	// phone stops receiving the account's notifications. Optional — a
+	// client without push (or one whose token lookup failed) leaves it
+	// empty and only the revocation happens.
+	FCMToken string `json:"fcm_token"`
 }
 
 type logoutResponse struct {
@@ -474,9 +486,27 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	// RevokeSession is idempotent all the way down to the repository layer —
 	// an unknown or already-revoked token isn't an error, so this only
 	// returns non-200 for a genuine backend failure.
-	if err := h.monolith.RevokeSession(r.Context(), req.RefreshToken); err != nil {
+	ctx := r.Context()
+	if err := h.monolith.RevokeSession(ctx, req.RefreshToken); err != nil {
 		writeGRPCError(w, err)
 		return
+	}
+
+	// The push registration is the account's, so dropping it needs the
+	// account proven: the bearer token, which the app still holds at the
+	// moment it signs out (OptionalAuth leaves user_id empty otherwise).
+	// The refresh token alone is not identity here — it has just been
+	// revoked, and the monolith never returns whose it was. Best-effort
+	// on purpose: the session is already gone, and a failure to unregister
+	// must not turn a completed sign-out into an error the app would
+	// retry against a token it no longer has. The phone-side token delete
+	// the app does next silences it regardless.
+	if fcm := req.FCMToken; fcm != "" {
+		if userID := middleware.UserIDFromContext(ctx); userID != "" {
+			if err := h.monolith.UnregisterDeviceToken(ctx, userID, fcm); err != nil {
+				h.logger.Warn("unregister device token at logout", "user_id", userID, "error", err)
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, logoutResponse{Success: true})
@@ -516,6 +546,22 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+// scheduleConflictResponse is the 409 body for the one-meetup-at-a-time
+// rule: the sentence every error carries, plus a machine-readable code and
+// the meetup in the way, so the app can show it and offer a way out. The
+// meetup is the caller's own (they host it or asked to join it), which is
+// why it can be returned in full.
+type scheduleConflictResponse struct {
+	Error    string         `json:"error"`
+	Code     string         `json:"code"`
+	Conflict meetupResponse `json:"conflict"`
+}
+
+// scheduleConflictCode is the `code` the app switches on. Only this error
+// carries a code; adding one to every response would be a wider contract
+// change than one rule warrants.
+const scheduleConflictCode = "schedule_conflict"
+
 // writeGRPCError maps a gRPC status error from monolithclient to the
 // corresponding HTTP status via apperror's single mapping table — the one
 // place this translation happens, not a switch statement per handler.
@@ -528,7 +574,17 @@ func writeGRPCError(w http.ResponseWriter, err error) {
 	if code >= http.StatusInternalServerError {
 		slog.Default().Error("upstream error", "grpc_code", st.Code().String(), "error", err)
 	}
-	writeError(w, code, apperror.UserMessage(st.Code(), st.Message()))
+	message := apperror.UserMessage(st.Code(), st.Message())
+	var conflict *monolithclient.ScheduleConflictError
+	if errors.As(err, &conflict) {
+		writeJSON(w, code, scheduleConflictResponse{
+			Error:    message,
+			Code:     scheduleConflictCode,
+			Conflict: meetupFromClient(conflict.Meetup),
+		})
+		return
+	}
+	writeError(w, code, message)
 }
 
 func writeError(w http.ResponseWriter, code int, message string) {

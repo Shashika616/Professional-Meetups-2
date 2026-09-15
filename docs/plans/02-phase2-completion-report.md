@@ -123,6 +123,7 @@ $ diff <(mine) <(source)   # → no differences, 20 routes
 | 10 | POST | `/v1/meetups/requests/{id}/withdraw` | `requireAuth` | — |
 | 11 | POST | `/v1/meetups/requests/{id}/respond` | `requireAuth` | — |
 | 12 | POST | `/v1/meetups/device-token` | `requireAuth` | — |
+| 12a | POST | `/v1/auth/logout` (+`fcm_token`) | `optionalAuth` | 2026-09-15 (ADR-005): also drops the device's push registration when the bearer proves the account; the `DELETE /v1/meetups/device-token` route added on 2026-09-14 was folded into this and removed. |
 | 13 | GET | `/v1/meetups/{id}/safety` | `requireAuth` | — |
 | 14 | POST | `/v1/meetups/{id}/safety/checklist` | `requireAuth` | — |
 | 15 | POST | `/v1/meetups/{id}/safety/live-location` | `requireAuth` | — |

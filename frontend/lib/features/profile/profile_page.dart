@@ -260,59 +260,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     );
   }
 
-  /// Gates [_signOut] behind an explicit confirm tap — a mis-tap on SIGN
-  /// OUT used to end the session immediately with no way back. Mirrors
-  /// `safety_page.dart`'s SOS confirmation dialog styling (the one existing
-  /// confirm-dialog pattern in this codebase), not a new dialog style.
+  /// Gates sign-out behind an explicit confirm tap — a mis-tap on SIGN OUT
+  /// used to end the session immediately with no way back. The dialog does
+  /// the signing out itself (see [_SignOutDialog]) so its button can show
+  /// the work happening; this only navigates once it reports done.
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
+    final signedOut = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppPalette.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'SIGN OUT',
-          style: TextStyle(
-            color: AppPalette.danger,
-            letterSpacing: 1.6,
-            fontSize: 15,
-          ),
-        ),
-        content: Text(
-          'Sign out of TieHere?',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'CANCEL',
-              style: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              'SIGN OUT',
-              style: TextStyle(
-                color: AppPalette.danger,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
+      builder: (_) => const _SignOutDialog(),
     );
-    if (confirmed != true) return;
-    if (!context.mounted) return;
-    await _signOut(context, ref);
-  }
-
-  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
-    // Clears the local session regardless of whether the logout network
-    // call succeeds — see AuthSessionNotifier.signOut.
-    await ref.read(authSessionProvider.notifier).signOut();
-    if (!context.mounted) return;
+    if (signedOut != true || !context.mounted) return;
     // Clears the nav stack so the back button can't return to AppShell.
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const LandingPage()),
@@ -928,6 +885,89 @@ class _EditNameDialogState extends State<_EditNameDialog> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The sign-out confirmation. Mirrors `safety_page.dart`'s SOS dialog
+/// styling (the one confirm-dialog pattern in this codebase). Owns the
+/// sign-out call so the SIGN OUT action can turn into a spinner and lock
+/// while it runs: the tap has to be seen to take, or the user taps again
+/// wondering whether it did. The wait is short by design —
+/// [AuthSessionNotifier.signOut] clears the local session first and does
+/// the server work afterwards, in the background — but it is not zero, and
+/// a button that looks idle for even a moment after a tap reads as broken.
+///
+/// Pops with true once signed out; the page navigates. Pops with false on
+/// CANCEL, and refuses to be dismissed at all mid-sign-out.
+class _SignOutDialog extends ConsumerStatefulWidget {
+  const _SignOutDialog();
+
+  @override
+  ConsumerState<_SignOutDialog> createState() => _SignOutDialogState();
+}
+
+class _SignOutDialogState extends ConsumerState<_SignOutDialog> {
+  bool _busy = false;
+
+  Future<void> _signOut() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    // Clears the local session regardless of whether the network call
+    // succeeds — see AuthSessionNotifier.signOut.
+    await ref.read(authSessionProvider.notifier).signOut();
+    if (!mounted) return;
+    Navigator.pop(context, true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        backgroundColor: AppPalette.card,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'SIGN OUT',
+          style: TextStyle(
+            color: AppPalette.danger,
+            letterSpacing: 1.6,
+            fontSize: 15,
+          ),
+        ),
+        content: Text(
+          'Sign out of TieHere?',
+          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.pop(context, false),
+            child: Text(
+              'CANCEL',
+              style: TextStyle(color: AppPalette.textSecondary),
+            ),
+          ),
+          TextButton(
+            onPressed: _busy ? null : _signOut,
+            child: _busy
+                ? SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppPalette.danger,
+                    ),
+                  )
+                : Text(
+                    'SIGN OUT',
+                    style: TextStyle(
+                      color: AppPalette.danger,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -9,9 +9,12 @@ enum IntentType {
   rideShare,
   dating;
 
+  /// The intent's name, without any time-of-day qualifier. For
+  /// [IntentType.lunch] that is MEAL; where a start time is known, use
+  /// [labelFor] so the sitting (breakfast, dinner...) is named as well.
   String get label => switch (this) {
     IntentType.coffee => 'COFFEE',
-    IntentType.lunch => 'LUNCH',
+    IntentType.lunch => 'MEAL',
     IntentType.networking => 'NETWORKING',
     IntentType.mentorship => 'MENTORSHIP',
     // Not 'EVENTS': the bottom tab already carries that word, and the
@@ -25,13 +28,24 @@ enum IntentType {
   /// picker cards. Short enough to sit on a half-width card at 11px.
   String get tagline => switch (this) {
     IntentType.coffee => 'A quick cup, a new connection',
-    IntentType.lunch => 'Break bread, talk shop',
+    IntentType.lunch => 'Breakfast, lunch or dinner: the time decides',
     IntentType.networking => 'Grow your circle',
     IntentType.mentorship => 'Learn from someone a step ahead',
     IntentType.outing => 'A gig, a game, a night out',
     IntentType.rideShare => 'Share the road, split the fare',
     IntentType.dating => 'Connect beyond the office',
   };
+
+  /// The label with the sitting named from [windowStart], in the device's
+  /// local time: "MEAL: BREAKFAST", "MEAL: DINNER". Only the meal intent
+  /// changes; every other intent is its plain [label]. One intent covers
+  /// every meal (2026-09-15) so the host picks a time, not a meal, and the
+  /// name follows. Null [windowStart] (a locked meetup hides its window)
+  /// gives the plain label.
+  String labelFor(DateTime? windowStart) {
+    if (this != IntentType.lunch || windowStart == null) return label;
+    return '$label: ${MealSitting.at(windowStart).label}';
+  }
 
   /// The landing-collage scene that best reads as this intent, reused as
   /// the picker card's backdrop so the flow shares the landing page's
@@ -76,6 +90,24 @@ enum IntentType {
   // These are ADVISORY here: the server re-checks both on every CreateMeetup
   // and RequestToJoin regardless of what this file says. They exist so the UI
   // can explain a lock before the user hits it, never as the gate itself.
+
+  /// The intent's name in a sentence: "coffee", "meal", "ride share".
+  String get sentenceName => label.toLowerCase();
+
+  /// The one line shown (as a toast, on the way to the verification
+  /// checklist) when the viewer is below the join bar. It says what to do
+  /// and why, and nothing else: the checklist page it accompanies is where
+  /// the specific steps and levels live, so repeating "Level 2 trust" and
+  /// the list of verifications here only made the toast long and
+  /// technical. Same shape for every intent, so the app speaks with one
+  /// voice.
+  String get joinLockedMessage =>
+      'Verify your account to join $sentenceName meetups.';
+
+  /// The hosting counterpart of [joinLockedMessage], shown on the way to
+  /// the hosting unlock page.
+  String get hostLockedMessage =>
+      'Verify your account to host $sentenceName meetups.';
 
   /// Trust level needed to REQUEST TO JOIN a meetup of this intent.
   /// Unchanged by ADR-002.
@@ -140,4 +172,30 @@ enum IntentType {
     'dating' => IntentType.dating,
     _ => throw FormatException('Unknown intent: $value'),
   };
+}
+
+/// Which meal a [IntentType.lunch] meetup is, decided by its local start
+/// hour. The bands are the product's (2026-09-15): breakfast 04:00–10:59,
+/// lunch 11:00–13:59, an evening meal 14:00–17:59, dinner 18:00–21:59, and
+/// a late-night meal from 22:00 to 03:59. Half-open, so 11:00 is lunch and
+/// 18:00 is dinner.
+enum MealSitting {
+  breakfast('BREAKFAST'),
+  lunch('LUNCH'),
+  eveningMeal('EVENING MEAL'),
+  dinner('DINNER'),
+  lateNight('LATE NIGHT MEAL');
+
+  const MealSitting(this.label);
+
+  final String label;
+
+  static MealSitting at(DateTime start) {
+    final hour = start.hour;
+    if (hour >= 4 && hour < 11) return MealSitting.breakfast;
+    if (hour >= 11 && hour < 14) return MealSitting.lunch;
+    if (hour >= 14 && hour < 18) return MealSitting.eveningMeal;
+    if (hour >= 18 && hour < 22) return MealSitting.dinner;
+    return MealSitting.lateNight;
+  }
 }

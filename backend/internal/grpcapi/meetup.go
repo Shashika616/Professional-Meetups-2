@@ -2,12 +2,34 @@ package grpcapi
 
 import (
 	"context"
+	"errors"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"professional-meetups-monolith/backend/internal/modules/meetup"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
 )
+
+// toStatus is apperror.ToGRPCStatus plus the one structured error this
+// service has: a meetup.ScheduleConflictError travels as an ALREADY_EXISTS
+// status carrying a meetupv1.ScheduleConflict detail, so the gateway can
+// put the meetup in the way into the 409 body. If attaching the detail
+// fails (it cannot for a well-formed proto), the plain status still goes
+// out — the sentence is the fallback the detail only improves on.
+func toStatus(err error) error {
+	var conflict *meetup.ScheduleConflictError
+	if !errors.As(err, &conflict) {
+		return apperror.ToGRPCStatus(err)
+	}
+	st := status.New(codes.AlreadyExists, err.Error())
+	if withDetail, detailErr := st.WithDetails(&meetupv1.ScheduleConflict{Meetup: meetupToProto(conflict.Conflict)}); detailErr == nil {
+		st = withDetail
+	}
+	return st.Err()
+}
 
 // MeetupServer adapts the meetup module to meetupv1.MeetupServiceServer —
 // the same thin, business-rule-free shape as AuthServer: field copying,
@@ -161,7 +183,7 @@ func (s *MeetupServer) CreateMeetup(ctx context.Context, req *meetupv1.CreateMee
 		Capacity:       int(req.GetCapacity()),
 	})
 	if err != nil {
-		return nil, apperror.ToGRPCStatus(err)
+		return nil, toStatus(err)
 	}
 	return meetupToProto(m), nil
 }
@@ -257,7 +279,7 @@ func (s *MeetupServer) RequestToJoin(ctx context.Context, req *meetupv1.RequestT
 		RequesterTrustLevel: int(req.GetRequesterTrustLevel()),
 	})
 	if err != nil {
-		return nil, apperror.ToGRPCStatus(err)
+		return nil, toStatus(err)
 	}
 	return requestToProto(r), nil
 }

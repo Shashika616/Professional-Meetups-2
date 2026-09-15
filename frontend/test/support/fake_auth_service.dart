@@ -73,7 +73,11 @@ class ImmediateAuthService implements AuthService {
       throw UnimplementedError();
 
   @override
-  Future<void> logout(String refreshToken) => throw UnimplementedError();
+  Future<void> logout(
+    String refreshToken, {
+    String? accessToken,
+    String? fcmToken,
+  }) => throw UnimplementedError();
 
   @override
   Future<int> startPhoneVerification(String phoneNumber) =>

@@ -105,7 +105,7 @@ func (r *postgresMeetupRepository) publish(ctx context.Context, topic string, pa
 // notifications-PLAN.md Step 1) through the same transaction as the INSERT
 // — the event ADR-008's addendum flagged as missing since before any
 // "notify about nearby meetups" feature could exist.
-func (r *postgresMeetupRepository) Create(ctx context.Context, m NewMeetup) (Meetup, error) {
+func (r *postgresMeetupRepository) Create(ctx context.Context, m NewMeetup, guard ScheduleGuard) (Meetup, error) {
 	hostID, err := parseUUID(m.HostUserID)
 	if err != nil {
 		return Meetup{}, fmt.Errorf("repository: invalid host user id %q: %w", m.HostUserID, apperror.ErrInvalidInput)
@@ -117,6 +117,11 @@ func (r *postgresMeetupRepository) Create(ctx context.Context, m NewMeetup) (Mee
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := r.q.WithTx(tx)
+
+	// Lock, then check, then write — all on this connection (Plan 19).
+	if err := runScheduleGuard(ctx, q, m.HostUserID, guard); err != nil {
+		return Meetup{}, err
+	}
 
 	row, err := q.CreateMeetup(ctx, sqlcgen.CreateMeetupParams{
 		HostUserID:    hostID,
@@ -216,6 +221,78 @@ func (r *postgresMeetupRepository) GetByID(ctx context.Context, id, viewerID str
 		MyRequestStatus:     requestStatusPtrOrNil(row.MyRequestStatus),
 		MyRequestID:         uuidPtrOrNil(row.MyRequestID),
 	}, nil
+}
+
+// runScheduleGuard takes userID's schedule lock on q's transaction and
+// runs guard against it. A nil guard takes no lock: callers with nothing
+// to check must not queue behind ones that do.
+func runScheduleGuard(ctx context.Context, q *sqlcgen.Queries, userID string, guard ScheduleGuard) error {
+	if guard == nil {
+		return nil
+	}
+	if err := q.LockUserSchedule(ctx, userID); err != nil {
+		return fmt.Errorf("repository: lock user schedule: %w: %w", apperror.ErrInternal, err)
+	}
+	// Returned as-is: the guard's error is the caller's own typed error.
+	return guard(ctx, scheduleTx{q: q})
+}
+
+// scheduleTx is the ScheduleTx a guard sees: the locked transaction.
+type scheduleTx struct{ q *sqlcgen.Queries }
+
+func (s scheduleTx) FindScheduleConflict(
+	ctx context.Context, userID string, windowStart, windowEnd time.Time, excludeID string,
+) (Meetup, bool, error) {
+	user, err := parseUUID(userID)
+	if err != nil {
+		return Meetup{}, false, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+	// The nil UUID matches no row, so "nothing to exclude" needs no second
+	// query shape.
+	var exclude uuid.UUID
+	if excludeID != "" {
+		if exclude, err = parseUUID(excludeID); err != nil {
+			return Meetup{}, false, fmt.Errorf("repository: invalid meetup id %q: %w", excludeID, apperror.ErrInvalidInput)
+		}
+	}
+
+	row, err := s.q.FindScheduleConflict(ctx, sqlcgen.FindScheduleConflictParams{
+		UserID:      user,
+		WindowStart: toTimestamptz(windowStart),
+		WindowEnd:   toTimestamptz(windowEnd),
+		ExcludeID:   exclude,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Meetup{}, false, nil
+		}
+		return Meetup{}, false, fmt.Errorf("repository: find schedule conflict: %w", err)
+	}
+
+	return Meetup{
+		ID:                  row.ID.String(),
+		HostUserID:          row.HostUserID.String(),
+		HostFullName:        row.HostFullName,
+		HostProfilePhotoURL: textOrEmpty(row.HostProfilePhotoUrl),
+		HostTrustLevel:      int(row.HostTrustLevel),
+		HostRatingAverage:   numericToFloat64(row.HostRatingAverage),
+		HostRatingCount:     int(row.HostRatingCount),
+		Intent:              Intent(row.Intent),
+		WindowStart:         timestamptzOrZero(row.WindowStart),
+		WindowEnd:           timestamptzOrZero(row.WindowEnd),
+		LocationLat:         row.LocationLat,
+		LocationLng:         row.LocationLng,
+		LocationLabel:       row.LocationLabel,
+		Capacity:            int(row.Capacity),
+		AcceptedCount:       int(row.AcceptedCount),
+		Status:              MeetupStatus(row.Status),
+		CreatedAt:           timestamptzOrZero(row.CreatedAt),
+		CancelledAt:         timePtrOrNil(row.CancelledAt),
+		CancellationReason:  stringPtrOrNil(row.CancellationReason),
+		ClosedAt:            timePtrOrNil(row.ClosedAt),
+		MyRequestStatus:     requestStatusPtrOrNil(row.MyRequestStatus),
+		MyRequestID:         uuidPtrOrNil(row.MyRequestID),
+	}, true, nil
 }
 
 func (r *postgresMeetupRepository) ListOpen(

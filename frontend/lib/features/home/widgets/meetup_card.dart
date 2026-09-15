@@ -51,11 +51,7 @@ class MeetupCard extends StatelessWidget {
   /// pattern this replaces — only the destination changes, from a dead end
   /// to somewhere that actually helps.
   void _handleLockedTap(BuildContext context) {
-    showSnack(
-      context,
-      '${meetup.intent.label} requires Level ${meetup.intent.requiredTrustLevelToJoin} trust. Verify your phone, personal email, and details to unlock it.',
-      type: ToastType.locked,
-    );
+    showSnack(context, meetup.intent.joinLockedMessage, type: ToastType.locked);
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
     );
@@ -77,6 +73,12 @@ class MeetupCard extends StatelessWidget {
         meetup.acceptedCount >= meetup.capacity ||
         meetup.status == MeetupStatus.full;
     final locked = meetup.lockedForViewer;
+    // Below the intent's join bar but not redacted (ADR-002 § 5 narrowed
+    // lockedForViewer to what is HIDDEN, not what can be joined): the card
+    // shows everything, and I'M INTERESTED goes to the verification
+    // checklist, the same way the detail page's button does. It used to
+    // reach the confirmation sheet and fail on the server with a toast.
+    final belowJoinBar = !meetup.intent.canJoin(viewerTrustLevel);
     // Green while the meetup is still ahead, gold once its window has passed,
     // muted if cancelled. Same three states, same two colours, same left edge
     // as the ACTIVE MEETUPS rows on Home and the cards on Events, so one
@@ -164,7 +166,7 @@ class MeetupCard extends StatelessWidget {
                                 runSpacing: 8,
                                 crossAxisAlignment: WrapCrossAlignment.center,
                                 children: [
-                                  _tag(meetup.intent.label),
+                                  _tag(meetup.intentLabel),
                                   _tag(
                                     '${meetup.acceptedCount}/${meetup.capacity} JOINED',
                                   ),
@@ -213,7 +215,10 @@ class MeetupCard extends StatelessWidget {
                               // Only a real action gets a button. A viewer who is
                               // hosting, or has already asked, has nothing to press
                               // here, so the row ends and VIEW LOCATION follows.
-                              if (locked) ...[
+                              if (locked ||
+                                  (belowJoinBar &&
+                                      !meetup.isHostedByMe &&
+                                      meetup.myRequestStatus == null)) ...[
                                 const SizedBox(height: 14),
                                 PrimaryButton(
                                   label: 'I\'M INTERESTED',

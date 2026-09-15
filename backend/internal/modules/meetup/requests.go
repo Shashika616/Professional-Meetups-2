@@ -34,7 +34,13 @@ func (s *service) RequestToJoin(ctx context.Context, req RequestToJoinRequest) (
 	// The requester's display name comes from a read on that same
 	// transaction — reading it afterwards, on another connection, would be
 	// a subtler version of the same race this whole change removes.
+	// One meetup at a time (ScheduleConflictError): the requester's own
+	// hosting or standing requests in this meetup's window block a new
+	// request, checked under their schedule lock in the insert's own
+	// transaction. The meetup being joined is excluded — a repeat request
+	// on it is the requests table's own conflict, with its own message.
 	created, err := s.requests.Create(ctx, req.MeetupID, req.RequesterID, m.HostUserID,
+		scheduleGuard(req.RequesterID, m.WindowStart, m.WindowEnd, m.ID),
 		func(ctx context.Context, tx repository.NotifyTx, created repository.MeetupRequest) error {
 			full, err := tx.GetRequestByID(ctx, created.ID)
 			if err != nil {
@@ -43,7 +49,7 @@ func (s *service) RequestToJoin(ctx context.Context, req RequestToJoinRequest) (
 			return queueNotification(ctx, tx, m.HostUserID,
 				TypeJoinRequest,
 				"New join request",
-				fmt.Sprintf("%s wants to join your %s meetup", full.RequesterFullName, m.Intent),
+				fmt.Sprintf("%s wants to join your %s meetup", full.RequesterFullName, Intent(m.Intent).DisplayName()),
 				map[string]string{"meetup_id": m.ID, "request_id": created.ID},
 			)
 		})
@@ -127,7 +133,7 @@ func (s *service) WithdrawRequest(ctx context.Context, req WithdrawRequestReques
 			return queueNotification(ctx, tx, m.HostUserID,
 				TypeRequestWithdrawn,
 				"Request withdrawn",
-				fmt.Sprintf("%s withdrew from your %s meetup", full.RequesterFullName, m.Intent),
+				fmt.Sprintf("%s withdrew from your %s meetup", full.RequesterFullName, Intent(m.Intent).DisplayName()),
 				map[string]string{"meetup_id": m.ID, "request_id": withdrawn.ID},
 			)
 		})
@@ -174,7 +180,7 @@ func (s *service) acceptRequest(ctx context.Context, requestID string, m reposit
 			if err := queueNotification(ctx, tx, accepted.RequesterID,
 				TypeRequestAccepted,
 				"Request accepted",
-				fmt.Sprintf("The host accepted your request to join their %s meetup", m.Intent),
+				fmt.Sprintf("The host accepted your request to join their %s meetup", Intent(m.Intent).DisplayName()),
 				map[string]string{"meetup_id": m.ID, "request_id": accepted.ID},
 			); err != nil {
 				return err
@@ -183,7 +189,7 @@ func (s *service) acceptRequest(ctx context.Context, requestID string, m reposit
 			if err := queueNotification(ctx, tx, accepted.RequesterID,
 				TypeSafetyChecklist,
 				"Review your safety checklist",
-				fmt.Sprintf("Review the safety checklist for your %s meetup", m.Intent),
+				fmt.Sprintf("Review the safety checklist for your %s meetup", Intent(m.Intent).DisplayName()),
 				map[string]string{"meetup_id": m.ID},
 			); err != nil {
 				return err
@@ -193,7 +199,7 @@ func (s *service) acceptRequest(ctx context.Context, requestID string, m reposit
 				if err := queueNotification(ctx, tx, rejected.RequesterID,
 					TypeMeetupFull,
 					"Meetup is full",
-					fmt.Sprintf("This %s meetup reached capacity before your request was accepted", m.Intent),
+					fmt.Sprintf("This %s meetup reached capacity before your request was accepted", Intent(m.Intent).DisplayName()),
 					map[string]string{"meetup_id": m.ID, "request_id": rejected.ID},
 				); err != nil {
 					return err
@@ -229,7 +235,7 @@ func (s *service) rejectRequest(ctx context.Context, requestID string, m reposit
 			return queueNotification(ctx, tx, rejected.RequesterID,
 				TypeRequestDeclined,
 				"Request declined",
-				fmt.Sprintf("The host declined your request to join their %s meetup", m.Intent),
+				fmt.Sprintf("The host declined your request to join their %s meetup", Intent(m.Intent).DisplayName()),
 				map[string]string{"meetup_id": m.ID, "request_id": rejected.ID},
 			)
 		})

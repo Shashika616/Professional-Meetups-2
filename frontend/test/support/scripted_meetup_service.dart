@@ -292,15 +292,6 @@ class ScriptedMeetupService implements MeetupService {
     lastRegisteredDeviceToken = fcmToken;
   }
 
-  int unregisterDeviceTokenCallCount = 0;
-  String? lastUnregisteredDeviceToken;
-
-  @override
-  Future<void> unregisterDeviceToken(String fcmToken) async {
-    unregisterDeviceTokenCallCount++;
-    lastUnregisteredDeviceToken = fcmToken;
-  }
-
   @override
   Future<SafetyState> getSafetyState(String meetupId) async {
     final state = _safetyState;

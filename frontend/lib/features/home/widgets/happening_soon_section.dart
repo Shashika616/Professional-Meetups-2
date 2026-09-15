@@ -23,6 +23,8 @@ import 'package:professional_connections_platform/features/home/viewer_location_
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/schedule_conflict_sheet.dart';
+import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 
 /// How far ahead "Happening Soon" looks. Passed through to the backend's
@@ -408,6 +410,20 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
       if (context.mounted) {
         ref.read(authSessionProvider.notifier).forceSignOut();
       }
+    } on MeetupScheduleConflictException catch (error) {
+      // Already committed elsewhere in this window — see the sheet.
+      if (context.mounted) {
+        await showScheduleConflictSheet(context, error: error);
+      }
+    } on MeetupForbiddenException catch (error) {
+      // The server's trust gate, which is the one that counts: the card's
+      // own check can be stale (a profile that has not refreshed since a
+      // verification). Same destination as the locked tap.
+      if (!context.mounted) return;
+      showSnack(context, error.message, type: ToastType.locked);
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
+      );
     } catch (error) {
       if (!context.mounted) return;
       showSnack(

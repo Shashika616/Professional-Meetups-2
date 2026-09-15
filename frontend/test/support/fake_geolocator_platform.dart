@@ -13,6 +13,7 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
     this.position,
     this.getCurrentPositionError,
     this.lastKnownPosition,
+    this.delay = Duration.zero,
   });
 
   bool serviceEnabled;
@@ -24,6 +25,10 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   /// cached", which is the common case on a fresh device.
   Position? lastKnownPosition;
   int getCurrentPositionCalls = 0;
+
+  /// How long getCurrentPosition takes to answer, for tests of what the
+  /// UI shows while a fix is in flight.
+  Duration delay;
 
   @override
   Future<bool> isLocationServiceEnabled() async => serviceEnabled;
@@ -39,6 +44,7 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
     LocationSettings? locationSettings,
   }) async {
     getCurrentPositionCalls++;
+    if (delay > Duration.zero) await Future<void>.delayed(delay);
     if (getCurrentPositionError != null) throw getCurrentPositionError!;
     return position!;
   }

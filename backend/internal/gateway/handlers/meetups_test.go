@@ -199,7 +199,6 @@ func TestMeetupRoutes_AreWiredAndRequireAuth(t *testing.T) {
 		{http.MethodPost, "/v1/meetups/requests/r1/withdraw", `{"note":"x"}`},
 		{http.MethodPost, "/v1/meetups/requests/r1/respond", `{"accept":true}`},
 		{http.MethodPost, "/v1/meetups/device-token", `{"fcm_token":"t"}`},
-		{http.MethodDelete, "/v1/meetups/device-token", `{"fcm_token":"t"}`},
 		{http.MethodGet, "/v1/meetups/m1/safety", ""},
 		{http.MethodPost, "/v1/meetups/m1/safety/checklist", `{}`},
 		{http.MethodPost, "/v1/meetups/m1/safety/live-location", `{"opt_in":true}`},

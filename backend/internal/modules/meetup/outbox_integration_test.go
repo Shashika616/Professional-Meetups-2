@@ -51,7 +51,7 @@ func TestOutbox_RollsBackWithTheBusinessWrite_Integration(t *testing.T) {
 	// the "something went wrong between the outbox insert and the commit"
 	// scenario.
 	boom := errors.New("simulated failure after the outbox insert")
-	_, err := h.requests.Create(ctx, m.ID, requester, host,
+	_, err := h.requests.Create(ctx, m.ID, requester, host, nil,
 		func(ctx context.Context, tx repository.NotifyTx, created repository.MeetupRequest) error {
 			if err := tx.Enqueue(ctx, repository.OutboxRow{
 				FCMTokens: []string{"host-device-token"},
@@ -655,12 +655,13 @@ func createOpenMeetup(t *testing.T, h *harness, host string) meetup.Meetup {
 
 func createOpenMeetupWith(t *testing.T, h *harness, svc meetup.Service, host string) meetup.Meetup {
 	t.Helper()
+	windowStart, windowEnd := h.nextWindow()
 	m, err := svc.CreateMeetup(context.Background(), meetup.CreateMeetupRequest{
 		HostUserID:     host,
 		HostTrustLevel: 4,
 		Intent:         meetup.IntentCoffee,
-		WindowStart:    time.Now().Add(time.Hour),
-		WindowEnd:      time.Now().Add(3 * time.Hour),
+		WindowStart:    windowStart,
+		WindowEnd:      windowEnd,
 		LocationLat:    colomboLat,
 		LocationLng:    colomboLng,
 		LocationLabel:  "Test Cafe",

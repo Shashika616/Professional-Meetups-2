@@ -291,6 +291,123 @@ func (q *Queries) CreateMeetup(ctx context.Context, arg CreateMeetupParams) (Mee
 	return i, err
 }
 
+const findScheduleConflict = `-- name: FindScheduleConflict :one
+SELECT
+  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location,
+  COALESCE(u.full_name, '') AS host_full_name,
+  u.profile_photo_url AS host_profile_photo_url,
+  COALESCE(u.trust_level, 0) AS host_trust_level,
+  COALESCE(ratings.rating_average, 0)::numeric(3,2) AS host_rating_average,
+  COALESCE(ratings.rating_count, 0)::int AS host_rating_count,
+  (SELECT count(*) FROM meetup.meetup_requests r2 WHERE r2.meetup_id = m.id AND r2.status = 'accepted') AS accepted_count,
+  r.status AS my_request_status,
+  r.id AS my_request_id
+FROM meetup.meetups m
+LEFT JOIN meetup.user_display_cache u ON u.user_id = m.host_user_id
+LEFT JOIN LATERAL (
+  SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
+  FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
+) ratings ON true
+LEFT JOIN meetup.meetup_requests r
+  ON r.meetup_id = m.id
+ AND r.requester_id = $1
+ AND r.status IN ('pending', 'accepted')
+WHERE m.status IN ('open', 'full')
+  AND m.window_end > now()
+  AND m.window_start < $2
+  AND m.window_end > $3
+  AND m.id <> $4
+  AND (m.host_user_id = $1 OR r.id IS NOT NULL)
+ORDER BY m.window_start ASC, m.id ASC
+LIMIT 1
+`
+
+type FindScheduleConflictParams struct {
+	UserID      uuid.UUID          `json:"user_id"`
+	WindowEnd   pgtype.Timestamptz `json:"window_end"`
+	WindowStart pgtype.Timestamptz `json:"window_start"`
+	ExcludeID   uuid.UUID          `json:"exclude_id"`
+}
+
+type FindScheduleConflictRow struct {
+	ID                     uuid.UUID                     `json:"id"`
+	HostUserID             uuid.UUID                     `json:"host_user_id"`
+	Intent                 MeetupIntentType              `json:"intent"`
+	LocationLat            float64                       `json:"location_lat"`
+	LocationLng            float64                       `json:"location_lng"`
+	LocationLabel          string                        `json:"location_label"`
+	Capacity               int16                         `json:"capacity"`
+	Status                 MeetupMeetupStatus            `json:"status"`
+	CreatedAt              pgtype.Timestamptz            `json:"created_at"`
+	CancelledAt            pgtype.Timestamptz            `json:"cancelled_at"`
+	WindowStart            pgtype.Timestamptz            `json:"window_start"`
+	WindowEnd              pgtype.Timestamptz            `json:"window_end"`
+	ClosedAt               pgtype.Timestamptz            `json:"closed_at"`
+	CancellationReason     pgtype.Text                   `json:"cancellation_reason"`
+	StartingSoonNotifiedAt pgtype.Timestamptz            `json:"starting_soon_notified_at"`
+	Location               interface{}                   `json:"location"`
+	HostFullName           string                        `json:"host_full_name"`
+	HostProfilePhotoUrl    pgtype.Text                   `json:"host_profile_photo_url"`
+	HostTrustLevel         int16                         `json:"host_trust_level"`
+	HostRatingAverage      pgtype.Numeric                `json:"host_rating_average"`
+	HostRatingCount        int32                         `json:"host_rating_count"`
+	AcceptedCount          int64                         `json:"accepted_count"`
+	MyRequestStatus        NullMeetupMeetupRequestStatus `json:"my_request_status"`
+	MyRequestID            pgtype.UUID                   `json:"my_request_id"`
+}
+
+// The one-meetup-at-a-time rule (2026-09-15): the earliest live meetup the
+// user is already committed to that overlaps [window_start, window_end).
+// "Committed" is hosting it, or holding a pending or accepted request on
+// it — a pending request counts because accepting it later must never be
+// what creates a double booking. "Live" is open/full and not yet over, so
+// a finished or cancelled meetup never blocks anything. exclude_id keeps a
+// join attempt from colliding with the very meetup being joined (a repeat
+// request on the same meetup is the requests table's own conflict, with
+// its own message). Half-open overlap, so back-to-back windows are fine.
+// Same joined shape as ListMeetupsByHost so it converts through the same
+// code; my_request_status is read so the caller can say "you asked to
+// join" versus "you're hosting".
+// LIVE, defined here, in the service's ListActiveMeetups isLive closure,
+// and (as BROWSABLE, 'open' only) in ListOpenMeetupsFirstPage/AfterCursor
+// above. Keep the three in step.
+func (q *Queries) FindScheduleConflict(ctx context.Context, arg FindScheduleConflictParams) (FindScheduleConflictRow, error) {
+	row := q.db.QueryRow(ctx, findScheduleConflict,
+		arg.UserID,
+		arg.WindowEnd,
+		arg.WindowStart,
+		arg.ExcludeID,
+	)
+	var i FindScheduleConflictRow
+	err := row.Scan(
+		&i.ID,
+		&i.HostUserID,
+		&i.Intent,
+		&i.LocationLat,
+		&i.LocationLng,
+		&i.LocationLabel,
+		&i.Capacity,
+		&i.Status,
+		&i.CreatedAt,
+		&i.CancelledAt,
+		&i.WindowStart,
+		&i.WindowEnd,
+		&i.ClosedAt,
+		&i.CancellationReason,
+		&i.StartingSoonNotifiedAt,
+		&i.Location,
+		&i.HostFullName,
+		&i.HostProfilePhotoUrl,
+		&i.HostTrustLevel,
+		&i.HostRatingAverage,
+		&i.HostRatingCount,
+		&i.AcceptedCount,
+		&i.MyRequestStatus,
+		&i.MyRequestID,
+	)
+	return i, err
+}
+
 const getMeetupByID = `-- name: GetMeetupByID :one
 SELECT
   m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location,
@@ -951,6 +1068,11 @@ WITH deduped AS (
     FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
   ) ratings ON true
   LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = $4
+  -- BROWSABLE is narrower than LIVE: 'open' only, a full meetup takes no
+  -- more requests. LIVE ('open' or 'full', not yet ended) is defined in
+  -- FindScheduleConflict below and in the service's ListActiveMeetups
+  -- isLive closure; a change to what counts as live must be made in all
+  -- three, and this one (plus its AfterCursor twin) if it means browsable.
   WHERE m.status = 'open'
     -- Same clock filter as ListOpenMeetupsFirstPage, and it has to be here
     -- too: a predicate that held on page 1 but not on page 2 would let an
@@ -1104,6 +1226,11 @@ WITH deduped AS (
     FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
   ) ratings ON true
   LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = $2
+  -- BROWSABLE is narrower than LIVE: 'open' only, a full meetup takes no
+  -- more requests. LIVE ('open' or 'full', not yet ended) is defined in
+  -- FindScheduleConflict below and in the service's ListActiveMeetups
+  -- isLive closure; a change to what counts as live must be made in all
+  -- three, and this one (plus its AfterCursor twin) if it means browsable.
   WHERE m.status = 'open'
     -- A meetup whose window has ENDED is not browsable, whatever its status
     -- column still says. This is NOT redundant with the auto-close sweep --
@@ -1265,6 +1392,24 @@ func (q *Queries) ListOpenMeetupsFirstPage(ctx context.Context, arg ListOpenMeet
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockUserSchedule = `-- name: LockUserSchedule :exec
+SELECT pg_advisory_xact_lock(hashtext($1::text))
+`
+
+// Serialises one person's schedule writes (Plan 19). Taken as the first
+// statement of the transaction that will read FindScheduleConflict and
+// then insert, so two concurrent creates or requests from the same person
+// queue behind each other and the second sees the first's committed row.
+// A transaction-scoped advisory lock: released at commit or rollback, no
+// row or constraint involved, so it is safe against the overlapping rows
+// already in production. hashtext folds the UUID's text into the int4 key
+// space; a collision between two users only makes them wait for each
+// other briefly (a false serialisation), never lets a conflict through.
+func (q *Queries) LockUserSchedule(ctx context.Context, userID string) error {
+	_, err := q.db.Exec(ctx, lockUserSchedule, userID)
+	return err
 }
 
 const markMeetupFull = `-- name: MarkMeetupFull :exec

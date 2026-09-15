@@ -1,4 +1,4 @@
-import 'dart:async' show Completer;
+import 'dart:async' show Completer, TimeoutException;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -453,6 +453,83 @@ void main() {
       expect(submittedLat, closeTo(6.9213, 0.0001));
       expect(submittedLng, closeTo(79.8756, 0.0001));
       expect(submittedLabel, isEmpty);
+    },
+  );
+
+  Future<void> pumpStep(WidgetTester tester) => tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: AndroidMapLocationStep(
+            onSubmit: (_, _, _) {},
+            httpClient: MockClient(
+              (request) async => http.Response(_featureCollection([]), 200),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  group(
+    '"use my current location" goes through the shared location helper',
+    () {
+      testWidgets(
+        'a denied permission says so with a SETTINGS action and picks '
+        'nothing',
+        (tester) async {
+          GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+            permission: LocationPermission.deniedForever,
+          );
+          await pumpStep(tester);
+          await tester.pump();
+
+          await tester.tap(find.text('USE MY CURRENT LOCATION'));
+          await tester.pump();
+          await tester.pump();
+
+          expect(find.textContaining('permission was denied'), findsOneWidget);
+          expect(find.text('SETTINGS'), findsOneWidget);
+          expect(find.text('Your current location'), findsNothing);
+        },
+      );
+
+      testWidgets('a fix that does not arrive falls back to the last known '
+          'position instead of hanging', (tester) async {
+        GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+          getCurrentPositionError: TimeoutException('no fix'),
+          lastKnownPosition: testPosition(lat: 6.9, lng: 79.8),
+        );
+        await pumpStep(tester);
+        await tester.pump();
+
+        await tester.tap(find.text('USE MY CURRENT LOCATION'));
+        await tester.pump();
+        await tester.pump();
+
+        expect(find.text('Your current location'), findsOneWidget);
+      });
+
+      testWidgets('the button reports that it is working while the fix is '
+          'fetched, and ignores a second tap', (tester) async {
+        final fake = FakeGeolocatorPlatform(
+          position: testPosition(lat: 6.9, lng: 79.8),
+          delay: const Duration(seconds: 2),
+        );
+        GeolocatorPlatform.instance = fake;
+        await pumpStep(tester);
+        await tester.pump();
+
+        await tester.tap(find.text('USE MY CURRENT LOCATION'));
+        await tester.pump();
+        expect(find.text('FINDING YOU...'), findsOneWidget);
+        await tester.tap(find.text('FINDING YOU...'), warnIfMissed: false);
+        await tester.pump(const Duration(seconds: 3));
+
+        expect(fake.getCurrentPositionCalls, 1);
+        expect(find.text('USE MY CURRENT LOCATION'), findsOneWidget);
+        expect(find.text('Your current location'), findsOneWidget);
+      });
     },
   );
 }

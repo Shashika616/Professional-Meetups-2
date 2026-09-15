@@ -139,8 +139,35 @@ type OpenMeetupFilter struct {
 	WithinDays int32
 }
 
+// ScheduleGuard runs inside a create's own transaction, after that
+// transaction has taken the actor's schedule lock (LockUserSchedule) and
+// before the row is written. Returning an error aborts the write and is
+// returned to the caller unwrapped, so a typed error (the service's
+// ScheduleConflictError) survives. Nil means "no guard": no lock, no
+// check — what tests that only need a row pass.
+//
+// The lock is what makes the check worth anything (Plan 19): a read on its
+// own connection, followed by a write on another, let two concurrent calls
+// both see "no conflict" and both succeed. Held for the transaction, the
+// second caller waits for the first to commit and then reads its row.
+type ScheduleGuard func(ctx context.Context, tx ScheduleTx) error
+
+// ScheduleTx is what a ScheduleGuard may read: the same connection that
+// holds the lock and will do the write.
+type ScheduleTx interface {
+	// FindScheduleConflict returns the earliest live meetup userID is
+	// already committed to (hosting, or a pending/accepted request) whose
+	// window overlaps [windowStart, windowEnd), and false when there is
+	// none. excludeID, when non-empty, is left out of the search — the
+	// meetup a join attempt is aimed at. MyRequestStatus is populated when
+	// the commitment is a request rather than hosting.
+	FindScheduleConflict(ctx context.Context, userID string, windowStart, windowEnd time.Time, excludeID string) (Meetup, bool, error)
+}
+
 type MeetupRepository interface {
-	Create(ctx context.Context, m NewMeetup) (Meetup, error)
+	// Create inserts the meetup. guard, when non-nil, runs under the host's
+	// schedule lock inside the same transaction (see ScheduleGuard).
+	Create(ctx context.Context, m NewMeetup, guard ScheduleGuard) (Meetup, error)
 	// GetByID returns apperror.ErrNotFound (wrapped) if id doesn't exist.
 	// viewerID populates MyRequestStatus relative to that specific caller.
 	GetByID(ctx context.Context, id, viewerID string) (Meetup, error)
@@ -257,8 +284,9 @@ type MeetupRequestRepository interface {
 	// (ADR-018) — not looked up again here.
 	// notify runs inside the write's own transaction (see NotifyTx), so the
 	// host's "new join request" push is queued atomically with the request
-	// row itself.
-	Create(ctx context.Context, meetupID, requesterID, hostUserID string, notify NotifyRequest) (MeetupRequest, error)
+	// row itself. guard, when non-nil, runs first, under the requester's
+	// schedule lock in that same transaction (see ScheduleGuard).
+	Create(ctx context.Context, meetupID, requesterID, hostUserID string, guard ScheduleGuard, notify NotifyRequest) (MeetupRequest, error)
 	// GetByID returns apperror.ErrNotFound (wrapped) if id doesn't exist.
 	GetByID(ctx context.Context, id string) (MeetupRequest, error)
 	// ListForMeetup returns every request (any status) on meetupID, oldest

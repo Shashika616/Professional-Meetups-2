@@ -80,6 +80,29 @@ func Auth(verifier *jwt.Verifier) func(http.Handler) http.Handler {
 	}
 }
 
+// OptionalAuth is Auth for a route that works without a caller identity but
+// does more with one: a valid bearer token attaches user_id and trust
+// level exactly as Auth does; a missing or invalid one passes the request
+// through unauthenticated instead of rejecting it, and UserIDFromContext
+// then returns "". Used by logout, which revokes the refresh token either
+// way and only drops the device's push registration when it can prove
+// whose it is. A handler behind this must treat an empty user id as "not
+// signed in" and never as a wildcard.
+func OptionalAuth(verifier *jwt.Verifier) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if token, ok := bearerToken(r); ok {
+				if claims, err := verifier.Verify(token); err == nil {
+					ctx := WithUserID(r.Context(), claims.UserID)
+					ctx = WithTrustLevel(ctx, claims.TrustLevel)
+					r = r.WithContext(ctx)
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func bearerToken(r *http.Request) (string, bool) {
 	const prefix = "Bearer "
 	header := r.Header.Get("Authorization")

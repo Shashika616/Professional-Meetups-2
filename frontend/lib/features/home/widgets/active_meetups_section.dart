@@ -592,8 +592,8 @@ class _ActiveMeetupRow extends StatelessWidget {
                               // line below with a pin, never run into it.
                               Text(
                                 cancelled
-                                    ? 'CANCELLED \u00B7 ${meetup.intent.label}'
-                                    : meetup.intent.label,
+                                    ? 'CANCELLED \u00B7 ${meetup.intentLabel}'
+                                    : meetup.intentLabel,
                                 style: TextStyle(
                                   color: edge,
                                   fontSize: 10.5,
@@ -606,6 +606,7 @@ class _ActiveMeetupRow extends StatelessWidget {
                                 meetup: meetup,
                                 compact: true,
                                 showHostName: false,
+                                concluded: awaitingReview || cancelled,
                               ),
                               if (meetup.locationLabel != null) ...[
                                 const SizedBox(height: 4),
@@ -842,7 +843,7 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              meetup.intent.label.toUpperCase(),
+                              meetup.intentLabel,
                               style: TextStyle(
                                 color: AppPalette.textSecondary,
                                 fontSize: 10,
@@ -868,7 +869,13 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                         ),
                       ),
                       const SizedBox(height: 6),
-                      MeetupRoleChips(meetup: meetup, showHostName: false),
+                      // Past tense on purpose: this card only ever shows a
+                      // meetup that is over or was called off.
+                      MeetupRoleChips(
+                        meetup: meetup,
+                        showHostName: false,
+                        concluded: true,
+                      ),
                       const SizedBox(height: 6),
                       Text(
                         meetup.formattedWindow,

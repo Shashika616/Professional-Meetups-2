@@ -179,13 +179,6 @@ class HttpMeetupService implements MeetupService {
   }
 
   @override
-  Future<void> unregisterDeviceToken(String fcmToken) async {
-    await _authenticatedDelete('/v1/meetups/device-token', {
-      'fcm_token': fcmToken,
-    });
-  }
-
-  @override
   Future<SafetyState> getSafetyState(String meetupId) async {
     final response = await _authenticatedGet('/v1/meetups/$meetupId/safety');
     return SafetyState.fromJson(_decodeOrThrow(response));
@@ -353,7 +346,9 @@ class HttpMeetupService implements MeetupService {
   }
 
   MeetupException _mapError(http.Response response) {
-    final message = _errorMessage(response.body);
+    final body = _errorBody(response.body);
+    final message =
+        body?['error'] as String? ?? 'Something went wrong. Please try again.';
     switch (response.statusCode) {
       case 400:
         return MeetupNetworkException(message);
@@ -364,22 +359,37 @@ class HttpMeetupService implements MeetupService {
       case 404:
         return MeetupNotFoundException(message);
       case 409:
+        // The one structured 409: the meetup in the way rides along under
+        // `conflict`. Anything malformed there falls back to the plain
+        // conflict, sentence intact, rather than failing to map at all.
+        if (body?['code'] == 'schedule_conflict') {
+          final raw = body?['conflict'];
+          if (raw is Map<String, dynamic>) {
+            try {
+              return MeetupScheduleConflictException(
+                message,
+                conflict: Meetup.fromJson(raw),
+              );
+            } catch (_) {
+              // fall through to the plain conflict
+            }
+          }
+        }
         return MeetupConflictException(message);
       default:
         return MeetupNetworkException(message);
     }
   }
 
-  String _errorMessage(String body) {
+  /// The decoded error body, or null when it is not a JSON object.
+  Map<String, dynamic>? _errorBody(String body) {
     try {
       final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic> && decoded['error'] is String) {
-        return decoded['error'] as String;
-      }
+      if (decoded is Map<String, dynamic>) return decoded;
     } catch (_) {
-      // fall through to the generic message below
+      // not JSON: the caller uses its generic message
     }
-    return 'Something went wrong. Please try again.';
+    return null;
   }
 
   Future<http.Response> _authenticatedPost(
@@ -389,20 +399,6 @@ class HttpMeetupService implements MeetupService {
     final headers = await _authHeaders();
     return _send(
       () => _httpClient.post(
-        Uri.parse('$_baseUrl$path'),
-        headers: headers,
-        body: jsonEncode(body),
-      ),
-    );
-  }
-
-  Future<http.Response> _authenticatedDelete(
-    String path,
-    Map<String, Object?> body,
-  ) async {
-    final headers = await _authHeaders();
-    return _send(
-      () => _httpClient.delete(
         Uri.parse('$_baseUrl$path'),
         headers: headers,
         body: jsonEncode(body),

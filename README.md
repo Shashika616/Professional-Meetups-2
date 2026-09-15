@@ -65,6 +65,22 @@ and `docs/plans/` for the phased build sequence. Built module by module, each
 phase verified before the next starts (same discipline the microservices backend
 itself was built with).
 
+Product rules that are easy to trip over while testing (each has an ADR in
+`docs/decisions/`):
+
+- **One meetup at a time** (ADR-005). Hosting, or holding a pending or
+  accepted request, blocks hosting or joining anything else in the same
+  window. The server answers `409` with `code: schedule_conflict` and the
+  meetup in the way; the app shows it and offers to open it (cancel or
+  withdraw there) or wait. Test accounts that already hold a meetup will hit
+  this when scheduling a second one at the same time.
+- **Sign-out is local first** (ADR-005). The session is cleared at once; one
+  background `POST /v1/auth/logout` (refresh token + FCM token + bearer)
+  revokes the session and drops the device's push registration.
+- **The `lunch` intent is shown as MEAL** with the sitting named from the
+  local start hour (breakfast / lunch / evening meal / dinner / late-night
+  meal). The wire value stays `lunch`.
+
 ## Building the app for devices
 
 From `frontend/`, use `./build.sh <prod-android|prod-ios|emulator|simulator>`

@@ -255,6 +255,22 @@ type Querier interface {
 	// (ADR-024 §2). ON CONFLICT DO NOTHING rather than upsert-with-RETURNING
 	// since callers always follow this with a plain Get.
 	EnsureSafetyState(ctx context.Context, arg EnsureSafetyStateParams) error
+	// The one-meetup-at-a-time rule (2026-09-15): the earliest live meetup the
+	// user is already committed to that overlaps [window_start, window_end).
+	// "Committed" is hosting it, or holding a pending or accepted request on
+	// it — a pending request counts because accepting it later must never be
+	// what creates a double booking. "Live" is open/full and not yet over, so
+	// a finished or cancelled meetup never blocks anything. exclude_id keeps a
+	// join attempt from colliding with the very meetup being joined (a repeat
+	// request on the same meetup is the requests table's own conflict, with
+	// its own message). Half-open overlap, so back-to-back windows are fine.
+	// Same joined shape as ListMeetupsByHost so it converts through the same
+	// code; my_request_status is read so the caller can say "you asked to
+	// join" versus "you're hosting".
+	// LIVE, defined here, in the service's ListActiveMeetups isLive closure,
+	// and (as BROWSABLE, 'open' only) in ListOpenMeetupsFirstPage/AfterCursor
+	// above. Keep the three in step.
+	FindScheduleConflict(ctx context.Context, arg FindScheduleConflictParams) (FindScheduleConflictRow, error)
 	// my_request_status is the *latest* request this specific user (viewerID)
 	// has made on this meetup, or NULL if they never requested — the frontend
 	// uses this to render "REQUEST TO JOIN" vs. the request's current status
@@ -490,6 +506,16 @@ type Querier interface {
 	// than 500 nearby users in one fan-out is worth capping regardless of how
 	// fast the lookup itself is.
 	ListUserLocationCacheWithinRadius(ctx context.Context, arg ListUserLocationCacheWithinRadiusParams) ([]ListUserLocationCacheWithinRadiusRow, error)
+	// Serialises one person's schedule writes (Plan 19). Taken as the first
+	// statement of the transaction that will read FindScheduleConflict and
+	// then insert, so two concurrent creates or requests from the same person
+	// queue behind each other and the second sees the first's committed row.
+	// A transaction-scoped advisory lock: released at commit or rollback, no
+	// row or constraint involved, so it is safe against the overlapping rows
+	// already in production. hashtext folds the UUID's text into the int4 key
+	// space; a collision between two users only makes them wait for each
+	// other briefly (a false serialisation), never lets a conflict through.
+	LockUserSchedule(ctx context.Context, userID string) error
 	MarkMeetupFull(ctx context.Context, id uuid.UUID) error
 	// Terminal. Leaves the claimable partial index and is never attempted again,
 	// but the row is kept: a permanent failure here means some users' profile

@@ -11,6 +11,7 @@ import 'package:professional_connections_platform/core/widgets/app_background.da
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/schedule_conflict_sheet.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
@@ -132,6 +133,18 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       if (mounted) {
         ref.read(authSessionProvider.notifier).forceSignOut();
       }
+    } on MeetupScheduleConflictException catch (error) {
+      // Already committed elsewhere in this window — see the sheet.
+      if (mounted) await showScheduleConflictSheet(context, error: error);
+    } on MeetupForbiddenException catch (error) {
+      // The server's trust gate: the button's own check uses the profile
+      // in memory, which can lag a verification. Same destination as the
+      // locked button.
+      if (!mounted) return;
+      showSnack(context, error.message, type: ToastType.locked);
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
+      );
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -251,7 +264,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       onPressed: () {
         showSnack(
           context,
-          '${meetup.intent.label} requires Level ${meetup.intent.requiredTrustLevelToJoin} trust. Verify your phone, personal email, and details to unlock it.',
+          meetup.intent.joinLockedMessage,
           type: ToastType.locked,
         );
         Navigator.of(context).push(
@@ -482,7 +495,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
-                                      meetup.intent.label.toUpperCase(),
+                                      meetup.intentLabel,
                                       style: TextStyle(
                                         color: AppPalette.textSecondary,
                                         fontSize: 10.5,
@@ -977,9 +990,14 @@ class _SafetyGateSection extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
               ],
+              // Accent on the label and the border so it reads as the
+              // action it is, not as a caption under the card's copy.
               SecondaryButton(
                 label: sharedCount > 0 ? 'TELL SOMEONE ELSE' : 'TELL SOMEONE',
-                height: 42,
+                icon: Icons.ios_share_rounded,
+                height: 44,
+                color: AppPalette.candyBlue,
+                borderColor: AppPalette.candyBlue.withValues(alpha: 0.6),
                 onPressed: onShareWithContacts,
               ),
             ],

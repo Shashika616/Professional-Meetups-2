@@ -168,7 +168,7 @@ func (s *service) DeclineCheckIn(ctx context.Context, req DeclineCheckInRequest)
 			return queueNotification(ctx, tx, m.HostUserID,
 				TypeParticipantDeclined,
 				"Participant declined",
-				fmt.Sprintf("A participant declined the safety checklist for your %s meetup: %s", m.Intent, reason),
+				fmt.Sprintf("A participant declined the safety checklist for your %s meetup: %s", Intent(m.Intent).DisplayName(), reason),
 				map[string]string{"meetup_id": m.ID},
 			)
 		})

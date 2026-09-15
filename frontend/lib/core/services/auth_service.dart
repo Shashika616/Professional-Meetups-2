@@ -85,7 +85,18 @@ abstract interface class AuthService {
   Future<int> startEmailSignupOtp(String email);
 
   Future<AuthSession> refreshSession(String refreshToken);
-  Future<void> logout(String refreshToken);
+
+  /// Ends the session server-side: the refresh token is revoked, and when
+  /// [fcmToken] is given with the still-valid [accessToken] the server also
+  /// drops this device's push registration for the account, so a
+  /// signed-out phone goes quiet. One request for both, because the app
+  /// runs it after the local sign-out has already happened and nothing
+  /// waits on it.
+  Future<void> logout(
+    String refreshToken, {
+    String? accessToken,
+    String? fcmToken,
+  });
 
   /// Returns the server's resend cooldown, in seconds — the client's own
   /// countdown timer is seeded from this, never hardcoded, since it's the
@@ -411,7 +422,11 @@ class MockAuthService implements AuthService {
   }
 
   @override
-  Future<void> logout(String refreshToken) async {
+  Future<void> logout(
+    String refreshToken, {
+    String? accessToken,
+    String? fcmToken,
+  }) async {
     await Future<void>.delayed(latency);
   }
 

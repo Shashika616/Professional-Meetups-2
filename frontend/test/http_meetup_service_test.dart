@@ -195,4 +195,95 @@ void main() {
       },
     );
   });
+
+  group('schedule conflict (409 with code schedule_conflict)', () {
+    Map<String, Object?> conflictBody({Object? conflict}) => {
+      'error': 'You are already hosting a meetup at that time.',
+      'code': 'schedule_conflict',
+      'conflict': conflict,
+    };
+
+    test('carries the meetup in the way as a typed exception', () async {
+      final client = MockClient(
+        (request) async => http.Response(
+          jsonEncode(
+            conflictBody(
+              conflict: {
+                'id': 'busy-1',
+                'host_user_id': 'me',
+                'intent': 'coffee',
+                'window_start_unix_seconds': 1757000000,
+                'window_end_unix_seconds': 1757003600,
+                'location_label': 'Cafe',
+                'capacity': 2,
+                'status': 'open',
+                'created_at_unix_seconds': 1756990000,
+                'is_hosted_by_me': true,
+              },
+            ),
+          ),
+          409,
+        ),
+      );
+
+      await expectLater(
+        _serviceWith(client).requestToJoin('meetup-2'),
+        throwsA(
+          isA<MeetupScheduleConflictException>()
+              .having((e) => e.conflict.id, 'conflict.id', 'busy-1')
+              .having((e) => e.conflict.isHostedByMe, 'hosted', isTrue)
+              .having(
+                (e) => e.message,
+                'message',
+                'You are already hosting a meetup at that time.',
+              ),
+        ),
+      );
+    });
+
+    test('a plain 409 stays a plain MeetupConflictException', () async {
+      final client = MockClient(
+        (request) async =>
+            http.Response(jsonEncode({'error': 'Meetup is not open.'}), 409),
+      );
+
+      await expectLater(
+        _serviceWith(client).requestToJoin('meetup-2'),
+        throwsA(
+          isA<MeetupConflictException>().having(
+            (e) => e is MeetupScheduleConflictException,
+            'is schedule conflict',
+            isFalse,
+          ),
+        ),
+      );
+    });
+
+    test('a malformed conflict falls back to the plain 409 with its '
+        'sentence intact', () async {
+      final client = MockClient(
+        (request) async => http.Response(
+          jsonEncode(conflictBody(conflict: {'id': 'busy-1'})),
+          409,
+        ),
+      );
+
+      await expectLater(
+        _serviceWith(client).requestToJoin('meetup-2'),
+        throwsA(
+          isA<MeetupConflictException>()
+              .having(
+                (e) => e is MeetupScheduleConflictException,
+                'is schedule conflict',
+                isFalse,
+              )
+              .having(
+                (e) => e.message,
+                'message',
+                'You are already hosting a meetup at that time.',
+              ),
+        ),
+      );
+    });
+  });
 }

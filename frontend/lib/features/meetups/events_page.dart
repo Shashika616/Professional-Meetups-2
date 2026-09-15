@@ -705,7 +705,7 @@ class _MyMeetupTile extends StatelessWidget {
                               const SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  meetup.intent.label.toUpperCase(),
+                                  meetup.intentLabel,
                                   style: TextStyle(
                                     color: AppPalette.textSecondary,
                                     fontSize: 10.5,
@@ -1001,7 +1001,7 @@ class _RequestManagementPageState
                           children: [
                             Expanded(
                               child: Text(
-                                _meetup.intent.label,
+                                _meetup.intentLabel,
                                 style: TextStyle(
                                   color: AppPalette.candyBlue,
                                   fontSize: 11,
@@ -1222,10 +1222,16 @@ class _RequestCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
+                  // The softer red (the cancelled-meetup tone, border
+                  // eased), the same treatment as CANCEL REQUEST: a
+                  // decline, visibly a button, but not an alarm next to
+                  // ACCEPT.
                   Expanded(
                     child: SecondaryButton(
                       label: 'REJECT',
                       height: 40,
+                      color: AppPalette.cancelled,
+                      borderColor: AppPalette.cancelled.withValues(alpha: 0.55),
                       onPressed: () => onRespond(request, false),
                     ),
                   ),

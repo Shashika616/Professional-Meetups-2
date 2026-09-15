@@ -13,12 +13,18 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 ///
 /// Reads only what the server already sends (`isHostedByMe`,
 /// `myRequestStatus`, `hostFullName`); nothing here is inferred.
+///
+/// [concluded] switches the wording to the past tense for a meetup that is
+/// over or called off (the review and cancelled decks): "YOU HOSTED" and
+/// "YOU JOINED" rather than "YOU'RE HOSTING" and "YOU'RE IN", because a
+/// present-tense chip on a finished meetup reads as if it were still on.
 class MeetupRoleChips extends StatelessWidget {
   const MeetupRoleChips({
     super.key,
     required this.meetup,
     this.compact = false,
     this.showHostName = true,
+    this.concluded = false,
   });
 
   final Meetup meetup;
@@ -30,6 +36,9 @@ class MeetupRoleChips extends StatelessWidget {
   /// already the host's name only needs the HOST tag.
   final bool showHostName;
 
+  /// Past tense: the meetup has ended or was cancelled.
+  final bool concluded;
+
   @override
   Widget build(BuildContext context) {
     final chips = <Widget>[];
@@ -37,19 +46,23 @@ class MeetupRoleChips extends StatelessWidget {
       chips.add(
         _RoleChip(
           icon: Icons.star_rounded,
-          label: 'YOU\'RE HOSTING',
+          label: concluded ? 'YOU HOSTED' : 'YOU\'RE HOSTING',
           tone: AppPalette.brandGreen,
           compact: compact,
         ),
       );
     } else {
       final host = meetup.hostFullName;
+      final named = showHostName && host != null && host.isNotEmpty;
       chips.add(
         _RoleChip(
           icon: Icons.person_rounded,
-          label: showHostName && host != null && host.isNotEmpty
-              ? 'HOST · ${host.toUpperCase()}'
-              : 'HOST',
+          label: switch ((concluded, named)) {
+            (true, true) => 'HOSTED BY ${host!.toUpperCase()}',
+            (true, false) => 'HOSTED',
+            (false, true) => 'HOST · ${host!.toUpperCase()}',
+            (false, false) => 'HOST',
+          },
           tone: AppPalette.textSecondary,
           compact: compact,
         ),
@@ -58,12 +71,14 @@ class MeetupRoleChips extends StatelessWidget {
       if (status != null) {
         final (label, icon, tone) = switch (status) {
           MeetupRequestStatus.accepted => (
-            'YOU\'RE IN',
+            concluded ? 'YOU JOINED' : 'YOU\'RE IN',
             Icons.check_circle_rounded,
             AppPalette.verified,
           ),
+          // A request nobody answered before the meetup ended or was
+          // called off is no longer pending anything.
           MeetupRequestStatus.pending => (
-            'REQUEST PENDING',
+            concluded ? 'NOT ANSWERED' : 'REQUEST PENDING',
             Icons.hourglass_top_rounded,
             AppPalette.gold,
           ),

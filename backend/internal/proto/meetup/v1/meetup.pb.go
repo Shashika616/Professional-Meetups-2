@@ -595,6 +595,57 @@ func (x *MeetupResponse) GetLockedForViewer() bool {
 	return false
 }
 
+// ScheduleConflict rides on the ALREADY_EXISTS status that CreateMeetup and
+// RequestToJoin return when the caller is already committed elsewhere in
+// the requested window (hosting, or with a pending/accepted request) — as a
+// status detail, not a response field, because the call did not succeed.
+// The gateway turns it into the `conflict` object of the 409 body so the
+// app can show WHICH meetup is in the way rather than only a sentence.
+// Always the caller's own meetup, so nothing here is new to them.
+type ScheduleConflict struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Meetup        *MeetupResponse        `protobuf:"bytes,1,opt,name=meetup,proto3" json:"meetup,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScheduleConflict) Reset() {
+	*x = ScheduleConflict{}
+	mi := &file_meetup_v1_meetup_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScheduleConflict) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScheduleConflict) ProtoMessage() {}
+
+func (x *ScheduleConflict) ProtoReflect() protoreflect.Message {
+	mi := &file_meetup_v1_meetup_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScheduleConflict.ProtoReflect.Descriptor instead.
+func (*ScheduleConflict) Descriptor() ([]byte, []int) {
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ScheduleConflict) GetMeetup() *MeetupResponse {
+	if x != nil {
+		return x.Meetup
+	}
+	return nil
+}
+
 type ListOpenMeetupsRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	UserId string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -632,7 +683,7 @@ type ListOpenMeetupsRequest struct {
 
 func (x *ListOpenMeetupsRequest) Reset() {
 	*x = ListOpenMeetupsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[2]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -644,7 +695,7 @@ func (x *ListOpenMeetupsRequest) String() string {
 func (*ListOpenMeetupsRequest) ProtoMessage() {}
 
 func (x *ListOpenMeetupsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[2]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -657,7 +708,7 @@ func (x *ListOpenMeetupsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListOpenMeetupsRequest.ProtoReflect.Descriptor instead.
 func (*ListOpenMeetupsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{2}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ListOpenMeetupsRequest) GetUserId() string {
@@ -726,7 +777,7 @@ type ListOpenMeetupsResponse struct {
 
 func (x *ListOpenMeetupsResponse) Reset() {
 	*x = ListOpenMeetupsResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[3]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -738,7 +789,7 @@ func (x *ListOpenMeetupsResponse) String() string {
 func (*ListOpenMeetupsResponse) ProtoMessage() {}
 
 func (x *ListOpenMeetupsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[3]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -751,7 +802,7 @@ func (x *ListOpenMeetupsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListOpenMeetupsResponse.ProtoReflect.Descriptor instead.
 func (*ListOpenMeetupsResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{3}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ListOpenMeetupsResponse) GetMeetups() []*MeetupResponse {
@@ -786,7 +837,7 @@ type GetMeetupRequest struct {
 
 func (x *GetMeetupRequest) Reset() {
 	*x = GetMeetupRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[4]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -798,7 +849,7 @@ func (x *GetMeetupRequest) String() string {
 func (*GetMeetupRequest) ProtoMessage() {}
 
 func (x *GetMeetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[4]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -811,7 +862,7 @@ func (x *GetMeetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMeetupRequest.ProtoReflect.Descriptor instead.
 func (*GetMeetupRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{4}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetMeetupRequest) GetMeetupId() string {
@@ -849,7 +900,7 @@ type ListMyMeetupsRequest struct {
 
 func (x *ListMyMeetupsRequest) Reset() {
 	*x = ListMyMeetupsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[5]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -861,7 +912,7 @@ func (x *ListMyMeetupsRequest) String() string {
 func (*ListMyMeetupsRequest) ProtoMessage() {}
 
 func (x *ListMyMeetupsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[5]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -874,7 +925,7 @@ func (x *ListMyMeetupsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMyMeetupsRequest.ProtoReflect.Descriptor instead.
 func (*ListMyMeetupsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{5}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListMyMeetupsRequest) GetUserId() string {
@@ -912,7 +963,7 @@ type ListMyMeetupsResponse struct {
 
 func (x *ListMyMeetupsResponse) Reset() {
 	*x = ListMyMeetupsResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[6]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -924,7 +975,7 @@ func (x *ListMyMeetupsResponse) String() string {
 func (*ListMyMeetupsResponse) ProtoMessage() {}
 
 func (x *ListMyMeetupsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[6]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -937,7 +988,7 @@ func (x *ListMyMeetupsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMyMeetupsResponse.ProtoReflect.Descriptor instead.
 func (*ListMyMeetupsResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{6}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListMyMeetupsResponse) GetHosted() []*MeetupResponse {
@@ -991,7 +1042,7 @@ type ListActiveMeetupsRequest struct {
 
 func (x *ListActiveMeetupsRequest) Reset() {
 	*x = ListActiveMeetupsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[7]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1003,7 +1054,7 @@ func (x *ListActiveMeetupsRequest) String() string {
 func (*ListActiveMeetupsRequest) ProtoMessage() {}
 
 func (x *ListActiveMeetupsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[7]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1016,7 +1067,7 @@ func (x *ListActiveMeetupsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListActiveMeetupsRequest.ProtoReflect.Descriptor instead.
 func (*ListActiveMeetupsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{7}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListActiveMeetupsRequest) GetUserId() string {
@@ -1036,7 +1087,7 @@ type ListActiveMeetupsResponse struct {
 
 func (x *ListActiveMeetupsResponse) Reset() {
 	*x = ListActiveMeetupsResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[8]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1048,7 +1099,7 @@ func (x *ListActiveMeetupsResponse) String() string {
 func (*ListActiveMeetupsResponse) ProtoMessage() {}
 
 func (x *ListActiveMeetupsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[8]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1061,7 +1112,7 @@ func (x *ListActiveMeetupsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListActiveMeetupsResponse.ProtoReflect.Descriptor instead.
 func (*ListActiveMeetupsResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{8}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ListActiveMeetupsResponse) GetMeetups() []*MeetupResponse {
@@ -1081,7 +1132,7 @@ type ListMeetupRequestsRequest struct {
 
 func (x *ListMeetupRequestsRequest) Reset() {
 	*x = ListMeetupRequestsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[9]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1093,7 +1144,7 @@ func (x *ListMeetupRequestsRequest) String() string {
 func (*ListMeetupRequestsRequest) ProtoMessage() {}
 
 func (x *ListMeetupRequestsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[9]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1106,7 +1157,7 @@ func (x *ListMeetupRequestsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMeetupRequestsRequest.ProtoReflect.Descriptor instead.
 func (*ListMeetupRequestsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{9}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ListMeetupRequestsRequest) GetMeetupId() string {
@@ -1132,7 +1183,7 @@ type ListMeetupRequestsResponse struct {
 
 func (x *ListMeetupRequestsResponse) Reset() {
 	*x = ListMeetupRequestsResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[10]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1144,7 +1195,7 @@ func (x *ListMeetupRequestsResponse) String() string {
 func (*ListMeetupRequestsResponse) ProtoMessage() {}
 
 func (x *ListMeetupRequestsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[10]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1157,7 +1208,7 @@ func (x *ListMeetupRequestsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMeetupRequestsResponse.ProtoReflect.Descriptor instead.
 func (*ListMeetupRequestsResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{10}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ListMeetupRequestsResponse) GetRequests() []*MeetupRequestResponse {
@@ -1178,7 +1229,7 @@ type RequestToJoinRequest struct {
 
 func (x *RequestToJoinRequest) Reset() {
 	*x = RequestToJoinRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[11]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1190,7 +1241,7 @@ func (x *RequestToJoinRequest) String() string {
 func (*RequestToJoinRequest) ProtoMessage() {}
 
 func (x *RequestToJoinRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[11]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1203,7 +1254,7 @@ func (x *RequestToJoinRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RequestToJoinRequest.ProtoReflect.Descriptor instead.
 func (*RequestToJoinRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{11}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RequestToJoinRequest) GetMeetupId() string {
@@ -1261,7 +1312,7 @@ type MeetupRequestResponse struct {
 
 func (x *MeetupRequestResponse) Reset() {
 	*x = MeetupRequestResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[12]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1273,7 +1324,7 @@ func (x *MeetupRequestResponse) String() string {
 func (*MeetupRequestResponse) ProtoMessage() {}
 
 func (x *MeetupRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[12]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1286,7 +1337,7 @@ func (x *MeetupRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeetupRequestResponse.ProtoReflect.Descriptor instead.
 func (*MeetupRequestResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{12}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *MeetupRequestResponse) GetId() string {
@@ -1414,7 +1465,7 @@ type WithdrawRequestRequest struct {
 
 func (x *WithdrawRequestRequest) Reset() {
 	*x = WithdrawRequestRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[13]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1426,7 +1477,7 @@ func (x *WithdrawRequestRequest) String() string {
 func (*WithdrawRequestRequest) ProtoMessage() {}
 
 func (x *WithdrawRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[13]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1439,7 +1490,7 @@ func (x *WithdrawRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WithdrawRequestRequest.ProtoReflect.Descriptor instead.
 func (*WithdrawRequestRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{13}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *WithdrawRequestRequest) GetRequestId() string {
@@ -1472,7 +1523,7 @@ type WithdrawRequestResponse struct {
 
 func (x *WithdrawRequestResponse) Reset() {
 	*x = WithdrawRequestResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[14]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1484,7 +1535,7 @@ func (x *WithdrawRequestResponse) String() string {
 func (*WithdrawRequestResponse) ProtoMessage() {}
 
 func (x *WithdrawRequestResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[14]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1497,7 +1548,7 @@ func (x *WithdrawRequestResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WithdrawRequestResponse.ProtoReflect.Descriptor instead.
 func (*WithdrawRequestResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{14}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *WithdrawRequestResponse) GetSuccess() bool {
@@ -1518,7 +1569,7 @@ type RespondToRequestRequest struct {
 
 func (x *RespondToRequestRequest) Reset() {
 	*x = RespondToRequestRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[15]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1530,7 +1581,7 @@ func (x *RespondToRequestRequest) String() string {
 func (*RespondToRequestRequest) ProtoMessage() {}
 
 func (x *RespondToRequestRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[15]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1543,7 +1594,7 @@ func (x *RespondToRequestRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RespondToRequestRequest.ProtoReflect.Descriptor instead.
 func (*RespondToRequestRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{15}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *RespondToRequestRequest) GetRequestId() string {
@@ -1577,7 +1628,7 @@ type RegisterDeviceTokenRequest struct {
 
 func (x *RegisterDeviceTokenRequest) Reset() {
 	*x = RegisterDeviceTokenRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[16]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1589,7 +1640,7 @@ func (x *RegisterDeviceTokenRequest) String() string {
 func (*RegisterDeviceTokenRequest) ProtoMessage() {}
 
 func (x *RegisterDeviceTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[16]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1602,7 +1653,7 @@ func (x *RegisterDeviceTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterDeviceTokenRequest.ProtoReflect.Descriptor instead.
 func (*RegisterDeviceTokenRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{16}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RegisterDeviceTokenRequest) GetUserId() string {
@@ -1628,7 +1679,7 @@ type RegisterDeviceTokenResponse struct {
 
 func (x *RegisterDeviceTokenResponse) Reset() {
 	*x = RegisterDeviceTokenResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[17]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1640,7 +1691,7 @@ func (x *RegisterDeviceTokenResponse) String() string {
 func (*RegisterDeviceTokenResponse) ProtoMessage() {}
 
 func (x *RegisterDeviceTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[17]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1653,7 +1704,7 @@ func (x *RegisterDeviceTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterDeviceTokenResponse.ProtoReflect.Descriptor instead.
 func (*RegisterDeviceTokenResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{17}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RegisterDeviceTokenResponse) GetSuccess() bool {
@@ -1673,7 +1724,7 @@ type UnregisterDeviceTokenRequest struct {
 
 func (x *UnregisterDeviceTokenRequest) Reset() {
 	*x = UnregisterDeviceTokenRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[18]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1685,7 +1736,7 @@ func (x *UnregisterDeviceTokenRequest) String() string {
 func (*UnregisterDeviceTokenRequest) ProtoMessage() {}
 
 func (x *UnregisterDeviceTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[18]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1698,7 +1749,7 @@ func (x *UnregisterDeviceTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterDeviceTokenRequest.ProtoReflect.Descriptor instead.
 func (*UnregisterDeviceTokenRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{18}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *UnregisterDeviceTokenRequest) GetUserId() string {
@@ -1724,7 +1775,7 @@ type UnregisterDeviceTokenResponse struct {
 
 func (x *UnregisterDeviceTokenResponse) Reset() {
 	*x = UnregisterDeviceTokenResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[19]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1736,7 +1787,7 @@ func (x *UnregisterDeviceTokenResponse) String() string {
 func (*UnregisterDeviceTokenResponse) ProtoMessage() {}
 
 func (x *UnregisterDeviceTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[19]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1749,7 +1800,7 @@ func (x *UnregisterDeviceTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnregisterDeviceTokenResponse.ProtoReflect.Descriptor instead.
 func (*UnregisterDeviceTokenResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{19}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *UnregisterDeviceTokenResponse) GetSuccess() bool {
@@ -1772,7 +1823,7 @@ type GetSafetyStateRequest struct {
 
 func (x *GetSafetyStateRequest) Reset() {
 	*x = GetSafetyStateRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[20]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1784,7 +1835,7 @@ func (x *GetSafetyStateRequest) String() string {
 func (*GetSafetyStateRequest) ProtoMessage() {}
 
 func (x *GetSafetyStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[20]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1797,7 +1848,7 @@ func (x *GetSafetyStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSafetyStateRequest.ProtoReflect.Descriptor instead.
 func (*GetSafetyStateRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{20}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *GetSafetyStateRequest) GetMeetupId() string {
@@ -1824,7 +1875,7 @@ type AcknowledgeSafetyChecklistRequest struct {
 
 func (x *AcknowledgeSafetyChecklistRequest) Reset() {
 	*x = AcknowledgeSafetyChecklistRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[21]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1836,7 +1887,7 @@ func (x *AcknowledgeSafetyChecklistRequest) String() string {
 func (*AcknowledgeSafetyChecklistRequest) ProtoMessage() {}
 
 func (x *AcknowledgeSafetyChecklistRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[21]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1849,7 +1900,7 @@ func (x *AcknowledgeSafetyChecklistRequest) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use AcknowledgeSafetyChecklistRequest.ProtoReflect.Descriptor instead.
 func (*AcknowledgeSafetyChecklistRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{21}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *AcknowledgeSafetyChecklistRequest) GetMeetupId() string {
@@ -1877,7 +1928,7 @@ type SetLiveLocationOptInRequest struct {
 
 func (x *SetLiveLocationOptInRequest) Reset() {
 	*x = SetLiveLocationOptInRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[22]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1889,7 +1940,7 @@ func (x *SetLiveLocationOptInRequest) String() string {
 func (*SetLiveLocationOptInRequest) ProtoMessage() {}
 
 func (x *SetLiveLocationOptInRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[22]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1902,7 +1953,7 @@ func (x *SetLiveLocationOptInRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetLiveLocationOptInRequest.ProtoReflect.Descriptor instead.
 func (*SetLiveLocationOptInRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{22}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SetLiveLocationOptInRequest) GetMeetupId() string {
@@ -1940,7 +1991,7 @@ type ShareWithContactsRequest struct {
 
 func (x *ShareWithContactsRequest) Reset() {
 	*x = ShareWithContactsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[23]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1952,7 +2003,7 @@ func (x *ShareWithContactsRequest) String() string {
 func (*ShareWithContactsRequest) ProtoMessage() {}
 
 func (x *ShareWithContactsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[23]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1965,7 +2016,7 @@ func (x *ShareWithContactsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShareWithContactsRequest.ProtoReflect.Descriptor instead.
 func (*ShareWithContactsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{23}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ShareWithContactsRequest) GetMeetupId() string {
@@ -1999,7 +2050,7 @@ type CheckInRequest struct {
 
 func (x *CheckInRequest) Reset() {
 	*x = CheckInRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[24]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2011,7 +2062,7 @@ func (x *CheckInRequest) String() string {
 func (*CheckInRequest) ProtoMessage() {}
 
 func (x *CheckInRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[24]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2024,7 +2075,7 @@ func (x *CheckInRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckInRequest.ProtoReflect.Descriptor instead.
 func (*CheckInRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{24}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *CheckInRequest) GetMeetupId() string {
@@ -2054,7 +2105,7 @@ type DeclineCheckInRequest struct {
 
 func (x *DeclineCheckInRequest) Reset() {
 	*x = DeclineCheckInRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[25]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2066,7 +2117,7 @@ func (x *DeclineCheckInRequest) String() string {
 func (*DeclineCheckInRequest) ProtoMessage() {}
 
 func (x *DeclineCheckInRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[25]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2079,7 +2130,7 @@ func (x *DeclineCheckInRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeclineCheckInRequest.ProtoReflect.Descriptor instead.
 func (*DeclineCheckInRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{25}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DeclineCheckInRequest) GetMeetupId() string {
@@ -2123,7 +2174,7 @@ type SafetyStateResponse struct {
 
 func (x *SafetyStateResponse) Reset() {
 	*x = SafetyStateResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[26]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2135,7 +2186,7 @@ func (x *SafetyStateResponse) String() string {
 func (*SafetyStateResponse) ProtoMessage() {}
 
 func (x *SafetyStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[26]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2148,7 +2199,7 @@ func (x *SafetyStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SafetyStateResponse.ProtoReflect.Descriptor instead.
 func (*SafetyStateResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{26}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *SafetyStateResponse) GetMeetupId() string {
@@ -2219,7 +2270,7 @@ type SubmitMeetupFeedbackRequest struct {
 
 func (x *SubmitMeetupFeedbackRequest) Reset() {
 	*x = SubmitMeetupFeedbackRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[27]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2231,7 +2282,7 @@ func (x *SubmitMeetupFeedbackRequest) String() string {
 func (*SubmitMeetupFeedbackRequest) ProtoMessage() {}
 
 func (x *SubmitMeetupFeedbackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[27]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2244,7 +2295,7 @@ func (x *SubmitMeetupFeedbackRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitMeetupFeedbackRequest.ProtoReflect.Descriptor instead.
 func (*SubmitMeetupFeedbackRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{27}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *SubmitMeetupFeedbackRequest) GetMeetupId() string {
@@ -2305,7 +2356,7 @@ type SubmitMeetupFeedbackResponse struct {
 
 func (x *SubmitMeetupFeedbackResponse) Reset() {
 	*x = SubmitMeetupFeedbackResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[28]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2317,7 +2368,7 @@ func (x *SubmitMeetupFeedbackResponse) String() string {
 func (*SubmitMeetupFeedbackResponse) ProtoMessage() {}
 
 func (x *SubmitMeetupFeedbackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[28]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2330,7 +2381,7 @@ func (x *SubmitMeetupFeedbackResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitMeetupFeedbackResponse.ProtoReflect.Descriptor instead.
 func (*SubmitMeetupFeedbackResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{28}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *SubmitMeetupFeedbackResponse) GetSuccess() bool {
@@ -2349,7 +2400,7 @@ type ListNotificationsRequest struct {
 
 func (x *ListNotificationsRequest) Reset() {
 	*x = ListNotificationsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[29]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2361,7 +2412,7 @@ func (x *ListNotificationsRequest) String() string {
 func (*ListNotificationsRequest) ProtoMessage() {}
 
 func (x *ListNotificationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[29]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2374,7 +2425,7 @@ func (x *ListNotificationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNotificationsRequest.ProtoReflect.Descriptor instead.
 func (*ListNotificationsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{29}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ListNotificationsRequest) GetUserId() string {
@@ -2393,7 +2444,7 @@ type ListNotificationsResponse struct {
 
 func (x *ListNotificationsResponse) Reset() {
 	*x = ListNotificationsResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[30]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2405,7 +2456,7 @@ func (x *ListNotificationsResponse) String() string {
 func (*ListNotificationsResponse) ProtoMessage() {}
 
 func (x *ListNotificationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[30]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2418,7 +2469,7 @@ func (x *ListNotificationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNotificationsResponse.ProtoReflect.Descriptor instead.
 func (*ListNotificationsResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{30}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ListNotificationsResponse) GetNotifications() []*UserNotification {
@@ -2447,7 +2498,7 @@ type UserNotification struct {
 
 func (x *UserNotification) Reset() {
 	*x = UserNotification{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[31]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2459,7 +2510,7 @@ func (x *UserNotification) String() string {
 func (*UserNotification) ProtoMessage() {}
 
 func (x *UserNotification) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[31]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2472,7 +2523,7 @@ func (x *UserNotification) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserNotification.ProtoReflect.Descriptor instead.
 func (*UserNotification) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{31}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *UserNotification) GetId() string {
@@ -2535,7 +2586,7 @@ type ListMeetupParticipantsRequest struct {
 
 func (x *ListMeetupParticipantsRequest) Reset() {
 	*x = ListMeetupParticipantsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[32]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2547,7 +2598,7 @@ func (x *ListMeetupParticipantsRequest) String() string {
 func (*ListMeetupParticipantsRequest) ProtoMessage() {}
 
 func (x *ListMeetupParticipantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[32]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2560,7 +2611,7 @@ func (x *ListMeetupParticipantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMeetupParticipantsRequest.ProtoReflect.Descriptor instead.
 func (*ListMeetupParticipantsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{32}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ListMeetupParticipantsRequest) GetMeetupId() string {
@@ -2600,7 +2651,7 @@ type ListMeetupParticipantsResponse struct {
 
 func (x *ListMeetupParticipantsResponse) Reset() {
 	*x = ListMeetupParticipantsResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[33]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2612,7 +2663,7 @@ func (x *ListMeetupParticipantsResponse) String() string {
 func (*ListMeetupParticipantsResponse) ProtoMessage() {}
 
 func (x *ListMeetupParticipantsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[33]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2625,7 +2676,7 @@ func (x *ListMeetupParticipantsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListMeetupParticipantsResponse.ProtoReflect.Descriptor instead.
 func (*ListMeetupParticipantsResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{33}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListMeetupParticipantsResponse) GetParticipants() []*MeetupParticipant {
@@ -2659,7 +2710,7 @@ type GetMemberActivityRequest struct {
 
 func (x *GetMemberActivityRequest) Reset() {
 	*x = GetMemberActivityRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[34]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2671,7 +2722,7 @@ func (x *GetMemberActivityRequest) String() string {
 func (*GetMemberActivityRequest) ProtoMessage() {}
 
 func (x *GetMemberActivityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[34]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2684,7 +2735,7 @@ func (x *GetMemberActivityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMemberActivityRequest.ProtoReflect.Descriptor instead.
 func (*GetMemberActivityRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{34}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *GetMemberActivityRequest) GetViewerId() string {
@@ -2710,7 +2761,7 @@ type GetMemberActivityResponse struct {
 
 func (x *GetMemberActivityResponse) Reset() {
 	*x = GetMemberActivityResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[35]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2722,7 +2773,7 @@ func (x *GetMemberActivityResponse) String() string {
 func (*GetMemberActivityResponse) ProtoMessage() {}
 
 func (x *GetMemberActivityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[35]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2735,7 +2786,7 @@ func (x *GetMemberActivityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMemberActivityResponse.ProtoReflect.Descriptor instead.
 func (*GetMemberActivityResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{35}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetMemberActivityResponse) GetRecentMeetups() []*MemberMeetup {
@@ -2769,7 +2820,7 @@ type MemberMeetup struct {
 
 func (x *MemberMeetup) Reset() {
 	*x = MemberMeetup{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[36]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2781,7 +2832,7 @@ func (x *MemberMeetup) String() string {
 func (*MemberMeetup) ProtoMessage() {}
 
 func (x *MemberMeetup) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[36]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2794,7 +2845,7 @@ func (x *MemberMeetup) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberMeetup.ProtoReflect.Descriptor instead.
 func (*MemberMeetup) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{36}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *MemberMeetup) GetId() string {
@@ -2892,7 +2943,7 @@ type MemberMeetupComment struct {
 
 func (x *MemberMeetupComment) Reset() {
 	*x = MemberMeetupComment{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[37]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2904,7 +2955,7 @@ func (x *MemberMeetupComment) String() string {
 func (*MemberMeetupComment) ProtoMessage() {}
 
 func (x *MemberMeetupComment) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[37]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2917,7 +2968,7 @@ func (x *MemberMeetupComment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MemberMeetupComment.ProtoReflect.Descriptor instead.
 func (*MemberMeetupComment) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{37}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *MemberMeetupComment) GetAuthorName() string {
@@ -2957,7 +3008,7 @@ type MeetupParticipant struct {
 
 func (x *MeetupParticipant) Reset() {
 	*x = MeetupParticipant{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[38]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2969,7 +3020,7 @@ func (x *MeetupParticipant) String() string {
 func (*MeetupParticipant) ProtoMessage() {}
 
 func (x *MeetupParticipant) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[38]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2982,7 +3033,7 @@ func (x *MeetupParticipant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeetupParticipant.ProtoReflect.Descriptor instead.
 func (*MeetupParticipant) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{38}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *MeetupParticipant) GetUserId() string {
@@ -3036,7 +3087,7 @@ type ListRatableParticipantsRequest struct {
 
 func (x *ListRatableParticipantsRequest) Reset() {
 	*x = ListRatableParticipantsRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[39]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3048,7 +3099,7 @@ func (x *ListRatableParticipantsRequest) String() string {
 func (*ListRatableParticipantsRequest) ProtoMessage() {}
 
 func (x *ListRatableParticipantsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[39]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3061,7 +3112,7 @@ func (x *ListRatableParticipantsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRatableParticipantsRequest.ProtoReflect.Descriptor instead.
 func (*ListRatableParticipantsRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{39}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ListRatableParticipantsRequest) GetMeetupId() string {
@@ -3106,7 +3157,7 @@ type RatableParticipant struct {
 
 func (x *RatableParticipant) Reset() {
 	*x = RatableParticipant{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[40]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3118,7 +3169,7 @@ func (x *RatableParticipant) String() string {
 func (*RatableParticipant) ProtoMessage() {}
 
 func (x *RatableParticipant) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[40]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3131,7 +3182,7 @@ func (x *RatableParticipant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RatableParticipant.ProtoReflect.Descriptor instead.
 func (*RatableParticipant) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{40}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *RatableParticipant) GetUserId() string {
@@ -3190,7 +3241,7 @@ type ListRatableParticipantsResponse struct {
 
 func (x *ListRatableParticipantsResponse) Reset() {
 	*x = ListRatableParticipantsResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[41]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3202,7 +3253,7 @@ func (x *ListRatableParticipantsResponse) String() string {
 func (*ListRatableParticipantsResponse) ProtoMessage() {}
 
 func (x *ListRatableParticipantsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[41]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3215,7 +3266,7 @@ func (x *ListRatableParticipantsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRatableParticipantsResponse.ProtoReflect.Descriptor instead.
 func (*ListRatableParticipantsResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{41}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *ListRatableParticipantsResponse) GetParticipants() []*RatableParticipant {
@@ -3248,7 +3299,7 @@ type RatingTrait struct {
 
 func (x *RatingTrait) Reset() {
 	*x = RatingTrait{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[42]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3260,7 +3311,7 @@ func (x *RatingTrait) String() string {
 func (*RatingTrait) ProtoMessage() {}
 
 func (x *RatingTrait) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[42]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3273,7 +3324,7 @@ func (x *RatingTrait) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RatingTrait.ProtoReflect.Descriptor instead.
 func (*RatingTrait) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{42}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *RatingTrait) GetKey() string {
@@ -3317,7 +3368,7 @@ type SubmitMeetupReviewRequest struct {
 
 func (x *SubmitMeetupReviewRequest) Reset() {
 	*x = SubmitMeetupReviewRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[43]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3329,7 +3380,7 @@ func (x *SubmitMeetupReviewRequest) String() string {
 func (*SubmitMeetupReviewRequest) ProtoMessage() {}
 
 func (x *SubmitMeetupReviewRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[43]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3342,7 +3393,7 @@ func (x *SubmitMeetupReviewRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitMeetupReviewRequest.ProtoReflect.Descriptor instead.
 func (*SubmitMeetupReviewRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{43}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *SubmitMeetupReviewRequest) GetMeetupId() string {
@@ -3395,7 +3446,7 @@ type ReviewParticipant struct {
 
 func (x *ReviewParticipant) Reset() {
 	*x = ReviewParticipant{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[44]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3407,7 +3458,7 @@ func (x *ReviewParticipant) String() string {
 func (*ReviewParticipant) ProtoMessage() {}
 
 func (x *ReviewParticipant) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[44]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3420,7 +3471,7 @@ func (x *ReviewParticipant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewParticipant.ProtoReflect.Descriptor instead.
 func (*ReviewParticipant) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{44}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *ReviewParticipant) GetUserId() string {
@@ -3453,7 +3504,7 @@ type SubmitMeetupReviewResponse struct {
 
 func (x *SubmitMeetupReviewResponse) Reset() {
 	*x = SubmitMeetupReviewResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[45]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3465,7 +3516,7 @@ func (x *SubmitMeetupReviewResponse) String() string {
 func (*SubmitMeetupReviewResponse) ProtoMessage() {}
 
 func (x *SubmitMeetupReviewResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[45]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3478,7 +3529,7 @@ func (x *SubmitMeetupReviewResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitMeetupReviewResponse.ProtoReflect.Descriptor instead.
 func (*SubmitMeetupReviewResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{45}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *SubmitMeetupReviewResponse) GetSuccess() bool {
@@ -3498,7 +3549,7 @@ type GetMeetupReviewRequest struct {
 
 func (x *GetMeetupReviewRequest) Reset() {
 	*x = GetMeetupReviewRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[46]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3510,7 +3561,7 @@ func (x *GetMeetupReviewRequest) String() string {
 func (*GetMeetupReviewRequest) ProtoMessage() {}
 
 func (x *GetMeetupReviewRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[46]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3523,7 +3574,7 @@ func (x *GetMeetupReviewRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMeetupReviewRequest.ProtoReflect.Descriptor instead.
 func (*GetMeetupReviewRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{46}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *GetMeetupReviewRequest) GetMeetupId() string {
@@ -3554,7 +3605,7 @@ type GetMeetupReviewResponse struct {
 
 func (x *GetMeetupReviewResponse) Reset() {
 	*x = GetMeetupReviewResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[47]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3566,7 +3617,7 @@ func (x *GetMeetupReviewResponse) String() string {
 func (*GetMeetupReviewResponse) ProtoMessage() {}
 
 func (x *GetMeetupReviewResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[47]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3579,7 +3630,7 @@ func (x *GetMeetupReviewResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMeetupReviewResponse.ProtoReflect.Descriptor instead.
 func (*GetMeetupReviewResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{47}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *GetMeetupReviewResponse) GetCompleted() bool {
@@ -3623,7 +3674,7 @@ type ReviewedParticipant struct {
 
 func (x *ReviewedParticipant) Reset() {
 	*x = ReviewedParticipant{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[48]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3635,7 +3686,7 @@ func (x *ReviewedParticipant) String() string {
 func (*ReviewedParticipant) ProtoMessage() {}
 
 func (x *ReviewedParticipant) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[48]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3648,7 +3699,7 @@ func (x *ReviewedParticipant) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReviewedParticipant.ProtoReflect.Descriptor instead.
 func (*ReviewedParticipant) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{48}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ReviewedParticipant) GetUserId() string {
@@ -3698,7 +3749,7 @@ type SubmitRatingRequest struct {
 
 func (x *SubmitRatingRequest) Reset() {
 	*x = SubmitRatingRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[49]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3710,7 +3761,7 @@ func (x *SubmitRatingRequest) String() string {
 func (*SubmitRatingRequest) ProtoMessage() {}
 
 func (x *SubmitRatingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[49]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3723,7 +3774,7 @@ func (x *SubmitRatingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitRatingRequest.ProtoReflect.Descriptor instead.
 func (*SubmitRatingRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{49}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *SubmitRatingRequest) GetMeetupId() string {
@@ -3763,7 +3814,7 @@ type SubmitRatingResponse struct {
 
 func (x *SubmitRatingResponse) Reset() {
 	*x = SubmitRatingResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[50]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3775,7 +3826,7 @@ func (x *SubmitRatingResponse) String() string {
 func (*SubmitRatingResponse) ProtoMessage() {}
 
 func (x *SubmitRatingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[50]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3788,7 +3839,7 @@ func (x *SubmitRatingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitRatingResponse.ProtoReflect.Descriptor instead.
 func (*SubmitRatingResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{50}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *SubmitRatingResponse) GetSuccess() bool {
@@ -3808,7 +3859,7 @@ type CloseMeetupRequest struct {
 
 func (x *CloseMeetupRequest) Reset() {
 	*x = CloseMeetupRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[51]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3820,7 +3871,7 @@ func (x *CloseMeetupRequest) String() string {
 func (*CloseMeetupRequest) ProtoMessage() {}
 
 func (x *CloseMeetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[51]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3833,7 +3884,7 @@ func (x *CloseMeetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseMeetupRequest.ProtoReflect.Descriptor instead.
 func (*CloseMeetupRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{51}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *CloseMeetupRequest) GetMeetupId() string {
@@ -3859,7 +3910,7 @@ type CloseMeetupResponse struct {
 
 func (x *CloseMeetupResponse) Reset() {
 	*x = CloseMeetupResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[52]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3871,7 +3922,7 @@ func (x *CloseMeetupResponse) String() string {
 func (*CloseMeetupResponse) ProtoMessage() {}
 
 func (x *CloseMeetupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[52]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3884,7 +3935,7 @@ func (x *CloseMeetupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseMeetupResponse.ProtoReflect.Descriptor instead.
 func (*CloseMeetupResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{52}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *CloseMeetupResponse) GetMeetup() *MeetupResponse {
@@ -3907,7 +3958,7 @@ type CancelMeetupRequest struct {
 
 func (x *CancelMeetupRequest) Reset() {
 	*x = CancelMeetupRequest{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[53]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3919,7 +3970,7 @@ func (x *CancelMeetupRequest) String() string {
 func (*CancelMeetupRequest) ProtoMessage() {}
 
 func (x *CancelMeetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[53]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3932,7 +3983,7 @@ func (x *CancelMeetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelMeetupRequest.ProtoReflect.Descriptor instead.
 func (*CancelMeetupRequest) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{53}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *CancelMeetupRequest) GetMeetupId() string {
@@ -3965,7 +4016,7 @@ type CancelMeetupResponse struct {
 
 func (x *CancelMeetupResponse) Reset() {
 	*x = CancelMeetupResponse{}
-	mi := &file_meetup_v1_meetup_proto_msgTypes[54]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3977,7 +4028,7 @@ func (x *CancelMeetupResponse) String() string {
 func (*CancelMeetupResponse) ProtoMessage() {}
 
 func (x *CancelMeetupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_meetup_v1_meetup_proto_msgTypes[54]
+	mi := &file_meetup_v1_meetup_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3990,7 +4041,7 @@ func (x *CancelMeetupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CancelMeetupResponse.ProtoReflect.Descriptor instead.
 func (*CancelMeetupResponse) Descriptor() ([]byte, []int) {
-	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{54}
+	return file_meetup_v1_meetup_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *CancelMeetupResponse) GetSuccess() bool {
@@ -4056,7 +4107,9 @@ const file_meetup_v1_meetup_proto_rawDesc = "" +
 	"\x18_window_end_unix_secondsB\x19\n" +
 	"\x17_closed_at_unix_secondsB\x16\n" +
 	"\x14_cancellation_reasonB\x10\n" +
-	"\x0e_my_request_id\"\x9e\x02\n" +
+	"\x0e_my_request_id\"E\n" +
+	"\x10ScheduleConflict\x121\n" +
+	"\x06meetup\x18\x01 \x01(\v2\x19.meetup.v1.MeetupResponseR\x06meetup\"\x9e\x02\n" +
 	"\x16ListOpenMeetupsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12)\n" +
 	"\x06intent\x18\x02 \x01(\x0e2\x11.meetup.v1.IntentR\x06intent\x12\x16\n" +
@@ -4382,149 +4435,151 @@ func file_meetup_v1_meetup_proto_rawDescGZIP() []byte {
 }
 
 var file_meetup_v1_meetup_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_meetup_v1_meetup_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
+var file_meetup_v1_meetup_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
 var file_meetup_v1_meetup_proto_goTypes = []any{
 	(Intent)(0),                               // 0: meetup.v1.Intent
 	(MeetupStatus)(0),                         // 1: meetup.v1.MeetupStatus
 	(MeetupRequestStatus)(0),                  // 2: meetup.v1.MeetupRequestStatus
 	(*CreateMeetupRequest)(nil),               // 3: meetup.v1.CreateMeetupRequest
 	(*MeetupResponse)(nil),                    // 4: meetup.v1.MeetupResponse
-	(*ListOpenMeetupsRequest)(nil),            // 5: meetup.v1.ListOpenMeetupsRequest
-	(*ListOpenMeetupsResponse)(nil),           // 6: meetup.v1.ListOpenMeetupsResponse
-	(*GetMeetupRequest)(nil),                  // 7: meetup.v1.GetMeetupRequest
-	(*ListMyMeetupsRequest)(nil),              // 8: meetup.v1.ListMyMeetupsRequest
-	(*ListMyMeetupsResponse)(nil),             // 9: meetup.v1.ListMyMeetupsResponse
-	(*ListActiveMeetupsRequest)(nil),          // 10: meetup.v1.ListActiveMeetupsRequest
-	(*ListActiveMeetupsResponse)(nil),         // 11: meetup.v1.ListActiveMeetupsResponse
-	(*ListMeetupRequestsRequest)(nil),         // 12: meetup.v1.ListMeetupRequestsRequest
-	(*ListMeetupRequestsResponse)(nil),        // 13: meetup.v1.ListMeetupRequestsResponse
-	(*RequestToJoinRequest)(nil),              // 14: meetup.v1.RequestToJoinRequest
-	(*MeetupRequestResponse)(nil),             // 15: meetup.v1.MeetupRequestResponse
-	(*WithdrawRequestRequest)(nil),            // 16: meetup.v1.WithdrawRequestRequest
-	(*WithdrawRequestResponse)(nil),           // 17: meetup.v1.WithdrawRequestResponse
-	(*RespondToRequestRequest)(nil),           // 18: meetup.v1.RespondToRequestRequest
-	(*RegisterDeviceTokenRequest)(nil),        // 19: meetup.v1.RegisterDeviceTokenRequest
-	(*RegisterDeviceTokenResponse)(nil),       // 20: meetup.v1.RegisterDeviceTokenResponse
-	(*UnregisterDeviceTokenRequest)(nil),      // 21: meetup.v1.UnregisterDeviceTokenRequest
-	(*UnregisterDeviceTokenResponse)(nil),     // 22: meetup.v1.UnregisterDeviceTokenResponse
-	(*GetSafetyStateRequest)(nil),             // 23: meetup.v1.GetSafetyStateRequest
-	(*AcknowledgeSafetyChecklistRequest)(nil), // 24: meetup.v1.AcknowledgeSafetyChecklistRequest
-	(*SetLiveLocationOptInRequest)(nil),       // 25: meetup.v1.SetLiveLocationOptInRequest
-	(*ShareWithContactsRequest)(nil),          // 26: meetup.v1.ShareWithContactsRequest
-	(*CheckInRequest)(nil),                    // 27: meetup.v1.CheckInRequest
-	(*DeclineCheckInRequest)(nil),             // 28: meetup.v1.DeclineCheckInRequest
-	(*SafetyStateResponse)(nil),               // 29: meetup.v1.SafetyStateResponse
-	(*SubmitMeetupFeedbackRequest)(nil),       // 30: meetup.v1.SubmitMeetupFeedbackRequest
-	(*SubmitMeetupFeedbackResponse)(nil),      // 31: meetup.v1.SubmitMeetupFeedbackResponse
-	(*ListNotificationsRequest)(nil),          // 32: meetup.v1.ListNotificationsRequest
-	(*ListNotificationsResponse)(nil),         // 33: meetup.v1.ListNotificationsResponse
-	(*UserNotification)(nil),                  // 34: meetup.v1.UserNotification
-	(*ListMeetupParticipantsRequest)(nil),     // 35: meetup.v1.ListMeetupParticipantsRequest
-	(*ListMeetupParticipantsResponse)(nil),    // 36: meetup.v1.ListMeetupParticipantsResponse
-	(*GetMemberActivityRequest)(nil),          // 37: meetup.v1.GetMemberActivityRequest
-	(*GetMemberActivityResponse)(nil),         // 38: meetup.v1.GetMemberActivityResponse
-	(*MemberMeetup)(nil),                      // 39: meetup.v1.MemberMeetup
-	(*MemberMeetupComment)(nil),               // 40: meetup.v1.MemberMeetupComment
-	(*MeetupParticipant)(nil),                 // 41: meetup.v1.MeetupParticipant
-	(*ListRatableParticipantsRequest)(nil),    // 42: meetup.v1.ListRatableParticipantsRequest
-	(*RatableParticipant)(nil),                // 43: meetup.v1.RatableParticipant
-	(*ListRatableParticipantsResponse)(nil),   // 44: meetup.v1.ListRatableParticipantsResponse
-	(*RatingTrait)(nil),                       // 45: meetup.v1.RatingTrait
-	(*SubmitMeetupReviewRequest)(nil),         // 46: meetup.v1.SubmitMeetupReviewRequest
-	(*ReviewParticipant)(nil),                 // 47: meetup.v1.ReviewParticipant
-	(*SubmitMeetupReviewResponse)(nil),        // 48: meetup.v1.SubmitMeetupReviewResponse
-	(*GetMeetupReviewRequest)(nil),            // 49: meetup.v1.GetMeetupReviewRequest
-	(*GetMeetupReviewResponse)(nil),           // 50: meetup.v1.GetMeetupReviewResponse
-	(*ReviewedParticipant)(nil),               // 51: meetup.v1.ReviewedParticipant
-	(*SubmitRatingRequest)(nil),               // 52: meetup.v1.SubmitRatingRequest
-	(*SubmitRatingResponse)(nil),              // 53: meetup.v1.SubmitRatingResponse
-	(*CloseMeetupRequest)(nil),                // 54: meetup.v1.CloseMeetupRequest
-	(*CloseMeetupResponse)(nil),               // 55: meetup.v1.CloseMeetupResponse
-	(*CancelMeetupRequest)(nil),               // 56: meetup.v1.CancelMeetupRequest
-	(*CancelMeetupResponse)(nil),              // 57: meetup.v1.CancelMeetupResponse
+	(*ScheduleConflict)(nil),                  // 5: meetup.v1.ScheduleConflict
+	(*ListOpenMeetupsRequest)(nil),            // 6: meetup.v1.ListOpenMeetupsRequest
+	(*ListOpenMeetupsResponse)(nil),           // 7: meetup.v1.ListOpenMeetupsResponse
+	(*GetMeetupRequest)(nil),                  // 8: meetup.v1.GetMeetupRequest
+	(*ListMyMeetupsRequest)(nil),              // 9: meetup.v1.ListMyMeetupsRequest
+	(*ListMyMeetupsResponse)(nil),             // 10: meetup.v1.ListMyMeetupsResponse
+	(*ListActiveMeetupsRequest)(nil),          // 11: meetup.v1.ListActiveMeetupsRequest
+	(*ListActiveMeetupsResponse)(nil),         // 12: meetup.v1.ListActiveMeetupsResponse
+	(*ListMeetupRequestsRequest)(nil),         // 13: meetup.v1.ListMeetupRequestsRequest
+	(*ListMeetupRequestsResponse)(nil),        // 14: meetup.v1.ListMeetupRequestsResponse
+	(*RequestToJoinRequest)(nil),              // 15: meetup.v1.RequestToJoinRequest
+	(*MeetupRequestResponse)(nil),             // 16: meetup.v1.MeetupRequestResponse
+	(*WithdrawRequestRequest)(nil),            // 17: meetup.v1.WithdrawRequestRequest
+	(*WithdrawRequestResponse)(nil),           // 18: meetup.v1.WithdrawRequestResponse
+	(*RespondToRequestRequest)(nil),           // 19: meetup.v1.RespondToRequestRequest
+	(*RegisterDeviceTokenRequest)(nil),        // 20: meetup.v1.RegisterDeviceTokenRequest
+	(*RegisterDeviceTokenResponse)(nil),       // 21: meetup.v1.RegisterDeviceTokenResponse
+	(*UnregisterDeviceTokenRequest)(nil),      // 22: meetup.v1.UnregisterDeviceTokenRequest
+	(*UnregisterDeviceTokenResponse)(nil),     // 23: meetup.v1.UnregisterDeviceTokenResponse
+	(*GetSafetyStateRequest)(nil),             // 24: meetup.v1.GetSafetyStateRequest
+	(*AcknowledgeSafetyChecklistRequest)(nil), // 25: meetup.v1.AcknowledgeSafetyChecklistRequest
+	(*SetLiveLocationOptInRequest)(nil),       // 26: meetup.v1.SetLiveLocationOptInRequest
+	(*ShareWithContactsRequest)(nil),          // 27: meetup.v1.ShareWithContactsRequest
+	(*CheckInRequest)(nil),                    // 28: meetup.v1.CheckInRequest
+	(*DeclineCheckInRequest)(nil),             // 29: meetup.v1.DeclineCheckInRequest
+	(*SafetyStateResponse)(nil),               // 30: meetup.v1.SafetyStateResponse
+	(*SubmitMeetupFeedbackRequest)(nil),       // 31: meetup.v1.SubmitMeetupFeedbackRequest
+	(*SubmitMeetupFeedbackResponse)(nil),      // 32: meetup.v1.SubmitMeetupFeedbackResponse
+	(*ListNotificationsRequest)(nil),          // 33: meetup.v1.ListNotificationsRequest
+	(*ListNotificationsResponse)(nil),         // 34: meetup.v1.ListNotificationsResponse
+	(*UserNotification)(nil),                  // 35: meetup.v1.UserNotification
+	(*ListMeetupParticipantsRequest)(nil),     // 36: meetup.v1.ListMeetupParticipantsRequest
+	(*ListMeetupParticipantsResponse)(nil),    // 37: meetup.v1.ListMeetupParticipantsResponse
+	(*GetMemberActivityRequest)(nil),          // 38: meetup.v1.GetMemberActivityRequest
+	(*GetMemberActivityResponse)(nil),         // 39: meetup.v1.GetMemberActivityResponse
+	(*MemberMeetup)(nil),                      // 40: meetup.v1.MemberMeetup
+	(*MemberMeetupComment)(nil),               // 41: meetup.v1.MemberMeetupComment
+	(*MeetupParticipant)(nil),                 // 42: meetup.v1.MeetupParticipant
+	(*ListRatableParticipantsRequest)(nil),    // 43: meetup.v1.ListRatableParticipantsRequest
+	(*RatableParticipant)(nil),                // 44: meetup.v1.RatableParticipant
+	(*ListRatableParticipantsResponse)(nil),   // 45: meetup.v1.ListRatableParticipantsResponse
+	(*RatingTrait)(nil),                       // 46: meetup.v1.RatingTrait
+	(*SubmitMeetupReviewRequest)(nil),         // 47: meetup.v1.SubmitMeetupReviewRequest
+	(*ReviewParticipant)(nil),                 // 48: meetup.v1.ReviewParticipant
+	(*SubmitMeetupReviewResponse)(nil),        // 49: meetup.v1.SubmitMeetupReviewResponse
+	(*GetMeetupReviewRequest)(nil),            // 50: meetup.v1.GetMeetupReviewRequest
+	(*GetMeetupReviewResponse)(nil),           // 51: meetup.v1.GetMeetupReviewResponse
+	(*ReviewedParticipant)(nil),               // 52: meetup.v1.ReviewedParticipant
+	(*SubmitRatingRequest)(nil),               // 53: meetup.v1.SubmitRatingRequest
+	(*SubmitRatingResponse)(nil),              // 54: meetup.v1.SubmitRatingResponse
+	(*CloseMeetupRequest)(nil),                // 55: meetup.v1.CloseMeetupRequest
+	(*CloseMeetupResponse)(nil),               // 56: meetup.v1.CloseMeetupResponse
+	(*CancelMeetupRequest)(nil),               // 57: meetup.v1.CancelMeetupRequest
+	(*CancelMeetupResponse)(nil),              // 58: meetup.v1.CancelMeetupResponse
 }
 var file_meetup_v1_meetup_proto_depIdxs = []int32{
 	0,  // 0: meetup.v1.CreateMeetupRequest.intent:type_name -> meetup.v1.Intent
 	0,  // 1: meetup.v1.MeetupResponse.intent:type_name -> meetup.v1.Intent
 	1,  // 2: meetup.v1.MeetupResponse.status:type_name -> meetup.v1.MeetupStatus
 	2,  // 3: meetup.v1.MeetupResponse.my_request_status:type_name -> meetup.v1.MeetupRequestStatus
-	0,  // 4: meetup.v1.ListOpenMeetupsRequest.intent:type_name -> meetup.v1.Intent
-	4,  // 5: meetup.v1.ListOpenMeetupsResponse.meetups:type_name -> meetup.v1.MeetupResponse
-	4,  // 6: meetup.v1.ListMyMeetupsResponse.hosted:type_name -> meetup.v1.MeetupResponse
-	4,  // 7: meetup.v1.ListMyMeetupsResponse.requested:type_name -> meetup.v1.MeetupResponse
-	4,  // 8: meetup.v1.ListActiveMeetupsResponse.meetups:type_name -> meetup.v1.MeetupResponse
-	15, // 9: meetup.v1.ListMeetupRequestsResponse.requests:type_name -> meetup.v1.MeetupRequestResponse
-	2,  // 10: meetup.v1.MeetupRequestResponse.status:type_name -> meetup.v1.MeetupRequestStatus
-	34, // 11: meetup.v1.ListNotificationsResponse.notifications:type_name -> meetup.v1.UserNotification
-	41, // 12: meetup.v1.ListMeetupParticipantsResponse.participants:type_name -> meetup.v1.MeetupParticipant
-	39, // 13: meetup.v1.GetMemberActivityResponse.recent_meetups:type_name -> meetup.v1.MemberMeetup
-	0,  // 14: meetup.v1.MemberMeetup.intent:type_name -> meetup.v1.Intent
-	1,  // 15: meetup.v1.MemberMeetup.status:type_name -> meetup.v1.MeetupStatus
-	40, // 16: meetup.v1.MemberMeetup.comments:type_name -> meetup.v1.MemberMeetupComment
-	43, // 17: meetup.v1.ListRatableParticipantsResponse.participants:type_name -> meetup.v1.RatableParticipant
-	45, // 18: meetup.v1.ListRatableParticipantsResponse.available_traits:type_name -> meetup.v1.RatingTrait
-	47, // 19: meetup.v1.SubmitMeetupReviewRequest.participants:type_name -> meetup.v1.ReviewParticipant
-	51, // 20: meetup.v1.GetMeetupReviewResponse.participants:type_name -> meetup.v1.ReviewedParticipant
-	4,  // 21: meetup.v1.CloseMeetupResponse.meetup:type_name -> meetup.v1.MeetupResponse
-	3,  // 22: meetup.v1.MeetupService.CreateMeetup:input_type -> meetup.v1.CreateMeetupRequest
-	5,  // 23: meetup.v1.MeetupService.ListOpenMeetups:input_type -> meetup.v1.ListOpenMeetupsRequest
-	7,  // 24: meetup.v1.MeetupService.GetMeetup:input_type -> meetup.v1.GetMeetupRequest
-	8,  // 25: meetup.v1.MeetupService.ListMyMeetups:input_type -> meetup.v1.ListMyMeetupsRequest
-	10, // 26: meetup.v1.MeetupService.ListActiveMeetups:input_type -> meetup.v1.ListActiveMeetupsRequest
-	12, // 27: meetup.v1.MeetupService.ListMeetupRequests:input_type -> meetup.v1.ListMeetupRequestsRequest
-	14, // 28: meetup.v1.MeetupService.RequestToJoin:input_type -> meetup.v1.RequestToJoinRequest
-	16, // 29: meetup.v1.MeetupService.WithdrawRequest:input_type -> meetup.v1.WithdrawRequestRequest
-	18, // 30: meetup.v1.MeetupService.RespondToRequest:input_type -> meetup.v1.RespondToRequestRequest
-	19, // 31: meetup.v1.MeetupService.RegisterDeviceToken:input_type -> meetup.v1.RegisterDeviceTokenRequest
-	21, // 32: meetup.v1.MeetupService.UnregisterDeviceToken:input_type -> meetup.v1.UnregisterDeviceTokenRequest
-	23, // 33: meetup.v1.MeetupService.GetSafetyState:input_type -> meetup.v1.GetSafetyStateRequest
-	24, // 34: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:input_type -> meetup.v1.AcknowledgeSafetyChecklistRequest
-	25, // 35: meetup.v1.MeetupService.SetLiveLocationOptIn:input_type -> meetup.v1.SetLiveLocationOptInRequest
-	26, // 36: meetup.v1.MeetupService.ShareWithContacts:input_type -> meetup.v1.ShareWithContactsRequest
-	27, // 37: meetup.v1.MeetupService.CheckIn:input_type -> meetup.v1.CheckInRequest
-	28, // 38: meetup.v1.MeetupService.DeclineCheckIn:input_type -> meetup.v1.DeclineCheckInRequest
-	30, // 39: meetup.v1.MeetupService.SubmitMeetupFeedback:input_type -> meetup.v1.SubmitMeetupFeedbackRequest
-	35, // 40: meetup.v1.MeetupService.ListMeetupParticipants:input_type -> meetup.v1.ListMeetupParticipantsRequest
-	37, // 41: meetup.v1.MeetupService.GetMemberActivity:input_type -> meetup.v1.GetMemberActivityRequest
-	32, // 42: meetup.v1.MeetupService.ListNotifications:input_type -> meetup.v1.ListNotificationsRequest
-	42, // 43: meetup.v1.MeetupService.ListRatableParticipants:input_type -> meetup.v1.ListRatableParticipantsRequest
-	52, // 44: meetup.v1.MeetupService.SubmitRating:input_type -> meetup.v1.SubmitRatingRequest
-	46, // 45: meetup.v1.MeetupService.SubmitMeetupReview:input_type -> meetup.v1.SubmitMeetupReviewRequest
-	49, // 46: meetup.v1.MeetupService.GetMeetupReview:input_type -> meetup.v1.GetMeetupReviewRequest
-	54, // 47: meetup.v1.MeetupService.CloseMeetup:input_type -> meetup.v1.CloseMeetupRequest
-	56, // 48: meetup.v1.MeetupService.CancelMeetup:input_type -> meetup.v1.CancelMeetupRequest
-	4,  // 49: meetup.v1.MeetupService.CreateMeetup:output_type -> meetup.v1.MeetupResponse
-	6,  // 50: meetup.v1.MeetupService.ListOpenMeetups:output_type -> meetup.v1.ListOpenMeetupsResponse
-	4,  // 51: meetup.v1.MeetupService.GetMeetup:output_type -> meetup.v1.MeetupResponse
-	9,  // 52: meetup.v1.MeetupService.ListMyMeetups:output_type -> meetup.v1.ListMyMeetupsResponse
-	11, // 53: meetup.v1.MeetupService.ListActiveMeetups:output_type -> meetup.v1.ListActiveMeetupsResponse
-	13, // 54: meetup.v1.MeetupService.ListMeetupRequests:output_type -> meetup.v1.ListMeetupRequestsResponse
-	15, // 55: meetup.v1.MeetupService.RequestToJoin:output_type -> meetup.v1.MeetupRequestResponse
-	17, // 56: meetup.v1.MeetupService.WithdrawRequest:output_type -> meetup.v1.WithdrawRequestResponse
-	15, // 57: meetup.v1.MeetupService.RespondToRequest:output_type -> meetup.v1.MeetupRequestResponse
-	20, // 58: meetup.v1.MeetupService.RegisterDeviceToken:output_type -> meetup.v1.RegisterDeviceTokenResponse
-	22, // 59: meetup.v1.MeetupService.UnregisterDeviceToken:output_type -> meetup.v1.UnregisterDeviceTokenResponse
-	29, // 60: meetup.v1.MeetupService.GetSafetyState:output_type -> meetup.v1.SafetyStateResponse
-	29, // 61: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:output_type -> meetup.v1.SafetyStateResponse
-	29, // 62: meetup.v1.MeetupService.SetLiveLocationOptIn:output_type -> meetup.v1.SafetyStateResponse
-	29, // 63: meetup.v1.MeetupService.ShareWithContacts:output_type -> meetup.v1.SafetyStateResponse
-	29, // 64: meetup.v1.MeetupService.CheckIn:output_type -> meetup.v1.SafetyStateResponse
-	29, // 65: meetup.v1.MeetupService.DeclineCheckIn:output_type -> meetup.v1.SafetyStateResponse
-	31, // 66: meetup.v1.MeetupService.SubmitMeetupFeedback:output_type -> meetup.v1.SubmitMeetupFeedbackResponse
-	36, // 67: meetup.v1.MeetupService.ListMeetupParticipants:output_type -> meetup.v1.ListMeetupParticipantsResponse
-	38, // 68: meetup.v1.MeetupService.GetMemberActivity:output_type -> meetup.v1.GetMemberActivityResponse
-	33, // 69: meetup.v1.MeetupService.ListNotifications:output_type -> meetup.v1.ListNotificationsResponse
-	44, // 70: meetup.v1.MeetupService.ListRatableParticipants:output_type -> meetup.v1.ListRatableParticipantsResponse
-	53, // 71: meetup.v1.MeetupService.SubmitRating:output_type -> meetup.v1.SubmitRatingResponse
-	48, // 72: meetup.v1.MeetupService.SubmitMeetupReview:output_type -> meetup.v1.SubmitMeetupReviewResponse
-	50, // 73: meetup.v1.MeetupService.GetMeetupReview:output_type -> meetup.v1.GetMeetupReviewResponse
-	55, // 74: meetup.v1.MeetupService.CloseMeetup:output_type -> meetup.v1.CloseMeetupResponse
-	57, // 75: meetup.v1.MeetupService.CancelMeetup:output_type -> meetup.v1.CancelMeetupResponse
-	49, // [49:76] is the sub-list for method output_type
-	22, // [22:49] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	4,  // 4: meetup.v1.ScheduleConflict.meetup:type_name -> meetup.v1.MeetupResponse
+	0,  // 5: meetup.v1.ListOpenMeetupsRequest.intent:type_name -> meetup.v1.Intent
+	4,  // 6: meetup.v1.ListOpenMeetupsResponse.meetups:type_name -> meetup.v1.MeetupResponse
+	4,  // 7: meetup.v1.ListMyMeetupsResponse.hosted:type_name -> meetup.v1.MeetupResponse
+	4,  // 8: meetup.v1.ListMyMeetupsResponse.requested:type_name -> meetup.v1.MeetupResponse
+	4,  // 9: meetup.v1.ListActiveMeetupsResponse.meetups:type_name -> meetup.v1.MeetupResponse
+	16, // 10: meetup.v1.ListMeetupRequestsResponse.requests:type_name -> meetup.v1.MeetupRequestResponse
+	2,  // 11: meetup.v1.MeetupRequestResponse.status:type_name -> meetup.v1.MeetupRequestStatus
+	35, // 12: meetup.v1.ListNotificationsResponse.notifications:type_name -> meetup.v1.UserNotification
+	42, // 13: meetup.v1.ListMeetupParticipantsResponse.participants:type_name -> meetup.v1.MeetupParticipant
+	40, // 14: meetup.v1.GetMemberActivityResponse.recent_meetups:type_name -> meetup.v1.MemberMeetup
+	0,  // 15: meetup.v1.MemberMeetup.intent:type_name -> meetup.v1.Intent
+	1,  // 16: meetup.v1.MemberMeetup.status:type_name -> meetup.v1.MeetupStatus
+	41, // 17: meetup.v1.MemberMeetup.comments:type_name -> meetup.v1.MemberMeetupComment
+	44, // 18: meetup.v1.ListRatableParticipantsResponse.participants:type_name -> meetup.v1.RatableParticipant
+	46, // 19: meetup.v1.ListRatableParticipantsResponse.available_traits:type_name -> meetup.v1.RatingTrait
+	48, // 20: meetup.v1.SubmitMeetupReviewRequest.participants:type_name -> meetup.v1.ReviewParticipant
+	52, // 21: meetup.v1.GetMeetupReviewResponse.participants:type_name -> meetup.v1.ReviewedParticipant
+	4,  // 22: meetup.v1.CloseMeetupResponse.meetup:type_name -> meetup.v1.MeetupResponse
+	3,  // 23: meetup.v1.MeetupService.CreateMeetup:input_type -> meetup.v1.CreateMeetupRequest
+	6,  // 24: meetup.v1.MeetupService.ListOpenMeetups:input_type -> meetup.v1.ListOpenMeetupsRequest
+	8,  // 25: meetup.v1.MeetupService.GetMeetup:input_type -> meetup.v1.GetMeetupRequest
+	9,  // 26: meetup.v1.MeetupService.ListMyMeetups:input_type -> meetup.v1.ListMyMeetupsRequest
+	11, // 27: meetup.v1.MeetupService.ListActiveMeetups:input_type -> meetup.v1.ListActiveMeetupsRequest
+	13, // 28: meetup.v1.MeetupService.ListMeetupRequests:input_type -> meetup.v1.ListMeetupRequestsRequest
+	15, // 29: meetup.v1.MeetupService.RequestToJoin:input_type -> meetup.v1.RequestToJoinRequest
+	17, // 30: meetup.v1.MeetupService.WithdrawRequest:input_type -> meetup.v1.WithdrawRequestRequest
+	19, // 31: meetup.v1.MeetupService.RespondToRequest:input_type -> meetup.v1.RespondToRequestRequest
+	20, // 32: meetup.v1.MeetupService.RegisterDeviceToken:input_type -> meetup.v1.RegisterDeviceTokenRequest
+	22, // 33: meetup.v1.MeetupService.UnregisterDeviceToken:input_type -> meetup.v1.UnregisterDeviceTokenRequest
+	24, // 34: meetup.v1.MeetupService.GetSafetyState:input_type -> meetup.v1.GetSafetyStateRequest
+	25, // 35: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:input_type -> meetup.v1.AcknowledgeSafetyChecklistRequest
+	26, // 36: meetup.v1.MeetupService.SetLiveLocationOptIn:input_type -> meetup.v1.SetLiveLocationOptInRequest
+	27, // 37: meetup.v1.MeetupService.ShareWithContacts:input_type -> meetup.v1.ShareWithContactsRequest
+	28, // 38: meetup.v1.MeetupService.CheckIn:input_type -> meetup.v1.CheckInRequest
+	29, // 39: meetup.v1.MeetupService.DeclineCheckIn:input_type -> meetup.v1.DeclineCheckInRequest
+	31, // 40: meetup.v1.MeetupService.SubmitMeetupFeedback:input_type -> meetup.v1.SubmitMeetupFeedbackRequest
+	36, // 41: meetup.v1.MeetupService.ListMeetupParticipants:input_type -> meetup.v1.ListMeetupParticipantsRequest
+	38, // 42: meetup.v1.MeetupService.GetMemberActivity:input_type -> meetup.v1.GetMemberActivityRequest
+	33, // 43: meetup.v1.MeetupService.ListNotifications:input_type -> meetup.v1.ListNotificationsRequest
+	43, // 44: meetup.v1.MeetupService.ListRatableParticipants:input_type -> meetup.v1.ListRatableParticipantsRequest
+	53, // 45: meetup.v1.MeetupService.SubmitRating:input_type -> meetup.v1.SubmitRatingRequest
+	47, // 46: meetup.v1.MeetupService.SubmitMeetupReview:input_type -> meetup.v1.SubmitMeetupReviewRequest
+	50, // 47: meetup.v1.MeetupService.GetMeetupReview:input_type -> meetup.v1.GetMeetupReviewRequest
+	55, // 48: meetup.v1.MeetupService.CloseMeetup:input_type -> meetup.v1.CloseMeetupRequest
+	57, // 49: meetup.v1.MeetupService.CancelMeetup:input_type -> meetup.v1.CancelMeetupRequest
+	4,  // 50: meetup.v1.MeetupService.CreateMeetup:output_type -> meetup.v1.MeetupResponse
+	7,  // 51: meetup.v1.MeetupService.ListOpenMeetups:output_type -> meetup.v1.ListOpenMeetupsResponse
+	4,  // 52: meetup.v1.MeetupService.GetMeetup:output_type -> meetup.v1.MeetupResponse
+	10, // 53: meetup.v1.MeetupService.ListMyMeetups:output_type -> meetup.v1.ListMyMeetupsResponse
+	12, // 54: meetup.v1.MeetupService.ListActiveMeetups:output_type -> meetup.v1.ListActiveMeetupsResponse
+	14, // 55: meetup.v1.MeetupService.ListMeetupRequests:output_type -> meetup.v1.ListMeetupRequestsResponse
+	16, // 56: meetup.v1.MeetupService.RequestToJoin:output_type -> meetup.v1.MeetupRequestResponse
+	18, // 57: meetup.v1.MeetupService.WithdrawRequest:output_type -> meetup.v1.WithdrawRequestResponse
+	16, // 58: meetup.v1.MeetupService.RespondToRequest:output_type -> meetup.v1.MeetupRequestResponse
+	21, // 59: meetup.v1.MeetupService.RegisterDeviceToken:output_type -> meetup.v1.RegisterDeviceTokenResponse
+	23, // 60: meetup.v1.MeetupService.UnregisterDeviceToken:output_type -> meetup.v1.UnregisterDeviceTokenResponse
+	30, // 61: meetup.v1.MeetupService.GetSafetyState:output_type -> meetup.v1.SafetyStateResponse
+	30, // 62: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:output_type -> meetup.v1.SafetyStateResponse
+	30, // 63: meetup.v1.MeetupService.SetLiveLocationOptIn:output_type -> meetup.v1.SafetyStateResponse
+	30, // 64: meetup.v1.MeetupService.ShareWithContacts:output_type -> meetup.v1.SafetyStateResponse
+	30, // 65: meetup.v1.MeetupService.CheckIn:output_type -> meetup.v1.SafetyStateResponse
+	30, // 66: meetup.v1.MeetupService.DeclineCheckIn:output_type -> meetup.v1.SafetyStateResponse
+	32, // 67: meetup.v1.MeetupService.SubmitMeetupFeedback:output_type -> meetup.v1.SubmitMeetupFeedbackResponse
+	37, // 68: meetup.v1.MeetupService.ListMeetupParticipants:output_type -> meetup.v1.ListMeetupParticipantsResponse
+	39, // 69: meetup.v1.MeetupService.GetMemberActivity:output_type -> meetup.v1.GetMemberActivityResponse
+	34, // 70: meetup.v1.MeetupService.ListNotifications:output_type -> meetup.v1.ListNotificationsResponse
+	45, // 71: meetup.v1.MeetupService.ListRatableParticipants:output_type -> meetup.v1.ListRatableParticipantsResponse
+	54, // 72: meetup.v1.MeetupService.SubmitRating:output_type -> meetup.v1.SubmitRatingResponse
+	49, // 73: meetup.v1.MeetupService.SubmitMeetupReview:output_type -> meetup.v1.SubmitMeetupReviewResponse
+	51, // 74: meetup.v1.MeetupService.GetMeetupReview:output_type -> meetup.v1.GetMeetupReviewResponse
+	56, // 75: meetup.v1.MeetupService.CloseMeetup:output_type -> meetup.v1.CloseMeetupResponse
+	58, // 76: meetup.v1.MeetupService.CancelMeetup:output_type -> meetup.v1.CancelMeetupResponse
+	50, // [50:77] is the sub-list for method output_type
+	23, // [23:50] is the sub-list for method input_type
+	23, // [23:23] is the sub-list for extension type_name
+	23, // [23:23] is the sub-list for extension extendee
+	0,  // [0:23] is the sub-list for field type_name
 }
 
 func init() { file_meetup_v1_meetup_proto_init() }
@@ -4533,19 +4588,19 @@ func file_meetup_v1_meetup_proto_init() {
 		return
 	}
 	file_meetup_v1_meetup_proto_msgTypes[1].OneofWrappers = []any{}
-	file_meetup_v1_meetup_proto_msgTypes[12].OneofWrappers = []any{}
-	file_meetup_v1_meetup_proto_msgTypes[26].OneofWrappers = []any{}
+	file_meetup_v1_meetup_proto_msgTypes[13].OneofWrappers = []any{}
 	file_meetup_v1_meetup_proto_msgTypes[27].OneofWrappers = []any{}
-	file_meetup_v1_meetup_proto_msgTypes[40].OneofWrappers = []any{}
-	file_meetup_v1_meetup_proto_msgTypes[43].OneofWrappers = []any{}
-	file_meetup_v1_meetup_proto_msgTypes[47].OneofWrappers = []any{}
+	file_meetup_v1_meetup_proto_msgTypes[28].OneofWrappers = []any{}
+	file_meetup_v1_meetup_proto_msgTypes[41].OneofWrappers = []any{}
+	file_meetup_v1_meetup_proto_msgTypes[44].OneofWrappers = []any{}
+	file_meetup_v1_meetup_proto_msgTypes[48].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_meetup_v1_meetup_proto_rawDesc), len(file_meetup_v1_meetup_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   55,
+			NumMessages:   56,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

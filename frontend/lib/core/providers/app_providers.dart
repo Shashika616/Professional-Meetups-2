@@ -479,10 +479,18 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     state = AsyncData(AuthSessionState(session: session, profile: profile));
   }
 
-  /// Clears the local session regardless of whether the network call
-  /// succeeds — a failed logout call to the backend shouldn't leave the
-  /// user stuck signed in locally, same idempotent-logout spirit as the
-  /// backend's `/v1/auth/logout` (`frontend/PLAN.md` Step 7).
+  /// Signs out locally FIRST and tells the server afterwards, in the
+  /// background: the stored session is cleared and the state flips to
+  /// signed-out before this returns, so the screen moves the moment the
+  /// user confirms. The server-side work (revoking the refresh token and
+  /// dropping this device's push registration, one request) then runs
+  /// off the UI path, bounded and best-effort — a slow or offline network
+  /// can neither hold sign-out hostage nor leave the user stuck signed in,
+  /// the same idempotent-logout spirit as the backend's `/v1/auth/logout`.
+  ///
+  /// Storage is cleared before the background work starts, not after it:
+  /// a sign-in that follows quickly must never have its fresh session
+  /// wiped by a late-finishing sign-out.
   Future<void> signOut() async {
     // Ensure build() has actually resolved before reading state.value —
     // ProfilePage never reads/watches this provider itself (only this
@@ -494,49 +502,71 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     // provider first and primes it long before ProfilePage is reachable,
     // but this shouldn't depend on that navigation ordering to be correct.
     await future;
-    final refreshToken = state.value?.session?.refreshToken;
-    if (refreshToken != null) {
-      // Stop the pushes FIRST, while the access token is still valid: the
-      // server drops this device's registration for the account, then the
-      // device drops the token itself. Without this a signed-out phone
-      // kept receiving the account's notifications until the next sign-in
-      // happened to reassign the token. Bounded and best-effort, so a
-      // slow or offline network cannot hold sign-out hostage.
-      await _unregisterPushToken();
-      try {
-        await ref.read(authServiceProvider).logout(refreshToken);
-      } catch (_) {
-        // Ignored on purpose — see doc comment above.
-      }
-    }
+    final session = state.value?.session;
     await ref.read(sessionStorageProvider).clearSession();
     state = const AsyncData(AuthSessionState(signedOutByUser: true));
-  }
+    if (session == null) return;
 
-  /// Sign-out's push cleanup: server-side unregistration (authenticated,
-  /// so it must run before logout) and then the device-side token delete.
-  /// Each step is independent and swallowed on failure; together they are
-  /// what makes a signed-out phone go quiet.
-  Future<void> _unregisterPushToken() async {
+    // Captured now: the closure below outlives any screen and may outlive
+    // this notifier, and a `ref` read after disposal throws.
+    final auth = ref.read(authServiceProvider);
     final push = ref.read(pushNotificationServiceProvider);
-    String? token;
-    try {
-      token = await push.currentToken();
-    } catch (_) {
-      token = null;
-    }
-    if (token != null) {
+    bool signedInAgain() {
       try {
-        await ref
-            .read(meetupServiceProvider)
-            .unregisterDeviceToken(token)
-            .timeout(const Duration(seconds: 5));
+        return state.value?.session != null;
       } catch (_) {
-        // The device-side delete below still silences the phone.
+        // `state` throws once the notifier is disposed: nobody is signed
+        // in through it any more.
+        return false;
       }
     }
+
+    unawaited(
+      _revokeSessionInBackground(
+        auth: auth,
+        push: push,
+        session: session,
+        signedInAgain: signedInAgain,
+      ),
+    );
+  }
+
+  /// The server half of sign-out. Static and handed everything it needs so
+  /// it cannot reach for `ref` after the notifier is gone. Each step is
+  /// independent and swallowed on failure; each is bounded so the chain
+  /// always ends.
+  ///
+  /// The device-side token delete comes last and is skipped if another
+  /// session has signed in meanwhile: that session has registered this
+  /// very token, and deleting it under them would silence the new account
+  /// until FCM's replacement token arrived.
+  static Future<void> _revokeSessionInBackground({
+    required AuthService auth,
+    required PushNotificationService push,
+    required AuthSession session,
+    required bool Function() signedInAgain,
+  }) async {
+    const step = Duration(seconds: 8);
+    String? fcmToken;
     try {
-      await push.deleteToken().timeout(const Duration(seconds: 5));
+      fcmToken = await push.currentToken().timeout(step);
+    } catch (_) {
+      fcmToken = null;
+    }
+    try {
+      await auth
+          .logout(
+            session.refreshToken,
+            accessToken: session.accessToken,
+            fcmToken: fcmToken,
+          )
+          .timeout(step);
+    } catch (_) {
+      // Ignored on purpose — see signOut.
+    }
+    if (signedInAgain()) return;
+    try {
+      await push.deleteToken().timeout(step);
     } catch (_) {
       // Best-effort by contract.
     }

@@ -158,6 +158,12 @@ class Meetup {
   /// [lockedForViewer]'s own doc comment) — any caller that can receive a
   /// locked meetup must check [lockedForViewer] before rendering the
   /// window instead of relying on this fallback.
+  /// The intent as it should be shown for THIS meetup: the meal intent
+  /// names its sitting from the start time ("MEAL: DINNER"); the rest are
+  /// their plain label. Use this, not `intent.label`, wherever a meetup is
+  /// in hand.
+  String get intentLabel => intent.labelFor(windowStart);
+
   String get formattedWindow {
     final start = windowStart, end = windowEnd;
     if (start == null || end == null) return '';
@@ -275,6 +281,10 @@ String formatMeetupWindow(DateTime start, DateTime end) {
       : '${_formatTime(start)}–${_formatTime(end)}';
   return '$datePart, $rangePart';
 }
+
+/// "3:00 PM": one clock time, for copy that names a single moment (a
+/// meetup's end, say) rather than its whole window.
+String formatMeetupTime(DateTime time) => _formatTime(time);
 
 /// Formats [time] as "3:00 PM" (or "3:00" with [showPeriod] false, for the
 /// start of a same-AM/PM-period range where the end already carries the

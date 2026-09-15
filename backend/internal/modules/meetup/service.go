@@ -305,7 +305,10 @@ func (s *service) CreateMeetup(ctx context.Context, req CreateMeetupRequest) (Me
 		LocationLng:   req.LocationLng,
 		LocationLabel: locationLabel,
 		Capacity:      req.Capacity,
-	})
+		// One meetup at a time: checked under the host's schedule lock in
+		// the same transaction as the insert (ScheduleConflictError names
+		// the meetup in the way).
+	}, scheduleGuard(req.HostUserID, req.WindowStart, req.WindowEnd, ""))
 	if err != nil {
 		return Meetup{}, err
 	}
@@ -509,6 +512,11 @@ func (s *service) ListActiveMeetups(ctx context.Context, userID string) ([]Meetu
 	// Live: still open/full and not yet over. Awaiting: over, unreviewed,
 	// and inside the window. A cancelled meetup is neither — there is
 	// nothing to attend and nothing to review.
+	//
+	// The same LIVE definition is written in SQL by FindScheduleConflict
+	// (meetups.sql), and its narrower BROWSABLE form ('open' only) by
+	// ListOpenMeetupsFirstPage/AfterCursor. A change here must be made
+	// there too.
 	isLive := func(m repository.Meetup) bool {
 		return (m.Status == repository.MeetupStatusOpen || m.Status == repository.MeetupStatusFull) &&
 			m.WindowEnd.After(now)

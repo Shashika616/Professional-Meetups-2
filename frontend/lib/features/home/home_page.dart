@@ -138,11 +138,7 @@ class _HomePageState extends ConsumerState<HomePage>
       // A locked intent still explains itself rather than doing nothing.
       // Only a NAMED intent can be locked; "All" never is.
       if (picked != null && !picked.canJoin(trustLevel)) {
-        showSnack(
-          context,
-          '${picked.label} requires Level ${picked.requiredTrustLevelToJoin} trust. Verify your phone, personal email, and details in Profile to unlock it.',
-          type: ToastType.locked,
-        );
+        showSnack(context, picked.joinLockedMessage, type: ToastType.locked);
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
         );
@@ -167,12 +163,10 @@ class _HomePageState extends ConsumerState<HomePage>
           : intentFilter.canHost(trustLevel);
 
       if (!canHostSomething) {
-        final requiredLevel =
-            intentFilter?.requiredTrustLevelToHost ??
-            IntentType.coffee.requiredTrustLevelToHost;
         showSnack(
           context,
-          'Hosting a meetup requires Level $requiredLevel trust. Add your company details to unlock it.',
+          intentFilter?.hostLockedMessage ??
+              'Verify your account to host meetups.',
           type: ToastType.locked,
         );
         Navigator.of(

@@ -62,7 +62,7 @@ func (r *postgresMeetupRequestRepository) publishAll(ctx context.Context, events
 	}
 }
 
-func (r *postgresMeetupRequestRepository) Create(ctx context.Context, meetupID, requesterID, hostUserID string, notify NotifyRequest) (MeetupRequest, error) {
+func (r *postgresMeetupRequestRepository) Create(ctx context.Context, meetupID, requesterID, hostUserID string, guard ScheduleGuard, notify NotifyRequest) (MeetupRequest, error) {
 	meetup, err := parseUUID(meetupID)
 	if err != nil {
 		return MeetupRequest{}, fmt.Errorf("repository: invalid meetup id %q: %w", meetupID, apperror.ErrInvalidInput)
@@ -78,6 +78,11 @@ func (r *postgresMeetupRequestRepository) Create(ctx context.Context, meetupID, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := r.q.WithTx(tx)
+
+	// Lock, then check, then write — all on this connection (Plan 19).
+	if err := runScheduleGuard(ctx, q, requesterID, guard); err != nil {
+		return MeetupRequest{}, err
+	}
 
 	row, err := q.CreateMeetupRequest(ctx, sqlcgen.CreateMeetupRequestParams{MeetupID: meetup, RequesterID: requester})
 	if err != nil {

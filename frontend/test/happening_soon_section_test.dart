@@ -217,8 +217,42 @@ void main() {
 
       expect(service.lastRequestToJoinMeetupId, isNull);
       expect(find.byType(VerificationChecklistPage), findsOneWidget);
-      expect(find.textContaining('requires Level 2 trust'), findsOneWidget);
+      expect(
+        find.text('Verify your account to join coffee meetups.'),
+        findsOneWidget,
+      );
     });
+
+    testWidgets(
+      'a Level 1 viewer below the join bar on an UNLOCKED card is sent to '
+      'the verification checklist, never to the host sheet or the server',
+      (tester) async {
+        // ADR-002 § 5 narrowed lockedForViewer to what is hidden, so a
+        // Level 1 viewer sees this coffee card in full but cannot join
+        // (coffee needs Level 2). The button used to open the confirmation
+        // sheet and fail on the server with a toast; the detail page
+        // already redirected, and now the card does too.
+        _useTallViewport(tester);
+        final service = ScriptedMeetupService(
+          openMeetups: [_meetup(id: 'meetup-55')],
+        );
+
+        await tester.pumpWidget(_appWith(service, trustLevel: 1));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Grace Hopper'), findsOneWidget); // not redacted
+        await tester.tap(find.text('I\'M INTERESTED'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('CONFIRM YOUR INTEREST'), findsNothing);
+        expect(service.lastRequestToJoinMeetupId, isNull);
+        expect(find.byType(VerificationChecklistPage), findsOneWidget);
+        expect(
+          find.text('Verify your account to join coffee meetups.'),
+          findsOneWidget,
+        );
+      },
+    );
 
     testWidgets(
       'tapping a locked card itself (not just its join button) shows the '
@@ -541,7 +575,10 @@ void main() {
         await tester.tap(find.text(IntentType.coffee.label));
         await tester.pumpAndSettle();
 
-        expect(find.textContaining('requires Level 2 trust'), findsOneWidget);
+        expect(
+          find.text('Verify your account to join coffee meetups.'),
+          findsOneWidget,
+        );
         expect(find.byType(VerificationChecklistPage), findsOneWidget);
         // No new query fired — the filter never moved off "All".
         expect(service.listOpenMeetupsCallCount, 1);

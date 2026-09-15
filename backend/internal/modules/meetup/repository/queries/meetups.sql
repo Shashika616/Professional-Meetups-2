@@ -110,6 +110,11 @@ WITH deduped AS (
     FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
   ) ratings ON true
   LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = sqlc.arg(requester_id)
+  -- BROWSABLE is narrower than LIVE: 'open' only, a full meetup takes no
+  -- more requests. LIVE ('open' or 'full', not yet ended) is defined in
+  -- FindScheduleConflict below and in the service's ListActiveMeetups
+  -- isLive closure; a change to what counts as live must be made in all
+  -- three, and this one (plus its AfterCursor twin) if it means browsable.
   WHERE m.status = 'open'
     -- A meetup whose window has ENDED is not browsable, whatever its status
     -- column still says. This is NOT redundant with the auto-close sweep --
@@ -182,6 +187,11 @@ WITH deduped AS (
     FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
   ) ratings ON true
   LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = sqlc.arg(requester_id)
+  -- BROWSABLE is narrower than LIVE: 'open' only, a full meetup takes no
+  -- more requests. LIVE ('open' or 'full', not yet ended) is defined in
+  -- FindScheduleConflict below and in the service's ListActiveMeetups
+  -- isLive closure; a change to what counts as live must be made in all
+  -- three, and this one (plus its AfterCursor twin) if it means browsable.
   WHERE m.status = 'open'
     -- Same clock filter as ListOpenMeetupsFirstPage, and it has to be here
     -- too: a predicate that held on page 1 but not on page 2 would let an
@@ -498,3 +508,60 @@ FROM (
 ) participants
 LEFT JOIN meetup.user_display_cache u ON u.user_id = participants.user_id
 ORDER BY participants.is_host DESC, u.full_name;
+
+-- name: FindScheduleConflict :one
+-- The one-meetup-at-a-time rule (2026-09-15): the earliest live meetup the
+-- user is already committed to that overlaps [window_start, window_end).
+-- "Committed" is hosting it, or holding a pending or accepted request on
+-- it — a pending request counts because accepting it later must never be
+-- what creates a double booking. "Live" is open/full and not yet over, so
+-- a finished or cancelled meetup never blocks anything. exclude_id keeps a
+-- join attempt from colliding with the very meetup being joined (a repeat
+-- request on the same meetup is the requests table's own conflict, with
+-- its own message). Half-open overlap, so back-to-back windows are fine.
+-- Same joined shape as ListMeetupsByHost so it converts through the same
+-- code; my_request_status is read so the caller can say "you asked to
+-- join" versus "you're hosting".
+SELECT
+  m.*,
+  COALESCE(u.full_name, '') AS host_full_name,
+  u.profile_photo_url AS host_profile_photo_url,
+  COALESCE(u.trust_level, 0) AS host_trust_level,
+  COALESCE(ratings.rating_average, 0)::numeric(3,2) AS host_rating_average,
+  COALESCE(ratings.rating_count, 0)::int AS host_rating_count,
+  (SELECT count(*) FROM meetup.meetup_requests r2 WHERE r2.meetup_id = m.id AND r2.status = 'accepted') AS accepted_count,
+  r.status AS my_request_status,
+  r.id AS my_request_id
+FROM meetup.meetups m
+LEFT JOIN meetup.user_display_cache u ON u.user_id = m.host_user_id
+LEFT JOIN LATERAL (
+  SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
+  FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
+) ratings ON true
+LEFT JOIN meetup.meetup_requests r
+  ON r.meetup_id = m.id
+ AND r.requester_id = sqlc.arg(user_id)
+ AND r.status IN ('pending', 'accepted')
+-- LIVE, defined here, in the service's ListActiveMeetups isLive closure,
+-- and (as BROWSABLE, 'open' only) in ListOpenMeetupsFirstPage/AfterCursor
+-- above. Keep the three in step.
+WHERE m.status IN ('open', 'full')
+  AND m.window_end > now()
+  AND m.window_start < sqlc.arg(window_end)
+  AND m.window_end > sqlc.arg(window_start)
+  AND m.id <> sqlc.arg(exclude_id)
+  AND (m.host_user_id = sqlc.arg(user_id) OR r.id IS NOT NULL)
+ORDER BY m.window_start ASC, m.id ASC
+LIMIT 1;
+
+-- name: LockUserSchedule :exec
+-- Serialises one person's schedule writes (Plan 19). Taken as the first
+-- statement of the transaction that will read FindScheduleConflict and
+-- then insert, so two concurrent creates or requests from the same person
+-- queue behind each other and the second sees the first's committed row.
+-- A transaction-scoped advisory lock: released at commit or rollback, no
+-- row or constraint involved, so it is safe against the overlapping rows
+-- already in production. hashtext folds the UUID's text into the int4 key
+-- space; a collision between two users only makes them wait for each
+-- other briefly (a false serialisation), never lets a conflict through.
+SELECT pg_advisory_xact_lock(hashtext(sqlc.arg(user_id)::text));

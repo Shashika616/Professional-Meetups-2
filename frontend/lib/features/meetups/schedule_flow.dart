@@ -17,6 +17,7 @@ import 'package:professional_connections_platform/features/home/widgets/intent_t
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_window_input.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/map_location_step.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/schedule_conflict_sheet.dart';
 import 'package:professional_connections_platform/features/verification/hosting_unlock_page.dart';
 
 /// Test seam for the timing step's clock. The step refuses a start that is
@@ -118,6 +119,11 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
       if (mounted) {
         ref.read(authSessionProvider.notifier).forceSignOut();
       }
+    } on MeetupScheduleConflictException catch (error) {
+      // Already committed elsewhere in this window: the sheet names the
+      // meetup in the way and how to free the time. The draft is kept,
+      // so a different time can be picked with the back button.
+      if (mounted) await showScheduleConflictSheet(context, error: error);
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -388,7 +394,7 @@ class _IntentStep extends StatelessWidget {
                   if (!intent.canHost(trustLevel)) {
                     showSnack(
                       context,
-                      'Hosting a ${intent.label} meetup requires Level ${intent.requiredTrustLevelToHost} trust. Add your company details to unlock it.',
+                      intent.hostLockedMessage,
                       type: ToastType.locked,
                     );
                     Navigator.of(context).push(
@@ -1059,7 +1065,7 @@ class _ReviewStep extends StatelessWidget {
               _ReviewRow(
                 icon: intent.icon,
                 label: 'INTENT',
-                value: intent.label,
+                value: intent.labelFor(windowStart),
                 detail: intent.tagline,
               ),
               const _ReviewDivider(),

@@ -410,7 +410,7 @@ class _MemberMeetupCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      m.intent.label,
+                      m.intentLabel,
                       style: TextStyle(
                         color: AppPalette.textPrimary,
                         fontSize: 12,

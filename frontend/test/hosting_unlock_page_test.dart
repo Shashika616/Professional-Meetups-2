@@ -90,7 +90,11 @@ class _FakeAuthService implements AuthService {
   Future<AuthSession> refreshSession(String refreshToken) =>
       throw UnimplementedError();
   @override
-  Future<void> logout(String refreshToken) => throw UnimplementedError();
+  Future<void> logout(
+    String refreshToken, {
+    String? accessToken,
+    String? fcmToken,
+  }) => throw UnimplementedError();
   @override
   Future<int> startPhoneVerification(String phoneNumber) =>
       throw UnimplementedError();
