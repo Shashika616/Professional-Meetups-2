@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The tint Android applies to the notification's small icon and app
+         name: the brand green (AppPalette.brandGreen), the same colour the
+         backend sends per message. -->
+    <color name="notification_accent">#34C24C</color>
+</resources>

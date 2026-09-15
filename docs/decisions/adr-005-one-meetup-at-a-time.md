@@ -95,3 +95,17 @@ the host's time zone.
 - No exclusion constraint: existing production rows already overlap and
   the migration would fail. The advisory lock is a serialisation primitive,
   not a data constraint, so it is safe over that data.
+
+## Addendum (2026-09-16): push notifications carry the app's mark
+
+System-rendered Android pushes showed a grey square: Android draws a
+notification's small icon as a single-colour silhouette and the app gave
+it nothing but the full-colour launcher icon. The app now ships
+`drawable-*/ic_stat_notification` (a white-on-transparent silhouette of
+the mark, generated from the launcher foreground with its white plate
+removed) and declares it, with the brand-green accent, as the FCM
+defaults in `AndroidManifest.xml`. The backend sets the same
+`android.notification.icon` / `color` on every message
+(`notification/fcm.go`) so the two cannot drift. iOS needs nothing: APNs
+always shows the app icon. Verified with a real FCM delivery to the
+emulator.

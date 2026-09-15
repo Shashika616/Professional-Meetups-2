@@ -61,6 +61,21 @@
                 android:name="flutter_deeplinking_enabled"
                 android:value="false" />
         </activity>
+        <!-- Push notifications rendered by the system (app in the
+             background or closed) take their status-bar icon and accent
+             from here. Android draws the small icon as a single-colour
+             silhouette, so it must be a white-on-transparent drawable
+             (ic_stat_notification, made from the launcher foreground) and
+             NOT the full-colour launcher icon, which the system would
+             flatten into a grey square. The server sets the same icon and
+             colour per message (backend notification/fcm.go); these are
+             the defaults for anything that arrives without them. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

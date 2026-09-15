@@ -153,12 +153,37 @@ type fcmMessageBody struct {
 	Token        string            `json:"token"`
 	Notification fcmNotification   `json:"notification"`
 	Data         map[string]string `json:"data,omitempty"`
+	Android      fcmAndroidConfig  `json:"android"`
 }
 
 type fcmNotification struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 }
+
+// fcmAndroidConfig carries the Android-only presentation. iOS needs
+// nothing here: APNs always shows the app's own icon.
+type fcmAndroidConfig struct {
+	Notification fcmAndroidNotification `json:"notification"`
+}
+
+// fcmAndroidNotification names the status-bar icon and accent the app
+// ships (frontend AndroidManifest.xml: ic_stat_notification and
+// notification_accent). Android renders the small icon as a single-colour
+// silhouette, so the app provides a white-on-transparent drawable; without
+// this the system falls back to flattening the launcher icon into a grey
+// square. Sent per message rather than left to the manifest defaults so
+// the two cannot drift apart, and so a client built before the drawable
+// existed still receives a name it can ignore.
+type fcmAndroidNotification struct {
+	Icon  string `json:"icon"`
+	Color string `json:"color"`
+}
+
+const (
+	androidNotificationIcon  = "ic_stat_notification"
+	androidNotificationColor = "#34C24C" // AppPalette.brandGreen
+)
 
 // fcmErrorResponse is the shape of FCM HTTP v1's error body. Only the fields
 // that classify the failure are decoded; the rest is ignored.
@@ -253,6 +278,10 @@ func (s *FCMPushSender) send(ctx context.Context, token, title, body string, dat
 		Token:        token,
 		Notification: fcmNotification{Title: title, Body: body},
 		Data:         data,
+		Android: fcmAndroidConfig{Notification: fcmAndroidNotification{
+			Icon:  androidNotificationIcon,
+			Color: androidNotificationColor,
+		}},
 	}}
 	encoded, err := json.Marshal(payload)
 	if err != nil {

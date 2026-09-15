@@ -284,6 +284,11 @@ func TestSendToTokens_RequestShapeMatchesFCMHTTPv1(t *testing.T) {
 	if gotBody.Message.Notification.Title != "Title" || gotBody.Message.Notification.Body != "Body" {
 		t.Errorf("notification = %+v, want Title/Body", gotBody.Message.Notification)
 	}
+	// The Android icon and accent ride on every message, so a notification
+	// rendered by the system shows the app's mark, not a grey square.
+	if got := gotBody.Message.Android.Notification; got.Icon != "ic_stat_notification" || got.Color != "#34C24C" {
+		t.Errorf("android.notification = %+v, want icon ic_stat_notification and colour #34C24C", got)
+	}
 	if gotBody.Message.Data["meetup_id"] != "m-1" {
 		t.Errorf("data = %v, want meetup_id=m-1", gotBody.Message.Data)
 	}
