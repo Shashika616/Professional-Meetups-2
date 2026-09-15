@@ -24,6 +24,7 @@ const (
 	MeetupService_GetMeetup_FullMethodName                  = "/meetup.v1.MeetupService/GetMeetup"
 	MeetupService_ListMyMeetups_FullMethodName              = "/meetup.v1.MeetupService/ListMyMeetups"
 	MeetupService_ListActiveMeetups_FullMethodName          = "/meetup.v1.MeetupService/ListActiveMeetups"
+	MeetupService_CheckSchedule_FullMethodName              = "/meetup.v1.MeetupService/CheckSchedule"
 	MeetupService_ListMeetupRequests_FullMethodName         = "/meetup.v1.MeetupService/ListMeetupRequests"
 	MeetupService_RequestToJoin_FullMethodName              = "/meetup.v1.MeetupService/RequestToJoin"
 	MeetupService_WithdrawRequest_FullMethodName            = "/meetup.v1.MeetupService/WithdrawRequest"
@@ -98,6 +99,12 @@ type MeetupServiceClient interface {
 	// decision made client-side from window_start/window_end, not a second
 	// authorization decision.
 	ListActiveMeetups(ctx context.Context, in *ListActiveMeetupsRequest, opts ...grpc.CallOption) (*ListActiveMeetupsResponse, error)
+	// The one-meetup-at-a-time rule (ADR-005) asked ahead of time: the
+	// meetup the caller is already committed to in a window, if any, so the
+	// scheduling flow can say so at the time step rather than after the
+	// location and headcount have been picked. Read-only and unlocked; the
+	// create and join paths still enforce the rule under the lock.
+	CheckSchedule(ctx context.Context, in *CheckScheduleRequest, opts ...grpc.CallOption) (*CheckScheduleResponse, error)
 	// Returns every request (any status) on a meetup, with requester display
 	// info — the host's request-management view (frontend/meetup-scheduling-
 	// PLAN.md Step 8). Host-only — verified against meetups.host_user_id,
@@ -268,6 +275,16 @@ func (c *meetupServiceClient) ListActiveMeetups(ctx context.Context, in *ListAct
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListActiveMeetupsResponse)
 	err := c.cc.Invoke(ctx, MeetupService_ListActiveMeetups_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *meetupServiceClient) CheckSchedule(ctx context.Context, in *CheckScheduleRequest, opts ...grpc.CallOption) (*CheckScheduleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckScheduleResponse)
+	err := c.cc.Invoke(ctx, MeetupService_CheckSchedule_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -544,6 +561,12 @@ type MeetupServiceServer interface {
 	// decision made client-side from window_start/window_end, not a second
 	// authorization decision.
 	ListActiveMeetups(context.Context, *ListActiveMeetupsRequest) (*ListActiveMeetupsResponse, error)
+	// The one-meetup-at-a-time rule (ADR-005) asked ahead of time: the
+	// meetup the caller is already committed to in a window, if any, so the
+	// scheduling flow can say so at the time step rather than after the
+	// location and headcount have been picked. Read-only and unlocked; the
+	// create and join paths still enforce the rule under the lock.
+	CheckSchedule(context.Context, *CheckScheduleRequest) (*CheckScheduleResponse, error)
 	// Returns every request (any status) on a meetup, with requester display
 	// info — the host's request-management view (frontend/meetup-scheduling-
 	// PLAN.md Step 8). Host-only — verified against meetups.host_user_id,
@@ -684,6 +707,9 @@ func (UnimplementedMeetupServiceServer) ListMyMeetups(context.Context, *ListMyMe
 }
 func (UnimplementedMeetupServiceServer) ListActiveMeetups(context.Context, *ListActiveMeetupsRequest) (*ListActiveMeetupsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListActiveMeetups not implemented")
+}
+func (UnimplementedMeetupServiceServer) CheckSchedule(context.Context, *CheckScheduleRequest) (*CheckScheduleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckSchedule not implemented")
 }
 func (UnimplementedMeetupServiceServer) ListMeetupRequests(context.Context, *ListMeetupRequestsRequest) (*ListMeetupRequestsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListMeetupRequests not implemented")
@@ -858,6 +884,24 @@ func _MeetupService_ListActiveMeetups_Handler(srv interface{}, ctx context.Conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MeetupServiceServer).ListActiveMeetups(ctx, req.(*ListActiveMeetupsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MeetupService_CheckSchedule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckScheduleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).CheckSchedule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_CheckSchedule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).CheckSchedule(ctx, req.(*CheckScheduleRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1284,6 +1328,10 @@ var MeetupService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListActiveMeetups",
 			Handler:    _MeetupService_ListActiveMeetups_Handler,
+		},
+		{
+			MethodName: "CheckSchedule",
+			Handler:    _MeetupService_CheckSchedule_Handler,
 		},
 		{
 			MethodName: "ListMeetupRequests",

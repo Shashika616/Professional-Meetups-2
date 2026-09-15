@@ -87,19 +87,22 @@ class AppPalette {
   static Color tintedSurface(Color tint) => Color.alphaBlend(tint, card);
 }
 
-/// The original values, unchanged — every one of these was previously a
-/// public `AppPalette.x` constant directly.
+/// Dark mode is not the light palette inverted (2026-09-16 pass): the
+/// ground is a deep blue-black rather than pure black so cards and hairlines
+/// have somewhere to sit, the primary text is off-white so a page of it does
+/// not glare, and the accent carries a little more colour than it did, since
+/// a pastel that reads as blue on white reads as grey on near-black.
 class _Dark {
   _Dark._();
 
-  static const Color onyx = Color(0xFF020202);
-  static const Color surface = Color(0xFF0C0F12);
-  static const Color card = Color(0xFF14181C);
-  static const Color candyBlue = Color(0xFFB2D5E5);
-  static const Color steelBlue = Color(0xFF6E93AC);
+  static const Color onyx = Color(0xFF07090C);
+  static const Color surface = Color(0xFF0F1318);
+  static const Color card = Color(0xFF181D24);
+  static const Color candyBlue = Color(0xFFA6D4EE);
+  static const Color steelBlue = Color(0xFF7A9DB6);
   static const Color deepBlue = Color(0xFF274050);
-  static const Color textPrimary = Color(0xFFEDF2F6);
-  static const Color textSecondary = Color(0xFF93A1AC);
+  static const Color textPrimary = Color(0xFFE8EDF2);
+  static const Color textSecondary = Color(0xFF9AA7B3);
 
   /// Was 0xFF4ADE80 in dark and 0xFF1E9A56 in light: two different greens for
   /// the same idea, neither of them the brand's. Both are now [brandGreen], so
@@ -114,7 +117,7 @@ class _Dark {
   static const Color danger = Color(0xFFE5484D);
   static const Color cancelled = Color(0xFFE8747A);
   static const Color gold = Color(0xFFE5B93D);
-  static const Color hairline = Color(0x26FFFFFF);
+  static const Color hairline = Color(0x22FFFFFF);
 }
 
 /// First-pass light-mode values (Slice G) — background/surface/card/text
@@ -132,14 +135,14 @@ class _Dark {
 class _Light {
   _Light._();
 
-  static const Color onyx = Color(0xFFF7F9FA);
-  static const Color surface = Color(0xFFF0F3F5);
+  static const Color onyx = Color(0xFFF3F6F9);
+  static const Color surface = Color(0xFFECF0F4);
   static const Color card = Color(0xFFFFFFFF);
-  static const Color candyBlue = Color(0xFF2E6483);
-  static const Color steelBlue = Color(0xFF5A7A8C);
+  static const Color candyBlue = Color(0xFF2A6B90);
+  static const Color steelBlue = Color(0xFF587A8E);
   static const Color deepBlue = Color(0xFFD9E7EC);
-  static const Color textPrimary = Color(0xFF12181C);
-  static const Color textSecondary = Color(0xFF5B6670);
+  static const Color textPrimary = Color(0xFF151B21);
+  static const Color textSecondary = Color(0xFF5D6873);
   static const Color verified = AppPalette.brandGreen;
   static const Color danger = Color(0xFFC7373D);
   static const Color cancelled = Color(0xFFD9666C);

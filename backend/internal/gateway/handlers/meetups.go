@@ -312,6 +312,38 @@ func (h *Handler) listActiveMeetups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listActiveMeetupsResponse{Meetups: meetupsFromClient(meetups)})
 }
 
+// checkScheduleResponse: `conflict` is the meetup in the way, or null when
+// the window is free. Same object the 409 body carries, so the app renders
+// both with one sheet.
+type checkScheduleResponse struct {
+	Conflict *meetupResponse `json:"conflict"`
+}
+
+// checkSchedule answers GET /v1/meetups/schedule-check?window_start_unix_seconds=&window_end_unix_seconds=
+// for the scheduling flow's time step (ADR-005). Advisory: the create call
+// still enforces the rule under the lock.
+func (h *Handler) checkSchedule(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	start, errStart := strconv.ParseInt(q.Get("window_start_unix_seconds"), 10, 64)
+	end, errEnd := strconv.ParseInt(q.Get("window_end_unix_seconds"), 10, 64)
+	if errStart != nil || errEnd != nil {
+		writeError(w, http.StatusBadRequest, "window_start_unix_seconds and window_end_unix_seconds are required")
+		return
+	}
+	ctx := r.Context()
+	conflict, found, err := h.monolith.CheckSchedule(ctx, middleware.UserIDFromContext(ctx), start, end)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	resp := checkScheduleResponse{}
+	if found {
+		m := meetupFromClient(conflict)
+		resp.Conflict = &m
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 type listMeetupRequestsResponse struct {
 	Requests []meetupRequestResponse `json:"requests"`
 }

@@ -126,6 +126,25 @@ class HttpMeetupService implements MeetupService {
   }
 
   @override
+  Future<Meetup?> findScheduleConflict({
+    required DateTime windowStart,
+    required DateTime windowEnd,
+  }) async {
+    final response = await _authenticatedGet(
+      '/v1/meetups/schedule-check',
+      query: {
+        'window_start_unix_seconds':
+            '${windowStart.millisecondsSinceEpoch ~/ 1000}',
+        'window_end_unix_seconds':
+            '${windowEnd.millisecondsSinceEpoch ~/ 1000}',
+      },
+    );
+    final conflict = _decodeOrThrow(response)['conflict'];
+    if (conflict is! Map<String, dynamic>) return null;
+    return Meetup.fromJson(conflict);
+  }
+
+  @override
   Future<List<Meetup>> listActiveMeetups() async {
     final response = await _authenticatedGet('/v1/meetups/active');
     final decoded = _decodeOrThrow(response);

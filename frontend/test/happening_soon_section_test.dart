@@ -11,10 +11,12 @@ import 'package:professional_connections_platform/core/models/user_profile.dart'
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
+import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
+import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
@@ -395,7 +397,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('No meetups near you this week'), findsOneWidget);
-        expect(find.byIcon(Icons.groups_2_outlined), findsOneWidget);
+        // The empty state is the app's own card deck, not a bare icon.
+        expect(find.byType(EmptyStateDeck), findsOneWidget);
         expect(
           find.textContaining('Be the first to put one on the calendar'),
           findsOneWidget,
@@ -645,12 +648,13 @@ void main() {
 
       testWidgets(
         'the location read starts when Home mounts, even while the browse '
-        'section is still below the fold and unbuilt',
+        'section is still below the fold',
         (tester) async {
           // The real phone shape: a short viewport and several active
           // meetups above the browse section, which puts Happening Soon
-          // outside both the viewport and the sliver cache, so its widget
-          // is never built. The read must not depend on it being.
+          // well outside the viewport. The read must not depend on the
+          // section being on screen. (Home builds every section up front
+          // now, so the section exists; it is still nowhere near visible.)
           tester.view.physicalSize = const Size(800, 400);
           tester.view.devicePixelRatio = 1.0;
           addTearDown(tester.view.reset);
@@ -667,7 +671,7 @@ void main() {
           await tester.pumpWidget(_appWith(service, trustLevel: 2));
           await tester.pumpAndSettle();
 
-          expect(find.byType(HappeningSoonSection), findsNothing);
+          expect(find.byType(HappeningSoonSection), findsOneWidget);
           expect(geo.getCurrentPositionCalls, 1);
         },
       );
@@ -957,7 +961,8 @@ void main() {
 
     /// Home's own outer ListView — first in tree order, ahead of the intent
     /// filter row's horizontal list and the nested browse list.
-    Finder homeList() => find.byType(ListView).first;
+    // Home's feed is a SingleChildScrollView (nothing on it is lazy).
+    Finder homeList() => find.byType(SingleChildScrollView).first;
 
     /// Scrolls Home the way a thumb would. Repeated drags rather than one
     /// huge fling: the section is laid out lazily, so it has to be scrolled
@@ -1442,6 +1447,62 @@ void main() {
   /// all). Home's content got shorter, the scroll position clamped to the
   /// new maxScrollExtent, and the page jumped upward under the user's thumb
   /// at the exact moment they were reading it.
+  group('scrolling Home keeps its place', () {
+    testWidgets(
+      'dragging back up from the bottom never jumps to the top: every '
+      'section stays built, so nothing is rebuilt at a different height',
+      (tester) async {
+        // The real phone shape, with enough above and below the fold to
+        // scroll a long way: active meetups on top, a browse list under.
+        tester.view.physicalSize = const Size(800, 900);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final service = ScriptedMeetupService(
+          openMeetups: List.generate(8, (i) => _meetup(id: 'open-$i')),
+          activeMeetups: [
+            for (var i = 0; i < 4; i++)
+              _meetup(id: 'active-$i', isHostedByMe: true),
+          ],
+        );
+        await tester.pumpWidget(_appWith(service, trustLevel: 2));
+        await tester.pumpAndSettle();
+
+        final feed = find.byType(SingleChildScrollView).first;
+        // The feed's own Scrollable is the first inside it; the nested
+        // shrink-wrapped lists have their own, which never move.
+        final position = tester
+            .state<ScrollableState>(
+              find
+                  .descendant(of: feed, matching: find.byType(Scrollable))
+                  .first,
+            )
+            .position;
+        position.jumpTo(position.maxScrollExtent);
+        await tester.pumpAndSettle();
+        expect(position.pixels, greaterThan(600));
+
+        // Scroll up in small drags, the way a thumb does, and watch the
+        // offset: it may only ever go down by about a drag's worth.
+        var last = position.pixels;
+        while (position.pixels > 0) {
+          await tester.drag(feed, const Offset(0, 120));
+          await tester.pumpAndSettle();
+          expect(position.pixels, lessThanOrEqualTo(last));
+          expect(
+            last - position.pixels,
+            lessThanOrEqualTo(400),
+            reason: 'the page jumped from $last to ${position.pixels}',
+          );
+          if (position.pixels == last) break;
+          last = position.pixels;
+        }
+        expect(position.pixels, 0);
+        // And nothing on top was rebuilt: the same section widget is there.
+        expect(find.byType(ActiveMeetupsSection), findsOneWidget);
+      },
+    );
+  });
+
   group('switching intent keeps the page still', () {
     testWidgets('the scroll position does not move when a chip is tapped', (
       tester,

@@ -62,3 +62,17 @@ func scheduleGuard(userID string, windowStart, windowEnd time.Time, excludeID st
 		return &ScheduleConflictError{Conflict: meetupFromRepo(conflict, userID)}
 	}
 }
+
+// CheckSchedule is the scheduling flow's early answer. A window that has
+// not been validated yet (end before start) is simply free: the create
+// path validates it properly and this must not fail for a draft.
+func (s *service) CheckSchedule(ctx context.Context, userID string, windowStart, windowEnd time.Time) (Meetup, bool, error) {
+	if !windowEnd.After(windowStart) {
+		return Meetup{}, false, nil
+	}
+	conflict, found, err := s.meetups.FindScheduleConflict(ctx, userID, windowStart, windowEnd, "")
+	if err != nil || !found {
+		return Meetup{}, false, err
+	}
+	return meetupFromRepo(conflict, userID), true, nil
+}

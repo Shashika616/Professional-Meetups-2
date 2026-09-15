@@ -933,3 +933,30 @@ func TestScheduleConflict_Is409WithTheMeetupInTheWay(t *testing.T) {
 		t.Errorf("plain conflict carried structured fields: %v", got)
 	}
 }
+
+// TestCheckSchedule_ReportsTheMeetupInTheWayOrNull: the time step's early
+// answer carries the same meetup object as the 409 body, or a null.
+func TestCheckSchedule_ReportsTheMeetupInTheWayOrNull(t *testing.T) {
+	s := newTestServer(t)
+	path := "/v1/meetups/schedule-check?window_start_unix_seconds=100&window_end_unix_seconds=200"
+
+	rec := s.do(http.MethodGet, path, "", s.tokenFor(t, "user-1", 3))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	if got := decodeBody(t, rec)["conflict"]; got != nil {
+		t.Errorf("free window: conflict = %v, want null", got)
+	}
+
+	s.monolith.meetupResponse = monolithclient.Meetup{ID: "busy-1", HostUserID: "user-1", Intent: "coffee", IsHostedByMe: true}
+	rec = s.do(http.MethodGet, path, "", s.tokenFor(t, "user-1", 3))
+	conflict, _ := decodeBody(t, rec)["conflict"].(map[string]any)
+	if conflict["id"] != "busy-1" {
+		t.Errorf("conflict = %v, want busy-1", decodeBody(t, rec)["conflict"])
+	}
+
+	rec = s.do(http.MethodGet, "/v1/meetups/schedule-check?window_start_unix_seconds=x", "", s.tokenFor(t, "user-1", 3))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("malformed query: status = %d, want 400", rec.Code)
+	}
+}

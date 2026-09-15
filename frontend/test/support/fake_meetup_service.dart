@@ -59,6 +59,12 @@ class ImmediateMeetupService implements MeetupService {
   Future<List<Meetup>> listActiveMeetups() async => const [];
 
   @override
+  Future<Meetup?> findScheduleConflict({
+    required DateTime windowStart,
+    required DateTime windowEnd,
+  }) async => null;
+
+  @override
   Future<List<MeetupRequestModel>> listMeetupRequests(String meetupId) =>
       throw UnimplementedError();
 

@@ -168,6 +168,10 @@ type MeetupRepository interface {
 	// Create inserts the meetup. guard, when non-nil, runs under the host's
 	// schedule lock inside the same transaction (see ScheduleGuard).
 	Create(ctx context.Context, m NewMeetup, guard ScheduleGuard) (Meetup, error)
+	// FindScheduleConflict is ScheduleTx's read outside any transaction:
+	// the advisory answer the scheduling flow shows at its time step. Not
+	// the enforcement, which happens under the lock at create time.
+	FindScheduleConflict(ctx context.Context, userID string, windowStart, windowEnd time.Time, excludeID string) (Meetup, bool, error)
 	// GetByID returns apperror.ErrNotFound (wrapped) if id doesn't exist.
 	// viewerID populates MyRequestStatus relative to that specific caller.
 	GetByID(ctx context.Context, id, viewerID string) (Meetup, error)

@@ -68,6 +68,16 @@ abstract interface class MeetupService {
   /// computed client-side from the returned timestamps.
   Future<List<Meetup>> listActiveMeetups();
 
+  /// The one-meetup-at-a-time rule asked ahead of time (ADR-005): the
+  /// meetup the caller is already committed to inside [windowStart,
+  /// windowEnd), or null when the window is free. Advisory, so the
+  /// scheduling flow can say so at the time step; the create call still
+  /// enforces the rule and may still answer with a conflict.
+  Future<Meetup?> findScheduleConflict({
+    required DateTime windowStart,
+    required DateTime windowEnd,
+  });
+
   /// The host's request-management view — every request (any status) on
   /// meetupId, with requester display info.
   Future<List<MeetupRequestModel>> listMeetupRequests(String meetupId);
@@ -424,6 +434,15 @@ class MockMeetupService implements MeetupService {
       requestedNextCursor: null,
       requestedHasMore: false,
     );
+  }
+
+  @override
+  Future<Meetup?> findScheduleConflict({
+    required DateTime windowStart,
+    required DateTime windowEnd,
+  }) async {
+    await Future<void>.delayed(latency);
+    return null;
   }
 
   @override

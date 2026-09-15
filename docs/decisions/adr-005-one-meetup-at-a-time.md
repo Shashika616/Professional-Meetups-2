@@ -109,3 +109,12 @@ defaults in `AndroidManifest.xml`. The backend sets the same
 (`notification/fcm.go`) so the two cannot drift. iOS needs nothing: APNs
 always shows the app icon. Verified with a real FCM delivery to the
 emulator.
+
+## Addendum (2026-09-16): the answer at the time step
+
+The scheduling flow now asks `GET /v1/meetups/schedule-check` (the same
+`FindScheduleConflict` query, read outside the lock) when CONTINUE is
+pressed on the date/time step, and shows the conflict sheet there, before
+the place and headcount are picked. It is advisory: `CreateMeetup` still
+enforces the rule under the lock, and a failed check lets the flow
+continue rather than blocking someone over a network blip.

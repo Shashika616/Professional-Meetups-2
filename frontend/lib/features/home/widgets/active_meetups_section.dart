@@ -818,6 +818,7 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Where the live card says NOW. Same shape, so the
                           // two are comparable at a glance.
@@ -840,21 +841,15 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              meetup.intentLabel,
-                              style: TextStyle(
-                                color: AppPalette.textSecondary,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.1,
-                              ),
-                            ),
-                          ),
+                          const Spacer(),
+                          // What kind of meetup it was, as the glyph the
+                          // rest of the app uses for the intent, with the
+                          // name in small type under it: a card in a deck
+                          // is scanned, not read.
+                          _IntentMark(meetup: meetup, tone: tone),
                         ],
                       ),
-                      const SizedBox(height: 10),
+                      const SizedBox(height: 4),
                       // WHICH meetup. Without these three lines the card
                       // asked someone to rate an unnamed event: a user with
                       // two finished meetups in the deck had no way to tell
@@ -1000,6 +995,48 @@ class _HostReason extends StatelessWidget {
               fontStyle: text.isEmpty ? FontStyle.normal : FontStyle.italic,
               height: 1.35,
             ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The intent's glyph in a tinted square with the intent's name in small
+/// type beneath, for the top-right corner of a card that is otherwise all
+/// text. Tinted with the card's own state colour so it belongs to the card
+/// rather than shouting over it.
+class _IntentMark extends StatelessWidget {
+  const _IntentMark({required this.meetup, required this.tone});
+
+  final Meetup meetup;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: tone.withValues(alpha: 0.14),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: tone.withValues(alpha: 0.35)),
+          ),
+          child: Icon(meetup.intent.icon, size: 18, color: tone),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          meetup.intentLabel,
+          textAlign: TextAlign.right,
+          style: TextStyle(
+            color: AppPalette.textSecondary,
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.9,
           ),
         ),
       ],

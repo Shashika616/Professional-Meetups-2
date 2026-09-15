@@ -1052,8 +1052,8 @@ void main() {
     });
 
     testWidgets(
-      'each sub-tab has its own empty message — History says "Nothing here '
-      'yet." rather than repeating the top-level tab\'s copy',
+      'each sub-tab has its own empty state rather than repeating the '
+      'top-level tab\'s copy',
       (tester) async {
         await tester.pumpWidget(
           _eventsApp(
@@ -1064,15 +1064,14 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(
-          find.text('You aren\'t hosting any meetups yet.'),
-          findsOneWidget,
-        );
+        expect(find.text('Nothing on your calendar yet'), findsOneWidget);
+        expect(find.text('HOST A MEETUP'), findsOneWidget);
 
         await tester.tap(find.text('History'));
         await tester.pumpAndSettle();
 
-        expect(find.text('Nothing here yet.'), findsOneWidget);
+        expect(find.text('No past meetups yet'), findsOneWidget);
+        expect(find.text('HOST A MEETUP'), findsNothing);
       },
     );
 

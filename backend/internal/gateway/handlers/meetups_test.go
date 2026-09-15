@@ -73,6 +73,14 @@ func (f *fakeMonolith) ListActiveMeetups(_ context.Context, userID string) ([]mo
 	return nil, f.err
 }
 
+func (f *fakeMonolith) CheckSchedule(_ context.Context, userID string, _, _ int64) (monolithclient.Meetup, bool, error) {
+	f.meetup.gotUserID = userID
+	if f.meetupResponse.ID != "" {
+		return f.meetupResponse, true, f.err
+	}
+	return monolithclient.Meetup{}, false, f.err
+}
+
 func (f *fakeMonolith) ListMeetupRequests(_ context.Context, meetupID, hostUserID string) ([]monolithclient.MeetupRequest, error) {
 	f.meetup.gotMeetupID, f.meetup.gotUserID = meetupID, hostUserID
 	return nil, f.err
@@ -191,6 +199,7 @@ func TestMeetupRoutes_AreWiredAndRequireAuth(t *testing.T) {
 		{http.MethodGet, "/v1/meetups?intent=coffee&viewer_lat=6.9&viewer_lng=79.8", ""},
 		{http.MethodGet, "/v1/meetups/mine", ""},
 		{http.MethodGet, "/v1/meetups/active", ""},
+		{http.MethodGet, "/v1/meetups/schedule-check?window_start_unix_seconds=1&window_end_unix_seconds=2", ""},
 		{http.MethodGet, "/v1/meetups/m1", ""},
 		{http.MethodPost, "/v1/meetups/m1/close", `{}`},
 		{http.MethodPost, "/v1/meetups/m1/cancel", `{"reason":"x"}`},

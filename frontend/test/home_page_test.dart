@@ -158,7 +158,7 @@ void main() {
 
     testWidgets(
       'the header is pinned above the feed with a hairline under it: it '
-      'is not a row of the ListView, so scrolling cannot carry it away',
+      'is not part of the feed, so scrolling cannot carry it away',
       (tester) async {
         await tester.pumpWidget(
           ProviderScope(
@@ -181,9 +181,8 @@ void main() {
         // a horizontal one).
         final feed = find.byWidgetPredicate(
           (w) =>
-              w is ListView &&
+              w is SingleChildScrollView &&
               w.scrollDirection == Axis.vertical &&
-              // Not the shrink-wrapped browse list nested inside it.
               w.physics is AlwaysScrollableScrollPhysics,
         );
         // Structural, not positional: the header must not be a descendant

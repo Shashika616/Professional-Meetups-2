@@ -60,14 +60,20 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
 
     return Scaffold(
       backgroundColor: Colors.transparent,
+      // top: false so the hero runs under the status bar; it pads for it
+      // itself.
       body: SafeArea(
+        top: false,
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
-            const SizedBox(height: 28),
-            _avatarBlock(context, ref, profile),
-            const SizedBox(height: 22),
-            _statsRow(profile),
+            _ProfileHero(
+              profile: profile,
+              onEditName: profile == null
+                  ? null
+                  : () => _editFullName(context, ref, profile),
+              stats: _statsRow(profile),
+            ),
             // Level 0 (ADR-014) — visible only for an account that hasn't
             // connected LinkedIn yet (Apple/Google/email signup, or a
             // LinkedIn link that hasn't happened). LinkedIn is the ONLY
@@ -277,74 +283,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     );
   }
 
-  Widget _avatarBlock(
-    BuildContext context,
-    WidgetRef ref,
-    UserProfile? profile,
-  ) {
-    final fullName = profile?.fullName;
-    final displayName = (fullName == null || fullName.isEmpty)
-        ? 'Member'
-        : fullName;
-
-    return Center(
-      child: Column(
-        children: [
-          ProfessionalAvatar(
-            size: 92,
-            name: fullName,
-            imageUrl: (profile?.profilePhotoUrl.isNotEmpty ?? false)
-                ? profile!.profilePhotoUrl
-                : null,
-          ),
-          const SizedBox(height: 14),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                displayName,
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: AppPalette.textPrimary,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              // Full name has no dedicated row in the VERIFICATION section
-              // below (ADR-023 §5) — a lightweight inline pencil here
-              // instead of a full-screen page, since editing it is just a
-              // single field with no OTP involved.
-              if (profile != null) ...[
-                const SizedBox(width: 6),
-                GestureDetector(
-                  onTap: () => _editFullName(context, ref, profile),
-                  child: Icon(
-                    Icons.edit_outlined,
-                    size: 16,
-                    color: AppPalette.textSecondary,
-                  ),
-                ),
-              ],
-            ],
-          ),
-          const SizedBox(height: 8),
-          VerificationBadges(
-            trustLevel: profile?.trustLevel ?? 0,
-            // Self-view only (ADR-023 §2) — decouples the Official chip
-            // from the full Level 3 bundle so onboarding's work-email-only
-            // verification is reflected immediately, not only once phone +
-            // personal email + legal name are also done.
-            workEmailVerifiedOverride: profile?.workEmailVerified,
-          ),
-          // headline (e.g. "SWE • Colombo") has no backend source in this
-          // slice — LinkedIn's OIDC userinfo call doesn't return one, and
-          // there's nowhere else to get it from yet (UserProfile.headline
-          // doc comment). Nothing shown here rather than inventing data.
-        ],
-      ),
-    );
-  }
-
   /// ADR-023 §5's full-name inline edit — a plain dialog, not a pushed
   /// screen: this is a single self-reported field with no OTP round-trip,
   /// unlike every other row in the VERIFICATION section. Calls
@@ -397,7 +335,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
   Widget _statsRow(UserProfile? profile) {
     final trustLevel = profile?.trustLevel;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: EdgeInsets.zero,
       child: Row(
         children: [
           Expanded(
@@ -694,16 +632,16 @@ class _StatChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FlatCard(
-      radius: 12,
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      radius: 16,
+      padding: const EdgeInsets.symmetric(vertical: 14),
       child: Column(
         children: [
           Text(
             value,
             style: TextStyle(
-              color: AppPalette.candyBlue,
+              color: AppPalette.textPrimary,
               fontWeight: FontWeight.w800,
-              fontSize: 16,
+              fontSize: 18,
             ),
           ),
           const SizedBox(height: 2),
@@ -967,6 +905,172 @@ class _SignOutDialogState extends ConsumerState<_SignOutDialog> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The top of the profile, in the shape of the reference design: a flat
+/// tinted band that runs edge to edge and under the status bar, rounded
+/// only at the bottom, with the edit control as a round button in its
+/// corner, the person in the middle with a ring around their picture and a
+/// small status dot, their name and standing under it, and their numbers
+/// in a quiet row at the bottom. The band is the palette's own deepBlue
+/// tint (pale in light, deep in dark): one colour, no gradient.
+class _ProfileHero extends StatelessWidget {
+  const _ProfileHero({
+    required this.profile,
+    required this.onEditName,
+    required this.stats,
+  });
+
+  final UserProfile? profile;
+  final VoidCallback? onEditName;
+  final Widget stats;
+
+  @override
+  Widget build(BuildContext context) {
+    final fullName = profile?.fullName;
+    final displayName = (fullName == null || fullName.isEmpty)
+        ? 'Member'
+        : fullName;
+    final photo = (profile?.profilePhotoUrl.isNotEmpty ?? false)
+        ? profile!.profilePhotoUrl
+        : null;
+    final standing = switch (profile?.trustLevel) {
+      null => 'Signing you in',
+      0 => 'New here',
+      1 => 'Getting verified',
+      2 => 'Verified member',
+      _ => 'Verified professional',
+    };
+
+    final statusBar = MediaQuery.paddingOf(context).top;
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, statusBar + 8, 20, 22),
+      decoration: BoxDecoration(
+        color: AppPalette.deepBlue,
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),
+      ),
+      child: Column(
+        children: [
+          // The one control on the card, in the corner where the
+          // reference keeps it. Full name has no row of its own in the
+          // VERIFICATION section (ADR-023 §5): one field, no OTP.
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (onEditName != null)
+                _RoundControl(icon: Icons.edit_outlined, onTap: onEditName!)
+              else
+                const SizedBox(height: 44),
+            ],
+          ),
+          const SizedBox(height: 2),
+          // A brand-gradient ring around the picture, and the status dot
+          // the reference puts at its edge.
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    colors: [AppPalette.brandBlue, AppPalette.brandGreen],
+                  ),
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppPalette.card,
+                  ),
+                  child: ProfessionalAvatar(
+                    size: 104,
+                    name: fullName,
+                    imageUrl: photo,
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 6,
+                bottom: 6,
+                child: Container(
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: AppPalette.brandGreen,
+                    border: Border.all(color: AppPalette.card, width: 3),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Text(
+            displayName,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
+              color: AppPalette.textPrimary,
+              letterSpacing: -0.4,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            standing,
+            style: TextStyle(color: AppPalette.textSecondary, fontSize: 14),
+          ),
+          const SizedBox(height: 12),
+          VerificationBadges(
+            trustLevel: profile?.trustLevel ?? 0,
+            // Self-view only (ADR-023 §2): the Official chip follows the
+            // work-email step on its own, ahead of the full Level 3.
+            workEmailVerifiedOverride: profile?.workEmailVerified,
+          ),
+          const SizedBox(height: 20),
+          stats,
+        ],
+      ),
+    );
+  }
+}
+
+/// A round, raised control on the hero card: the reference's corner
+/// buttons.
+class _RoundControl extends StatelessWidget {
+  const _RoundControl({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppPalette.card,
+          border: Border.all(color: AppPalette.hairline),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(
+                alpha: AppPalette.isLight ? 0.06 : 0.3,
+              ),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Icon(icon, size: 19, color: AppPalette.textPrimary),
       ),
     );
   }

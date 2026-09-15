@@ -174,22 +174,29 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final isLight = themeMode == AppThemeMode.light;
 
-    SystemChrome.setSystemUIOverlayStyle(
-      SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
-        statusBarIconBrightness: isLight ? Brightness.dark : Brightness.light,
-        statusBarBrightness: isLight ? Brightness.light : Brightness.dark,
-        systemNavigationBarColor: AppPalette.onyx,
-        systemNavigationBarIconBrightness: isLight
-            ? Brightness.dark
-            : Brightness.light,
-      ),
+    final overlayStyle = SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: isLight ? Brightness.dark : Brightness.light,
+      statusBarBrightness: isLight ? Brightness.light : Brightness.dark,
+      systemNavigationBarColor: AppPalette.onyx,
+      systemNavigationBarIconBrightness: isLight
+          ? Brightness.dark
+          : Brightness.light,
     );
+    SystemChrome.setSystemUIOverlayStyle(overlayStyle);
 
     return MaterialApp(
       key: ValueKey(themeMode),
       debugShowCheckedModeBanner: false,
       title: 'TieHere',
+      // The style above is only a request; any route that paints its own
+      // (an AppBar, a dialog) replaces it, and a page without one keeps
+      // whatever came last, which is how the clock ended up white on the
+      // light ground. Annotating the whole tree keeps every screen honest.
+      builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
+        value: overlayStyle,
+        child: child ?? const SizedBox.shrink(),
+      ),
       theme: ThemeData(
         brightness: isLight ? Brightness.light : Brightness.dark,
         useMaterial3: true,
@@ -221,6 +228,10 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
           elevation: 0,
           scrolledUnderElevation: 0,
           centerTitle: true,
+          // An AppBar paints its own status-bar style, and with a
+          // transparent background it guessed light icons in light mode
+          // (a white clock on the pale ground). Pin it to the app's.
+          systemOverlayStyle: overlayStyle,
           titleTextStyle: TextStyle(
             color: AppPalette.textPrimary,
             fontSize: 15,

@@ -135,6 +135,9 @@ type Client interface {
 	GetMeetup(ctx context.Context, meetupID, userID string, viewerTrustLevel int32) (Meetup, error)
 	ListMyMeetups(ctx context.Context, userID, hostedCursor, requestedCursor string) (hosted, requested []Meetup, hostedNextCursor string, hostedHasMore bool, requestedNextCursor string, requestedHasMore bool, err error)
 	ListActiveMeetups(ctx context.Context, userID string) ([]Meetup, error)
+	// CheckSchedule returns the meetup userID is already committed to in
+	// the window, and false when it is free (ADR-005, advisory).
+	CheckSchedule(ctx context.Context, userID string, windowStart, windowEnd int64) (Meetup, bool, error)
 	ListMeetupRequests(ctx context.Context, meetupID, hostUserID string) ([]MeetupRequest, error)
 	RequestToJoin(ctx context.Context, meetupID, requesterID string, requesterTrustLevel int32) (MeetupRequest, error)
 	WithdrawRequest(ctx context.Context, requestID, requesterID, note string) error

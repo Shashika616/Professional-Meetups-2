@@ -232,47 +232,53 @@ class _HomePageState extends ConsumerState<HomePage>
                         .then((_) {}, onError: (_) {}),
                   ]);
                 },
-                child: ListView(
+                // A SingleChildScrollView, NOT a ListView. Home is three
+                // sections, and a ListView lays them out lazily: scroll to
+                // the bottom and the ACTIVE MEETUPS section at the top
+                // leaves the keep-alive range and is disposed; scroll back
+                // up and it is rebuilt from scratch, its carousels and
+                // timers reset, and its real height differs from the
+                // estimate the viewport used while it was gone. Flutter
+                // corrects the scroll offset for that difference, which the
+                // user saw as the page jumping to the top halfway through
+                // the Happening Soon cards. Nothing on this page is long
+                // enough to need laziness; everything stays built.
+                child: SingleChildScrollView(
                   controller: _scrollController,
                   // A RefreshIndicator can only fire on an overscroll, and a
-                  // list shorter than its viewport does not scroll at all
+                  // page shorter than its viewport does not scroll at all
                   // under the default physics — so pull-to-refresh silently
                   // did nothing whenever Home was short: a new account with
                   // no active meetups and nothing nearby, or one whose
                   // location is blocked. Exactly the state in which a user
                   // is most likely to pull.
-                  //
-                  // It was masked until now by the loading skeleton, which
-                  // padded the page tall enough to scroll on the way in.
-                  // Delaying the skeleton removed that accident and exposed
-                  // the bug underneath; same fix, and same reasoning, as
-                  // PaginatedMeetupList's own physics.
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: EdgeInsets.zero,
-                  addAutomaticKeepAlives: true,
-                  addRepaintBoundaries: true,
-                  children: [
-                    const SizedBox(height: 4),
-                    const ActiveMeetupsSection(),
-                    // The intent filter lives INSIDE this section now, not
-                    // at the top of the page. It only ever filtered this
-                    // list, so sitting above ActiveMeetupsSection — which it
-                    // does not filter — read as a page-wide control and
-                    // implied the active-meetups strip was being filtered
-                    // too.
-                    HappeningSoonSection(
-                      intent: intentFilter,
-                      trustLevel: trustLevel,
-                      onSelectIntent: onIntentSelected,
-                      // The bridge: this page scrolls, that section's list
-                      // does not, so the section watches this controller to
-                      // know when to fetch the next page.
-                      outerScrollController: _scrollController,
-                    ),
-                    const SafetyTipCard(),
-                    // Clearance above the fixed CTA block below.
-                    const SizedBox(height: 16),
-                  ],
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const SizedBox(height: 4),
+                      const ActiveMeetupsSection(),
+                      // The intent filter lives INSIDE this section now, not
+                      // at the top of the page. It only ever filtered this
+                      // list, so sitting above ActiveMeetupsSection — which
+                      // it does not filter — read as a page-wide control and
+                      // implied the active-meetups strip was being filtered
+                      // too.
+                      HappeningSoonSection(
+                        intent: intentFilter,
+                        trustLevel: trustLevel,
+                        onSelectIntent: onIntentSelected,
+                        // The bridge: this page scrolls, that section's list
+                        // does not, so the section watches this controller
+                        // to know when to fetch the next page.
+                        outerScrollController: _scrollController,
+                      ),
+                      const SafetyTipCard(),
+                      // Clearance above the fixed CTA block below.
+                      const SizedBox(height: 16),
+                    ],
+                  ),
                 ),
               ),
             ),

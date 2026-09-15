@@ -428,6 +428,11 @@ void main() {
       'Level 0 shows the Connect LinkedIn banner, LinkedIn row says Not '
       'connected, and the four verify chips are locked instead of VERIFY',
       (tester) async {
+        // The hero card at the top makes the page taller than the default
+        // test viewport; a tall one keeps every row built and tappable.
+        tester.view.physicalSize = const Size(1000, 2600);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
         final auth = _FakeAuthService(
           profile: const UserProfile(
             id: 'user-1',
@@ -505,6 +510,8 @@ void main() {
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.text('VERIFY').first);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('VERIFY').first);
       await tester.pumpAndSettle();
 
@@ -516,6 +523,8 @@ void main() {
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
 
+      await tester.ensureVisible(find.text('VERIFY').at(1));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('VERIFY').at(1));
       await tester.pumpAndSettle();
 
@@ -528,6 +537,8 @@ void main() {
         await tester.pumpWidget(_appWith(_FakeAuthService()));
         await tester.pumpAndSettle();
 
+        await tester.ensureVisible(find.text('VERIFY').at(2));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('VERIFY').at(2));
         await tester.pumpAndSettle();
 

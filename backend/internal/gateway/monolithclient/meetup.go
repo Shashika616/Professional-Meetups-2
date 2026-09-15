@@ -403,6 +403,19 @@ func (c *grpcClient) ListActiveMeetups(ctx context.Context, userID string) ([]Me
 	return meetupsFromProto(resp.GetMeetups()), nil
 }
 
+func (c *grpcClient) CheckSchedule(ctx context.Context, userID string, windowStart, windowEnd int64) (Meetup, bool, error) {
+	resp, err := c.meetup.CheckSchedule(ctx, &meetupv1.CheckScheduleRequest{
+		UserId: userID, WindowStartUnixSeconds: windowStart, WindowEndUnixSeconds: windowEnd,
+	})
+	if err != nil {
+		return Meetup{}, false, err
+	}
+	if resp.GetConflict() == nil {
+		return Meetup{}, false, nil
+	}
+	return meetupFromProto(resp.GetConflict()), true, nil
+}
+
 func (c *grpcClient) ListMeetupRequests(ctx context.Context, meetupID, hostUserID string) ([]MeetupRequest, error) {
 	resp, err := c.meetup.ListMeetupRequests(ctx, &meetupv1.ListMeetupRequestsRequest{
 		MeetupId: meetupID, HostUserId: hostUserID,

@@ -257,6 +257,20 @@ func (s *MeetupServer) ListActiveMeetups(ctx context.Context, req *meetupv1.List
 	return &meetupv1.ListActiveMeetupsResponse{Meetups: meetupsToProto(meetups)}, nil
 }
 
+func (s *MeetupServer) CheckSchedule(ctx context.Context, req *meetupv1.CheckScheduleRequest) (*meetupv1.CheckScheduleResponse, error) {
+	conflict, found, err := s.svc.CheckSchedule(ctx, req.GetUserId(),
+		time.Unix(req.GetWindowStartUnixSeconds(), 0).UTC(),
+		time.Unix(req.GetWindowEndUnixSeconds(), 0).UTC())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	resp := &meetupv1.CheckScheduleResponse{}
+	if found {
+		resp.Conflict = meetupToProto(conflict)
+	}
+	return resp, nil
+}
+
 func (s *MeetupServer) ListMeetupRequests(ctx context.Context, req *meetupv1.ListMeetupRequestsRequest) (*meetupv1.ListMeetupRequestsResponse, error) {
 	requests, err := s.svc.ListMeetupRequests(ctx, meetup.ListMeetupRequestsRequest{
 		MeetupID:   req.GetMeetupId(),

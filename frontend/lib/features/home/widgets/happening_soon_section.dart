@@ -13,6 +13,7 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -586,35 +587,15 @@ class _NoMeetupsYet extends StatelessWidget {
         : '${intent!.label.toLowerCase()} meetups';
 
     return FlatCard(
-      radius: 12,
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.groups_2_outlined, color: AppPalette.candyBlue, size: 30),
-          const SizedBox(height: 12),
-          Text(
-            'No $scope near you this week',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Be the first to put one on the calendar... hosting takes a '
-            'minute. Or check back soon: new meetups appear here as soon as '
-            'someone nearby schedules one.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppPalette.textSecondary,
-              fontSize: 12,
-              height: 1.45,
-            ),
-          ),
-        ],
+      radius: 16,
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+      child: EmptyStateDeck(
+        compact: true,
+        title: 'No $scope near you this week',
+        message:
+            'Be the first to put one on the calendar, or check back soon. '
+            'New meetups appear here as soon as someone nearby schedules one.',
+        scenes: EmptyDeckScenes.meetups,
       ),
     );
   }

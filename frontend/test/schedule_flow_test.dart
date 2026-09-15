@@ -6,8 +6,12 @@ import 'package:professional_connections_platform/core/maps/map_provider.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/models/intent_type.dart';
+import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart'
     show ScheduleFlowPage, debugScheduleFlowNowOverride;
+
+import 'support/scripted_meetup_service.dart';
 
 /// Resolves immediately to a fixed, already-Level-2 profile — the Intent
 /// step gates on trust level, so every intent here needs to render
@@ -23,9 +27,16 @@ class _FakeAuthSessionNotifier extends AuthSessionNotifier {
   );
 }
 
-Widget _appWith() {
+/// [service] answers the time step's schedule check (a free window by
+/// default); the flow never reaches the network in these tests.
+Widget _appWith({ScriptedMeetupService? service}) {
   return ProviderScope(
-    overrides: [authSessionProvider.overrideWith(_FakeAuthSessionNotifier.new)],
+    overrides: [
+      authSessionProvider.overrideWith(_FakeAuthSessionNotifier.new),
+      meetupServiceProvider.overrideWithValue(
+        service ?? ScriptedMeetupService(),
+      ),
+    ],
     child: const MaterialApp(home: ScheduleFlowPage()),
   );
 }
@@ -355,6 +366,77 @@ void main() {
         );
       },
     );
+  });
+
+  group('Schedule flow — the schedule check at the time step (ADR-005)', () {
+    Meetup busy() => Meetup(
+      id: 'busy-1',
+      hostUserId: 'user-1',
+      hostFullName: 'Ada Lovelace',
+      hostTrustLevel: 3,
+      intent: IntentType.networking,
+      windowStart: DateTime.now().add(const Duration(hours: 2)),
+      windowEnd: DateTime.now().add(const Duration(hours: 3)),
+      locationLabel: 'Barefoot Cafe',
+      capacity: 3,
+      acceptedCount: 0,
+      status: MeetupStatus.open,
+      createdAt: DateTime.now(),
+      isHostedByMe: true,
+    );
+
+    Future<void> pickTimes(WidgetTester tester) async {
+      _pinClockToStartOfToday();
+      await tester.tap(find.text('COFFEE'));
+      await tester.pumpAndSettle();
+      await _enterTime(tester, field: 'FROM', hhmm: '1500');
+      await _enterTime(tester, field: 'TO', hhmm: '1700');
+      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.tap(find.text('CONTINUE'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('CONTINUE asks the server about the window and moves on '
+        'when it is free', (tester) async {
+      final service = ScriptedMeetupService();
+      await tester.pumpWidget(_appWith(service: service));
+      await tester.pumpAndSettle();
+      await pickTimes(tester);
+
+      expect(service.findScheduleConflictCallCount, 1);
+      expect(service.lastScheduleCheckStart!.hour, 15);
+      expect(service.lastScheduleCheckEnd!.hour, 17);
+      expect(find.text('Where?'), findsOneWidget);
+    });
+
+    testWidgets('a busy window shows the conflict sheet and stays on the '
+        'time step, so another time can be picked', (tester) async {
+      final service = ScriptedMeetupService()..scheduleConflict = busy();
+      await tester.pumpWidget(_appWith(service: service));
+      await tester.pumpAndSettle();
+      await pickTimes(tester);
+
+      expect(find.text('ONE MEETUP AT A TIME'), findsOneWidget);
+      expect(
+        find.text("You're already hosting a meetup at that time"),
+        findsOneWidget,
+      );
+      await tester.tap(find.text("I'LL WAIT"));
+      await tester.pumpAndSettle();
+      expect(find.text('When should it happen?'), findsOneWidget);
+      expect(find.text('Where?'), findsNothing);
+    });
+
+    testWidgets('a failed check does not stop the flow: the create call '
+        'still enforces the rule', (tester) async {
+      final service = ScriptedMeetupService()
+        ..findScheduleConflictError = Exception('offline');
+      await tester.pumpWidget(_appWith(service: service));
+      await tester.pumpAndSettle();
+      await pickTimes(tester);
+
+      expect(find.text('Where?'), findsOneWidget);
+    });
   });
 
   group('Schedule flow — capacity-stepper bounds (backend CHECK 1..20)', () {

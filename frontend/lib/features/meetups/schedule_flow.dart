@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -85,6 +87,45 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
     } else {
       Navigator.pop(context);
     }
+  }
+
+  /// The time step's CONTINUE. Asks the server whether the window is free
+  /// before moving on (ADR-005): being told here beats being told after
+  /// the place and headcount are picked. A conflict shows the same sheet
+  /// the create call would, and the step stays put so another time can be
+  /// chosen. If the check itself fails (offline, a server error) the flow
+  /// continues: the create call enforces the rule regardless, and a
+  /// network blip must not stop someone scheduling.
+  Future<void> _pickWindow(DateTime windowStart, DateTime windowEnd) async {
+    Meetup? conflict;
+    try {
+      conflict = await ref
+          .read(meetupServiceProvider)
+          .findScheduleConflict(windowStart: windowStart, windowEnd: windowEnd);
+    } on MeetupSessionExpiredException {
+      if (mounted) ref.read(authSessionProvider.notifier).forceSignOut();
+      return;
+    } catch (_) {
+      conflict = null;
+    }
+    if (!mounted) return;
+    if (conflict != null) {
+      // Not awaited: CONTINUE's spinner is tied to this method, and it
+      // should stop the moment the sheet is up, not when it is closed.
+      unawaited(
+        showScheduleConflictSheet(
+          context,
+          error: MeetupScheduleConflictException(
+            'You already have a meetup at that time.',
+            conflict: conflict,
+          ),
+        ),
+      );
+      return;
+    }
+    _draft.windowStart = windowStart;
+    _draft.windowEnd = windowEnd;
+    _goNext();
   }
 
   Future<void> _submit() async {
@@ -189,11 +230,7 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
                       _Step.timing => _TimingStep(
                         initialStart: _draft.windowStart,
                         initialEnd: _draft.windowEnd,
-                        onPick: (windowStart, windowEnd) {
-                          _draft.windowStart = windowStart;
-                          _draft.windowEnd = windowEnd;
-                          _goNext();
-                        },
+                        onPick: _pickWindow,
                       ),
                       // MapLocationStep, not the commented-out _LocationStep
                       // stopgap below — frontend/meetup-scheduling-PLAN.md's
@@ -429,13 +466,18 @@ class _TimingStep extends StatefulWidget {
 
   final DateTime? initialStart;
   final DateTime? initialEnd;
-  final void Function(DateTime windowStart, DateTime windowEnd) onPick;
+
+  /// Awaited: CONTINUE shows its spinner until this resolves, since the
+  /// flow asks the server about the window before moving on.
+  final Future<void> Function(DateTime windowStart, DateTime windowEnd) onPick;
 
   @override
   State<_TimingStep> createState() => _TimingStepState();
 }
 
 class _TimingStepState extends State<_TimingStep> {
+  // CONTINUE is waiting on the schedule check.
+  bool _checking = false;
   late DateTime _date = widget.initialStart ?? _now();
   TimeOfDay? _from;
   TimeOfDay? _to;
@@ -625,12 +667,22 @@ class _TimingStepState extends State<_TimingStep> {
         const SizedBox(height: 20),
         PrimaryButton(
           label: 'CONTINUE',
-          onPressed: resolved != null && resolved.isValid
-              ? () => widget.onPick(resolved.start, resolved.end)
+          isLoading: _checking,
+          onPressed: resolved != null && resolved.isValid && !_checking
+              ? () => _continue(resolved.start, resolved.end)
               : null,
         ),
       ],
     );
+  }
+
+  Future<void> _continue(DateTime start, DateTime end) async {
+    setState(() => _checking = true);
+    try {
+      await widget.onPick(start, end);
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
   }
 }
 

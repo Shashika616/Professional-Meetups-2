@@ -123,6 +123,21 @@ func TestScheduleConflict_OneMeetupAtATime(t *testing.T) {
 		}
 	})
 
+	t.Run("CheckSchedule answers the same question ahead of time", func(t *testing.T) {
+		conflict, found, err := h.svc.CheckSchedule(ctx, host, base.Add(30*time.Minute), base.Add(90*time.Minute))
+		if err != nil || !found || conflict.ID != first.ID || !conflict.IsHostedByMe {
+			t.Errorf("CheckSchedule over the hosted window = (%+v, %v, %v), want the hosted meetup", conflict, found, err)
+		}
+		if _, found, err := h.svc.CheckSchedule(ctx, host, base.Add(48*time.Hour), base.Add(49*time.Hour)); err != nil || found {
+			t.Errorf("CheckSchedule over a free window = (found %v, err %v), want free", found, err)
+		}
+		// A draft whose end is not after its start is simply free here; the
+		// create path is where that is rejected.
+		if _, found, err := h.svc.CheckSchedule(ctx, host, base, base); err != nil || found {
+			t.Errorf("CheckSchedule over an empty window = (found %v, err %v), want free", found, err)
+		}
+	})
+
 	t.Run("a cancelled meetup no longer blocks its host", func(t *testing.T) {
 		cancelHost := newUserID(t, h)
 		m, err := h.createMeetupAt(t, cancelHost, base, base.Add(time.Hour))

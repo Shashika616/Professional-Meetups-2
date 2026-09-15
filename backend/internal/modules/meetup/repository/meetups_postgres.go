@@ -237,7 +237,16 @@ func runScheduleGuard(ctx context.Context, q *sqlcgen.Queries, userID string, gu
 	return guard(ctx, scheduleTx{q: q})
 }
 
-// scheduleTx is the ScheduleTx a guard sees: the locked transaction.
+// FindScheduleConflict on the pool: the same query as the locked read,
+// for the advisory pre-check.
+func (r *postgresMeetupRepository) FindScheduleConflict(
+	ctx context.Context, userID string, windowStart, windowEnd time.Time, excludeID string,
+) (Meetup, bool, error) {
+	return scheduleTx{q: r.q}.FindScheduleConflict(ctx, userID, windowStart, windowEnd, excludeID)
+}
+
+// scheduleTx is the ScheduleTx a guard sees: the locked transaction (or,
+// for the pre-check above, the pool).
 type scheduleTx struct{ q *sqlcgen.Queries }
 
 func (s scheduleTx) FindScheduleConflict(

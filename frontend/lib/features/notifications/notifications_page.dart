@@ -7,6 +7,7 @@ import 'package:professional_connections_platform/core/services/meetup_service.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
@@ -114,12 +115,18 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
 
     final rows = _notifications ?? const <AppNotification>[];
     if (rows.isEmpty) {
-      return const _CentredMessage(
-        icon: Icons.notifications_none_rounded,
-        title: 'Nothing yet.',
-        subtitle:
-            'Join requests, accepted invites and meetup updates from the '
-            'last 7 days show up here.',
+      // Scrollable so pull-to-refresh still works with nothing in the list.
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          EmptyStateDeck(
+            title: 'All quiet for now',
+            message:
+                'Join requests, accepted invites and meetup updates from the '
+                'last 7 days show up here.',
+            scenes: EmptyDeckScenes.inbox,
+          ),
+        ],
       );
     }
 
@@ -297,16 +304,10 @@ String formatNotificationTime(DateTime value) =>
     '${_two(value.hour)}:${_two(value.minute)}';
 
 class _CentredMessage extends StatelessWidget {
-  const _CentredMessage({
-    required this.icon,
-    required this.title,
-    this.subtitle,
-    this.action,
-  });
+  const _CentredMessage({required this.icon, required this.title, this.action});
 
   final IconData icon;
   final String title;
-  final String? subtitle;
   final Widget? action;
 
   @override
@@ -327,18 +328,6 @@ class _CentredMessage extends StatelessWidget {
             fontWeight: FontWeight.w700,
           ),
         ),
-        if (subtitle != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            subtitle!,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppPalette.textSecondary,
-              fontSize: 12.5,
-              height: 1.45,
-            ),
-          ),
-        ],
         if (action != null) ...[const SizedBox(height: 20), action!],
       ],
     );

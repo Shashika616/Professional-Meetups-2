@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -20,6 +21,9 @@ import 'package:professional_connections_platform/core/widgets/star_rating.dart'
 import 'package:professional_connections_platform/core/widgets/trust_level_badge.dart';
 import 'package:professional_connections_platform/core/widgets/verification_badges.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
+import 'package:professional_connections_platform/features/meetups/schedule_flow.dart';
+import 'package:professional_connections_platform/features/verification/hosting_unlock_page.dart';
+import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/host_meetup_controls.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
@@ -116,6 +120,30 @@ class _EventsPageState extends ConsumerState<EventsPage>
   @override
   bool get wantKeepAlive => true;
 
+  /// The empty hosted tab's way in. The same gate Home applies before the
+  /// scheduling flow (ADR-002 § 4): someone below the host bar for every
+  /// intent goes to the unlock page instead, with the same one-line toast.
+  Future<void> _hostMeetup(BuildContext context, WidgetRef ref) async {
+    final trustLevel =
+        ref.read(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    if (!IntentType.values.any((i) => i.canHost(trustLevel))) {
+      showSnack(
+        context,
+        'Verify your account to host meetups.',
+        type: ToastType.locked,
+      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const HostingUnlockPage()));
+      return;
+    }
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ScheduleFlowPage()));
+    ref.invalidate(myMeetupsProvider);
+    ref.invalidate(activeMeetupsProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     // Required by the mixin — it is what registers the keep-alive with the
@@ -195,7 +223,22 @@ class _EventsPageState extends ConsumerState<EventsPage>
                   initialItems: result.hosted,
                   initialNextCursor: result.hostedNextCursor,
                   initialHasMore: result.hostedHasMore,
-                  emptyMessage: 'You aren\'t hosting any meetups yet.',
+                  emptyState: EmptyStateDeck(
+                    title: 'Nothing on your calendar yet',
+                    message:
+                        'Meetups you host show up here, with the people who '
+                        'asked to join. Put the first one on the calendar.',
+                    scenes: EmptyDeckScenes.meetups,
+                    actionLabel: 'HOST A MEETUP',
+                    onAction: () => _hostMeetup(context, ref),
+                  ),
+                  historyEmptyState: const EmptyStateDeck(
+                    title: 'No past meetups yet',
+                    message:
+                        'Once a meetup you hosted has ended, it moves here '
+                        'so you can look back on it.',
+                    scenes: EmptyDeckScenes.meetups,
+                  ),
                   // A finished meetup goes to the same past-meetup view a
                   // participant gets, not to request management.
                   //
@@ -221,8 +264,19 @@ class _EventsPageState extends ConsumerState<EventsPage>
                   initialItems: result.requested,
                   initialNextCursor: result.requestedNextCursor,
                   initialHasMore: result.requestedHasMore,
-                  emptyMessage:
-                      'You haven\'t requested to join any meetups yet.',
+                  emptyState: const EmptyStateDeck(
+                    title: 'No requests yet',
+                    message:
+                        'Meetups you ask to join show up here while the host '
+                        'decides. Find one on Home under Happening Soon.',
+                    scenes: EmptyDeckScenes.requests,
+                  ),
+                  historyEmptyState: const EmptyStateDeck(
+                    title: 'No past meetups yet',
+                    message:
+                        'Meetups you joined move here once they have ended.',
+                    scenes: EmptyDeckScenes.requests,
+                  ),
                   onTap: (meetup) async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
@@ -307,7 +361,8 @@ class _MeetupList extends ConsumerStatefulWidget {
     required this.initialItems,
     required this.initialNextCursor,
     required this.initialHasMore,
-    required this.emptyMessage,
+    required this.emptyState,
+    required this.historyEmptyState,
     required this.onTap,
   });
 
@@ -315,7 +370,10 @@ class _MeetupList extends ConsumerStatefulWidget {
   final List<Meetup> initialItems;
   final String? initialNextCursor;
   final bool initialHasMore;
-  final String emptyMessage;
+
+  /// What the Open and History tabs show with nothing in them.
+  final Widget emptyState;
+  final Widget historyEmptyState;
   final void Function(Meetup meetup) onTap;
 
   @override
@@ -385,8 +443,8 @@ class _MeetupListState extends ConsumerState<_MeetupList>
             controller: _subTabs,
             physics: _noSwipeInsideAppShell,
             children: [
-              _buildList(_isOpen, widget.emptyMessage),
-              _buildList(_isHistory, 'Nothing here yet.'),
+              _buildList(_isOpen, widget.emptyState),
+              _buildList(_isHistory, widget.historyEmptyState),
             ],
           ),
         ),
@@ -394,7 +452,7 @@ class _MeetupListState extends ConsumerState<_MeetupList>
     );
   }
 
-  Widget _buildList(bool Function(Meetup) filter, String emptyMessage) {
+  Widget _buildList(bool Function(Meetup) filter, Widget emptyState) {
     return PaginatedMeetupList(
       items: widget.initialItems.where(filter).toList(),
       nextCursor: widget.initialNextCursor,
@@ -410,7 +468,8 @@ class _MeetupListState extends ConsumerState<_MeetupList>
         );
       },
       onRefresh: _refresh,
-      emptyMessage: emptyMessage,
+      emptyMessage: '',
+      emptyState: emptyState,
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
       // `previous` is unused here: Events lists are already split by tab and
       // by open/history, so a third level of grouping inside them would be
@@ -1069,15 +1128,25 @@ class _RequestManagementPageState
 
     return TabBarView(
       children: [
-        _buildRequestList(pending, 'No pending requests.'),
-        _buildRequestList(accepted, 'No accepted requests yet.'),
+        _buildRequestList(pending, (
+          title: 'No one has asked yet',
+          message:
+              'When someone taps I\'M INTERESTED on this meetup, their '
+              'request lands here for you to accept or decline.',
+        )),
+        _buildRequestList(accepted, (
+          title: 'No one confirmed yet',
+          message: 'People you accept show up here.',
+        )),
         Column(
           children: [
             Expanded(
-              child: _buildRequestList(
-                rejectedOrWithdrawn,
-                'No rejected or withdrawn requests.',
-              ),
+              child: _buildRequestList(rejectedOrWithdrawn, (
+                title: 'Nothing declined',
+                message:
+                    'Requests you decline, and people who withdraw, are kept '
+                    'here for the record.',
+              )),
             ),
             // A withdrawn requester becomes ratable once — this reuses the
             // same RatingPrompt widget the happened-based flow uses
@@ -1107,13 +1176,20 @@ class _RequestManagementPageState
     );
   }
 
-  Widget _buildRequestList(List<MeetupRequestModel> requests, String empty) {
+  Widget _buildRequestList(
+    List<MeetupRequestModel> requests,
+    ({String title, String message}) empty,
+  ) {
     if (requests.isEmpty) {
-      return Center(
-        child: Text(
-          empty,
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-        ),
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          EmptyStateDeck(
+            title: empty.title,
+            message: empty.message,
+            scenes: EmptyDeckScenes.requests,
+          ),
+        ],
       );
     }
     return ListView.builder(

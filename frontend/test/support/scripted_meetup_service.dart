@@ -227,6 +227,26 @@ class ScriptedMeetupService implements MeetupService {
   // genuinely does NOT.
   int listActiveMeetupsCallCount = 0;
 
+  /// What findScheduleConflict answers; null (the default) is a free
+  /// window. [findScheduleConflictError], when set, is thrown instead.
+  Meetup? scheduleConflict;
+  Object? findScheduleConflictError;
+  int findScheduleConflictCallCount = 0;
+  DateTime? lastScheduleCheckStart;
+  DateTime? lastScheduleCheckEnd;
+
+  @override
+  Future<Meetup?> findScheduleConflict({
+    required DateTime windowStart,
+    required DateTime windowEnd,
+  }) async {
+    findScheduleConflictCallCount++;
+    lastScheduleCheckStart = windowStart;
+    lastScheduleCheckEnd = windowEnd;
+    if (findScheduleConflictError != null) throw findScheduleConflictError!;
+    return scheduleConflict;
+  }
+
   @override
   Future<List<Meetup>> listActiveMeetups() async {
     listActiveMeetupsCallCount++;

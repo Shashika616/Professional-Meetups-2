@@ -110,7 +110,7 @@ void main() {
     await tester.pumpWidget(_appWith(service));
     await tester.pumpAndSettle();
 
-    expect(find.text('Nothing yet.'), findsOneWidget);
+    expect(find.text('All quiet for now'), findsOneWidget);
     expect(find.textContaining('last 7 days'), findsOneWidget);
   });
 

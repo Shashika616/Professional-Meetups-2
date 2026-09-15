@@ -55,6 +55,13 @@ service MeetupService {
   // authorization decision.
   rpc ListActiveMeetups(ListActiveMeetupsRequest) returns (ListActiveMeetupsResponse);
 
+  // The one-meetup-at-a-time rule (ADR-005) asked ahead of time: the
+  // meetup the caller is already committed to in a window, if any, so the
+  // scheduling flow can say so at the time step rather than after the
+  // location and headcount have been picked. Read-only and unlocked; the
+  // create and join paths still enforce the rule under the lock.
+  rpc CheckSchedule(CheckScheduleRequest) returns (CheckScheduleResponse);
+
   // Returns every request (any status) on a meetup, with requester display
   // info — the host's request-management view (frontend/meetup-scheduling-
   // PLAN.md Step 8). Host-only — verified against meetups.host_user_id,
@@ -392,6 +399,17 @@ message ListMyMeetupsResponse {
 
 message ListActiveMeetupsRequest {
   string user_id = 1; // set by the gateway from the verified JWT
+}
+
+message CheckScheduleRequest {
+  string user_id = 1; // set by the gateway from the verified JWT
+  int64 window_start_unix_seconds = 2;
+  int64 window_end_unix_seconds = 3;
+}
+
+message CheckScheduleResponse {
+  // Unset when the window is free.
+  optional MeetupResponse conflict = 1;
 }
 
 message ListActiveMeetupsResponse {

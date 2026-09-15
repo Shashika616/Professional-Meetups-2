@@ -82,6 +82,11 @@ type Service interface {
 	GetMeetup(ctx context.Context, req GetMeetupRequest) (Meetup, error)
 	ListMyMeetups(ctx context.Context, req ListMyMeetupsRequest) (ListMyMeetupsResult, error)
 	ListActiveMeetups(ctx context.Context, userID string) ([]Meetup, error)
+	// CheckSchedule answers the one-meetup-at-a-time rule ahead of time:
+	// the meetup userID is already committed to in [windowStart,
+	// windowEnd), and false when the window is free. Advisory; CreateMeetup
+	// and RequestToJoin enforce the rule under the lock regardless.
+	CheckSchedule(ctx context.Context, userID string, windowStart, windowEnd time.Time) (Meetup, bool, error)
 	ListMeetupRequests(ctx context.Context, req ListMeetupRequestsRequest) ([]MeetupRequest, error)
 	RequestToJoin(ctx context.Context, req RequestToJoinRequest) (MeetupRequest, error)
 	WithdrawRequest(ctx context.Context, req WithdrawRequestRequest) error
