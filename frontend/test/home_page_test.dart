@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -10,6 +11,7 @@ import 'package:professional_connections_platform/features/home/widgets/home_hea
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart';
 import 'package:professional_connections_platform/features/verification/hosting_unlock_page.dart';
 
+import 'support/fake_geolocator_platform.dart';
 import 'support/fake_meetup_service.dart';
 import 'support/scripted_meetup_service.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
@@ -27,6 +29,16 @@ class _FakeAuthSessionNotifier extends AuthSessionNotifier {
 }
 
 void main() {
+  // Home starts the viewer-location read on mount. Without a fake, the
+  // geolocator's platform channel has no handler under flutter_test and its
+  // future never completes; a real device always answers one way or the
+  // other, and so must the tests.
+  setUp(() {
+    GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+      position: testPosition(),
+    );
+  });
+
   group('HomeHeader (frontend/PLAN.md Step 13)', () {
     testWidgets(
       'renders the profile photo via ProfessionalAvatar when imageUrl is provided',
@@ -141,6 +153,57 @@ void main() {
 
         final header = tester.widget<HomeHeader>(find.byType(HomeHeader));
         expect(header.imageUrl, 'https://example.com/grace.jpg');
+      },
+    );
+
+    testWidgets(
+      'the header is pinned above the feed with a hairline under it: it '
+      'is not a row of the ListView, so scrolling cannot carry it away',
+      (tester) async {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              authSessionProvider.overrideWith(
+                () => _FakeAuthSessionNotifier(
+                  const AuthSessionState(
+                    profile: UserProfile(id: 'user-1', fullName: 'Grace'),
+                  ),
+                ),
+              ),
+              meetupServiceProvider.overrideWithValue(ImmediateMeetupService()),
+            ],
+            child: const MaterialApp(home: HomePage()),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // The page's own vertical list (the intent chip strip inside it is
+        // a horizontal one).
+        final feed = find.byWidgetPredicate(
+          (w) =>
+              w is ListView &&
+              w.scrollDirection == Axis.vertical &&
+              // Not the shrink-wrapped browse list nested inside it.
+              w.physics is AlwaysScrollableScrollPhysics,
+        );
+        // Structural, not positional: the header must not be a descendant
+        // of the scrollable at all.
+        expect(
+          find.descendant(of: feed, matching: find.byType(HomeHeader)),
+          findsNothing,
+        );
+        expect(find.byType(HomeHeader), findsOneWidget);
+        // And it stays put after a hard fling of the feed.
+        final before = tester.getTopLeft(find.byType(HomeHeader));
+        await tester.fling(feed, const Offset(0, -600), 2000);
+        await tester.pumpAndSettle();
+        expect(tester.getTopLeft(find.byType(HomeHeader)), before);
+        // The separator sits directly beneath it.
+        final divider = find.byType(Divider).first;
+        expect(
+          tester.getTopLeft(divider).dy,
+          tester.getBottomLeft(find.byType(HomeHeader)).dy,
+        );
       },
     );
 

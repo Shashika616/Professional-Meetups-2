@@ -127,19 +127,28 @@ void main() async {
 /// ten seconds until the app is closed. Battery, data and server load, all for
 /// a request whose answer will never change.
 ///
-/// So: session failures are terminal, everything else keeps Riverpod's default
-/// behaviour. Deliberately NOT a blanket cap on retries — a transient network
-/// blip genuinely should keep trying, and this is the one distinction that is
-/// safe to make centrally without knowing what each provider is for.
+/// So: session failures are terminal; everything else retries with
+/// Riverpod's backoff, but only [maxProviderRetries] times. A transient blip
+/// recovers well inside that budget (the schedule below adds up to about 40
+/// seconds), while a phone that is genuinely offline, or a server that is
+/// genuinely down, stops being asked every 6.4 seconds for as long as the
+/// app is open. Every screen that shows a provider error already has a
+/// RETRY button or pull-to-refresh, so giving up in the background costs the
+/// user nothing they cannot get back with one tap.
 @visibleForTesting
 Duration? retryPolicyForTest(int retryCount, Object error) =>
     _retryPolicy(retryCount, error);
+
+/// 200, 400, 800, 1600, 3200, 6400, 6400, 6400 ms: eight attempts, ~40s.
+@visibleForTesting
+const int maxProviderRetries = 8;
 
 Duration? _retryPolicy(int retryCount, Object error) {
   if (error is MeetupSessionExpiredException ||
       error is SessionExpiredException) {
     return null;
   }
+  if (retryCount >= maxProviderRetries) return null;
   // Riverpod's own default: 200ms doubling, capped at 6.4s.
   final ms = 200 * (1 << retryCount);
   return Duration(milliseconds: ms > 6400 ? 6400 : ms);

@@ -120,6 +120,48 @@ func parseOTPBypassAllowlist(envVar string, normalize func(string) string) map[s
 	return set
 }
 
+// reservedTestTLDs are the RFC 2606 (and RFC 6761) suffixes that cannot be
+// registered or resolve to a real mailbox — the only domains that make
+// TEST_OTP_BYPASS_EMAILS's safety argument actually true rather than just
+// stated in a comment.
+var reservedTestTLDs = []string{".test", ".example", ".invalid", ".localhost"}
+
+// isReservedTestAddress reports whether email's domain ends in one of
+// reservedTestTLDs. Case-insensitive, like the allowlist itself.
+func isReservedTestAddress(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return false
+	}
+	domain := email[at+1:]
+	for _, suffix := range reservedTestTLDs {
+		if strings.HasSuffix(domain, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// ValidateTestOTPBypassEmails is the startup check behind the rule above:
+// every entry of TEST_OTP_BYPASS_EMAILS (raw, comma-separated, as read
+// from the environment) must be a reserved-TLD address. It returns an error
+// naming the first entry that is not, so the process can refuse to start
+// rather than boot with a credential-free login to a real mailbox. Empty
+// entries are ignored, matching parseOTPBypassAllowlist.
+func ValidateTestOTPBypassEmails(raw string) error {
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if !isReservedTestAddress(entry) {
+			return fmt.Errorf("TEST_OTP_BYPASS_EMAILS entry %q is not on a reserved test TLD (%s): a deliverable address here is a credential-free login for whoever owns it", entry, strings.Join(reservedTestTLDs, ", "))
+		}
+	}
+	return nil
+}
+
 // testOTPBypassEmails parses TEST_OTP_BYPASS_EMAILS — the email-side twin of
 // testOTPBypassPhones, deliberately the same shape so the two can be reasoned
 // about, logged, and reverted identically.
@@ -241,19 +283,23 @@ func normalizeBypassEmail(target string) string {
 // an allowlisted address is an account that anyone knowing the address could
 // sign in as with "123456". That is a real account-takeover surface.
 //
-// What contains it is the allowlist's contents, not the mechanism:
+// What contains it is the allowlist's contents, not the mechanism, and
+// that containment is ENFORCED, not merely documented:
 //
-//   - The seeded addresses live on RFC 2606 reserved TLDs (.test), which
-//     cannot be registered, cannot receive mail, and therefore cannot belong
-//     to a real person or be recovered by one.
+//   - Every entry must be on an RFC 2606 / RFC 6761 reserved suffix (see
+//     reservedTestTLDs). Those cannot be registered, cannot receive mail,
+//     and therefore cannot belong to a real person or be recovered by one.
+//     cmd/monolith checks every entry with ValidateTestOTPBypassEmails at
+//     startup and refuses to boot if any entry is deliverable, naming it.
 //   - They are seeded fixtures holding no real data, no payment method, and
 //     no relationship to any real account.
 //   - Every other address, including any real user's, still requires the
 //     real delivered code.
 //
-// So the correct operating rule is narrower than for the phone list: NEVER
-// put a real, deliverable address in TEST_OTP_BYPASS_EMAILS. A reserved-TLD
-// fixture is a test account; a real address is a published password.
+// So the operating rule is narrower than for the phone list: NEVER put a
+// real, deliverable address in TEST_OTP_BYPASS_EMAILS. A reserved-TLD
+// fixture is a test account; a real address is a published password, and
+// since 2026-09-15 the process will not start with one in the list.
 //
 // The three mechanisms are independent on purpose: each can be identified on
 // its own in logs and reverted on its own.

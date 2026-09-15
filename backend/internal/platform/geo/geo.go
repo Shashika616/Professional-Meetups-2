@@ -35,7 +35,7 @@ func ValidateLatLng(lat, lng float64) error {
 	// what a failed GPS read defaults to, and it passes every range check
 	// above, so before this it flowed silently through to a real geography
 	// column: a meetup created 5,000km from where its host thinks it is,
-	// invisible to the 40km nearby-notify fan-out and to every browse-radius
+	// invisible to the 50km nearby-notify fan-out and to every browse-radius
 	// filter, with no error surfaced anywhere to explain why. On the SOS
 	// path it would have put null island into a maps link sent to a real
 	// trusted contact during an emergency.

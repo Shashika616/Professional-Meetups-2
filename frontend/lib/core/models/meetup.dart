@@ -578,16 +578,23 @@ class RatingTrait {
     required this.key,
     required this.label,
     required this.emoji,
+    this.negative = false,
   });
 
   final String key;
   final String label;
   final String emoji;
 
+  /// Sorts the trait into the picker's Negative tab. Server-classified, so
+  /// the client never decides which words count as criticism; absent on an
+  /// older server, in which case everything is positive as before.
+  final bool negative;
+
   factory RatingTrait.fromJson(Map<String, dynamic> json) => RatingTrait(
     key: json['key'] as String,
     label: json['label'] as String? ?? '',
     emoji: json['emoji'] as String? ?? '',
+    negative: json['negative'] as bool? ?? false,
   );
 }
 

@@ -12,12 +12,18 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
     this.permission = LocationPermission.whileInUse,
     this.position,
     this.getCurrentPositionError,
+    this.lastKnownPosition,
   });
 
   bool serviceEnabled;
   LocationPermission permission;
   Position? position;
   Object? getCurrentPositionError;
+
+  /// What getLastKnownPosition answers; null (the default) is "nothing
+  /// cached", which is the common case on a fresh device.
+  Position? lastKnownPosition;
+  int getCurrentPositionCalls = 0;
 
   @override
   Future<bool> isLocationServiceEnabled() async => serviceEnabled;
@@ -32,9 +38,15 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   Future<Position> getCurrentPosition({
     LocationSettings? locationSettings,
   }) async {
+    getCurrentPositionCalls++;
     if (getCurrentPositionError != null) throw getCurrentPositionError!;
     return position!;
   }
+
+  @override
+  Future<Position?> getLastKnownPosition({
+    bool forceLocationManager = false,
+  }) async => lastKnownPosition;
 }
 
 Position testPosition({double lat = 6.9271, double lng = 79.8612}) {

@@ -1321,7 +1321,7 @@ func (x *CompleteProfileSetupRequest) GetCompanyEmail() string {
 	return ""
 }
 
-// 40km geo-visibility (ADR-021 §4).
+// 50km geo-visibility (ADR-021 §4).
 type UpdateLastKnownLocationRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"` // set by the gateway from the verified JWT

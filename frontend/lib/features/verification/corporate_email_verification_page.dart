@@ -146,7 +146,7 @@ class _CorporateEmailVerificationPageState
           : 'Verify Your Work Email',
       trustBenefit:
           'Verifying a work email is the strongest trust signal short of '
-          'KYC — it unlocks a verified badge other members can see.',
+          'KYC. It unlocks a verified badge other members can see.',
       onSkip: () => Navigator.pop(context),
       child: !_showOtpEntry
           ? Column(
@@ -178,7 +178,7 @@ class _CorporateEmailVerificationPageState
                 if (_looksLikeFreeEmail) ...[
                   const SizedBox(height: 8),
                   Text(
-                    'This looks like a personal email address — work '
+                    'This looks like a personal email address. Work '
                     'email verification needs your company address.',
                     style: TextStyle(
                       fontSize: 11,
@@ -191,7 +191,7 @@ class _CorporateEmailVerificationPageState
                 // send/verify action, the reuse-abuse warning.
                 const SizedBox(height: 8),
                 Text(
-                  'We don’t store this email — only that it proved you '
+                  'We don’t store this email, only that it proved you '
                   'have access to an inbox at this company’s domain.',
                   style: TextStyle(
                     fontSize: 11,

@@ -54,9 +54,13 @@ type TrustedContact struct {
 type AddTrustedContactRequest struct {
 	UserID string
 	Name   string
-	// At least one of PhoneNumber/Email is required — enforced server-side
-	// here, mirroring the DB CHECK constraint so the caller gets a clean
-	// ErrInvalidInput rather than a raw constraint-violation error.
+	// PhoneNumber is required and Email is optional — enforced here, in
+	// AddTrustedContact, as ErrInvalidInput. The DB CHECK constraint
+	// (migrations/0001, `phone_number IS NOT NULL OR email IS NOT NULL`) is
+	// intentionally LOOSER: it predates the phone-mandatory rule and is not
+	// a backstop for it. This method is the only insert path, which is what
+	// makes the Go check sufficient; tightening the constraint is separate
+	// work (gap tracker, Round 6 §Backend #36).
 	PhoneNumber string
 	Email       string
 	// CallerTrustLevel comes from the JWT via the gateway, never from the
@@ -163,7 +167,7 @@ const (
 )
 
 // AddTrustedContact enforces the soft cap of 3 (ErrInvalidInput if exceeded)
-// and requires at least one of phone_number/email.
+// and requires a phone number (email is optional).
 func (s *Service) AddTrustedContact(ctx context.Context, req AddTrustedContactRequest) (TrustedContact, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -174,8 +178,13 @@ func (s *Service) AddTrustedContact(ctx context.Context, req AddTrustedContactRe
 	}
 	phone := strings.TrimSpace(req.PhoneNumber)
 	emailAddr := strings.TrimSpace(req.Email)
-	if phone == "" && emailAddr == "" {
-		return TrustedContact{}, fmt.Errorf("auth: at least one of phone_number/email is required: %w", apperror.ErrInvalidInput)
+	// PHONE IS MANDATORY, EMAIL OPTIONAL. An SOS is a phone call or a text
+	// to someone who can act in the next few minutes; an inbox is checked
+	// later. A contact reachable only by email is not a trusted contact in
+	// the sense this feature promises, so the number is required and the
+	// address is the extra channel when it is known.
+	if phone == "" {
+		return TrustedContact{}, fmt.Errorf("auth: a phone number is required for a trusted contact: %w", apperror.ErrInvalidInput)
 	}
 	// Format checks are an addition over the source, which validated these
 	// two fields only in the Flutter client (manage_trusted_contacts_page's
@@ -184,10 +193,8 @@ func (s *Service) AddTrustedContact(ctx context.Context, req AddTrustedContactRe
 	// client-side-only validation, anywhere", the same rules are enforced
 	// here — deliberately the frontend's exact rules, so nothing the
 	// existing UI accepts is now rejected by the server.
-	if phone != "" {
-		if err := s.validate.PhoneNumber(phone); err != nil {
-			return TrustedContact{}, err
-		}
+	if err := s.validate.PhoneNumber(phone); err != nil {
+		return TrustedContact{}, err
 	}
 	if emailAddr != "" {
 		if err := s.validate.Email(emailAddr); err != nil {

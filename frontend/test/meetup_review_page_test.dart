@@ -185,6 +185,84 @@ void main() {
     expect(find.text('Cheerful'), findsNothing);
   });
 
+  testWidgets('traits sit under Positive and Negative tabs sharing one cap of '
+      'four, and the submission carries picks from both', (tester) async {
+    tester.view.physicalSize = const Size(1000, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final service = ScriptedMeetupService(ratableParticipants: [_host]);
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    await _pickOverall(tester, ExperienceLevel.good);
+    await tester.tap(find.text('NEXT'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('What were they like? (up to 4)'), findsOneWidget);
+    // Positive tab first; nothing critical is on screen until asked for.
+    expect(find.text('Cheerful'), findsOneWidget);
+    expect(find.text('Arrived late'), findsNothing);
+
+    for (final label in ['Cheerful', 'Great listener', 'Insightful']) {
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    await tester.tap(find.byKey(const Key('traitTabNegative')));
+    await tester.pumpAndSettle();
+    expect(find.text('Arrived late'), findsOneWidget);
+    expect(find.text('Cheerful'), findsNothing);
+    // The other tab's count travels with it.
+    expect(find.text('3'), findsOneWidget);
+
+    await tester.tap(find.text('Arrived late'));
+    await tester.pumpAndSettle();
+    // Fourth pick reached the cap: a fifth is refused across tabs.
+    await tester.tap(find.text('Distracted'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('CONFIRM'));
+    await tester.pumpAndSettle();
+
+    expect(service.submitReviewCallCount, 1);
+    expect(
+      service.lastReviewParticipants.single.traits,
+      unorderedEquals([
+        'cheerful',
+        'great_listener',
+        'insightful',
+        'arrived_late',
+      ]),
+    );
+  });
+
+  testWidgets('a vocabulary with no negative half (an older server) renders '
+      'with no tabs at all', (tester) async {
+    tester.view.physicalSize = const Size(1000, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final service = ScriptedMeetupService(ratableParticipants: [_host])
+      ..availableTraits = const [
+        RatingTrait(key: 'cheerful', label: 'Cheerful', emoji: '☀️'),
+      ];
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    await _pickOverall(tester, ExperienceLevel.good);
+    await tester.tap(find.text('NEXT'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(1));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cheerful'), findsOneWidget);
+    expect(find.byKey(const Key('traitTabPositive')), findsNothing);
+    expect(find.byKey(const Key('traitTabNegative')), findsNothing);
+  });
+
   testWidgets('with no trait vocabulary, the trait header is not rendered '
       'over blank space — an older server sends none', (tester) async {
     tester.view.physicalSize = const Size(1000, 2400);

@@ -77,11 +77,13 @@ SELECT * FROM meetup.meetups WHERE id = $1 FOR UPDATE;
 -- ADR-027) runs alongside idx_meetups_intent_status's own narrowing of
 -- m.status/m.intent — the two conditions each use their own index
 -- (idx_meetups_intent_status, idx_meetups_location_gist), not one
--- replacing the other. 40000 = 40km in meters (ST_DWithin on geography
--- takes meters, not degrees).
+-- replacing the other. 50000 = 50km in meters (ST_DWithin on geography
+-- takes meters, not degrees). Raised from 40km on 2026-09-13; the
+-- nearby-notify fan-out in user_location_cache.sql uses the same figure,
+-- so anyone who can see a meetup is also someone it may notify.
 --
 -- The viewer's OWN hosted meetups are exempt from that radius: a host who
--- scheduled a meetup outside their own current 40km bubble (travelling, or
+-- scheduled a meetup outside their own current 50km bubble (travelling, or
 -- scheduling somewhere they'll be later) otherwise couldn't see their own
 -- meetup on the browse feed at all, even though _MeetupCard already has a
 -- "YOU'RE HOSTING" state ready for exactly that row. This deliberately
@@ -144,7 +146,7 @@ WITH deduped AS (
       OR ST_DWithin(
         m.location,
         ST_SetSRID(ST_MakePoint(sqlc.arg(viewer_lng)::float8, sqlc.arg(viewer_lat)::float8), 4326)::geography,
-        40000
+        50000
       )
     )
   ORDER BY m.id, r.created_at DESC NULLS LAST
@@ -160,7 +162,7 @@ LIMIT sqlc.arg(page_limit);
 -- chain of ORs. Same DISTINCT-then-re-sort shape as the first-page query
 -- above, for the same reason. See that query's comment for the
 -- ST_DWithin condition below, and for why the viewer's own hosted meetups
--- (m.host_user_id = requester_id) are exempt from the 40km radius — the exemption
+-- (m.host_user_id = requester_id) are exempt from the 50km radius — the exemption
 -- must stay identical in both queries, or a host's own out-of-range meetup
 -- would appear on page 1 and then vanish from page 2 onward.
 WITH deduped AS (
@@ -205,7 +207,7 @@ WITH deduped AS (
       OR ST_DWithin(
         m.location,
         ST_SetSRID(ST_MakePoint(sqlc.arg(viewer_lng)::float8, sqlc.arg(viewer_lat)::float8), 4326)::geography,
-        40000
+        50000
       )
     )
   ORDER BY m.id, r.created_at DESC NULLS LAST

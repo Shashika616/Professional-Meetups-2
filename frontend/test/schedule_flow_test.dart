@@ -2,13 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/maps/map_provider.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart'
     show ScheduleFlowPage, debugScheduleFlowNowOverride;
-import 'package:professional_connections_platform/features/meetups/widgets/stadia_map_location_step.dart'
-    show debugStadiaApiKeyOverride;
 
 /// Resolves immediately to a fixed, already-Level-2 profile — the Intent
 /// step gates on trust level, so every intent here needs to render
@@ -62,18 +61,14 @@ void _pinClockToStartOfToday() {
 /// One consistent flow now (ADR-016) — no more "Schedule Today" entry
 /// choice to tap through first.
 ///
-/// The Location step is [MapLocationStep] (real Stadia Maps integration) —
-/// `debugStadiaApiKeyOverride` fakes a configured key so it renders its
-/// real UI instead of the "not configured" state. Typing into the search
-/// field starts a 400ms debounced autocomplete call against a real Stadia
-/// endpoint; this helper deliberately taps CONTINUE and moves off the step
-/// *before* that timer fires (a single `pump()`, never `pumpAndSettle()`,
-/// in between) so `MapLocationStep.dispose()` cancels it — no real network
+/// The Location step is [MapLocationStep]; on the default (OSM) provider
+/// it needs no key, so it renders its real UI here. Typing into the search
+/// field starts a debounced autocomplete call against a real geocoder;
+/// this helper deliberately taps CONTINUE and moves off the step *before*
+/// that timer fires (a single `pump()`, never `pumpAndSettle()`, in
+/// between) so `MapLocationStep.dispose()` cancels it — no real network
 /// call ever happens in this test.
 Future<void> _reachCapacityStep(WidgetTester tester) async {
-  debugStadiaApiKeyOverride = 'test-key';
-  addTearDown(() => debugStadiaApiKeyOverride = null);
-
   _pinClockToStartOfToday();
   await tester.pumpWidget(_appWith());
   await tester.pumpAndSettle();
@@ -111,13 +106,15 @@ Future<void> _reachCapacityStep(WidgetTester tester) async {
 }
 
 void main() {
-  group('Schedule flow — location step, Stadia key not configured', () {
+  group('Schedule flow — location step, Stadia selected without a key', () {
     testWidgets(
       'shows a clear "not configured" message instead of attempting to '
       'render the map',
       (tester) async {
-        // No debugStadiaApiKeyOverride set — this is the real default
-        // (AppConfig.stadiaMapsApiKey empty, no --dart-define passed).
+        // The one configuration that cannot draw a map: the Stadia
+        // provider with no key. The default (OSM) needs none.
+        MapConfig.debugProviderOverride = MapProvider.stadia;
+        addTearDown(() => MapConfig.debugProviderOverride = null);
         _pinClockToStartOfToday();
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();

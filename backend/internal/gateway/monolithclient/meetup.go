@@ -117,9 +117,10 @@ type UserNotification struct {
 
 // RatingTrait is one selectable personality trait, server-owned.
 type RatingTrait struct {
-	Key   string
-	Label string
-	Emoji string
+	Key      string
+	Label    string
+	Emoji    string
+	Negative bool
 }
 
 // RatableParticipants is the ratable list plus the trait vocabulary the
@@ -582,7 +583,7 @@ func (c *grpcClient) ListRatableParticipants(ctx context.Context, meetupID, view
 	}
 	for _, t := range resp.GetAvailableTraits() {
 		out.AvailableTraits = append(out.AvailableTraits, RatingTrait{
-			Key: t.GetKey(), Label: t.GetLabel(), Emoji: t.GetEmoji(),
+			Key: t.GetKey(), Label: t.GetLabel(), Emoji: t.GetEmoji(), Negative: t.GetNegative(),
 		})
 	}
 	return out, nil

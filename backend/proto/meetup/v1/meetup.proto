@@ -319,7 +319,7 @@ message ListOpenMeetupsRequest {
   Intent intent = 2;
   string cursor = 3;   // empty for the first page
   int32 page_size = 4; // service applies a sane default/cap if unset or too large
-  // 40km geo-visibility (ADR-021 §2) — required. The device's current
+  // 50km geo-visibility (ADR-021 §2) — required. The device's current
   // on-demand location read; the browse screen blocks with a prompt rather
   // than calling this RPC at all when location is unavailable.
   double viewer_lat = 5;
@@ -651,11 +651,14 @@ message ListRatableParticipantsResponse {
 }
 
 // One selectable personality trait. Clients render emoji + label and send
-// back key; key is the only part ever stored.
+// back key; key is the only part ever stored. negative sorts the trait
+// into the picker's Negative tab; the server owns that classification the
+// same way it owns the vocabulary.
 message RatingTrait {
   string key = 1;
   string label = 2;
   string emoji = 3;
+  bool negative = 4;
 }
 
 message SubmitMeetupReviewRequest {

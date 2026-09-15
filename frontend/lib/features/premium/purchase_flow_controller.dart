@@ -15,7 +15,7 @@ import 'package:professional_connections_platform/core/services/subscription_ser
 /// factored out of any widget so it's directly unit-testable without
 /// faking `InAppPurchasePlatform`'s whole abstract surface — the same
 /// "injectable test seam" convention already used elsewhere in this
-/// codebase (e.g. `StadiaMapLocationStep`'s injectable `httpClient`,
+/// codebase (e.g. `AndroidMapLocationStep`'s injectable `httpClient`,
 /// `debugStadiaApiKeyOverride`). [purchaseUpdates] defaults to the real
 /// `InAppPurchase.instance.purchaseStream` and [completePurchase]/[buy]
 /// default to the real `InAppPurchase.instance` calls; tests supply their

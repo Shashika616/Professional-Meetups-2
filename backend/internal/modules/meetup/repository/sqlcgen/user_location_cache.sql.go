@@ -19,7 +19,7 @@ WHERE updated_at > $1::timestamptz
   AND ST_DWithin(
     location,
     ST_SetSRID(ST_MakePoint($2::float8, $3::float8), 4326)::geography,
-    40000
+    50000
   )
 LIMIT 500
 `

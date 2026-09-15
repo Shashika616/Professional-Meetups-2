@@ -319,8 +319,10 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
     if (_nameController.text.trim().isEmpty) return false;
     final phone = _phoneController.text.trim();
     final email = _emailController.text.trim();
-    if (phone.isEmpty && email.isEmpty) return false;
-    if (phone.isNotEmpty && Validators.phone(phone) != null) return false;
+    // Phone is the one channel an SOS can reach in minutes, so it is
+    // required; email is the optional second channel. The server applies
+    // the same rule.
+    if (Validators.phone(phone) != null) return false;
     if (email.isNotEmpty && Validators.email(email) != null) return false;
     return true;
   }
@@ -383,7 +385,7 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
             GlassTextField(
               controller: _phoneController,
               icon: Icons.phone_iphone_rounded,
-              hint: 'Phone number (optional)',
+              hint: 'Phone number',
               keyboardType: TextInputType.phone,
             ),
             const SizedBox(height: 10),
@@ -395,7 +397,8 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
             ),
             const SizedBox(height: 6),
             Text(
-              'At least one of phone or email is required.',
+              'A phone number is required so we can reach them fast. Email '
+              'is optional.',
               style: TextStyle(color: AppPalette.textSecondary, fontSize: 11),
             ),
             if (_error != null) ...[

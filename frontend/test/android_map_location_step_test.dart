@@ -6,19 +6,20 @@ import 'package:geolocator_platform_interface/geolocator_platform_interface.dart
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
-import 'package:professional_connections_platform/features/meetups/widgets/stadia_map_location_step.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/android_map_location_step.dart';
 
 import 'support/fake_geolocator_platform.dart';
 
-/// A minimal GeoJSON FeatureCollection matching Stadia's real response
-/// shape (confirmed directly against a live request during this
-/// addendum's bug diagnosis — see TESTING-NOTES.md).
+/// A minimal GeoJSON FeatureCollection in Photon's real response shape
+/// (OSM tags under properties, no pre-built label): the default provider
+/// under test. The step composes the label from `name` alone here so the
+/// tests can look the place up by the same string they supplied.
 String _featureCollection(List<(String label, double lat, double lon)> places) {
   final features = places
       .map(
         (p) =>
             '{"type":"Feature","geometry":{"type":"Point","coordinates":[${p.$3},${p.$2}]},'
-            '"properties":{"label":"${p.$1}"}}',
+            '"properties":{"name":"${p.$1}","osm_key":"amenity","osm_value":"cafe"}}',
       )
       .join(',');
   return '{"type":"FeatureCollection","features":[$features]}';
@@ -28,9 +29,6 @@ String _featureCollection(List<(String label, double lat, double lon)> places) {
 // exactly how ScheduleFlowPage hosts it (schedule_flow.dart) — the step's
 // content is taller than a bare test viewport and is designed to scroll.
 void main() {
-  setUp(() => debugStadiaApiKeyOverride = 'test-key');
-  tearDown(() => debugStadiaApiKeyOverride = null);
-
   testWidgets(
     'debounces: several rapid keystrokes collapse into exactly one request',
     (tester) async {
@@ -47,7 +45,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SingleChildScrollView(
-              child: StadiaMapLocationStep(
+              child: AndroidMapLocationStep(
                 onSubmit: (_, _, _) {},
                 httpClient: client,
               ),
@@ -98,7 +96,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: SingleChildScrollView(
-            child: StadiaMapLocationStep(
+            child: AndroidMapLocationStep(
               onSubmit: (lat, lng, label) {
                 submittedLat = lat;
                 submittedLng = lng;
@@ -133,6 +131,55 @@ void main() {
     expect(submittedLabel, 'The Coffee Shop');
   });
 
+  testWidgets(
+    'the IME re-delivering the chosen label after a selection does not '
+    'search again or reopen the dropdown',
+    (tester) async {
+      var requestCount = 0;
+      final client = MockClient((request) async {
+        requestCount++;
+        return http.Response(
+          _featureCollection([('Galle Face Green', 6.927, 79.845)]),
+          200,
+        );
+      });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: AndroidMapLocationStep(
+                onSubmit: (_, _, _) {},
+                httpClient: client,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final field = find.widgetWithText(
+        TextField,
+        'Search for a cafe, restaurant, or venue',
+      );
+      await tester.enterText(field, 'galle');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+      expect(requestCount, 1);
+
+      await tester.tap(find.text('Galle Face Green').last);
+      await tester.pump();
+      // What a keyboard's autocorrect pass does: sets the same text again.
+      await tester.enterText(field, 'Galle Face Green');
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+
+      expect(requestCount, 1, reason: 'the chosen label is not a new query');
+      // The field and the SelectedPlaceBanner carry the label; a reopened
+      // dropdown would add a third.
+      expect(find.text('Galle Face Green'), findsNWidgets(2));
+    },
+  );
+
   testWidgets('a stale in-flight suggestions request landing after a result is '
       'selected does not reopen the dropdown (regression: cancelling the '
       'debounce Timer alone does not stop a request that already fired)', (
@@ -157,7 +204,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: SingleChildScrollView(
-            child: StadiaMapLocationStep(
+            child: AndroidMapLocationStep(
               onSubmit: (_, _, _) {},
               httpClient: client,
             ),
@@ -211,7 +258,8 @@ void main() {
       double? submittedLat;
       double? submittedLng;
       final client = MockClient((request) async {
-        expect(request.url.path, '/geocoding/v1/search');
+        expect(request.url.host, 'photon.komoot.io');
+        expect(request.url.queryParameters['limit'], '1');
         return http.Response(
           _featureCollection([('Department of Coffee', 6.9172, 79.8634)]),
           200,
@@ -222,7 +270,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SingleChildScrollView(
-              child: StadiaMapLocationStep(
+              child: AndroidMapLocationStep(
                 onSubmit: (lat, lng, _) {
                   submittedLat = lat;
                   submittedLng = lng;
@@ -274,7 +322,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SingleChildScrollView(
-              child: StadiaMapLocationStep(
+              child: AndroidMapLocationStep(
                 onSubmit: (_, _, _) => submitted = true,
                 httpClient: client,
               ),
@@ -326,7 +374,7 @@ void main() {
       MaterialApp(
         home: Scaffold(
           body: SingleChildScrollView(
-            child: StadiaMapLocationStep(
+            child: AndroidMapLocationStep(
               onSubmit: (_, _, _) {},
               httpClient: client,
             ),
@@ -362,7 +410,7 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SingleChildScrollView(
-              child: StadiaMapLocationStep(
+              child: AndroidMapLocationStep(
                 onSubmit: (lat, lng, label) {
                   submittedLat = lat;
                   submittedLng = lng;

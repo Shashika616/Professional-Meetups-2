@@ -150,7 +150,7 @@ type Querier interface {
 	// is the only caller. fullName is always required there, unlike every
 	// other field on this table.
 	UpdateUserFullName(ctx context.Context, arg UpdateUserFullNameParams) (AuthUser, error)
-	// 40km geo-visibility (ADR-021 §4) — the browse screen's on-demand
+	// 50km geo-visibility (ADR-021 §4) — the browse screen's on-demand
 	// location read is the only call site for this; no trust-level bump, no
 	// other side effect. Plain unconditional UPDATE, not order-guarded: unlike
 	// the event-consumer upserts elsewhere, this is a direct RPC write from the

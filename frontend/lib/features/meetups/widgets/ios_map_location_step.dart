@@ -42,7 +42,7 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   bool _searching = false;
   Timer? _debounce;
   int _requestGeneration = 0;
-  // Same one-shot suppress-flag pattern as StadiaMapLocationStep — see
+  // Same one-shot suppress-flag pattern as AndroidMapLocationStep — see
   // that file's own comment on this field for why it's needed.
   bool _suppressNextSearch = false;
   // ADR-029 (round-8 hardening) — set when the user taps "use my current
@@ -257,7 +257,7 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
         const SizedBox(height: 16),
         Stack(
           // clipBehavior: Clip.none (not the Stack default, Clip.hardEdge)
-          // is only half of it — see StadiaMapLocationStep's own doc
+          // is only half of it — see AndroidMapLocationStep's own doc
           // comment on this bug (same fix applies here: the search field
           // and the map share this one outer Stack as a single Column, so
           // the dropdown — a later Stack child — reliably paints *above*
@@ -352,7 +352,7 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
             // Dims and blocks everything behind the dropdown (map, USE MY
             // CURRENT LOCATION, CONTINUE) so none of it shows or is
             // tappable through the completions list — see
-            // StadiaMapLocationStep's matching comment for why (paint
+            // AndroidMapLocationStep's matching comment for why (paint
             // order: these are earlier Column siblings, so without this
             // scrim CONTINUE rendered visually *over* an overflowing
             // dropdown, not under it). Tapping the scrim dismisses the
@@ -447,7 +447,7 @@ class _CompletionsDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Solid, not glass — see StadiaMapLocationStep's matching dropdown for
+    // Solid, not glass — see AndroidMapLocationStep's matching dropdown for
     // why: a blurred/translucent dropdown over the map made suggestion
     // text unreadable against whatever was behind it.
     return Material(

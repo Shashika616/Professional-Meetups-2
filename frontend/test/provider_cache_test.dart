@@ -170,7 +170,15 @@ void _retryPolicyTests() {
 
     test('backoff is capped rather than growing without bound', () {
       const err = MeetupNetworkException('flaky');
-      expect(retryPolicyForTest(20, err), const Duration(milliseconds: 6400));
+      expect(retryPolicyForTest(7, err), const Duration(milliseconds: 6400));
+    });
+
+    test('retries stop after the budget: an offline phone must not ask the '
+        'server every 6.4 seconds for as long as the app is open', () {
+      const err = MeetupOfflineException();
+      expect(retryPolicyForTest(maxProviderRetries - 1, err), isNotNull);
+      expect(retryPolicyForTest(maxProviderRetries, err), isNull);
+      expect(retryPolicyForTest(20, err), isNull);
     });
   });
 }

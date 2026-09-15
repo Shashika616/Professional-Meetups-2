@@ -388,7 +388,7 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
                 );
                 if (selected.contains(key)) {
                   selected.remove(key);
-                } else if (selected.length < 3) {
+                } else if (selected.length < kMaxTraitsPerParticipant) {
                   selected.add(key);
                 }
               }),
@@ -567,8 +567,8 @@ class _ParticipantCard extends StatelessWidget {
             const SizedBox(height: 12),
             _StarRow(score: score, onScore: onScore),
             // The trait picker only appears once a score is given —
-            // otherwise every card opens as a wall of twelve chips and the
-            // thing you are actually asked for is buried.
+            // otherwise every card opens as a wall of chips and the thing
+            // you are actually asked for is buried.
             AnimatedSize(
               duration: const Duration(milliseconds: 260),
               curve: Curves.easeOutCubic,
@@ -582,40 +582,243 @@ class _ParticipantCard extends StatelessWidget {
                   ? const SizedBox(width: double.infinity)
                   : Padding(
                       padding: const EdgeInsets.only(top: 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'What were they like? (up to 3)',
-                            style: TextStyle(
-                              color: AppPalette.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              for (final trait in traits)
-                                _TraitChip(
-                                  trait: trait,
-                                  selected: selectedTraits.contains(trait.key),
-                                  // At the cap, the unselected chips go
-                                  // quiet rather than vanishing — the
-                                  // vocabulary stays legible.
-                                  dimmed:
-                                      selectedTraits.length >= 3 &&
-                                      !selectedTraits.contains(trait.key),
-                                  onTap: () => onToggleTrait(trait.key),
-                                ),
-                            ],
-                          ),
-                        ],
+                      child: _TraitPicker(
+                        traits: traits,
+                        selected: selectedTraits,
+                        onToggle: onToggleTrait,
                       ),
                     ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// How many traits, across both tabs together, one rater may attach to one
+/// person. Mirrors the server's own cap; the server still enforces it.
+const int kMaxTraitsPerParticipant = 4;
+
+/// The vocabulary under two tabs, Positive and Negative, with one shared
+/// cap. Two tabs rather than one long wrap so a rater who only wants to say
+/// something kind never has to read past a list of criticisms to do it,
+/// and so the criticisms, when wanted, are a deliberate switch away rather
+/// than mixed in. The tab remembers itself per card while the page lives.
+class _TraitPicker extends StatefulWidget {
+  const _TraitPicker({
+    required this.traits,
+    required this.selected,
+    required this.onToggle,
+  });
+
+  final List<RatingTrait> traits;
+  final Set<String> selected;
+  final ValueChanged<String> onToggle;
+
+  @override
+  State<_TraitPicker> createState() => _TraitPickerState();
+}
+
+class _TraitPickerState extends State<_TraitPicker> {
+  bool _showNegative = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // Partitioned once per build from the server's order, which is already
+    // grouped; each tab keeps that order.
+    final positive = <RatingTrait>[];
+    final negative = <RatingTrait>[];
+    for (final t in widget.traits) {
+      (t.negative ? negative : positive).add(t);
+    }
+    // A vocabulary with no negative half (an older server) needs no tabs.
+    final tabbed = negative.isNotEmpty && positive.isNotEmpty;
+    final showing = _showNegative && tabbed ? negative : positive;
+    final tone = _showNegative && tabbed
+        ? AppPalette.danger
+        : AppPalette.candyBlue;
+    final atCap = widget.selected.length >= kMaxTraitsPerParticipant;
+
+    int countIn(List<RatingTrait> list) =>
+        list.where((t) => widget.selected.contains(t.key)).length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'What were they like? (up to $kMaxTraitsPerParticipant)',
+          style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+        ),
+        if (tabbed) ...[
+          const SizedBox(height: 10),
+          _TraitTabs(
+            showNegative: _showNegative,
+            positiveCount: countIn(positive),
+            negativeCount: countIn(negative),
+            onChanged: (negative) => setState(() => _showNegative = negative),
+          ),
+          const SizedBox(height: 4),
+        ],
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final trait in showing)
+              _TraitChip(
+                trait: trait,
+                tone: tone,
+                selected: widget.selected.contains(trait.key),
+                // At the cap, the unselected chips go quiet rather than
+                // vanishing — the vocabulary stays legible.
+                dimmed: atCap && !widget.selected.contains(trait.key),
+                onTap: () => widget.onToggle(trait.key),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// The picker's switch between its two halves: two equal, full-width
+/// segments, read as a different KIND of thing from the chips beneath
+/// them by size and treatment, not by colour fill. The active segment is
+/// drawn at full size with its border and type in the tab's colour; the
+/// inactive one sits slightly smaller and in grey. No solid fill: a filled
+/// block in either brand colour swallowed the label, and the chips already
+/// use tint for "selected", so the tabs must not. Each side carries a
+/// count once anything there is chosen, so a rater on one tab can see
+/// they have picked something on the other without switching back.
+class _TraitTabs extends StatelessWidget {
+  const _TraitTabs({
+    required this.showNegative,
+    required this.positiveCount,
+    required this.negativeCount,
+    required this.onChanged,
+  });
+
+  final bool showNegative;
+  final int positiveCount;
+  final int negativeCount;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _TraitSegment(
+          key: const Key('traitTabPositive'),
+          label: 'POSITIVE',
+          icon: Icons.thumb_up_alt_rounded,
+          count: positiveCount,
+          active: !showNegative,
+          tone: AppPalette.candyBlue,
+          onTap: () => onChanged(false),
+        ),
+        const SizedBox(width: 10),
+        _TraitSegment(
+          key: const Key('traitTabNegative'),
+          label: 'NEGATIVE',
+          icon: Icons.thumb_down_alt_rounded,
+          count: negativeCount,
+          active: showNegative,
+          tone: AppPalette.danger,
+          onTap: () => onChanged(true),
+        ),
+      ],
+    );
+  }
+}
+
+class _TraitSegment extends StatelessWidget {
+  const _TraitSegment({
+    super.key,
+    required this.label,
+    required this.icon,
+    required this.count,
+    required this.active,
+    required this.tone,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final int count;
+  final bool active;
+  final Color tone;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = active ? tone : AppPalette.textSecondary;
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: active,
+        label: count == 0 ? label : '$label, $count chosen',
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedScale(
+            // The inactive tab steps back rather than the active one
+            // stepping forward, so the active one is always at true size
+            // and never clipped by the card.
+            scale: active ? 1.0 : 0.94,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppPalette.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: active ? tone : AppPalette.hairline,
+                  width: active ? 1.8 : 1,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 15, color: foreground),
+                  const SizedBox(width: 7),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  if (count > 0) ...[
+                    const SizedBox(width: 7),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: tone.withValues(alpha: active ? 0.22 : 0.14),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$count',
+                        style: TextStyle(
+                          color: tone,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -691,12 +894,17 @@ class _StarRow extends StatelessWidget {
 class _TraitChip extends StatelessWidget {
   const _TraitChip({
     required this.trait,
+    required this.tone,
     required this.selected,
     required this.dimmed,
     required this.onTap,
   });
 
   final RatingTrait trait;
+
+  /// The selected colour: the tab's own, so a chosen criticism reads red
+  /// and a chosen compliment reads blue wherever the chip is seen.
+  final Color tone;
   final bool selected;
   final bool dimmed;
   final VoidCallback onTap;
@@ -713,12 +921,10 @@ class _TraitChip extends StatelessWidget {
           curve: Curves.easeOut,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: selected
-                ? AppPalette.candyBlue.withValues(alpha: 0.2)
-                : AppPalette.card,
+            color: selected ? tone.withValues(alpha: 0.2) : AppPalette.card,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: selected ? AppPalette.candyBlue : AppPalette.hairline,
+              color: selected ? tone : AppPalette.hairline,
               width: selected ? 1.5 : 1,
             ),
           ),

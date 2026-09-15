@@ -15,7 +15,7 @@
 #   ./run.sh                          # both iOS simulator and Android emulator
 #   ./run.sh -d chrome                # web only
 #   ./run.sh -d emulator-5554         # Android only (id from `flutter devices`)
-#   ./run.sh -d "iPhone 16"           # iOS only (exact name from `flutter devices`)
+#   ./run.sh -d "iPhone 18 Pro"       # iOS only (exact name from `flutter devices`)
 #
 # Note: -d ios / -d android are NOT valid device selectors in this Flutter
 # version — they fail with "No supported devices found with name or id
@@ -37,8 +37,14 @@ PREFERRED_ANDROID_EMULATOR_ID="Pixel_8"
 # iOS simulator to boot when none is running — used only by the simctl
 # fallback below, not by `flutter emulators --launch` (which has no
 # per-device-name selector of its own; "apple_ios_simulator" always means
-# "whatever Simulator.app's currently-selected device is").
-PREFERRED_IOS_SIMULATOR_NAME="iPhone 16"
+# "whatever the simulator app's currently-selected device is").
+#
+# Names are tried in order; the first one that exists wins, and when a name
+# exists on several runtimes (an old "iPhone 16" on iOS 18.3 next to the
+# current ones on iOS 27) the NEWEST runtime is taken. Xcode 27 ships
+# iPhone 18 / 17e / Air devices on iOS 27; the iPhone 16 entry is the
+# fallback for a machine that still only has the older runtime.
+PREFERRED_IOS_SIMULATOR_NAMES="iPhone 18 Pro,iPhone 17e,iPhone Air,iPhone 16 Pro,iPhone 16"
 
 if [ ! -f .env ]; then
   echo "frontend/.env not found — copy .env.example to .env and fill in your keys first." >&2
@@ -207,23 +213,53 @@ print("\n".join(d["id"] for d in devices if d["targetPlatform"].startswith("andr
 boot_ios_simulator() {
   local udid
   udid=$(xcrun simctl list devices available -j 2>/dev/null | python3 -c "
-import json, sys
+import json, re, sys
 data = json.load(sys.stdin)
-target = sys.argv[1]
-for devices in data.get('devices', {}).values():
-    for d in devices:
-        if d['name'] == target:
-            print(d['udid'])
-            sys.exit()
-" "$PREFERRED_IOS_SIMULATOR_NAME" 2>/dev/null || true)
+wanted = [n.strip() for n in sys.argv[1].split(',') if n.strip()]
+# runtime keys look like com.apple.CoreSimulator.SimRuntime.iOS-27-0;
+# sort candidates by that version, newest first.
+def version(runtime):
+    m = re.search(r'iOS-(\\d+)-(\\d+)', runtime)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+for name in wanted:
+    found = []
+    for runtime, devices in data.get('devices', {}).items():
+        for d in devices:
+            if d['name'] == name:
+                found.append((version(runtime), d['udid']))
+    if found:
+        found.sort(reverse=True)
+        print(found[0][1])
+        sys.exit()
+" "$PREFERRED_IOS_SIMULATOR_NAMES" 2>/dev/null || true)
   if [ -z "$udid" ]; then
-    # Named simulator not found on this machine — fall back to Flutter's
-    # own resolution, which is at least not a no-op when nothing is open.
+    # None of the named simulators exist on this machine — fall back to
+    # Flutter's own resolution, which is at least not a no-op when nothing
+    # is open.
     flutter emulators --launch "$ios_emulator_id"
     return
   fi
   xcrun simctl boot "$udid" 2>/dev/null || true
-  open -a Simulator
+  open_simulator_app
+}
+
+# The device window. Xcode 26 and earlier ship Simulator.app; Xcode 27
+# replaced it with DeviceHub.app (bundle id com.apple.dt.Devices), which
+# `open -a Simulator` cannot find. The booted device keeps running headless
+# either way (screenshots and `flutter run` work without the window), so a
+# missing app is a warning, not a failure.
+open_simulator_app() {
+  local dev
+  dev=$(xcode-select -p 2>/dev/null)
+  if [ -d "$dev/Applications/Simulator.app" ]; then
+    open -a "$dev/Applications/Simulator.app"
+  elif [ -d "$dev/../Applications/DeviceHub.app" ]; then
+    open -a "$dev/../Applications/DeviceHub.app"
+  elif open -b com.apple.iphonesimulator 2>/dev/null || open -b com.apple.dt.Devices 2>/dev/null; then
+    :
+  else
+    echo "Note: no simulator window app found; the device is booted headless." >&2
+  fi
 }
 
 devices_snapshot=$(snapshot_devices)

@@ -629,6 +629,9 @@ type ratingTraitResponse struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Emoji string `json:"emoji"`
+	// Sorts the trait into the review screen's Negative tab. Server-owned
+	// so a client never decides which words count as criticism.
+	Negative bool `json:"negative"`
 }
 
 type listRatableParticipantsResponse struct {
@@ -667,7 +670,7 @@ func (h *Handler) listRatableParticipants(w http.ResponseWriter, r *http.Request
 	}
 	traits := make([]ratingTraitResponse, 0, len(result.AvailableTraits))
 	for _, t := range result.AvailableTraits {
-		traits = append(traits, ratingTraitResponse{Key: t.Key, Label: t.Label, Emoji: t.Emoji})
+		traits = append(traits, ratingTraitResponse{Key: t.Key, Label: t.Label, Emoji: t.Emoji, Negative: t.Negative})
 	}
 	writeJSON(w, http.StatusOK, listRatableParticipantsResponse{Participants: out, AvailableTraits: traits})
 }

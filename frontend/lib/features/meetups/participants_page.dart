@@ -388,7 +388,7 @@ class _VerifyToSeeNotice extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Names and photos are only shared with verified members — the '
+            'Names and photos are only shared with verified members. It is the '
             'same protection everyone here gets.',
             style: TextStyle(color: AppPalette.textSecondary, fontSize: 12.5),
           ),

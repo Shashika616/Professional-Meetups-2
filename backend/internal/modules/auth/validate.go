@@ -49,8 +49,19 @@ func validatePhoneNumber(value string) error {
 // verification additionally applies is a separate, stronger rule and lives
 // in isRejectedCorporateEmail (otp.go), exactly as in the source.
 func validateEmailShape(value string) error {
-	if !emailPattern.MatchString(strings.TrimSpace(value)) {
+	value = strings.TrimSpace(value)
+	// RFC 5321's path limit. The regex alone accepted a 20 KB "address",
+	// which was stored, then handed to Gmail, which refused it with a
+	// protocol error that surfaced as a 500. A length cap makes that a 400
+	// before any storage or delivery is attempted.
+	if len(value) > maxEmailLength {
+		return fmt.Errorf("auth: enter a valid email address: %w", apperror.ErrInvalidInput)
+	}
+	if !emailPattern.MatchString(value) {
 		return fmt.Errorf("auth: enter a valid email address: %w", apperror.ErrInvalidInput)
 	}
 	return nil
 }
+
+// maxEmailLength is RFC 5321's maximum forward-path length.
+const maxEmailLength = 254

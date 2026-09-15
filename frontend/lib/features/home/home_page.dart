@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
+import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
 import 'package:professional_connections_platform/features/home/widgets/home_header.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/safety_tip_card.dart';
@@ -81,8 +82,28 @@ class _HomePageState extends ConsumerState<HomePage>
   /// one (docs/plans/07-happening-soon-pagination-fix.md).
   final ScrollController _scrollController = ScrollController();
 
+  /// The subscription that keeps viewerLocationProvider alive for this
+  /// page's lifetime. Held so it can be CLOSED: without that, every
+  /// HomePage teardown (sign-out, forced session expiry) left a live
+  /// listener behind and the autoDispose provider never disposed, which is
+  /// exactly what autoDispose is there to guarantee across a sign-in cycle.
+  late final ProviderSubscription<ViewerLocation> _locationListener;
+
+  @override
+  void initState() {
+    super.initState();
+    // Start the viewer-location read the moment Home mounts. The browse
+    // section that needs it is often below the fold in a lazy ListView, and
+    // when the read lived in that section's initState the permission prompt
+    // and the fix waited until the user scrolled. Listening from here keeps
+    // the autoDispose provider alive for the page's lifetime and starts it
+    // now; the section still watches it for state.
+    _locationListener = ref.listenManual(viewerLocationProvider, (_, _) {});
+  }
+
   @override
   void dispose() {
+    _locationListener.close();
     _scrollController.dispose();
     super.dispose();
   }
@@ -177,18 +198,45 @@ class _HomePageState extends ConsumerState<HomePage>
       body: SafeArea(
         child: Column(
           children: [
+            // PINNED, not the first row of the list: the greeting, bell and
+            // avatar are the page's chrome, and chrome that scrolls off with
+            // the feed leaves the bell unreachable mid-browse. The hairline
+            // under it is what makes the content visibly pass beneath.
+            HomeHeader(userName: displayName, imageUrl: imageUrl),
+            Divider(height: 1, thickness: 1, color: AppPalette.hairline),
             Expanded(
               // Pull-to-refresh for the whole page. Scoped to
               // activeMeetupsProvider plus every open-meetups instance —
               // the two things on this page backed by a network read.
               child: RefreshIndicator(
                 onRefresh: () async {
-                  ref.invalidate(openMeetupsProvider);
-                  // The awaited value is discarded on purpose: awaiting is
-                  // what makes RefreshIndicator hold its spinner until the
-                  // refetch lands, and the data itself reaches the UI
-                  // through the provider's own watchers.
-                  await ref.refresh(activeMeetupsProvider.future).then((_) {});
+                  // Two independent refreshes run together: the active
+                  // list, and a fresh position for the browse list (a pull
+                  // after moving across town should re-centre the radius).
+                  // Neither waits on, or is failed by, the other.
+                  //
+                  // The browse list is refetched ONCE: a moved position is
+                  // a new provider key and fetches on its own, so only an
+                  // unchanged one needs the explicit invalidation. The
+                  // position read is bounded by its own deadline.
+                  final location = ref.read(viewerLocationProvider.notifier);
+                  final before = ref.read(viewerLocationProvider);
+                  await Future.wait<void>([
+                    location.refresh().then((_) {
+                      final after = ref.read(viewerLocationProvider);
+                      if (after.lat == before.lat && after.lng == before.lng) {
+                        ref.invalidate(openMeetupsProvider);
+                      }
+                    }),
+                    // The awaited value is discarded on purpose: awaiting
+                    // is what makes RefreshIndicator hold its spinner until
+                    // the refetch lands; the data reaches the UI through
+                    // the provider's own watchers. A failure here is the
+                    // provider's error state, not the pull's.
+                    ref
+                        .refresh(activeMeetupsProvider.future)
+                        .then((_) {}, onError: (_) {}),
+                  ]);
                 },
                 child: ListView(
                   controller: _scrollController,
@@ -210,7 +258,6 @@ class _HomePageState extends ConsumerState<HomePage>
                   addAutomaticKeepAlives: true,
                   addRepaintBoundaries: true,
                   children: [
-                    HomeHeader(userName: displayName, imageUrl: imageUrl),
                     const SizedBox(height: 4),
                     const ActiveMeetupsSection(),
                     // The intent filter lives INSIDE this section now, not

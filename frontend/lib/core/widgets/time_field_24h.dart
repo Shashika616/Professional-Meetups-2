@@ -96,7 +96,9 @@ class _TimeField24hState extends State<TimeField24h> {
           decoration: InputDecoration(
             isDense: true,
             contentPadding: const EdgeInsets.only(top: 2, bottom: 6),
-            hintText: '--:--',
+            // The shape of the value, so an empty field already says what
+            // it wants; the card beneath names the 24-hour clock outright.
+            hintText: 'HH:MM',
             hintStyle: TextStyle(
               color: AppPalette.textSecondary.withValues(alpha: 0.45),
               fontWeight: FontWeight.w700,

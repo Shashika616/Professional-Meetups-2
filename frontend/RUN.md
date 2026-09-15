@@ -1,9 +1,10 @@
 # Running the app
 
 Every command below needs `frontend/.env` to exist first — copy
-`.env.example` to `.env` and fill in your keys (see `TESTING-NOTES.md` at
-the repo root for what `STADIA_MAPS_API_KEY` is and where to get one).
-Run everything from `frontend/`.
+`.env.example` to `.env` and fill in your keys. The Android map defaults to
+OpenStreetMap (`MAP_PROVIDER=osm`: OpenFreeMap tiles + Photon search, no
+key); set `MAP_PROVIDER=stadia` plus `STADIA_MAPS_API_KEY` only to opt back
+into Stadia Maps. Run everything from `frontend/`.
 
 ```bash
 cp .env.example .env   # first time only, then edit .env
@@ -85,22 +86,57 @@ host (`backend/README.md`'s documented gotcha).
 ## iOS only
 
 ```bash
-flutter run -d "iPhone 16" --dart-define-from-file=.env
+flutter run -d "iPhone 18 Pro" --dart-define-from-file=.env
 ```
 
 **Unlike `chrome`, there's no generic `ios` shortcut** — `flutter run -d
 ios` fails with `No supported devices found with name or id matching
 'ios'.` (confirmed directly; this isn't a guess). You have to name the
 exact simulator by its device name (or its UUID from `flutter devices`),
-and that name depends on which simulator model you have booted — `"iPhone
-16"` is what this machine's default simulator is called; run `flutter
-devices` first if yours is a different model and swap the name in.
+and that name depends on which simulator model you have booted — with
+Xcode 27 / iOS 27 the devices are `iPhone 18 Pro`, `iPhone 17e`, `iPhone
+Air` and so on (an `iPhone 16` may still exist on an older iOS 18.3
+runtime); run `flutter devices` first and swap the name in. `run.sh` picks
+the newest runtime automatically (`PREFERRED_IOS_SIMULATOR_NAMES`).
+
+Xcode 27 note: Simulator.app is gone; the device window is
+**DeviceHub.app** inside Xcode (`open -a
+/Applications/Xcode.app/Contents/Applications/DeviceHub.app`). A device
+booted with `xcrun simctl boot` runs fine without the window.
 
 If no simulator is running yet:
 
 ```bash
 flutter emulators --launch apple_ios_simulator
 ```
+
+## Building for real devices and production
+
+Use `./build.sh`; do not type `flutter build` by hand. The script passes
+`--dart-define-from-file=.env` for every target, sets the right
+`GATEWAY_BASE_URL`, and for production builds checks the compiled Dart for
+the production host, the absence of any localhost URL, and the presence of
+the selected map provider. A build made with only
+`--dart-define=GATEWAY_BASE_URL=...` compiles and runs but ships without
+the LinkedIn client id (and, on the Stadia provider, without the map key),
+silently. That happened once (2026-09-13); the script is the guard.
+
+```bash
+./build.sh prod-android   # release APKs vs Cloud Run: arm64/armeabi/x86_64 + universal
+./build.sh prod-ios       # unsigned release Runner.app + .ipa for sideloading
+./build.sh emulator       # debug APK against the local gateway (10.0.2.2:8080)
+./build.sh simulator      # debug iOS simulator build against localhost:8080
+```
+
+Outputs: `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` (install
+this one on a phone), `build/ios/iphoneos/Runner.app` and
+`build/ios/ipa-unsigned/TieHere-prod-unsigned.ipa`. The split APKs and the
+universal APK carry different version codes, so uninstall one flavour before
+installing the other.
+
+If you must call `flutter build` directly, the invariant is: `.env` first,
+gateway override second, e.g.
+`flutter build apk --release --dart-define-from-file=.env --dart-define=GATEWAY_BASE_URL=https://meetups-backend-k7eklebcwq-el.a.run.app`.
 
 ## Finding the exact device selector yourself
 

@@ -422,7 +422,7 @@ message CompleteProfileSetupRequest {
   string company_email = 4;  // optional; if set, kicks off corporate-email verification-start (ADR-019 §2)
 }
 
-// 40km geo-visibility (ADR-021 §4).
+// 50km geo-visibility (ADR-021 §4).
 message UpdateLastKnownLocationRequest {
   string user_id = 1; // set by the gateway from the verified JWT
   double lat = 2;

@@ -147,6 +147,14 @@ func run(logger *slog.Logger) error {
 	// Count only, never the addresses — the same rule as above, and here it
 	// matters more, since an address in this list IS the credential.
 	if raw := os.Getenv("TEST_OTP_BYPASS_EMAILS"); raw != "" {
+		// The safety argument for this list is that no entry can be a real
+		// mailbox. Enforce it before anything else: a deliverable address
+		// here is a credential-free login, so the process refuses to start
+		// rather than warn and continue. Same exit path as any other
+		// invalid required configuration (run() returns, main exits 1).
+		if err := auth.ValidateTestOTPBypassEmails(raw); err != nil {
+			return fmt.Errorf("config: %w", err)
+		}
 		n := 0
 		for _, e := range strings.Split(raw, ",") {
 			if strings.TrimSpace(e) != "" {

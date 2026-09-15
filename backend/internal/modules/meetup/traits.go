@@ -17,17 +17,22 @@ import (
 // grow without an app release, since clients render whatever this returns
 // rather than a hardcoded copy.
 //
-// # WHY THEY ARE ALL POSITIVE
+// # WHY NEGATIVE TRAITS ARE PRIVATE, AND WHY THEY ARE WORDED AS THEY ARE
 //
-// Deliberate. These are shown on a real professional's profile alongside
-// their name, and a vocabulary containing "rude" or "boring" turns a
-// networking app into a place people get labelled. The negative signal this
-// system does need already exists and is private: the 1-5 score, the safety
-// feedback, and the report path. Traits are the part that is public, so
-// they only ever say what someone was good at.
+// Traits are only ever read back to the rater who chose them ("How you
+// rated them"); no aggregate or per-person view of them is exposed to
+// anyone else, and PrivacyControlsPage tells members exactly that. That is
+// what makes a negative vocabulary safe to offer at all: it lets a rater
+// record why a score was low without turning a networking app into a place
+// people get labelled in public. Each negative entry names a BEHAVIOUR at
+// the meetup (arrived late, was distracted), never a judgement of the
+// person, so the record stays useful and stays fair. The public negative
+// signal remains what it was: the 1-5 score, the safety feedback, and the
+// report path.
 //
-// Ordered deliberately — clients render them in this order, and the list is
-// grouped conversation-style first, then working-style.
+// Ordered deliberately — clients render them in this order within each
+// tab, and the positive list is grouped conversation-style first, then
+// working-style.
 var ratingTraits = []RatingTrait{
 	{Key: "great_listener", Label: "Great listener", Emoji: "👂"},
 	{Key: "easy_to_talk_to", Label: "Easy to talk to", Emoji: "😄"},
@@ -41,19 +46,31 @@ var ratingTraits = []RatingTrait{
 	{Key: "generous_with_time", Label: "Generous with time", Emoji: "⏳"},
 	{Key: "great_connector", Label: "Great connector", Emoji: "🌐"},
 	{Key: "inspiring", Label: "Inspiring", Emoji: "🚀"},
+
+	{Key: "arrived_late", Label: "Arrived late", Emoji: "⏰", Negative: true},
+	{Key: "left_early", Label: "Left early", Emoji: "🚪", Negative: true},
+	{Key: "distracted", Label: "Distracted", Emoji: "📱", Negative: true},
+	{Key: "unprepared", Label: "Unprepared", Emoji: "📄", Negative: true},
+	{Key: "talked_over_others", Label: "Talked over others", Emoji: "🗣️", Negative: true},
+	{Key: "too_salesy", Label: "Too salesy", Emoji: "💼", Negative: true},
+	{Key: "hard_to_talk_to", Label: "Hard to talk to", Emoji: "🤐", Negative: true},
+	{Key: "disrespectful", Label: "Disrespectful", Emoji: "⚠️", Negative: true},
+	{Key: "irresponsible", Label: "Irresponsible", Emoji: "🙈", Negative: true},
 }
 
-// maxTraitsPerParticipant caps how many a rater may attach to one person.
-// Without a cap, selecting all of them says nothing — the point of the
-// feature is that a rater chooses.
-const maxTraitsPerParticipant = 3
+// maxTraitsPerParticipant caps how many a rater may attach to one person,
+// across both lists together. Without a cap, selecting all of them says
+// nothing — the point of the feature is that a rater chooses.
+const maxTraitsPerParticipant = 4
 
-// RatingTrait is one selectable trait. The client renders Emoji + Label and
-// sends back Key; Key is the only part ever stored.
+// RatingTrait is one selectable trait. The client renders Emoji + Label,
+// under the Positive or Negative tab per [Negative], and sends back Key;
+// Key is the only part ever stored.
 type RatingTrait struct {
-	Key   string
-	Label string
-	Emoji string
+	Key      string
+	Label    string
+	Emoji    string
+	Negative bool
 }
 
 // RatingTraits returns the vocabulary, for the client to render.

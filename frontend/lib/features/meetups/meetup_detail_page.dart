@@ -609,26 +609,16 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
         // to decide whether it may.
         // The participants strip on the card above is the way into the
         // guest list — a second PARTICIPANTS tile here did the same thing.
-        Row(
-          children: [
-            Expanded(
-              child: _ActionTile(
-                icon: Icons.place_outlined,
-                label: 'LOCATION',
-                onTap: () => LocationViewPage.open(
-                  context,
-                  meetup,
-                  viewerTrustLevel:
-                      ref
-                          .watch(authSessionProvider)
-                          .value
-                          ?.profile
-                          ?.trustLevel ??
-                      0,
-                ),
-              ),
-            ),
-          ],
+        _ActionTile(
+          icon: Icons.map_outlined,
+          label: 'LOCATION',
+          detail: 'Map, address and directions',
+          onTap: () => LocationViewPage.open(
+            context,
+            meetup,
+            viewerTrustLevel:
+                ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0,
+          ),
         ),
         const SizedBox(height: 12),
         // Everything from here down is about GETTING to a meetup. A finished
@@ -654,15 +644,18 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
             if (_canWithdraw(meetup)) ...[
               const SizedBox(height: 10),
               // Before the host answers, taking the request back is a
-              // cancellation — quieter, and in the neutral colour: nothing
-              // is being broken, nobody is let down. After acceptance it
-              // is a withdrawal, and the red says so.
+              // cancellation; after acceptance it is a withdrawal. Both
+              // undo the viewer's own standing on this meetup, so both are
+              // outlined in red, but the cancellation in the SOFTER red
+              // (the cancelled-meetup tone, with the border further eased):
+              // nothing is broken and nobody is let down, so it must not
+              // shout the way the withdrawal does.
               if (meetup.myRequestStatus == MeetupRequestStatus.pending)
                 SecondaryButton(
                   label: 'CANCEL REQUEST',
                   height: 40,
-                  color: AppPalette.textSecondary,
-                  borderColor: AppPalette.hairline,
+                  color: AppPalette.cancelled,
+                  borderColor: AppPalette.cancelled.withValues(alpha: 0.55),
                   onPressed: () =>
                       _confirmWithdraw(meetup.myRequestId!, pending: true),
                 )
@@ -772,6 +765,11 @@ class _MeetupDetailSkeleton extends StatelessWidget {
   }
 }
 
+/// Where the viewer's request stands. A STATE, not a control: it is
+/// left-aligned with an icon and a sentence, carries no press affordance,
+/// and is coloured by outcome (amber while waiting, green when in, red
+/// when declined, grey when withdrawn), so it cannot be mistaken for the
+/// LOCATION button above it or the cancel/withdraw button below it.
 class _RequestStatusBanner extends StatelessWidget {
   const _RequestStatusBanner({required this.status});
 
@@ -779,25 +777,85 @@ class _RequestStatusBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final (label, color) = switch (status) {
-      MeetupRequestStatus.pending => ('REQUEST PENDING', AppPalette.candyBlue),
-      MeetupRequestStatus.accepted => ('YOU\'RE IN', AppPalette.verified),
-      MeetupRequestStatus.rejected => ('REQUEST DECLINED', AppPalette.danger),
-      MeetupRequestStatus.withdrawn => ('WITHDRAWN', AppPalette.textSecondary),
+    final (label, detail, icon, color) = switch (status) {
+      MeetupRequestStatus.pending => (
+        'REQUEST PENDING',
+        'Waiting for the host to respond. We will notify you.',
+        Icons.hourglass_top_rounded,
+        AppPalette.gold,
+      ),
+      MeetupRequestStatus.accepted => (
+        'YOU\'RE IN',
+        'The host accepted your request. See you there.',
+        Icons.check_circle_rounded,
+        AppPalette.verified,
+      ),
+      MeetupRequestStatus.rejected => (
+        'REQUEST DECLINED',
+        'The host did not accept this request.',
+        Icons.cancel_rounded,
+        AppPalette.danger,
+      ),
+      MeetupRequestStatus.withdrawn => (
+        'WITHDRAWN',
+        'You left this meetup.',
+        Icons.undo_rounded,
+        AppPalette.textSecondary,
+      ),
     };
-    return FlatCard(
-      radius: 12,
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      tint: color.withValues(alpha: 0.08),
-      border: color.withValues(alpha: 0.3),
-      child: Center(
-        child: Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.4,
-            fontSize: 12,
+    return Semantics(
+      // Read as a status line, never announced as a button.
+      liveRegion: true,
+      label: '$label. $detail',
+      child: FlatCard(
+        radius: 12,
+        padding: EdgeInsets.zero,
+        tint: color.withValues(alpha: 0.08),
+        border: color.withValues(alpha: 0.30),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Edge stripe in the state colour, the same device the
+                // cancelled banner and history rows use for outcome.
+                Container(width: 4, color: color),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 0, 12),
+                  child: Icon(icon, size: 22, color: color),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            color: color,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1.3,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          detail,
+                          style: TextStyle(
+                            color: AppPalette.textSecondary,
+                            fontSize: 12,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1005,19 +1063,26 @@ class _CancelledBanner extends StatelessWidget {
   }
 }
 
+/// A full-width row button: icon in an accent disc, small-caps label with
+/// a one-line detail, and a chevron. The chevron and the accent border are
+/// what say "this goes somewhere"; the earlier centred icon-over-label tile
+/// read as a badge rather than a control.
 class _ActionTile extends StatelessWidget {
   const _ActionTile({
     required this.icon,
     required this.label,
+    required this.detail,
     required this.onTap,
   });
 
   final IconData icon;
   final String label;
+  final String detail;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final accent = AppPalette.candyBlue;
     return Material(
       color: AppPalette.card,
       borderRadius: BorderRadius.circular(14),
@@ -1026,29 +1091,53 @@ class _ActionTile extends StatelessWidget {
         onTap: onTap,
         // A visible press state. The old bordered bars gave none, which is
         // half of why they did not read as buttons.
-        splashColor: AppPalette.candyBlue.withValues(alpha: 0.10),
-        highlightColor: AppPalette.candyBlue.withValues(alpha: 0.06),
+        splashColor: accent.withValues(alpha: 0.12),
+        highlightColor: accent.withValues(alpha: 0.06),
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppPalette.hairline),
+            border: Border.all(color: accent.withValues(alpha: 0.45)),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+            child: Row(
               children: [
-                Icon(icon, size: 20, color: AppPalette.candyBlue),
-                const SizedBox(height: 7),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: AppPalette.textPrimary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.1,
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, size: 20, color: accent),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          color: AppPalette.textPrimary,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        detail,
+                        style: TextStyle(
+                          color: AppPalette.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right_rounded, size: 22, color: accent),
               ],
             ),
           ),

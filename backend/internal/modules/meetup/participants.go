@@ -100,7 +100,9 @@ func (s *service) ListMeetupParticipants(ctx context.Context, req ListMeetupPart
 	// who hosts on the card either, so they do not see it here.
 	hostNamed := req.ViewerTrustLevel >= visibilityFloor
 	for _, row := range rows {
-		if out.Redacted && !(row.IsHost && hostNamed) {
+		// Everyone except a host the viewer is allowed to see by name.
+		namedHost := row.IsHost && hostNamed
+		if out.Redacted && !namedHost {
 			out.Participants = append(out.Participants, MeetupParticipant{IsHost: row.IsHost})
 			continue
 		}

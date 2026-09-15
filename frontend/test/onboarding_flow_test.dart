@@ -67,12 +67,14 @@ class _FakeAuthService implements AuthService {
   final Completer<AuthSession>? _completer;
   final UserProfile? _profile;
   int callCount = 0;
+  bool? lastAgeConfirmedOver18;
 
   @override
   Future<AuthSession> signInWithLinkedIn({
     required bool ageConfirmedOver18,
   }) async {
     callCount++;
+    lastAgeConfirmedOver18 = ageConfirmedOver18;
     if (_completer != null) return _completer.future;
     if (_error != null) throw _error;
     return _session!;
@@ -396,6 +398,20 @@ void main() {
 
     await _confirmAge(tester);
     expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
+  });
+
+  testWidgets('the sign-up path sends the attestation the age step recorded, '
+      'not a constant (Plan 18, Fix 2 regression guard)', (tester) async {
+    final auth = _FakeAuthService.success(_testSession);
+    await tester.pumpWidget(_appWith(auth));
+    await tester.pumpAndSettle();
+    await _confirmAge(tester);
+
+    await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+    await tester.pumpAndSettle();
+
+    expect(auth.callCount, 1);
+    expect(auth.lastAgeConfirmedOver18, isTrue);
   });
 
   // The trust paragraph that used to sit here is gone. It explained the

@@ -407,6 +407,20 @@ class ScriptedMeetupService implements MeetupService {
     RatingTrait(key: 'cheerful', label: 'Cheerful', emoji: '☀️'),
     RatingTrait(key: 'great_listener', label: 'Great listener', emoji: '👂'),
     RatingTrait(key: 'insightful', label: 'Insightful', emoji: '💡'),
+    RatingTrait(key: 'funny', label: 'Funny', emoji: '😂'),
+    RatingTrait(key: 'welcoming', label: 'Welcoming', emoji: '🤝'),
+    RatingTrait(
+      key: 'arrived_late',
+      label: 'Arrived late',
+      emoji: '⏰',
+      negative: true,
+    ),
+    RatingTrait(
+      key: 'distracted',
+      label: 'Distracted',
+      emoji: '📱',
+      negative: true,
+    ),
   ];
 
   /// What the last submitMeetupReview carried, and how many times it ran.

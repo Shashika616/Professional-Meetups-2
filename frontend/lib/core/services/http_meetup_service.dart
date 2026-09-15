@@ -2,6 +2,7 @@ import 'dart:async' show TimeoutException;
 import 'dart:convert';
 import 'dart:io' show SocketException;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 
 import 'package:professional_connections_platform/core/config/app_config.dart';
@@ -414,15 +415,27 @@ class HttpMeetupService implements MeetupService {
   /// problem and is still mapped by [_mapError].
   Future<http.Response> _send(Future<http.Response> Function() request) async {
     try {
-      return await request();
+      // A hard deadline. Without one a connection that is up but not
+      // moving (a captive portal, a stalled cell link) never resolves and
+      // never errors, and the screen shimmers forever. Every call this
+      // service makes is a small JSON round trip; nothing here should take
+      // near this long.
+      return await request().timeout(requestTimeout);
     } on SocketException catch (error) {
       throw MeetupOfflineException(_offlineMessage(error));
     } on http.ClientException catch (error) {
       throw MeetupOfflineException(_offlineMessage(error));
-    } on TimeoutException catch (error) {
-      throw MeetupOfflineException(_offlineMessage(error));
+    } on TimeoutException {
+      throw const MeetupOfflineException(
+        'The connection is too slow right now. Check your network and try '
+        'again.',
+      );
     }
   }
+
+  /// How long one request may take before it is treated as unreachable.
+  @visibleForTesting
+  static const requestTimeout = Duration(seconds: 20);
 
   /// The exception's own text is deliberately discarded — it carries host
   /// names, ports and errno strings that mean nothing to a user.

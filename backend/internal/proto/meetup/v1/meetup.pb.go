@@ -607,7 +607,7 @@ type ListOpenMeetupsRequest struct {
 	Intent   Intent `protobuf:"varint,2,opt,name=intent,proto3,enum=meetup.v1.Intent" json:"intent,omitempty"`
 	Cursor   string `protobuf:"bytes,3,opt,name=cursor,proto3" json:"cursor,omitempty"`                      // empty for the first page
 	PageSize int32  `protobuf:"varint,4,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"` // service applies a sane default/cap if unset or too large
-	// 40km geo-visibility (ADR-021 §2) — required. The device's current
+	// 50km geo-visibility (ADR-021 §2) — required. The device's current
 	// on-demand location read; the browse screen blocks with a prompt rather
 	// than calling this RPC at all when location is unavailable.
 	ViewerLat float64 `protobuf:"fixed64,5,opt,name=viewer_lat,json=viewerLat,proto3" json:"viewer_lat,omitempty"`
@@ -3137,12 +3137,15 @@ func (x *ListRatableParticipantsResponse) GetAvailableTraits() []*RatingTrait {
 }
 
 // One selectable personality trait. Clients render emoji + label and send
-// back key; key is the only part ever stored.
+// back key; key is the only part ever stored. negative sorts the trait
+// into the picker's Negative tab; the server owns that classification the
+// same way it owns the vocabulary.
 type RatingTrait struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
 	Label         string                 `protobuf:"bytes,2,opt,name=label,proto3" json:"label,omitempty"`
 	Emoji         string                 `protobuf:"bytes,3,opt,name=emoji,proto3" json:"emoji,omitempty"`
+	Negative      bool                   `protobuf:"varint,4,opt,name=negative,proto3" json:"negative,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3196,6 +3199,13 @@ func (x *RatingTrait) GetEmoji() string {
 		return x.Emoji
 	}
 	return ""
+}
+
+func (x *RatingTrait) GetNegative() bool {
+	if x != nil {
+		return x.Negative
+	}
+	return false
 }
 
 type SubmitMeetupReviewRequest struct {
@@ -4154,11 +4164,12 @@ const file_meetup_v1_meetup_proto_rawDesc = "" +
 	"\r_context_note\"\xa7\x01\n" +
 	"\x1fListRatableParticipantsResponse\x12A\n" +
 	"\fparticipants\x18\x01 \x03(\v2\x1d.meetup.v1.RatableParticipantR\fparticipants\x12A\n" +
-	"\x10available_traits\x18\x02 \x03(\v2\x16.meetup.v1.RatingTraitR\x0favailableTraits\"K\n" +
+	"\x10available_traits\x18\x02 \x03(\v2\x16.meetup.v1.RatingTraitR\x0favailableTraits\"g\n" +
 	"\vRatingTrait\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12\x14\n" +
-	"\x05emoji\x18\x03 \x01(\tR\x05emoji\"\xe8\x01\n" +
+	"\x05emoji\x18\x03 \x01(\tR\x05emoji\x12\x1a\n" +
+	"\bnegative\x18\x04 \x01(\bR\bnegative\"\xe8\x01\n" +
 	"\x19SubmitMeetupReviewRequest\x12\x1b\n" +
 	"\tmeetup_id\x18\x01 \x01(\tR\bmeetupId\x12\"\n" +
 	"\rrater_user_id\x18\x02 \x01(\tR\vraterUserId\x12#\n" +

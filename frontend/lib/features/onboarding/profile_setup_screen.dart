@@ -238,7 +238,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                 _companyEmailField(),
                 const SizedBox(height: 8),
                 Text(
-                  'We don’t store this email — only that it proved you '
+                  'We don’t store this email, only that it proved you '
                   'have access to an inbox at this company’s domain.',
                   style: TextStyle(
                     fontSize: 11,

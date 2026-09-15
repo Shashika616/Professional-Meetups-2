@@ -64,3 +64,12 @@ Scaffolding only as of 2026-09-04 — see `docs/decisions/adr-001-modular-monoli
 and `docs/plans/` for the phased build sequence. Built module by module, each
 phase verified before the next starts (same discipline the microservices backend
 itself was built with).
+
+## Building the app for devices
+
+From `frontend/`, use `./build.sh <prod-android|prod-ios|emulator|simulator>`
+and nothing else. It passes `--dart-define-from-file=.env` (map provider, LinkedIn
+client id) plus the right `GATEWAY_BASE_URL`, and verifies production builds
+before reporting success. A hand-typed `flutter build` with only the gateway
+URL compiles fine and ships with the map disabled. Details in
+`frontend/RUN.md` → "Building for real devices and production".

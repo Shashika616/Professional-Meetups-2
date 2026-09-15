@@ -377,6 +377,43 @@ func TestEmailSignup_Integration(t *testing.T) {
 // deliberate design: a second signup with an address that is already a
 // verified personal_email logs into THAT account rather than creating a
 // duplicate — which only works if the UNIQUE index and the lookup agree.
+// The unauthenticated start endpoints validate the address before anything
+// is stored or sent: a 20 KB string that matches the regex's character
+// class used to reach Gmail and come back as a 500.
+func TestEmailStart_RejectsMalformedAndOversizedAddresses(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	oversized := strings.Repeat("a", 300) + "@example.com"
+	for _, tc := range []struct{ name, target string }{
+		{"no at sign", "not-an-address"},
+		{"oversized", oversized},
+		{"spaces inside", "a b@example.com"},
+	} {
+		for _, start := range []struct {
+			name string
+			fn   func() error
+		}{
+			{"login", func() error {
+				_, err := h.svc.StartEmailLogin(ctx, auth.StartVerificationRequest{Purpose: auth.VerificationPurposeEmailLogin, Target: tc.target})
+				return err
+			}},
+			{"signup", func() error {
+				_, err := h.svc.StartEmailSignup(ctx, auth.StartVerificationRequest{Purpose: auth.VerificationPurposeEmailSignup, Target: tc.target})
+				return err
+			}},
+		} {
+			sent := len(h.emailer.codes)
+			err := start.fn()
+			if !isSentinel(err, apperror.ErrInvalidInput) {
+				t.Errorf("%s/%s: error = %v, want ErrInvalidInput", start.name, tc.name, err)
+			}
+			if len(h.emailer.codes) != sent {
+				t.Errorf("%s/%s: an email was sent for an invalid address", start.name, tc.name)
+			}
+		}
+	}
+}
+
 func TestEmailSignup_RecoversExistingAccount(t *testing.T) {
 	h := newHarness(t)
 

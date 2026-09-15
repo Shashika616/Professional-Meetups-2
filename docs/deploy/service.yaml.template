@@ -1,0 +1,166 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: meetups-backend
+spec:
+  template:
+    metadata:
+      # Explicit revision name. `services replace` only creates a new
+      # revision when the template CHANGES — with an unchanged spec it
+      # re-points at the existing (here: failed) revision and reports
+      # failure without starting a container. Bump this suffix on any
+      # redeploy that does not otherwise change the spec.
+      name: meetups-backend-r22
+      annotations:
+        # Instance ceiling, derived from the DATABASE rather than from
+        # traffic. db.MaxConns is 20 per instance, and Cloud SQL derives
+        # max_connections from tier RAM (~400 on db-custom-1-3840, ~200 on a
+        # shared-core tier). Cloud Run's default of 100 instances would
+        # therefore demand up to 2000 connections and start REFUSING them at
+        # roughly 20 — a hard failure, not a slowdown, and nothing in the app
+        # guards against it.
+        #
+        # 8 x 20 = 160 leaves headroom under EITHER tier, so this stays
+        # correct if the instance is ever downsized. It is also a spend
+        # ceiling: a retry loop or traffic spike cannot scale to 100
+        # instances and bill for them. Raise it only together with
+        # max_connections, a smaller MaxConns, or a pooler.
+        autoscaling.knative.dev/maxScale: "8"
+        run.googleapis.com/cloudsql-instances: project-285b9289-549d-4fef-92c:asia-south1:meetups-db
+        run.googleapis.com/container-dependencies: '{"gateway":["monolith"]}'
+    spec:
+      containers:
+      - name: gateway
+        image: asia-south1-docker.pkg.dev/project-285b9289-549d-4fef-92c/meetups-repo/gateway:r22
+        ports:
+        - containerPort: 8080
+        env:
+        # PORT is deliberately absent: Cloud Run reserves it and injects it
+        # automatically from containerPort (8080 above). Declaring it is a
+        # hard deploy error, not an override.
+        - name: MONOLITH_ADDR
+          value: "localhost:9090"
+        - name: JWT_PRIVATE_KEY_PATH
+          value: /secrets-priv/jwt_private.pem
+        - name: JWT_PUBLIC_KEY_PATH
+          value: /secrets-pub/jwt_public.pem
+        - name: MONOLITH_SHARED_SECRET
+          valueFrom:
+            secretKeyRef: { name: internal-grpc-secret, key: latest }
+        resources:
+          limits: { memory: 512Mi, cpu: "1" }
+        volumeMounts:
+        - { name: jwt-priv, mountPath: /secrets-priv }
+        - { name: jwt-pub, mountPath: /secrets-pub }
+        startupProbe:
+          # tcpSocket rather than httpGet /healthz.
+          #
+          # Note on /healthz, since it is surprising: Google's frontend
+          # intercepts GET /healthz on *.run.app and returns its own 404 —
+          # the request never reaches the container. Verified: the app
+          # answers /healthz 200 locally, and Cloud Run's own request log
+          # shows /readyz and /metrics arriving but /healthz never appearing
+          # at all. This is NOT caused by the probe (it still happened with
+          # the httpGet probe removed) and is not fixable from here. Use
+          # /readyz for external health checks — it is the stronger signal
+          # anyway, since it verifies the gateway can reach the monolith.
+          #
+          # tcpSocket is adequate for startup: the gateway binds its
+          # listener only after the signer, verifier and monolith client
+          # are constructed, and container-dependencies already holds it
+          # until the monolith is up.
+          tcpSocket: { port: 8080 }
+          periodSeconds: 3
+          failureThreshold: 10
+      - name: monolith
+        image: asia-south1-docker.pkg.dev/project-285b9289-549d-4fef-92c/meetups-repo/monolith:r22
+        env:
+        - name: MONOLITH_PORT
+          value: "9090"
+        # REQUIRED at startup, not optional. The plan doc claims these are
+        # "deliberately omitted ... fail closed rather than blocking
+        # startup" — that is wrong: internal/modules/auth/config/config.go
+        # has a hard required list, and the monolith exits 1 without them.
+        - name: LINKEDIN_CLIENT_ID
+          value: "<LINKEDIN_CLIENT_ID>"
+        - name: LINKEDIN_REDIRECT_URI
+          value: "https://professional-meetups-976d2.web.app"
+        - name: LINKEDIN_CLIENT_SECRET
+          valueFrom: { secretKeyRef: { name: linkedin-client-secret, key: latest } }
+        - name: DATABASE_URL
+          valueFrom: { secretKeyRef: { name: database-url, key: latest } }
+        - name: INTERNAL_GRPC_SHARED_SECRET
+          valueFrom: { secretKeyRef: { name: internal-grpc-secret, key: latest } }
+        - name: FIREBASE_SERVICE_ACCOUNT_JSON
+          valueFrom: { secretKeyRef: { name: firebase-sa, key: latest } }
+        - name: TWILIO_ACCOUNT_SID
+          value: "<TWILIO_ACCOUNT_SID>"
+        - name: TWILIO_PHONE_NUMBER
+          value: "<TWILIO_PHONE_NUMBER>"
+        - name: TWILIO_AUTH_TOKEN
+          valueFrom: { secretKeyRef: { name: twilio-auth-token, key: latest } }
+        # Gmail SMTP for verification emails. Without both of these the
+        # monolith falls back to LoggingEmailSender, which only writes the
+        # code to the logs — and personal-email verification is one of the
+        # four things Level 2 requires (trustlevel.go), so Level 2 was
+        # unreachable from the app until this was set.
+        - name: GMAIL_ADDRESS
+          value: "<GMAIL_ADDRESS>"
+        - name: GMAIL_APP_PASSWORD
+          valueFrom: { secretKeyRef: { name: gmail-app-password, key: latest } }
+        - name: WORK_EMAIL_HMAC_KEY_PATH
+          value: /secrets-hmac/work_email_hmac.key
+        - name: ALLOW_TEST_OTP_BYPASS
+          value: "false"
+        # The narrower, scoped bypass (Plan 16/17). ALLOW_TEST_OTP_BYPASS
+        # above stays "false" — it is global, and this URL is public.
+        # This one is phone-purpose-only and limited to these exact numbers,
+        # matched byte-for-byte against what the client sends. Plain env,
+        # not a secret: these are phone numbers, not credentials.
+        # Revert = delete these two lines, bump the revision, redeploy.
+        - name: TEST_OTP_BYPASS_PHONES
+          value: "<TEST_OTP_BYPASS_PHONES>"
+        # The email twin (see otp.go's "THE THIRD MECHANISM"). Same shape,
+        # different justification: email delivery WORKS, so unlike the phone
+        # list this does expose accounts that would otherwise be reachable
+        # only with a real code.
+        #
+        # What makes that acceptable is the contents, not the mechanism:
+        # every entry is on .test, an RFC 2606 reserved TLD that cannot be
+        # registered and cannot receive mail, so none of these can ever be a
+        # real person's address. They map 1:1 onto the eight seeded fixtures
+        # in testdata/seed-test-users.sql (two per trust level 0-3).
+        #
+        # NEVER add a deliverable address here. An allowlisted address is a
+        # published credential for whoever knows it.
+        #
+        # Revert = delete these two lines, bump the revision, redeploy.
+        - name: TEST_OTP_BYPASS_EMAILS
+          value: "<TEST_OTP_BYPASS_EMAILS>"
+        resources:
+          limits: { memory: 1Gi, cpu: "1" }
+        volumeMounts:
+        - { name: work-hmac, mountPath: /secrets-hmac }
+        startupProbe:
+          # tcpSocket, NOT grpc: the health service sits behind the same
+          # internalauth interceptor as every business RPC, deliberately
+          # (see cmd/monolith/healthcheck.go's comment — "an exemption list
+          # is a place for mistakes"). Cloud Run's grpc prober sends no
+          # credential, so it got UNAUTHENTICATED 20 times and the instance
+          # never started. `monolith -healthcheck` is the only prober that
+          # can authenticate, and Cloud Run has no exec probe.
+          #
+          # This is an accurate readiness signal regardless: the listener is
+          # bound only after the DB pool, Twilio and FCM are wired, and
+          # SERVING is set microseconds later in the same function. The port
+          # opening genuinely means the monolith is up.
+          tcpSocket: { port: 9090 }
+          periodSeconds: 3
+          failureThreshold: 20
+      volumes:
+      - name: jwt-priv
+        secret: { secretName: jwt-private-key, items: [{ key: latest, path: jwt_private.pem }] }
+      - name: jwt-pub
+        secret: { secretName: jwt-public-key, items: [{ key: latest, path: jwt_public.pem }] }
+      - name: work-hmac
+        secret: { secretName: work-email-hmac, items: [{ key: latest, path: work_email_hmac.key }] }

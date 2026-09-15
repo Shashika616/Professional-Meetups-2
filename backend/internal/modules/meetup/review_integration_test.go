@@ -154,12 +154,26 @@ func TestSubmitMeetupReview_Validation_Integration(t *testing.T) {
 		}
 	})
 
+	t.Run("exactly the cap, mixing positive and negative traits, is accepted", func(t *testing.T) {
+		f := newReviewFixture(t, h)
+		err := h.svc.SubmitMeetupReview(ctx, meetup.SubmitMeetupReviewRequest{
+			MeetupID: f.meetupID, RaterID: f.host, OverallScore: 4,
+			Participants: []meetup.ReviewParticipantInput{
+				{UserID: f.guestOne, Score: 2, Traits: []string{"cheerful", "arrived_late", "distracted", "left_early"}},
+				{UserID: f.guestTwo, Score: 5},
+			},
+		})
+		if err != nil {
+			t.Fatalf("four traits across both lists: error = %v, want nil", err)
+		}
+	})
+
 	t.Run("more traits than the cap is rejected", func(t *testing.T) {
 		f := newReviewFixture(t, h)
 		err := h.svc.SubmitMeetupReview(ctx, meetup.SubmitMeetupReviewRequest{
 			MeetupID: f.meetupID, RaterID: f.host, OverallScore: 4,
 			Participants: []meetup.ReviewParticipantInput{
-				{UserID: f.guestOne, Score: 5, Traits: []string{"cheerful", "funny", "thoughtful", "inspiring"}},
+				{UserID: f.guestOne, Score: 5, Traits: []string{"cheerful", "funny", "thoughtful", "inspiring", "welcoming"}},
 				{UserID: f.guestTwo, Score: 5},
 			},
 		})

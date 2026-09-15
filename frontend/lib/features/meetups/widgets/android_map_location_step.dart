@@ -1,9 +1,8 @@
 // ignore_for_file: prefer_initializing_formals
-// StadiaMapLocationStep's public `httpClient` param name deliberately
+// AndroidMapLocationStep's public `httpClient` param name deliberately
 // differs from the private `_httpClient` field it initializes — same
 // tradeoff as token_refresher.dart's own doc comment on this lint.
 import 'dart:async';
-import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -11,7 +10,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:maplibre_gl/maplibre_gl.dart';
 
-import 'package:professional_connections_platform/core/config/app_config.dart';
+import 'package:professional_connections_platform/core/maps/map_provider.dart';
+import 'package:professional_connections_platform/core/maps/place_search.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
@@ -20,9 +20,10 @@ import 'package:professional_connections_platform/core/widgets/step_hero.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/selected_place_banner.dart';
 
 /// Android's half of [MapLocationStep]'s platform switch (ADR-013 §4's
-/// third correction) — Stadia Maps via `maplibre_gl`, unchanged provider
-/// choice from the prior testing addendum (still provisional; see
-/// TESTING-NOTES.md). **This is the one file that talks to Stadia Maps.**
+/// third correction): a MapLibre map with a crosshair, a type-ahead place
+/// search, and "use my current location". Which tiles and which geocoder
+/// is decided by [MapConfig] (OpenStreetMap-based OpenFreeMap + Photon by
+/// default, Stadia by build flag); this widget talks to neither directly.
 ///
 /// Fixes a real bug from the prior pass: address search fetched and
 /// parsed results correctly, but the suggestions dropdown never rendered
@@ -30,11 +31,12 @@ import 'package:professional_connections_platform/features/meetups/widgets/selec
 /// wrapping the search field only sizes itself to the field's own height,
 /// so the `Positioned` dropdown below it was silently clipped away every
 /// time. See `TESTING-NOTES.md` for the full diagnosis.
-class StadiaMapLocationStep extends StatefulWidget {
-  const StadiaMapLocationStep({
+class AndroidMapLocationStep extends StatefulWidget {
+  const AndroidMapLocationStep({
     super.key,
     required this.onSubmit,
     http.Client? httpClient,
+    this.placeSearch,
   }) : _httpClient = httpClient;
 
   final void Function(double lat, double lng, String label) onSubmit;
@@ -47,44 +49,22 @@ class StadiaMapLocationStep extends StatefulWidget {
   /// `http.Client()`.
   final http.Client? _httpClient;
 
+  /// Overridable geocoder; defaults to the current provider's, built over
+  /// [httpClient].
+  final PlaceSearch? placeSearch;
+
   @override
-  State<StadiaMapLocationStep> createState() => _StadiaMapLocationStepState();
+  State<AndroidMapLocationStep> createState() => _AndroidMapLocationStepState();
 }
 
 /// Colombo Fort — a sane default center for the invite-only Colombo pilot
 /// (ADR-005) before the map has a real signal (search, current location).
 const _defaultCenter = LatLng(6.9271, 79.8612);
 
-/// Stadia's dark vector style, matching this app's dark glassmorphism UI —
-/// confirmed against docs.stadiamaps.com directly, not assumed.
-const _stadiaStyleUrl =
-    'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';
-
-/// Debounced-suggestions endpoint — partial-text completions.
-const _stadiaAutocompleteUrl =
-    'https://api.stadiamaps.com/geocoding/v1/autocomplete';
-
-/// Direct-submit endpoint (type a full query, press search/return) — same
-/// response shape as autocomplete, confirmed against docs.stadiamaps.com,
-/// resolves a complete query straight to its best-match coordinates rather
-/// than a list of partial completions.
-const _stadiaSearchUrl = 'https://api.stadiamaps.com/geocoding/v1/search';
-
-/// Test-only override for [AppConfig.stadiaMapsApiKey] — real code must
-/// never set this. Exists so widget tests (e.g. the Schedule flow's
-/// capacity-stepper/timing-step tests, which need to get past this step to
-/// reach later ones) can exercise the "configured" branch without a real
-/// Stadia key. `MapLibreMap` itself renders safely under `flutter_test`
-/// with a bogus style URL/key — no native tile fetch happens off the Dart
-/// side in that environment — so this carries no platform-view risk.
-@visibleForTesting
-String? debugStadiaApiKeyOverride;
-
-String get _effectiveApiKey =>
-    debugStadiaApiKeyOverride ?? AppConfig.stadiaMapsApiKey;
-
-class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
+class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   late final http.Client _httpClient = widget._httpClient ?? http.Client();
+  late final PlaceSearch _search =
+      widget.placeSearch ?? placeSearchFor(_httpClient);
   MapLibreMapController? _controller;
   // The submitted location — set directly (synchronously) by every path
   // that picks a location (suggestion select, direct search, current
@@ -98,7 +78,7 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
   // device either.
   LatLng _pickedLocation = _defaultCenter;
   final _searchController = TextEditingController();
-  List<_GeocodeResult> _results = [];
+  List<PlaceResult> _results = [];
   bool _searching = false;
   Timer? _debounce;
   int _requestGeneration = 0;
@@ -109,6 +89,13 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
   // this manually" case, so this is a one-shot suppress flag, not a
   // permanently-removed listener.
   bool _suppressNextSearch = false;
+  // The label of the place last chosen (suggestion or direct search). The
+  // IME can re-deliver that exact text a moment after it was set (an
+  // autocorrect composing pass, a suggestion-strip commit), which the
+  // one-shot flag above has already spent, and the step then searched for
+  // the place it had just picked and reopened the dropdown over the map.
+  // Text identical to the chosen label is not a new query.
+  String? _lastChosenLabel;
   // ADR-029 (round-8 hardening) — set when the user taps "use my current
   // location" and a position is resolved. _useCurrentLocation no longer
   // fills the search field with a hardcoded "Current location" placeholder
@@ -133,6 +120,7 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
       _suppressNextSearch = false;
       return;
     }
+    if (_searchController.text == _lastChosenLabel) return;
     _onSearchChanged(_searchController.text);
   }
 
@@ -149,7 +137,9 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
 
   void _onSearchChanged(String text) {
     _debounce?.cancel();
-    if (text.trim().isEmpty) {
+    // One character cannot rank anything useful and the geocoder is a
+    // shared, fair-use service; nothing is sent until there are two.
+    if (text.trim().length < 2) {
       setState(() => _results = []);
       return;
     }
@@ -167,28 +157,13 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
     setState(() => _searching = true);
     try {
       final focus = _pickedLocation;
-      final uri = Uri.parse(_stadiaAutocompleteUrl).replace(
-        queryParameters: {
-          'api_key': _effectiveApiKey,
-          'text': text,
-          'focus.point.lat': '${focus.latitude}',
-          'focus.point.lon': '${focus.longitude}',
-        },
+      final results = await _search.suggest(
+        text,
+        focusLat: focus.latitude,
+        focusLng: focus.longitude,
       );
-      final response = await _httpClient.get(uri);
       if (generation != _requestGeneration || !mounted) return;
-      if (response.statusCode != 200) {
-        setState(() => _results = []);
-        return;
-      }
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final features = decoded['features'] as List<dynamic>? ?? [];
-      setState(() {
-        _results = features
-            .map((f) => _GeocodeResult.fromFeature(f as Map<String, dynamic>))
-            .whereType<_GeocodeResult>()
-            .toList();
-      });
+      setState(() => _results = results);
     } catch (_) {
       if (generation == _requestGeneration && mounted) {
         setState(() => _results = []);
@@ -200,7 +175,7 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
     }
   }
 
-  Future<void> _selectResult(_GeocodeResult result) async {
+  Future<void> _selectResult(PlaceResult result) async {
     _debounce?.cancel();
     // Cancelling the Timer above only stops a debounce that hasn't fired
     // yet — it does nothing for a suggestions request that already fired
@@ -213,14 +188,14 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
     // explicitly instead.
     ++_requestGeneration;
     _suppressNextSearch = true;
+    final target = LatLng(result.latitude, result.longitude);
+    _lastChosenLabel = result.label;
     setState(() {
       _searchController.text = result.label;
       _results = [];
-      _pickedLocation = result.location;
+      _pickedLocation = target;
     });
-    await _controller?.animateCamera(
-      CameraUpdate.newLatLngZoom(result.location, 15),
-    );
+    await _controller?.animateCamera(CameraUpdate.newLatLngZoom(target, 15));
   }
 
   /// The "type a complete query and press search/return" path — a direct
@@ -238,38 +213,24 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
     });
     try {
       final focus = _pickedLocation;
-      final uri = Uri.parse(_stadiaSearchUrl).replace(
-        queryParameters: {
-          'api_key': _effectiveApiKey,
-          'text': text,
-          'focus.point.lat': '${focus.latitude}',
-          'focus.point.lon': '${focus.longitude}',
-          'size': '1',
-        },
+      final result = await _search.search(
+        text,
+        focusLat: focus.latitude,
+        focusLng: focus.longitude,
       );
-      final response = await _httpClient.get(uri);
       if (generation != _requestGeneration || !mounted) return;
-      if (response.statusCode != 200) {
-        _showError('No results for "$text".');
-        return;
-      }
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final features = decoded['features'] as List<dynamic>? ?? [];
-      final result = features.isEmpty
-          ? null
-          : _GeocodeResult.fromFeature(features.first as Map<String, dynamic>);
       if (result == null) {
         _showError('No results for "$text".');
         return;
       }
+      final target = LatLng(result.latitude, result.longitude);
+      _lastChosenLabel = result.label;
       _suppressNextSearch = true;
       setState(() {
         _searchController.text = result.label;
-        _pickedLocation = result.location;
+        _pickedLocation = target;
       });
-      await _controller?.animateCamera(
-        CameraUpdate.newLatLngZoom(result.location, 15),
-      );
+      await _controller?.animateCamera(CameraUpdate.newLatLngZoom(target, 15));
     } catch (_) {
       if (generation == _requestGeneration && mounted) {
         _showError('No results for "$text".');
@@ -334,7 +295,7 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
 
   @override
   Widget build(BuildContext context) {
-    if (_effectiveApiKey.isEmpty) {
+    if (!MapConfig.isConfigured) {
       return _NotConfiguredNotice(stepTitle: _stepTitle());
     }
 
@@ -392,8 +353,7 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
                       alignment: Alignment.center,
                       children: [
                         MapLibreMap(
-                          styleString:
-                              '$_stadiaStyleUrl?api_key=$_effectiveApiKey',
+                          styleString: MapConfig.styleUrl(),
                           initialCameraPosition: const CameraPosition(
                             target: _defaultCenter,
                             zoom: 13,
@@ -420,11 +380,11 @@ class _StadiaMapLocationStepState extends State<StadiaMapLocationStep> {
                         IgnorePointer(
                           child: Icon(
                             Icons.location_on,
-                            color: AppPalette.candyBlue,
+                            color: MapConfig.pinColor,
                             size: 36,
                             shadows: [
                               Shadow(
-                                color: AppPalette.onyx.withValues(alpha: 0.6),
+                                color: Colors.black.withValues(alpha: 0.45),
                                 blurRadius: 6,
                               ),
                             ],
@@ -579,9 +539,9 @@ class _NotConfiguredNotice extends StatelessWidget {
           tint: AppPalette.danger.withValues(alpha: 0.08),
           border: AppPalette.danger.withValues(alpha: 0.3),
           child: Text(
-            'Location search isn\'t configured for this build — no map '
-            'access key was provided. Ask whoever built this app to pass '
-            'one, or use the manual-entry fallback in the code until then.',
+            'The map isn\'t configured for this build: it was built for '
+            'Stadia Maps without an access key. Build with MAP_PROVIDER=osm '
+            'or provide the key.',
             style: TextStyle(color: AppPalette.danger, fontSize: 12),
           ),
         ),
@@ -593,8 +553,8 @@ class _NotConfiguredNotice extends StatelessWidget {
 class _ResultsDropdown extends StatelessWidget {
   const _ResultsDropdown({required this.results, required this.onSelect});
 
-  final List<_GeocodeResult> results;
-  final void Function(_GeocodeResult result) onSelect;
+  final List<PlaceResult> results;
+  final void Function(PlaceResult result) onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -613,7 +573,7 @@ class _ResultsDropdown extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       // Caps the list to roughly 5 visible rows and scrolls internally
       // beyond that — an unbounded Column here could grow the dropdown
-      // past the whole screen when Stadia returns a long results list.
+      // past the whole screen when the geocoder returns a long results list.
       child: ConstrainedBox(
         constraints: const BoxConstraints(
           maxHeight: _maxVisibleDropdownResults * _dropdownItemHeight,
@@ -648,28 +608,3 @@ class _ResultsDropdown extends StatelessWidget {
 
 const _maxVisibleDropdownResults = 5;
 const _dropdownItemHeight = 60.0;
-
-/// One Stadia geocoding result — only what this widget needs (label to
-/// display/store, coordinates to recenter the map on selection).
-class _GeocodeResult {
-  const _GeocodeResult({required this.label, required this.location});
-
-  final String label;
-  final LatLng location;
-
-  /// Returns null for a malformed feature rather than throwing — a single
-  /// bad result shouldn't break the whole dropdown.
-  static _GeocodeResult? fromFeature(Map<String, dynamic> feature) {
-    final properties = feature['properties'] as Map<String, dynamic>?;
-    final geometry = feature['geometry'] as Map<String, dynamic>?;
-    final coordinates = geometry?['coordinates'] as List<dynamic>?;
-    final label = properties?['label'] as String?;
-    if (label == null || coordinates == null || coordinates.length != 2) {
-      return null;
-    }
-    // GeoJSON order is [lon, lat], not [lat, lon].
-    final lon = (coordinates[0] as num).toDouble();
-    final lat = (coordinates[1] as num).toDouble();
-    return _GeocodeResult(label: label, location: LatLng(lat, lon));
-  }
-}

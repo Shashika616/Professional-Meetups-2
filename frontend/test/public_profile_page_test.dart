@@ -173,8 +173,8 @@ void main() {
     expect(find.text('Not rated yet'), findsOneWidget);
     // Comments render as quotations with an attributed line under each.
     expect(find.text('\u201CGreat chat.\u201D'), findsOneWidget);
-    expect(find.text('\u2014 A participant'), findsOneWidget);
-    expect(find.text('\u2014 Ada Lovelace'), findsOneWidget);
+    expect(find.text('A participant'), findsOneWidget);
+    expect(find.text('Ada Lovelace'), findsOneWidget);
   });
 
   testWidgets('a refused profile is shown as a locked state with the '

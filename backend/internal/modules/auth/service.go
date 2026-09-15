@@ -427,6 +427,12 @@ func (s *service) startTargetKeyedVerification(
 	if target == "" {
 		return StartVerificationResult{}, fmt.Errorf("target is required: %w", apperror.ErrInvalidInput)
 	}
+	// Same shape rule the personal/corporate verification paths apply. These
+	// two endpoints are unauthenticated, and until 2026-09-15 they accepted
+	// any non-empty string, stored it, and asked Gmail to deliver to it.
+	if err := validateEmailShape(target); err != nil {
+		return StartVerificationResult{}, err
+	}
 
 	existing, err := s.verificationCodes.GetByTarget(ctx, purpose, target)
 	if err == nil {

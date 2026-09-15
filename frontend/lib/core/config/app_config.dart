@@ -47,16 +47,20 @@ abstract final class AppConfig {
   /// page and the app do. Registered on both platforms in Step 2.
   static const String appRedirectScheme = 'professionalconnections';
 
-  /// Stadia Maps API key for the Schedule flow's map/location-picker step
-  /// (frontend/meetup-scheduling-PLAN.md's 2026-08-18 testing addendum —
-  /// see TESTING-NOTES.md). **Provisional testing provider, not the
-  /// production decision** (ADR-013 §4's second correction) — the eventual
-  /// choice is still open between Google Maps and Mapbox. Unlike Twilio/
-  /// Resend's empty-means-fallback pattern, this is a real, working key:
-  /// if it's empty the map widget shows a "not configured" state rather
-  /// than silently failing. Pass the real value via
-  /// `--dart-define=STADIA_MAPS_API_KEY=...` at run time — never written
-  /// into source.
+  /// Which map/geocoding provider the ANDROID map screens use (iOS uses
+  /// Apple Maps regardless): `osm` (default) draws OpenFreeMap vector
+  /// tiles and searches with Photon, both OpenStreetMap-based, key-free
+  /// and free to use; `stadia` is the previous provider, kept selectable
+  /// for anyone with a key. See `core/maps/map_provider.dart`.
+  static const String mapProvider = String.fromEnvironment(
+    'MAP_PROVIDER',
+    defaultValue: 'osm',
+  );
+
+  /// Stadia Maps API key, used only when [mapProvider] is `stadia`. With
+  /// that provider and an empty key the map widget shows a "not
+  /// configured" state rather than silently failing. Pass it via
+  /// `--dart-define=STADIA_MAPS_API_KEY=...` (`.env`), never in source.
   static const String stadiaMapsApiKey = String.fromEnvironment(
     'STADIA_MAPS_API_KEY',
     defaultValue: '',

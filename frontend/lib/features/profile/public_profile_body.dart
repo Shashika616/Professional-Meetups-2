@@ -564,7 +564,7 @@ class _CommentRow extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            '\u2014 ${named ? comment.authorName : 'A participant'}',
+            named ? comment.authorName : 'A participant',
             style: TextStyle(
               color: named ? AppPalette.textPrimary : AppPalette.textSecondary,
               fontSize: 12,

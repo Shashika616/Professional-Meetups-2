@@ -72,13 +72,28 @@ func TestAddTrustedContact_EnforcesSoftCapOfThree(t *testing.T) {
 	}
 }
 
-func TestAddTrustedContact_RequiresPhoneOrEmail(t *testing.T) {
-	svc, _, _, _, _, _ := newTestServiceForSOS(t)
+func TestAddTrustedContact_RequiresPhone(t *testing.T) {
+	svc, users, _, _, _, _ := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
 	ctx := context.Background()
 
 	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "No Contact Info"})
 	if !errors.Is(err, apperror.ErrInvalidInput) {
 		t.Fatalf("AddTrustedContact() with neither phone nor email: code = %v, want %v", err, apperror.ErrInvalidInput)
+	}
+
+	// An email alone is not enough: an SOS needs someone reachable now.
+	_, err = svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "Email Only", Email: "friend@example.com"})
+	if !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Fatalf("AddTrustedContact() with email only: code = %v, want %v", err, apperror.ErrInvalidInput)
+	}
+
+	// Phone alone is the minimum; email is the optional extra channel.
+	if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "Phone Only", PhoneNumber: "+94771234567"}); err != nil {
+		t.Fatalf("AddTrustedContact() with phone only: %v, want nil", err)
+	}
+	if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "Both", PhoneNumber: "+94771234568", Email: "friend@example.com"}); err != nil {
+		t.Fatalf("AddTrustedContact() with phone and email: %v, want nil", err)
 	}
 }
 

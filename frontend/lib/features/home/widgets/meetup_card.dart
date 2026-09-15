@@ -526,7 +526,7 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = switch (tone) {
       _StatusTone.host => AppPalette.brandGreen,
-      _StatusTone.pending => AppPalette.candyBlue,
+      _StatusTone.pending => AppPalette.gold,
       _StatusTone.accepted => AppPalette.verified,
       _StatusTone.declined => AppPalette.danger,
       _StatusTone.muted => AppPalette.textSecondary,

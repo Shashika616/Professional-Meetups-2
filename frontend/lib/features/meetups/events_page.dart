@@ -837,11 +837,11 @@ class _MyMeetupTile extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final (label, color) = switch (status) {
-      MeetupRequestStatus.pending => ('REQUEST PENDING', AppPalette.candyBlue),
+      MeetupRequestStatus.pending => ('REQUEST PENDING', AppPalette.gold),
       MeetupRequestStatus.accepted => ('YOU\'RE IN', AppPalette.verified),
       MeetupRequestStatus.rejected =>
         meetup.myRequestAutoRejected
-            ? ('NOT SELECTED — MEETUP FILLED UP', AppPalette.textSecondary)
+            ? ('NOT SELECTED, MEETUP FILLED UP', AppPalette.textSecondary)
             : ('DECLINED BY HOST', AppPalette.danger),
       MeetupRequestStatus.withdrawn => ('WITHDRAWN', AppPalette.textSecondary),
     };

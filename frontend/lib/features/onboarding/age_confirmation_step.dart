@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/features/onboarding/age_confirmation_checkbox.dart';
 
 /// Mandatory, blocking 18+ self-attestation (ADR-014) shown **first**,
 /// before any of the four signup paths are even visible — not after
@@ -70,7 +71,10 @@ class _AgeConfirmationStepState extends State<AgeConfirmationStep> {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    _confirmCheckbox(),
+                    AgeConfirmationCheckbox(
+                      value: _confirmed,
+                      onChanged: (v) => setState(() => _confirmed = v),
+                    ),
                     const SizedBox(height: 20),
                     Text(
                       'We verify professional identity and give you tools '
@@ -96,36 +100,6 @@ class _AgeConfirmationStepState extends State<AgeConfirmationStep> {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _confirmCheckbox() {
-    return GestureDetector(
-      onTap: () => setState(() => _confirmed = !_confirmed),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Checkbox(
-            value: _confirmed,
-            onChanged: (value) => setState(() => _confirmed = value ?? false),
-            activeColor: AppPalette.candyBlue,
-            checkColor: AppPalette.onyx,
-            side: BorderSide(
-              color: AppPalette.textSecondary.withValues(alpha: 0.6),
-            ),
-          ),
-          Flexible(
-            child: Text(
-              'I confirm I am 18 years of age or older.',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppPalette.textPrimary,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }

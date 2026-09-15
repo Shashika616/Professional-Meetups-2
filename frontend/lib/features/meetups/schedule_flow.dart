@@ -354,8 +354,8 @@ class _IntentStep extends StatelessWidget {
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
           // Image cards, not icon rows: roughly square so the scene reads
-          // and there is room under it for name + tagline.
-          childAspectRatio: 0.98,
+          // and there is room under it for the icon chip and name.
+          childAspectRatio: 1.04,
           children: [
             for (final intent in IntentType.values)
               IntentTile(
@@ -526,30 +526,59 @@ class _TimingStepState extends State<_TimingStep> {
         // the window is one thing, so it gets one surface.
         _IllustratedCard(
           asset: 'assets/images/schedule/time_card.jpg',
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: TimeField24h(
-                  label: 'FROM',
-                  initialValue: _from,
-                  onChanged: (t) => setState(() => _from = t),
-                ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: TimeField24h(
+                      label: 'FROM',
+                      initialValue: _from,
+                      onChanged: (t) => setState(() => _from = t),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                    child: Icon(
+                      Icons.arrow_forward_rounded,
+                      size: 18,
+                      color: AppPalette.textSecondary,
+                    ),
+                  ),
+                  Expanded(
+                    child: TimeField24h(
+                      label: 'TO',
+                      initialValue: _to,
+                      onChanged: (t) => setState(() => _to = t),
+                    ),
+                  ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-                child: Icon(
-                  Icons.arrow_forward_rounded,
-                  size: 18,
-                  color: AppPalette.textSecondary,
-                ),
-              ),
-              Expanded(
-                child: TimeField24h(
-                  label: 'TO',
-                  initialValue: _to,
-                  onChanged: (t) => setState(() => _to = t),
-                ),
+              const SizedBox(height: 10),
+              // Named outright: the fields accept only the 24-hour clock,
+              // and a person used to "7:30" needs to be told so before
+              // they type it, not by a rejected digit.
+              Row(
+                children: [
+                  Icon(
+                    Icons.schedule_rounded,
+                    size: 13,
+                    color: AppPalette.textSecondary,
+                  ),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      '24-hour format, e.g. 09:30 or 18:00',
+                      style: TextStyle(
+                        color: AppPalette.textSecondary,
+                        fontSize: 11.5,
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

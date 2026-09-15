@@ -239,7 +239,7 @@ void main() {
 
     await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Grace');
     await tester.enterText(
-      find.widgetWithText(TextField, 'Phone number (optional)'),
+      find.widgetWithText(TextField, 'Phone number'),
       '+94771234567',
     );
     await tester.pumpAndSettle();
@@ -250,6 +250,40 @@ void main() {
     expect(auth.addCallCount, 1);
     expect(find.text('Grace'), findsOneWidget);
     expect(find.text('+94771234567'), findsOneWidget);
+  });
+
+  testWidgets('SAVE stays disabled with a name and an email but no phone: '
+      'the phone is mandatory, the email optional', (tester) async {
+    final auth = _FakeAuthService();
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('ADD CONTACT'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Grace');
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Email (optional)'),
+      'grace@example.com',
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('SAVE'));
+    await tester.pumpAndSettle();
+    expect(auth.addCallCount, 0);
+
+    // The number unlocks it; the email rides along.
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Phone number'),
+      '+94771234567',
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SAVE'));
+    await tester.pumpAndSettle();
+    expect(auth.addCallCount, 1);
   });
 
   testWidgets('removing a contact requires confirmation, then calls '

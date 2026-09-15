@@ -1,4 +1,4 @@
-import 'dart:async' show Timer, unawaited;
+import 'dart:async' show Timer;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +18,8 @@ import 'package:professional_connections_platform/core/widgets/paginated_meetup_
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
+import 'package:professional_connections_platform/core/widgets/slow_load_notice.dart';
+import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
@@ -34,37 +36,8 @@ import 'package:professional_connections_platform/features/meetups/meetup_detail
 /// / the week after" says anything. "Soon" still holds at a month for a
 /// marketplace where most areas have a handful of meetups.
 const happeningSoonWithinDays = 28;
-
-/// Rounds a viewer coordinate to ~110m before it is used as a cache key.
-///
-/// Full decision, measurements, and the two alternatives deliberately not
-/// taken (a `cos(latitude)` correction, and H3 hexagonal indexing) with a
-/// revisit trigger for each: `docs/decisions/adr-004-viewer-coordinate-quantisation.md`.
-///
-/// # WHY
-///
-/// [openMeetupsProvider] is a `.family` keyed on
-/// `(intent, viewerLat, viewerLng, withinDays)`. A stationary phone's GPS
-/// still drifts a few metres between reads, so raw coordinates minted a
-/// BRAND-NEW key every time - refetching an identical list over the network
-/// and orphaning the previous cache entry.
-///
-/// Seen in the deployed service's own request logs: `/v1/meetups` fetched at
-/// latitudes 6.8705648, 6.8705815, 6.8705842 and 6.8705933 within minutes,
-/// and `intent=lunch` fetched twice 21 seconds apart, because the device
-/// moved about three metres on a desk.
-///
-/// Three decimal places is ~110m, which is far below the distance at which a
-/// meetup's relevance changes, so the results are the same either way - the
-/// cache just stops being thrown away. Walking a real distance still crosses
-/// a boundary and refetches, which is the behaviour worth keeping.
-///
-/// Only the KEY is quantised. `AuthService.updateLastKnownLocation` is still
-/// sent the exact position from the device, so the user's stored location
-/// keeps full precision.
-@visibleForTesting
-double quantiseViewerCoordinate(double value) =>
-    (value * 1000).roundToDouble() / 1000;
+// quantiseViewerCoordinate now lives in viewer_location_provider.dart, next
+// to the read whose cache key it shapes.
 
 /// Home's browse section — the open-meetups list that used to be a whole
 /// separate "Matches" tab.
@@ -126,8 +99,6 @@ class HappeningSoonSection extends ConsumerStatefulWidget {
       _HappeningSoonSectionState();
 }
 
-enum _LocationPhase { loading, blocked, ready }
-
 class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
   /// The last page this section successfully showed, kept across an intent
   /// change.
@@ -159,16 +130,11 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
   Timer? _slowSwapTimer;
   bool _slowSwap = false;
 
-  _LocationPhase _phase = _LocationPhase.loading;
-  LocationUnavailableException? _blockReason;
-  double? _viewerLat;
-  double? _viewerLng;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadLocation();
-  }
+  /// The viewer's position comes from viewerLocationProvider; HomePage
+  /// starts that read when it mounts, so by the time this section is
+  /// built (often below the fold) the fix is usually already in.
+  Future<void> _refreshLocation() =>
+      ref.read(viewerLocationProvider.notifier).refresh();
 
   @override
   void didUpdateWidget(HappeningSoonSection oldWidget) {
@@ -188,56 +154,6 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
   void dispose() {
     _slowSwapTimer?.cancel();
     super.dispose();
-  }
-
-  /// Carried over unchanged from the deleted browse page: the single
-  /// on-demand location read the whole geo-visibility behaviour hangs off,
-  /// and the app's only trigger for [AuthService.updateLastKnownLocation],
-  /// fired fire-and-forget so a slow location-update call never blocks the
-  /// list from loading.
-  Future<void> _loadLocation() async {
-    setState(() {
-      _phase = _LocationPhase.loading;
-      _blockReason = null;
-    });
-    try {
-      final position = await requestCurrentLocation();
-      if (!mounted) return;
-      setState(() {
-        _phase = _LocationPhase.ready;
-        // Quantised here rather than at each provider call site: these two
-        // fields feed the cache key and nothing else, so doing it once at
-        // the source cannot be half-applied. The un-rounded position is
-        // still what updateLastKnownLocation sends below.
-        _viewerLat = quantiseViewerCoordinate(position.latitude);
-        _viewerLng = quantiseViewerCoordinate(position.longitude);
-      });
-      unawaited(
-        ref
-            .read(authServiceProvider)
-            .updateLastKnownLocation(
-              latitude: position.latitude,
-              longitude: position.longitude,
-            )
-            .catchError(
-              // TYPE AND A FIXED MESSAGE, never the raw error object.
-              // debugPrint is not stripped from release builds, and while
-              // the typed exceptions this codebase throws carry only
-              // sanitized messages, an untyped one (a PlatformException
-              // from the geolocator plugin, an HTTP client error) can put
-              // far more into its toString() than intended.
-              (error) => debugPrint(
-                'updateLastKnownLocation failed: ${error.runtimeType}',
-              ),
-            ),
-      );
-    } on LocationUnavailableException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _LocationPhase.blocked;
-        _blockReason = error;
-      });
-    }
   }
 
   @override
@@ -269,22 +185,39 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
   }
 
   Widget _buildBody(BuildContext context, int trustLevel) {
-    switch (_phase) {
-      case _LocationPhase.loading:
-        return const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: MeetupsSkeleton(shrinkWrap: true),
+    final location = ref.watch(viewerLocationProvider);
+    switch (location.status) {
+      case ViewerLocationStatus.loading:
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Column(
+            children: [
+              const MeetupsSkeleton(shrinkWrap: true),
+              // Told, not left to wonder: past the slow threshold the
+              // shimmer gets a sentence about what it is waiting on.
+              if (location.slow)
+                const SlowLoadNotice(
+                  key: Key('locationSlowNotice'),
+                  icon: Icons.my_location_rounded,
+                  message:
+                      'Still finding your location. Make sure location is '
+                      'on and you have signal.',
+                ),
+            ],
+          ),
         );
-      case _LocationPhase.blocked:
+      case ViewerLocationStatus.blocked:
         return _LocationBlockedState(
-          reason: _blockReason!,
-          onRetry: _loadLocation,
+          reason: location.blockReason!,
+          onRetry: _refreshLocation,
         );
-      case _LocationPhase.ready:
+      case ViewerLocationStatus.ready:
+        final viewerLat = location.lat!;
+        final viewerLng = location.lng!;
         final key = (
           intent: widget.intent,
-          viewerLat: _viewerLat!,
-          viewerLng: _viewerLng!,
+          viewerLat: viewerLat,
+          viewerLng: viewerLng,
           withinDays: happeningSoonWithinDays,
         );
         final meetupsAsync = ref.watch(openMeetupsProvider(key));
@@ -329,10 +262,23 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
               onRetry: () => ref.invalidate(openMeetupsProvider(key)),
             );
           }
-          // A genuine FIRST load, with nothing to hold on to.
+          // A genuine FIRST load, with nothing to hold on to. The notice
+          // times itself from when this skeleton mounted, so a slow network
+          // is named after a few seconds instead of shimmering in silence;
+          // the request's own deadline turns a dead one into _ErrorState.
           return const Padding(
             padding: EdgeInsets.only(top: 8),
-            child: MeetupsSkeleton(shrinkWrap: true),
+            child: Column(
+              children: [
+                MeetupsSkeleton(shrinkWrap: true),
+                SlowLoadNotice.after(
+                  key: Key('networkSlowNotice'),
+                  delay: Duration(seconds: 5),
+                  icon: Icons.wifi_tethering_rounded,
+                  message: 'Slow connection. Still loading meetups near you.',
+                ),
+              ],
+            ),
           );
         }
 
@@ -382,14 +328,14 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
                   ? 'No meetups happening near you in the next week yet.'
                   : 'No ${widget.intent!.label.toLowerCase()} meetups near you in the next week yet.',
               emptyState: _NoMeetupsYet(intent: widget.intent),
-              onRefresh: _loadLocation,
+              onRefresh: _refreshLocation,
               loadMore: (cursor) async {
                 final next = await ref
                     .read(meetupServiceProvider)
                     .listOpenMeetups(
                       intent: widget.intent,
-                      viewerLat: _viewerLat!,
-                      viewerLng: _viewerLng!,
+                      viewerLat: viewerLat,
+                      viewerLng: viewerLng,
                       cursor: cursor,
                       withinDays: happeningSoonWithinDays,
                     );
@@ -551,7 +497,15 @@ class _ErrorState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The offline exception's own sentence: "no connection" and "too slow"
+    // are different situations with different fixes, and the service
+    // already told them apart. (A field, not a local, does not promote on
+    // an `is` check, hence the pattern.)
     final offline = error is MeetupOfflineException;
+    final offlineDetail = switch (error) {
+      MeetupOfflineException e => e.message,
+      _ => 'This one is on us, not you. Please try again in a moment.',
+    };
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -568,7 +522,9 @@ class _ErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              offline ? 'You\'re offline' : 'Could not load meetups right now',
+              offline
+                  ? 'Connection problem'
+                  : 'Could not load meetups right now',
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppPalette.textPrimary,
@@ -578,9 +534,7 @@ class _ErrorState extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              offline
-                  ? 'Check your connection and try again.'
-                  : 'This one is on us, not you. Please try again in a moment.',
+              offlineDetail,
               textAlign: TextAlign.center,
               style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
             ),

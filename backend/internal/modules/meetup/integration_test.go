@@ -41,7 +41,7 @@ const defaultTestDatabaseURL = "postgres://app:app@localhost:5432/monolith_db?ss
 // for every module (ADR-001 §3), so this brings up auth's schema too.
 const migrationsURL = "file://../../../migrations"
 
-// Colombo, and a point ~200km away (well outside the 40km radius).
+// Colombo, and a point ~200km away (well outside the 50km radius).
 const (
 	colomboLat, colomboLng = 6.9271, 79.8612
 	farAwayLat, farAwayLng = 8.5874, 81.2152
@@ -595,7 +595,7 @@ func TestCreateMeetup_ReverseGeocodesPlaceholderLabel(t *testing.T) {
 // still come back (they'd otherwise be unable to see their own meetup on the
 // browse screen after travelling, or when scheduling somewhere they'll be
 // later). A stranger's equally-distant meetup must still be excluded — the
-// bypass is scoped to hosts, and would be a 40km-visibility hole otherwise.
+// bypass is scoped to hosts, and would be a 50km-visibility hole otherwise.
 func TestListOpenMeetups_HostBypassesRadius(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -630,6 +630,37 @@ func TestListOpenMeetups_HostBypassesRadius(t *testing.T) {
 	}
 	if !got[strangerNearby.ID] {
 		t.Error("a stranger's in-radius meetup was not returned — the radius filter is excluding too much")
+	}
+}
+
+// TestListOpenMeetups_RadiusIs50km pins the radius at its boundary rather
+// than 200km out: a meetup 45km from the viewer is in, one 55km out is
+// not. Latitude degrees are ~111km, so the offsets are 0.405 and 0.495.
+func TestListOpenMeetups_RadiusIs50km(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	viewer := newUserID(t, h)
+	host := newUserID(t, h)
+
+	inside := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat+0.405, colomboLng)
+	outside := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat+0.495, colomboLng)
+
+	result, err := h.svc.ListOpenMeetups(ctx, meetup.ListOpenMeetupsRequest{
+		UserID: viewer, Intent: intentPtr(meetup.IntentCoffee),
+		ViewerLat: colomboLat, ViewerLng: colomboLng, ViewerTrustLevel: 4,
+	})
+	if err != nil {
+		t.Fatalf("ListOpenMeetups: %v", err)
+	}
+	got := map[string]bool{}
+	for _, m := range result.Meetups {
+		got[m.ID] = true
+	}
+	if !got[inside.ID] {
+		t.Error("a meetup 45km away was not returned; the radius is under 50km")
+	}
+	if got[outside.ID] {
+		t.Error("a meetup 55km away was returned; the radius is over 50km")
 	}
 }
 
@@ -2093,7 +2124,7 @@ func TestListOpenMeetups_FiltersDoNotAffectRedactionOrRoleFields_Integration(t *
 	}
 
 	// Role fields: the host still sees their own meetup annotated, and the
-	// 40km-exemption for one's own hosted meetups still applies.
+	// 50km-exemption for one's own hosted meetups still applies.
 	hostView, err := h.svc.ListOpenMeetups(ctx, meetup.ListOpenMeetupsRequest{
 		UserID: host, Intent: nil, WithinDays: 7,
 		ViewerLat: colomboLat, ViewerLng: colomboLng, ViewerTrustLevel: 4,

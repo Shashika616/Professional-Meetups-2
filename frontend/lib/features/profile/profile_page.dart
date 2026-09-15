@@ -463,7 +463,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
           Expanded(
             child: _StatChip(
               value: (profile?.ratingCount ?? 0) == 0
-                  ? '—'
+                  ? '-'
                   : profile!.ratingAverage.toStringAsFixed(1),
               label: 'RATING',
             ),
@@ -471,7 +471,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
           const SizedBox(width: 12),
           Expanded(
             child: _StatChip(
-              value: trustLevel == null ? '—' : 'L$trustLevel',
+              value: trustLevel == null ? '-' : 'L$trustLevel',
               label: 'TRUST',
             ),
           ),
@@ -566,20 +566,25 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     required bool locked,
     required WidgetBuilder buildScreen,
   }) {
+    // Pencil first, tick LAST: the tick is the row's status and every
+    // status tick in this section (LinkedIn's, Premium's) sits flush at the
+    // right edge, so the pencil goes inboard of it. The other order pushed
+    // a verified row's tick 23px left of its neighbours' and the column
+    // read as ragged.
     final trailing = done
         ? Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.check_circle_rounded,
-                size: 18,
-                color: AppPalette.verified,
-              ),
-              const SizedBox(width: 8),
-              Icon(
                 Icons.edit_outlined,
                 size: 15,
                 color: AppPalette.textSecondary,
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.check_circle_rounded,
+                size: 18,
+                color: AppPalette.verified,
               ),
             ],
           )

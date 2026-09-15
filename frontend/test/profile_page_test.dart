@@ -484,6 +484,14 @@ void main() {
         expect(find.text('Verified'), findsNWidgets(4));
         expect(find.text('VERIFY'), findsNothing);
         expect(find.text('Not verified'), findsNothing);
+
+        // Every tick shares one right edge, whether or not a pencil sits
+        // beside it: the status column must read as a straight line.
+        final rightEdges = tester
+            .widgetList(find.byIcon(Icons.check_circle_rounded))
+            .map((w) => tester.getTopRight(find.byWidget(w)).dx)
+            .toSet();
+        expect(rightEdges, hasLength(1));
       },
     );
 
@@ -714,7 +722,7 @@ void main() {
       // No ratings yet is a dash, not a score of 0 — an average over zero
       // ratings is not a rating.
       expect(find.text('RATING'), findsOneWidget);
-      expect(find.text('—'), findsOneWidget);
+      expect(find.text('-'), findsOneWidget);
     });
 
     testWidgets('a user with history shows their real counts', (tester) async {

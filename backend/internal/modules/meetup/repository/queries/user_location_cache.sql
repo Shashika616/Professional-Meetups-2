@@ -32,6 +32,6 @@ WHERE updated_at > sqlc.arg(not_before)::timestamptz
   AND ST_DWithin(
     location,
     ST_SetSRID(ST_MakePoint(sqlc.arg(center_lng)::float8, sqlc.arg(center_lat)::float8), 4326)::geography,
-    40000
+    50000
   )
 LIMIT 500;

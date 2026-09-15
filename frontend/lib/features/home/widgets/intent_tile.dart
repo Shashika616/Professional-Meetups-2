@@ -5,8 +5,8 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
 /// One intent on the Schedule flow's "What kind of meetup?" step: a scene
 /// from the landing collage as backdrop, a scrim so type stays legible over
-/// any of those images, the intent's icon in a chip, its name, and a
-/// one-line tagline. Same corner radius and hairline as the meetup cards,
+/// any of those images, the intent's icon in a chip and its name. Same
+/// corner radius and hairline as the meetup cards,
 /// so the picker reads as part of the same system rather than a different
 /// app.
 ///
@@ -152,39 +152,34 @@ class IntentTile extends StatelessWidget {
                                 : const SizedBox(height: 20),
                           ),
                           const Spacer(),
-                          Row(
-                            children: [
-                              _IconChip(
-                                icon: locked ? Icons.lock_outline : intent.icon,
-                                locked: locked,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  intent.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.2,
-                                    height: 1.1,
-                                  ),
+                          _IconChip(
+                            icon: locked ? Icons.lock_outline : intent.icon,
+                            locked: locked,
+                          ),
+                          const SizedBox(height: 8),
+                          // Full card width, and SCALED rather than
+                          // clipped: a half-width card on a narrow phone
+                          // cannot always fit "NETWORKING" at 14px with
+                          // tracking, and "NETWOR..." is not a name. The
+                          // widest label is what sets the size; the rest
+                          // render at the natural size unchanged.
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                intent.label,
+                                maxLines: 1,
+                                softWrap: false,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 1.2,
+                                  height: 1.1,
                                 ),
                               ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            intent.tagline,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.80),
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w500,
-                              height: 1.25,
                             ),
                           ),
                         ],

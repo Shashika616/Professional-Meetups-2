@@ -14,6 +14,7 @@ import 'package:professional_connections_platform/core/widgets/meetup_status_bad
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
+import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
 import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
@@ -410,8 +411,11 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('You\'re offline'), findsOneWidget);
-      expect(find.text('Check your connection and try again.'), findsOneWidget);
+      expect(find.text('Connection problem'), findsOneWidget);
+      expect(
+        find.text('No connection. Check your network and try again.'),
+        findsOneWidget,
+      );
       expect(find.byIcon(Icons.wifi_off_outlined), findsOneWidget);
       expect(find.text('RETRY'), findsOneWidget);
     });
@@ -599,6 +603,155 @@ void main() {
           expect(auth.updateLastKnownLocationCallCount, 1);
           expect(auth.lastUpdateLastKnownLocationLat, 6.9271);
           expect(auth.lastUpdateLastKnownLocationLng, 79.8612);
+        },
+      );
+
+      testWidgets(
+        'the location read starts when Home mounts, even while the browse '
+        'section is still below the fold and unbuilt',
+        (tester) async {
+          // The real phone shape: a short viewport and several active
+          // meetups above the browse section, which puts Happening Soon
+          // outside both the viewport and the sliver cache, so its widget
+          // is never built. The read must not depend on it being.
+          tester.view.physicalSize = const Size(800, 400);
+          tester.view.devicePixelRatio = 1.0;
+          addTearDown(tester.view.reset);
+          final geo = FakeGeolocatorPlatform(position: testPosition());
+          GeolocatorPlatform.instance = geo;
+          final service = ScriptedMeetupService(
+            openMeetups: [_meetup()],
+            activeMeetups: [
+              for (var i = 0; i < 8; i++)
+                _meetup(id: 'active-$i', isHostedByMe: true),
+            ],
+          );
+
+          await tester.pumpWidget(_appWith(service, trustLevel: 2));
+          await tester.pumpAndSettle();
+
+          expect(find.byType(HappeningSoonSection), findsNothing);
+          expect(geo.getCurrentPositionCalls, 1);
+        },
+      );
+
+      testWidgets(
+        'a fix that does not arrive in time falls back to the last known '
+        'position rather than blocking or shimmering forever',
+        (tester) async {
+          _useTallViewport(tester);
+          GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+            getCurrentPositionError: TimeoutException('no fix'),
+            lastKnownPosition: testPosition(lat: 6.9000, lng: 79.9000),
+          );
+          final service = ScriptedMeetupService(openMeetups: [_meetup()]);
+
+          await tester.pumpWidget(_appWith(service, trustLevel: 2));
+          await tester.pumpAndSettle();
+
+          expect(find.text('Grace Hopper'), findsOneWidget);
+          expect(service.lastListOpenMeetupsViewerLat, 6.9);
+          expect(service.lastListOpenMeetupsViewerLng, 79.9);
+        },
+      );
+
+      testWidgets(
+        'a fix that does not arrive and no last known position is a blocked '
+        'state that says so, with a retry',
+        (tester) async {
+          _useTallViewport(tester);
+          GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+            getCurrentPositionError: TimeoutException('no fix'),
+          );
+          final service = ScriptedMeetupService(openMeetups: [_meetup()]);
+
+          await tester.pumpWidget(_appWith(service, trustLevel: 2));
+          await tester.pumpAndSettle();
+
+          expect(
+            find.textContaining('Couldn\'t pin down your location'),
+            findsOneWidget,
+          );
+          expect(find.text('TRY AGAIN'), findsOneWidget);
+          expect(service.listOpenMeetupsCallCount, 0);
+        },
+      );
+
+      testWidgets(
+        'while the location read runs long, the skeleton gains a sentence '
+        'saying what it is waiting on',
+        (tester) async {
+          _useTallViewport(tester);
+          final fix = Completer<Position>();
+          final service = ScriptedMeetupService(openMeetups: [_meetup()]);
+
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [
+                meetupServiceProvider.overrideWithValue(service),
+                authServiceProvider.overrideWithValue(ImmediateAuthService()),
+                authSessionProvider.overrideWith(
+                  () => _FakeAuthSessionNotifier(
+                    const AuthSessionState(
+                      profile: UserProfile(
+                        id: 'user-1',
+                        fullName: 'Grace',
+                        trustLevel: 2,
+                      ),
+                    ),
+                  ),
+                ),
+                viewerLocationSourceProvider.overrideWithValue(
+                  () => fix.future,
+                ),
+              ],
+              child: const MaterialApp(home: HomePage()),
+            ),
+          );
+          await tester.pump();
+          expect(find.byKey(const Key('locationSlowNotice')), findsNothing);
+
+          await tester.pump(ViewerLocationNotifier.slowAfter);
+          await tester.pump();
+          expect(find.byKey(const Key('locationSlowNotice')), findsOneWidget);
+          expect(
+            find.textContaining('Still finding your location'),
+            findsOneWidget,
+          );
+
+          // The fix lands; the notice goes and the list arrives.
+          fix.complete(testPosition());
+          await tester.pumpAndSettle();
+          expect(find.byKey(const Key('locationSlowNotice')), findsNothing);
+          expect(find.text('Grace Hopper'), findsOneWidget);
+        },
+      );
+
+      testWidgets(
+        'while the FETCH runs long, the skeleton names the slow connection',
+        (tester) async {
+          _useTallViewport(tester);
+          final gate = Completer<void>();
+          final service = ScriptedMeetupService(
+            openMeetups: [_meetup()],
+            openMeetupsGate: gate.future,
+          );
+
+          await tester.pumpWidget(_appWith(service, trustLevel: 2));
+          await tester.pump();
+          await tester.pump();
+          expect(find.byKey(const Key('networkSlowNotice')), findsOneWidget);
+          // Present but silent until the delay has run.
+          expect(find.textContaining('Slow connection'), findsNothing);
+
+          await tester.pump(const Duration(seconds: 5));
+          await tester.pump();
+          expect(find.textContaining('Slow connection'), findsOneWidget);
+
+          gate.complete();
+          await tester.pumpAndSettle();
+          expect(find.textContaining('Slow connection'), findsNothing);
+          expect(find.text('Grace Hopper'), findsOneWidget);
         },
       );
 
@@ -911,23 +1064,28 @@ void main() {
     });
 
     test('a new group starts only when the week changes', () {
-      final mon = atDay(0, id: 'a');
-      final sameWeek = Meetup(
-        id: 'b',
+      // Fixed dates, not "now": grouping is a pure function of the two
+      // window starts, and a clock-relative fixture crossed midnight into
+      // the next week whenever the suite ran late on a Sunday.
+      Meetup at(String id, DateTime start) => Meetup(
+        id: id,
         hostUserId: 'h',
         hostFullName: 'x',
         hostTrustLevel: 1,
         intent: IntentType.coffee,
-        windowStart: mon.windowStart!.add(const Duration(hours: 3)),
-        windowEnd: mon.windowEnd!.add(const Duration(hours: 3)),
+        windowStart: start,
+        windowEnd: start.add(const Duration(hours: 1)),
         locationLat: 1,
         locationLng: 1,
         locationLabel: 'x',
         capacity: 2,
         acceptedCount: 0,
         status: MeetupStatus.open,
-        createdAt: DateTime.now(),
+        createdAt: start,
       );
+      final mon = at('a', DateTime(2026, 9, 7, 10)); // a Monday
+      final sameWeek = at('b', DateTime(2026, 9, 7, 13));
+      final twoWeeksOn = at('c', DateTime(2026, 9, 21, 10));
 
       expect(
         startsNewWeek(mon, null),
@@ -935,12 +1093,33 @@ void main() {
         reason: 'the first card always opens a group',
       );
       expect(startsNewWeek(sameWeek, mon), isFalse);
-      expect(startsNewWeek(atDay(14), mon), isTrue);
+      expect(startsNewWeek(twoWeeksOn, mon), isTrue);
     });
 
     test('labels are relative for the weeks people plan around', () {
       final now = DateTime(2026, 9, 10); // a Thursday
-      expect(weekLabelFor(atDay(0), now: now), 'THIS WEEK');
+      // A meetup in the same (pinned) week, not atDay(0), which is built
+      // from the real clock and drifts out of this week as days pass.
+      String labelFor(DateTime start) => weekLabelFor(
+        Meetup(
+          id: 'm',
+          hostUserId: 'h',
+          hostFullName: 'x',
+          hostTrustLevel: 1,
+          intent: IntentType.coffee,
+          windowStart: start,
+          windowEnd: start.add(const Duration(hours: 1)),
+          locationLat: 1,
+          locationLng: 1,
+          locationLabel: 'x',
+          capacity: 2,
+          acceptedCount: 0,
+          status: MeetupStatus.open,
+          createdAt: now,
+        ),
+        now: now,
+      );
+      expect(labelFor(now.add(const Duration(days: 1))), 'THIS WEEK');
 
       String labelForWeeksAhead(int weeks) {
         final start = startOfWeek(now).add(Duration(days: 7 * weeks + 1));
@@ -1005,10 +1184,12 @@ void main() {
       tester,
     ) async {
       _useTallViewport(tester);
+      // Same guard as the test above: on a Sunday, tomorrow is next week.
+      final secondDay = DateTime.now().weekday == DateTime.sunday ? 0 : 1;
       final service = ScriptedMeetupService(
         openMeetups: [
           atDay(0, id: 'a'),
-          atDay(1, id: 'b'),
+          atDay(secondDay, id: 'b'),
         ],
       );
 

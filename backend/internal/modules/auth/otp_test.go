@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"regexp"
+	"strings"
 	"testing"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/email"
@@ -195,6 +196,49 @@ func TestDomainFromEmail_Lowercases(t *testing.T) {
 //
 // As above, every case hashes a DIFFERENT code than the one presented, so a
 // pass can only come from the allowlist branch.
+// Plan 18 Fix 1: the reserved-TLD rule is enforced at startup, not merely
+// documented. A single deliverable address anywhere in the list must be
+// caught and named, whatever else the list contains.
+func TestValidateTestOTPBypassEmails(t *testing.T) {
+	t.Run("accepts every RFC 2606/6761 reserved suffix, any case, with blanks", func(t *testing.T) {
+		raw := " l0.a@meetups.test, L2.A@Meetups.TEST ,alice@fixtures.example,,bob@nowhere.invalid, qa@host.localhost "
+		if err := ValidateTestOTPBypassEmails(raw); err != nil {
+			t.Fatalf("ValidateTestOTPBypassEmails(%q) = %v, want nil", raw, err)
+		}
+	})
+
+	t.Run("rejects a deliverable address and names it", func(t *testing.T) {
+		for _, bad := range []string{
+			"someone@gmail.com",
+			"l0.a@meetups.test,tester@company.io",
+			"test@example.com.attacker.net", // .example must be the suffix, not a label
+			"notanaddress.test",             // no @: not an address at all
+			"user@test",                     // bare label without the dot
+		} {
+			err := ValidateTestOTPBypassEmails(bad)
+			if err == nil {
+				t.Errorf("ValidateTestOTPBypassEmails(%q) = nil, want an error", bad)
+				continue
+			}
+			// The message must name the offending entry so an operator can
+			// fix the right one without guessing.
+			offending := bad
+			if i := strings.Index(bad, ","); i >= 0 {
+				offending = bad[i+1:]
+			}
+			if !strings.Contains(err.Error(), offending) {
+				t.Errorf("error for %q does not name the entry: %v", bad, err)
+			}
+		}
+	})
+
+	t.Run("an empty list is fine", func(t *testing.T) {
+		if err := ValidateTestOTPBypassEmails(""); err != nil {
+			t.Fatalf("empty list: %v, want nil", err)
+		}
+	})
+}
+
 func TestOtpMatches_TestEmailAllowlist(t *testing.T) {
 	const allowed = "l2.a@meetups.test"
 	const other = "someone.real@gmail.com"

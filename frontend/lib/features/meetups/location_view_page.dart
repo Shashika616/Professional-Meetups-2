@@ -5,7 +5,7 @@ import 'package:apple_maps_flutter/apple_maps_flutter.dart' as apple_maps;
 import 'package:maplibre_gl/maplibre_gl.dart' as maplibre;
 import 'package:url_launcher/url_launcher.dart';
 
-import 'package:professional_connections_platform/core/config/app_config.dart';
+import 'package:professional_connections_platform/core/maps/map_provider.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
@@ -199,8 +199,7 @@ class _LocationPreviewMap extends StatelessWidget {
                 myLocationButtonEnabled: false,
               )
             : maplibre.MapLibreMap(
-                styleString:
-                    '$_stadiaStyleUrl?api_key=${AppConfig.stadiaMapsApiKey}',
+                styleString: MapConfig.styleUrl(),
                 initialCameraPosition: maplibre.CameraPosition(
                   target: maplibre.LatLng(lat, lng),
                   zoom: 15,
@@ -219,7 +218,11 @@ class _LocationPreviewMap extends StatelessWidget {
         IgnorePointer(
           child: Icon(
             Icons.location_on,
-            color: AppPalette.candyBlue,
+            // iOS keeps the accent on Apple Maps; Android takes the colour
+            // that reads on the current tile provider.
+            color: defaultTargetPlatform == TargetPlatform.iOS
+                ? AppPalette.candyBlue
+                : MapConfig.pinColor,
             size: 36,
             shadows: [
               Shadow(
@@ -233,8 +236,3 @@ class _LocationPreviewMap extends StatelessWidget {
     );
   }
 }
-
-/// Matches `StadiaMapLocationStep`'s own style — the same visual language,
-/// not a second style choice.
-const _stadiaStyleUrl =
-    'https://tiles.stadiamaps.com/styles/alidade_smooth_dark.json';

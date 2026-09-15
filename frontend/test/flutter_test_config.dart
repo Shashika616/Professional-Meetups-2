@@ -1,8 +1,11 @@
 import 'dart:async';
 
+import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
+
+import 'support/fake_geolocator_platform.dart';
 
 /// Runs once before every test in this directory — Flutter's own
 /// convention for this exact filename/signature, not a hand-rolled hook.
@@ -39,6 +42,18 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   // which turns this back off for its own tests, so neither branch is left
   // untested.
   debugDisableAmbientAnimations = true;
+
+  // A default position for the whole suite. Home starts the viewer-location
+  // read the moment it mounts (viewerLocationProvider), so every test that
+  // lands on AppShell reaches the geolocator; with no fake, its platform
+  // channel has no handler under flutter_test and the future never resolves
+  // (the same failure shape as SharedPreferences above), and any test that
+  // awaits that read (pull-to-refresh) hangs. Tests that care about a
+  // specific location outcome install their own fake in setUp, as
+  // happening_soon_section_test does; this is the floor beneath them.
+  GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+    position: testPosition(),
+  );
 
   await testMain();
 }

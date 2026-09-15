@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:professional_connections_platform/core/models/meetup.dart';
+import 'package:professional_connections_platform/core/models/paged_result.dart';
 import 'package:professional_connections_platform/core/services/http_meetup_service.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 
@@ -38,6 +42,46 @@ String _safetyStateBody({List<String> sharedWith = const []}) => jsonEncode({
 /// and a differently-shaped service-layer wrapper, so these go through the
 /// real service.
 void main() {
+  group('request deadline', () {
+    test(
+      'a request that never answers becomes MeetupOfflineException with the '
+      'slow-connection sentence once the deadline passes, instead of hanging',
+      () {
+        FakeAsync().run((async) {
+          // A client that accepts the request and then says nothing: the
+          // captive-portal / stalled-cell case that no exception ever
+          // surfaces on its own.
+          final client = MockClient(
+            (request) => Completer<http.Response>().future,
+          );
+          Object? caught;
+          _serviceWith(client)
+              .listOpenMeetups(viewerLat: 6.9, viewerLng: 79.8)
+              .catchError((Object e) {
+                caught = e;
+                return const PagedResult<Meetup>(
+                  items: [],
+                  nextCursor: null,
+                  hasMore: false,
+                );
+              });
+
+          async.elapse(
+            HttpMeetupService.requestTimeout - const Duration(seconds: 1),
+          );
+          expect(caught, isNull, reason: 'not yet at the deadline');
+
+          async.elapse(const Duration(seconds: 2));
+          expect(caught, isA<MeetupOfflineException>());
+          expect(
+            (caught! as MeetupOfflineException).message,
+            contains('too slow'),
+          );
+        });
+      },
+    );
+  });
+
   group('getSafetyState', () {
     test(
       'parses the contacts already told from a real response body',

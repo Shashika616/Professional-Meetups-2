@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,9 +9,8 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/cafe_scene.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
-import 'package:professional_connections_platform/core/widgets/brand_marks.dart';
-import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
+import 'package:professional_connections_platform/features/auth/social_sign_in_section.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/features/onboarding/age_confirmation_step.dart';
 import 'package:professional_connections_platform/features/onboarding/email_signup_step.dart';
@@ -88,66 +86,28 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
 
   _OnboardingFlowState() : _busy = false;
 
+  /// The user's 18+ attestation, recorded when AgeConfirmationStep's
+  /// CONTINUE fires (which it cannot until the box is checked). Held as a
+  /// value rather than implied by the step, so the provider calls carry
+  /// exactly what the user gave and nothing hardcoded.
+  bool _ageConfirmed = false;
+
   void _onAgeConfirmed() {
-    setState(() => _step = _OnboardingStep.chooseMethod);
+    setState(() {
+      _ageConfirmed = true;
+      _step = _OnboardingStep.chooseMethod;
+    });
   }
 
-  Future<void> _continueWithLinkedIn() async {
-    if (_busy) return; // guards against a slow tap double-firing the flow
-    setState(() => _busy = true);
-    try {
-      await ref
-          .read(authSessionProvider.notifier)
-          .signInWithLinkedIn(ageConfirmedOver18: true);
-      if (!mounted) return;
-      // The Level 2/3 phone/personal-email/personal-details/corporate-email
-      // sequence no longer runs during initial onboarding straight to the
-      // mandatory profile-setup screen instead, same as every other path.
-      // Those steps are still reachable later from ProfilePage (which
-      // reuses the exact same pendingVerificationSteps/runVerificationSequence
-      // pair via its own "Connect LinkedIn" banner).
-      await _goToAppShell();
-    } catch (error, stackTrace) {
-      _handleSignInError('signInWithLinkedIn', error, stackTrace);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _continueWithApple() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      await ref
-          .read(authSessionProvider.notifier)
-          .signInWithApple(ageConfirmedOver18: true);
-      if (!mounted) return;
-      // Level 0 (Apple alone never grants trust, ADR-014 §1) straight to
-      // AppShell, no verification sequence attempted (every step in it
-      // requires LinkedIn server-side and would just 403).
-      await _goToAppShell();
-    } catch (error, stackTrace) {
-      _handleSignInError('signInWithApple', error, stackTrace);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _continueWithGoogle() async {
-    if (_busy) return;
-    setState(() => _busy = true);
-    try {
-      await ref
-          .read(authSessionProvider.notifier)
-          .signInWithGoogle(ageConfirmedOver18: true);
-      if (!mounted) return;
-      await _goToAppShell();
-    } catch (error, stackTrace) {
-      _handleSignInError('signInWithGoogle', error, stackTrace);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
+  // The provider buttons (Apple/Google/LinkedIn) live in
+  // SocialSignInSection, shared with the sign-in page. Sign-up and sign-in
+  // are the same server call (resolve-or-create), so the only thing this
+  // flow adds is where to go afterwards: every path lands on
+  // _goToAppShell, the single insertion point for the profile-setup screen.
+  // The Level 2/3 phone/personal-email/personal-details/corporate-email
+  // sequence no longer runs during initial onboarding; those steps remain
+  // reachable from ProfilePage's "Connect LinkedIn" banner.
+  Future<void> _onSocialSignedIn(bool isNewUser) => _goToAppShell();
 
   /// The guest path (ADR-002 § 6). Age confirmation has already happened —
   /// this button only exists on the chooseMethod step, which is only
@@ -164,7 +124,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     try {
       await ref
           .read(authSessionProvider.notifier)
-          .guestSignup(ageConfirmedOver18: true);
+          .guestSignup(ageConfirmedOver18: _ageConfirmed);
       if (!mounted) return;
       _navigateToAppShell();
     } catch (error, stackTrace) {
@@ -178,7 +138,8 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     final success = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (context) => const EmailSignupStep(ageConfirmedOver18: true),
+        builder: (context) =>
+            EmailSignupStep(ageConfirmedOver18: _ageConfirmed),
       ),
     );
     if (success == true && mounted) await _goToAppShell();
@@ -212,9 +173,9 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     // browser without finishing LinkedIn) isn't really an "error" — a
     // softer, non-alarming toast, not the red error styling a genuine
     // network/server failure gets. Either way the button must always end
-    // up clickable again (the `finally` in each _continueWithX already
-    // does that) and the user must always see *something*, never be left
-    // staring at a stalled spinner with no feedback at all.
+    // up clickable again (the `finally` in _continueAsGuest does that) and
+    // the user must always see *something*, never be left staring at a
+    // stalled spinner with no feedback at all.
     showSnack(
       context,
       error is AuthException
@@ -296,13 +257,6 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   }
 
   Widget _chooseMethodStep() {
-    // iOS shows Apple+LinkedIn; Android shows Google+LinkedIn (scope note,
-    // frontend/level0-federated-identity-PLAN.md: Apple has no native
-    // Android SDK, and Google Sign-In has no first-class iOS placement
-    // requirement the way Apple does on iOS). defaultTargetPlatform, not
-    // dart:io Platform, so this stays testable in `flutter test`.
-    final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
-
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -329,54 +283,18 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             // They stay the visually dominant pair through fill and
             // elevation, not colour: the alternatives below are outlined
             // with no fill at all.
-            if (isIOS) ...[
-              PrimaryButton(
-                label: 'CONTINUE WITH APPLE',
-                iconWidget: AppleMark(size: 20, color: AppPalette.textPrimary),
-                fillColor: AppPalette.card,
-                foregroundColor: AppPalette.textPrimary,
-                borderColor: AppPalette.hairline,
-                isLoading: _busy,
-                onPressed: _continueWithApple,
-              ),
-              const SizedBox(height: 12),
-              PrimaryButton(
-                key: const Key('continueWithLinkedIn'),
-                label: 'CONTINUE WITH LINKEDIN',
-                iconWidget: const LinkedInMark(size: 20),
-                fillColor: AppPalette.card,
-                foregroundColor: AppPalette.textPrimary,
-                borderColor: AppPalette.hairline,
-                isLoading: _busy,
-                onPressed: _continueWithLinkedIn,
-              ),
-            ] else ...[
-              PrimaryButton(
-                label: 'CONTINUE WITH GOOGLE',
-                iconWidget: const GoogleMark(size: 20),
-                fillColor: AppPalette.card,
-                foregroundColor: AppPalette.textPrimary,
-                borderColor: AppPalette.hairline,
-                isLoading: _busy,
-                onPressed: _continueWithGoogle,
-              ),
-              const SizedBox(height: 12),
-              PrimaryButton(
-                key: const Key('continueWithLinkedIn'),
-                label: 'CONTINUE WITH LINKEDIN',
-                iconWidget: const LinkedInMark(size: 20),
-                fillColor: AppPalette.card,
-                foregroundColor: AppPalette.textPrimary,
-                borderColor: AppPalette.hairline,
-                isLoading: _busy,
-                onPressed: _continueWithLinkedIn,
-              ),
-            ],
+            SocialSignInSection(
+              onSignedIn: _onSocialSignedIn,
+              // Real: this step is only reachable after AgeConfirmationStep
+              // was checked and continued (see _onAgeConfirmed).
+              ageConfirmedOver18: _ageConfirmed,
+              onBusyChanged: (busy) => setState(() => _busy = busy),
+            ),
             const SizedBox(height: 18),
             // A divider, so the OAuth buttons read as one group and the two
             // other ways in read as alternatives rather than as fine print
             // trailing off the bottom of the screen.
-            const _OrDivider(),
+            const OrDivider(),
             const SizedBox(height: 14),
             // PROMOTED FROM A 13px TEXT LINK. Email signup is a real, equal
             // way to create an account — it just isn't the one-tap one — so
@@ -473,35 +391,6 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
           const SizedBox(height: 8),
         ],
       ),
-    );
-  }
-}
-
-/// A hairline with "or" set into it, separating the one-tap sign-in buttons
-/// above from the two other ways in below.
-///
-/// Exists because those two used to trail off the bottom as unlabelled small
-/// text, which read as a footnote rather than as a choice.
-class _OrDivider extends StatelessWidget {
-  const _OrDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    final line = Expanded(
-      child: Divider(color: AppPalette.hairline, height: 1),
-    );
-    return Row(
-      children: [
-        line,
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: Text(
-            'or',
-            style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-          ),
-        ),
-        line,
-      ],
     );
   }
 }

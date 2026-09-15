@@ -484,7 +484,7 @@ func (s *MeetupServer) ListRatableParticipants(ctx context.Context, req *meetupv
 	traits := meetup.RatingTraits()
 	wireTraits := make([]*meetupv1.RatingTrait, 0, len(traits))
 	for _, t := range traits {
-		wireTraits = append(wireTraits, &meetupv1.RatingTrait{Key: t.Key, Label: t.Label, Emoji: t.Emoji})
+		wireTraits = append(wireTraits, &meetupv1.RatingTrait{Key: t.Key, Label: t.Label, Emoji: t.Emoji, Negative: t.Negative})
 	}
 	return &meetupv1.ListRatableParticipantsResponse{Participants: out, AvailableTraits: wireTraits}, nil
 }

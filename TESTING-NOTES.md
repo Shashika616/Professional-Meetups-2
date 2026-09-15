@@ -233,13 +233,17 @@ skip in `startTargetKeyedVerification` (service.go), and the `main.go`
 warning block. Note there are **two** send sites, not one: the target-keyed
 purposes never reach `dispatchVerificationCode`.
 
-## Inherited: Stadia Maps API key — not the production decision
+## Android map provider: OpenStreetMap by default (2026-09-13)
 
-`frontend/.env`'s `STADIA_MAPS_API_KEY` was copied unmodified from the
-source repo when this project was scaffolded (2026-09-03/04) — same
-provisional status as documented in
-`../Professional-Meetups/TESTING-NOTES.md`'s Stadia Maps section: Android's
-final map-tile vendor is still an open decision between Google Maps and
-OpenStreetMap/Stadia; iOS already uses Apple MapKit, settled, no key. This
-repo hasn't changed that status, just inherited it — resolve it in the
-source's own decision process, not independently here.
+Android's map and place search moved off Stadia Maps' metered free tier to
+OpenStreetMap-based services: OpenFreeMap vector tiles (`liberty` style, a light
+Google-Maps-like look in both themes, no key; the ODbL credit lives behind
+MapLibre's (i) corner control rather than a text overlay) and Photon for
+type-ahead search, with a Nominatim fallback for a direct search when
+Photon is unavailable (never for keystrokes; Nominatim's policy forbids
+type-ahead). Both OSM services get an identifying `User-Agent`. The switch
+is `MAP_PROVIDER` in `frontend/.env` (`osm` default, `stadia` to opt back
+in with `STADIA_MAPS_API_KEY`), implemented in
+`frontend/lib/core/maps/`. iOS is unaffected: Apple MapKit, no key.
+`./build.sh` verifies the selected provider is compiled into a production
+APK.

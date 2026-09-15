@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/features/meetups/widgets/ios_map_location_step.dart';
-import 'package:professional_connections_platform/features/meetups/widgets/stadia_map_location_step.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/android_map_location_step.dart';
 
 /// The Schedule flow's location step (ADR-013 §4's third correction;
 /// frontend/meetup-scheduling-PLAN.md's 2026-08-18 platform-split
@@ -13,7 +13,7 @@ import 'package:professional_connections_platform/features/meetups/widgets/stadi
 /// - **iOS**: [IosMapLocationStep] — Apple MapKit, no API key, settled as
 ///   the iOS decision (not provisional).
 /// - **Everything else (Android, and a reasonable fallback for any other
-///   target)**: [StadiaMapLocationStep] — the existing Stadia Maps
+///   target)**: [AndroidMapLocationStep] — the existing Stadia Maps
 ///   implementation, still provisional (see TESTING-NOTES.md).
 ///
 /// `defaultTargetPlatform` (not `dart:io`'s `Platform.isIOS`, which throws
@@ -30,6 +30,6 @@ class MapLocationStep extends StatelessWidget {
   Widget build(BuildContext context) {
     return defaultTargetPlatform == TargetPlatform.iOS
         ? IosMapLocationStep(onSubmit: onSubmit)
-        : StadiaMapLocationStep(onSubmit: onSubmit);
+        : AndroidMapLocationStep(onSubmit: onSubmit);
   }
 }

@@ -105,7 +105,7 @@ class _PersonalDetailsPageState extends ConsumerState<PersonalDetailsPage> {
       icon: Icons.badge_outlined,
       headline: 'Personal Details',
       trustBenefit:
-          'Your legal name is never shown to other members — it helps '
+          'Your legal name is never shown to other members. It helps '
           'confirm you\'re a real professional and supports incident '
           'response if it\'s ever needed.',
       onSkip: () => Navigator.pop(context),
