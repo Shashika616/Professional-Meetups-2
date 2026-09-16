@@ -28,10 +28,10 @@ void main() {
       final start = DateTime(now.year, now.month, now.day, 15, 0);
       final end = DateTime(now.year, now.month, now.day, 17, 0);
 
-      expect(formatMeetupWindow(start, end), 'Today, 3:00–5:00 PM');
+      expect(formatMeetupWindow(start, end), 'Today, 3:00 - 5:00 PM');
       expect(
         _meetup(windowStart: start, windowEnd: end).formattedWindow,
-        'Today, 3:00–5:00 PM',
+        'Today, 3:00 - 5:00 PM',
       );
     });
 
@@ -39,7 +39,7 @@ void main() {
       final start = DateTime(2026, 8, 22, 18, 0);
       final end = DateTime(2026, 8, 22, 20, 0);
 
-      expect(formatMeetupWindow(start, end), 'Aug 22, 6:00–8:00 PM');
+      expect(formatMeetupWindow(start, end), 'Aug 22, 6:00 - 8:00 PM');
     });
 
     test(
@@ -48,7 +48,7 @@ void main() {
         final start = DateTime(2026, 8, 22, 11, 30);
         final end = DateTime(2026, 8, 22, 13, 30);
 
-        expect(formatMeetupWindow(start, end), 'Aug 22, 11:30 AM–1:30 PM');
+        expect(formatMeetupWindow(start, end), 'Aug 22, 11:30 AM - 1:30 PM');
       },
     );
 
@@ -59,20 +59,20 @@ void main() {
         final start = DateTime(2026, 8, 22, 22, 0);
         final end = DateTime(2026, 8, 23, 1, 0);
 
-        expect(formatMeetupWindow(start, end), 'Aug 22, 10:00 PM–1:00 AM');
+        expect(formatMeetupWindow(start, end), 'Aug 22, 10:00 PM - 1:00 AM');
       },
     );
 
     test('noon and midnight format as 12, not 0', () {
       final noon = DateTime(2026, 8, 22, 12, 0);
       final afternoon = DateTime(2026, 8, 22, 13, 0);
-      expect(formatMeetupWindow(noon, afternoon), 'Aug 22, 12:00–1:00 PM');
+      expect(formatMeetupWindow(noon, afternoon), 'Aug 22, 12:00 - 1:00 PM');
 
       final midnight = DateTime(2026, 8, 22, 0, 0);
       final earlyMorning = DateTime(2026, 8, 22, 1, 0);
       expect(
         formatMeetupWindow(midnight, earlyMorning),
-        'Aug 22, 12:00–1:00 AM',
+        'Aug 22, 12:00 - 1:00 AM',
       );
     });
   });

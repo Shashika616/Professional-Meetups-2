@@ -9,6 +9,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/validation/validators.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -200,12 +201,22 @@ class _ContactsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (contacts.isEmpty) {
-      return Center(
-        child: Text(
-          'No trusted contacts yet.\nAdd someone who should be alerted if '
-          'you trigger SOS.',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
+      // Centred in whatever space the list had, and still scrollable so a
+      // short screen can reach all of it.
+      return LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: const Center(
+              child: EmptyStateDeck(
+                title: 'Nobody on your list yet',
+                message:
+                    'Add someone who should hear from us if you trigger SOS: '
+                    'the people you would call anyway.',
+                scenes: EmptyDeckScenes.people,
+              ),
+            ),
+          ),
         ),
       );
     }

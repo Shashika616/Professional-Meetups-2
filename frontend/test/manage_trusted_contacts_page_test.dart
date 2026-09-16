@@ -4,6 +4,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
+
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
@@ -209,7 +211,12 @@ void main() {
     await tester.pumpWidget(_appWith(container));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('No trusted contacts yet'), findsOneWidget);
+    // The app's own card deck, not a line of grey text.
+    expect(find.byType(EmptyStateDeck), findsOneWidget);
+    expect(find.text('Nobody on your list yet'), findsOneWidget);
+    expect(find.textContaining('trigger SOS'), findsOneWidget);
+    // The way out is the page's own ADD CONTACT button, still there.
+    expect(find.text('ADD CONTACT'), findsOneWidget);
   });
 
   testWidgets(

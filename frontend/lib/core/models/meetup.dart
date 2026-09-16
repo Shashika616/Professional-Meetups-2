@@ -277,8 +277,8 @@ String formatMeetupWindow(DateTime start, DateTime end) {
   final startIsPM = start.hour >= 12;
   final endIsPM = end.hour >= 12;
   final rangePart = startIsPM == endIsPM
-      ? '${_formatTime(start, showPeriod: false)}–${_formatTime(end)}'
-      : '${_formatTime(start)}–${_formatTime(end)}';
+      ? '${_formatTime(start, showPeriod: false)} - ${_formatTime(end)}'
+      : '${_formatTime(start)} - ${_formatTime(end)}';
   return '$datePart, $rangePart';
 }
 

@@ -75,7 +75,7 @@ void main() {
     expect(find.text('YOU HOSTED'), findsNothing);
     expect(find.text("YOU'RE HOSTING"), findsOneWidget);
     expect(find.text('Barefoot Cafe'), findsOneWidget);
-    expect(find.textContaining('5:00–6:30 PM'), findsOneWidget);
+    expect(find.textContaining('5:00 - 6:30 PM'), findsOneWidget);
     expect(
       find.text(
         'Wait until it ends at 6:30 PM, or cancel that meetup to free the '

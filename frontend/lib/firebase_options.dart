@@ -27,7 +27,7 @@ class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
       throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web — '
+        'DefaultFirebaseOptions have not been configured for web. '
         'no web app exists in the professional-meetups-976d2 Firebase '
         'project. Add one in the console and regenerate this file if '
         'web support is ever needed.',
@@ -41,7 +41,7 @@ class DefaultFirebaseOptions {
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform '
-          '($defaultTargetPlatform) — only Android and iOS apps exist in '
+          '($defaultTargetPlatform). Only Android and iOS apps exist in '
           'the professional-meetups-976d2 Firebase project today.',
         );
     }

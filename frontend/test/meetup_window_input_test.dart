@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_window_input.dart';
 
 void main() {
-  group('parseTime24h — strict 00:00–23:59', () {
+  group('parseTime24h — strict 00:00 - 23:59', () {
     test('accepts HH:MM and bare HHMM identically', () {
       expect(parseTime24h('21:30'), const TimeOfDay(hour: 21, minute: 30));
       expect(parseTime24h('2130'), const TimeOfDay(hour: 21, minute: 30));
@@ -63,7 +63,7 @@ void main() {
       expect(r.end, DateTime(2026, 9, 11, 17, 0));
     });
 
-    test('00 after 23 is the next day: 22:00–01:00 ends tomorrow at 01:00', () {
+    test('00 after 23 is the next day: 22:00 - 01:00 ends tomorrow at 01:00', () {
       final r = resolveMeetupWindow(
         date: today,
         from: const TimeOfDay(hour: 22, minute: 0),

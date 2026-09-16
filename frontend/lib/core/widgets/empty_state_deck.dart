@@ -181,6 +181,11 @@ abstract final class EmptyDeckScenes {
     'assets/images/landing/l14.jpg',
     'assets/images/landing/l05.jpg',
   ];
+  static const people = [
+    'assets/images/landing/l23.jpg',
+    'assets/images/landing/l18.jpg',
+    'assets/images/landing/l26.jpg',
+  ];
   static const inbox = [
     'assets/images/landing/l02.jpg',
     'assets/images/landing/l13.jpg',

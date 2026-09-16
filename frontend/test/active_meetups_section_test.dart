@@ -25,12 +25,13 @@ Meetup _meetup({
   String? cancellationReason,
   bool isHostedByMe = false,
   MeetupRequestStatus? myRequestStatus,
+  IntentType intent = IntentType.coffee,
 }) => Meetup(
   id: id,
   hostUserId: 'host-$id',
   hostFullName: hostFullName,
   hostTrustLevel: 2,
-  intent: IntentType.coffee,
+  intent: intent,
   windowStart: windowStart,
   windowEnd: windowEnd,
   locationLat: 6.9271,
@@ -614,5 +615,48 @@ void main() {
         findsOneWidget,
       );
     });
+  });
+
+  testWidgets('every card in the deck names its intent in the same corner: '
+      'the live card, the review card and the cancelled one', (tester) async {
+    // One of each, so all three shapes are on screen together.
+    final now = DateTime.now();
+    final service = ScriptedMeetupService(
+      activeMeetups: [
+        _meetup(
+          id: 'live-1',
+          hostFullName: 'Grace Hopper',
+          intent: IntentType.coffee,
+          windowStart: now.subtract(const Duration(minutes: 10)),
+          windowEnd: now.add(const Duration(hours: 1)),
+          isHostedByMe: true,
+        ),
+        _meetup(
+          id: 'review-1',
+          hostFullName: 'Ada Lovelace',
+          intent: IntentType.networking,
+          windowStart: now.subtract(const Duration(hours: 3)),
+          windowEnd: now.subtract(const Duration(hours: 2)),
+          isHostedByMe: true,
+        ),
+        _meetup(
+          id: 'cancelled-1',
+          hostFullName: 'Alan Turing',
+          intent: IntentType.lunch,
+          status: MeetupStatus.cancelled,
+          windowStart: now.add(const Duration(hours: 4)),
+          windowEnd: now.add(const Duration(hours: 5)),
+          isHostedByMe: true,
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(_appWith(service));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(IntentType.coffee.icon), findsWidgets);
+    expect(find.text('COFFEE'), findsWidgets);
+    expect(find.byIcon(IntentType.networking.icon), findsWidgets);
+    expect(find.byIcon(IntentType.lunch.icon), findsWidgets);
   });
 }

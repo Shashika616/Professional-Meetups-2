@@ -67,7 +67,7 @@ void _pinClockToStartOfToday() {
 }
 
 /// Drives Intent → Timing (accepts the default date — today — then picks
-/// 3:00 PM–5:00 PM) → Location → lands on the Capacity step, since
+/// 3:00 PM to 5:00 PM) → Location → lands on the Capacity step, since
 /// capacity-stepper bounds are what most of these tests actually exercise.
 /// One consistent flow now (ADR-016) — no more "Schedule Today" entry
 /// choice to tap through first.
@@ -215,7 +215,7 @@ void main() {
     });
 
     testWidgets('FROM supports entering 00:00 (midnight) — regression guard: a '
-        '12-hour picker has no literal "00", only 1–12 + AM/PM, which is '
+        '12-hour picker has no literal "00", only 1 - 12 + AM/PM, which is '
         'where users previously got stuck trying to schedule at midnight', (
       tester,
     ) async {

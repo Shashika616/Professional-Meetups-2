@@ -379,6 +379,7 @@ class _PersistentMeetupCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -421,9 +422,17 @@ class _PersistentMeetupCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           MeetupStatusBadge(status: meetup.status),
+                          const Spacer(),
+                          // Same corner mark as the review and cancelled
+                          // cards, so every card in the deck says what kind
+                          // of meetup it is in the same place.
+                          _IntentMark(
+                            meetup: meetup,
+                            tone: AppPalette.candyBlue,
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 4),
                       Text(
                         meetup.hostFullName!,
                         style: TextStyle(
