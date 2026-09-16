@@ -10,6 +10,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
@@ -183,34 +184,19 @@ class _EventsPageState extends ConsumerState<EventsPage>
           ),
           body: myMeetupsAsync.when(
             loading: () => const _MyMeetupsSkeleton(),
-            error: (error, stack) => Center(
-              child: FlatCard(
-                radius: 12,
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.wifi_off_outlined,
-                      color: AppPalette.textSecondary,
-                      size: 28,
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Could not load your meetups.',
-                      style: TextStyle(
-                        color: AppPalette.textPrimary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    PrimaryButton(
-                      label: 'RETRY',
-                      height: 40,
-                      onPressed: () => ref.invalidate(myMeetupsProvider),
-                    ),
-                  ],
-                ),
+            // The skeleton stays up a moment after the failure, then the
+            // page says what went wrong, with the picture every failed
+            // load in the app shares.
+            error: (error, stack) => SkeletonThenFailure(
+              skeleton: const _MyMeetupsSkeleton(),
+              failure: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  LoadFailedState(
+                    failure: LoadFailure.of(error),
+                    onRetry: () => ref.invalidate(myMeetupsProvider),
+                  ),
+                ],
               ),
             ),
             data: (result) => TabBarView(
@@ -933,7 +919,7 @@ class _RequestManagementPageState
   late Meetup _meetup;
   List<MeetupRequestModel>? _requests;
   bool _loading = true;
-  String? _loadError;
+  Object? _loadError;
 
   @override
   void initState() {
@@ -975,9 +961,9 @@ class _RequestManagementPageState
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _loadError = error is MeetupException
-            ? error.message
-            : 'Something went wrong. Please try again.';
+        // The error itself, so the failure state can tell offline from
+        // the rest.
+        _loadError = error;
         _loading = false;
       });
     }
@@ -1094,10 +1080,15 @@ class _RequestManagementPageState
                   child: _loading
                       ? const _RequestsSkeleton()
                       : _loadError != null
-                      ? Center(
-                          child: Text(
-                            _loadError!,
-                            style: TextStyle(color: AppPalette.textSecondary),
+                      ? SkeletonThenFailure(
+                          skeleton: const _RequestsSkeleton(),
+                          failure: ListView(
+                            children: [
+                              LoadFailedState(
+                                failure: LoadFailure.of(_loadError),
+                                onRetry: _load,
+                              ),
+                            ],
                           ),
                         )
                       : _buildRequestTabs(),

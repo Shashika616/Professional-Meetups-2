@@ -11,7 +11,8 @@ import 'package:professional_connections_platform/core/models/user_profile.dart'
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
-import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
+import 'package:professional_connections_platform/core/widgets/faded_picture.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
@@ -148,6 +149,14 @@ void _useTallViewport(WidgetTester tester) {
   tester.view.physicalSize = const Size(1000, 3000);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
+}
+
+/// A failed load keeps its skeleton up for a moment (SkeletonThenFailure)
+/// before the failure state appears; this pumps past that hold.
+Future<void> _settlePastSkeletonHold(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  await tester.pump(const Duration(milliseconds: 1400));
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -397,16 +406,17 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('No meetups near you this week'), findsOneWidget);
-        // The empty state is the app's own card deck, not a bare icon.
-        expect(find.byType(EmptyStateDeck), findsOneWidget);
+        // The empty state is the balcony picture with a nudge to host or
+        // stay ready to join, not a bare icon.
+        expect(find.byType(FadedPicture), findsOneWidget);
         expect(
-          find.textContaining('Be the first to put one on the calendar'),
+          find.textContaining('Host one and let people come to you'),
           findsOneWidget,
         );
 
         // None of the failure affordances.
         expect(find.text('RETRY'), findsNothing);
-        expect(find.byIcon(Icons.wifi_off_outlined), findsNothing);
+        expect(find.byType(LoadFailedState), findsNothing);
         expect(find.textContaining('Could not load'), findsNothing);
         expect(find.byType(CircularProgressIndicator), findsNothing);
       },
@@ -446,15 +456,15 @@ void main() {
       );
 
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
-      await tester.pumpAndSettle();
+      await _settlePastSkeletonHold(tester);
 
-      expect(find.text('Connection problem'), findsOneWidget);
+      expect(find.text('You look offline'), findsOneWidget);
       expect(
         find.text('No connection. Check your network and try again.'),
         findsOneWidget,
       );
-      expect(find.byIcon(Icons.wifi_off_outlined), findsOneWidget);
-      expect(find.text('RETRY'), findsOneWidget);
+      expect(find.byType(LoadFailedState), findsOneWidget);
+      expect(find.text('TRY AGAIN'), findsOneWidget);
     });
 
     testWidgets(
@@ -468,13 +478,11 @@ void main() {
         );
 
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Could not load meetups right now'), findsOneWidget);
-        expect(find.textContaining('on us, not you'), findsOneWidget);
-        expect(find.byIcon(Icons.wifi_off_outlined), findsNothing);
-        expect(find.textContaining('Check your connection'), findsNothing);
-        expect(find.text('RETRY'), findsOneWidget);
+        await _settlePastSkeletonHold(tester);
+        expect(find.text('Something went wrong on our side'), findsOneWidget);
+        expect(find.text('You look offline'), findsNothing);
+        expect(find.textContaining('Check your network'), findsNothing);
+        expect(find.text('TRY AGAIN'), findsOneWidget);
       },
     );
 
@@ -487,12 +495,12 @@ void main() {
         );
 
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
-        await tester.pumpAndSettle();
+        await _settlePastSkeletonHold(tester);
 
         final before = service.listOpenMeetupsCallCount;
         expect(before, greaterThanOrEqualTo(1));
 
-        await tester.tap(find.text('RETRY'));
+        await tester.tap(find.text('TRY AGAIN'));
         await tester.pumpAndSettle();
 
         // Not pinned to an exact count: Riverpod retries a failed provider
@@ -518,9 +526,9 @@ void main() {
         );
 
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
-        await tester.pumpAndSettle();
+        await _settlePastSkeletonHold(tester);
 
-        expect(find.text('Could not load meetups right now'), findsOneWidget);
+        expect(find.text('Something went wrong on our side'), findsOneWidget);
         expect(find.textContaining('12345'), findsNothing);
       },
     );

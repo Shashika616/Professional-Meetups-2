@@ -147,6 +147,7 @@ flutter:
     - assets/images/landing/
     - assets/images/schedule/
     - assets/images/review/
+    - assets/images/states/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

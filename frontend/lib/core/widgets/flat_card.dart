@@ -70,6 +70,24 @@ class FlatCard extends StatelessWidget {
     );
   }
 
+  /// Dark mode's depth cue. A drop shadow does not read against a
+  /// near-black ground, so a card is lifted the way a lit surface is: a
+  /// touch lighter along its top edge than at its bottom. Faint on
+  /// purpose; it is felt more than seen. Light mode keeps a flat fill and
+  /// lets the shadow do the work.
+  Gradient? get _lift {
+    if (AppPalette.isLight) return null;
+    final surface = _surface;
+    return LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        Color.alphaBlend(Colors.white.withValues(alpha: 0.035), surface),
+        surface,
+      ],
+    );
+  }
+
   List<BoxShadow>? get _shadow {
     // Dark mode: no shadow at any elevation. A drop shadow against a
     // near-black background is invisible, and faking it with a darker halo
@@ -92,11 +110,20 @@ class FlatCard extends StatelessWidget {
         ),
       ];
     }
+    // The ordinary card, light mode: a tight contact shadow and a soft,
+    // wider cast, so it sits ON the page rather than being drawn on it.
+    // Lighter than the elevated pair above, so the one card meant to be
+    // read first still stands out.
     return [
       BoxShadow(
-        color: Colors.black.withValues(alpha: 0.06),
-        blurRadius: 6,
+        color: Colors.black.withValues(alpha: 0.04),
+        blurRadius: 2,
         offset: const Offset(0, 1),
+      ),
+      BoxShadow(
+        color: Colors.black.withValues(alpha: 0.07),
+        blurRadius: 14,
+        offset: const Offset(0, 5),
       ),
     ];
   }
@@ -106,9 +133,14 @@ class FlatCard extends StatelessWidget {
     return RepaintBoundary(
       child: Container(
         padding: padding,
+        // Children are clipped to the card's corners: an accent bar down
+        // one edge, a picture, anything drawn to the edge stays inside
+        // the rounded outline instead of poking past the border.
+        clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(radius),
-          color: _surface,
+          color: _lift == null ? _surface : null,
+          gradient: _lift,
           border: Border.all(color: border ?? AppPalette.hairline, width: 1),
           // Light mode only — a solid near-white card has nothing but the
           // hairline border to separate it from AppBackground's equally

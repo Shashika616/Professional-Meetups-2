@@ -8,8 +8,9 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
-import 'package:professional_connections_platform/core/widgets/section_label.dart';
+import 'package:professional_connections_platform/core/widgets/section_heading.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
@@ -17,7 +18,7 @@ import 'package:professional_connections_platform/core/widgets/verification_badg
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
-import 'package:professional_connections_platform/features/premium/premium_page.dart';
+import 'package:professional_connections_platform/features/premium/premium_plans_page.dart';
 import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
 import 'package:professional_connections_platform/features/safety/safety_page.dart';
 import 'package:professional_connections_platform/features/verification/corporate_email_verification_page.dart';
@@ -54,9 +55,38 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     // response, cached in AuthSessionState (see backend/PLAN.md Step 3 /
     // frontend/PLAN.md Step 3). Null while the session is still loading or
     // if somehow unauthenticated; the block below falls back sensibly.
-    final profile = ref.watch(authSessionProvider).value?.profile;
+    final sessionAsync = ref.watch(authSessionProvider);
+    final profile = sessionAsync.value?.profile;
     final themeMode = ref.watch(themeModeProvider);
     final isLight = themeMode == AppThemeMode.light;
+
+    // Nothing to show yet: the page's own shape, shimmering, rather than a
+    // hero that says "Member" over empty rows. A failed session restore
+    // holds the skeleton a moment and then says so, with a way to retry.
+    if (profile == null && sessionAsync.isLoading) {
+      return const Scaffold(
+        backgroundColor: Colors.transparent,
+        body: _ProfileSkeleton(),
+      );
+    }
+    if (profile == null && sessionAsync.hasError) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SkeletonThenFailure(
+          skeleton: const _ProfileSkeleton(),
+          failure: SafeArea(
+            child: ListView(
+              children: [
+                LoadFailedState(
+                  failure: LoadFailure.of(sessionAsync.error),
+                  onRetry: () => ref.invalidate(authSessionProvider),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -410,7 +440,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             ),
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute<void>(builder: (context) => const PremiumPage()),
+        MaterialPageRoute<void>(builder: (context) => const PremiumPlansPage()),
       ),
     );
   }
@@ -421,7 +451,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SectionLabel(title),
+          SectionHeading(title),
           const SizedBox(height: 12),
           FlatCard(
             radius: 12,
@@ -1071,6 +1101,96 @@ class _RoundControl extends StatelessWidget {
           ],
         ),
         child: Icon(icon, size: 19, color: AppPalette.textPrimary),
+      ),
+    );
+  }
+}
+
+/// The profile's own shape as placeholders: the band with a circle and
+/// two lines, three stat boxes, then a card of four rows.
+class _ProfileSkeleton extends StatelessWidget {
+  const _ProfileSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final statusBar = MediaQuery.paddingOf(context).top;
+    return SkeletonLoader(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        physics: const NeverScrollableScrollPhysics(),
+        children: [
+          Container(
+            padding: EdgeInsets.fromLTRB(20, statusBar + 52, 20, 22),
+            decoration: BoxDecoration(
+              color: AppPalette.deepBlue,
+              borderRadius: const BorderRadius.vertical(
+                bottom: Radius.circular(32),
+              ),
+            ),
+            child: Column(
+              children: [
+                const SkeletonBox(width: 116, height: 116, radius: 58),
+                const SizedBox(height: 18),
+                const SkeletonBox(width: 180, height: 22, opacity: 0.1),
+                const SizedBox(height: 10),
+                const SkeletonBox(width: 120, height: 13),
+                const SizedBox(height: 26),
+                Row(
+                  children: [
+                    for (var i = 0; i < 3; i++) ...[
+                      if (i > 0) const SizedBox(width: 12),
+                      const Expanded(
+                        child: SkeletonBox(
+                          width: double.infinity,
+                          height: 68,
+                          radius: 16,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20),
+            child: SkeletonBox(width: 110, height: 11),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: FlatCard(
+              radius: 12,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  for (var i = 0; i < 4; i++)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: i == 3 ? 0 : 18),
+                      child: const Row(
+                        children: [
+                          SkeletonBox(width: 40, height: 40, radius: 12),
+                          SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                SkeletonBox(width: 120, height: 13),
+                                SizedBox(height: 6),
+                                SkeletonBox(width: 80, height: 11),
+                              ],
+                            ),
+                          ),
+                          SkeletonBox(width: 22, height: 22, radius: 11),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

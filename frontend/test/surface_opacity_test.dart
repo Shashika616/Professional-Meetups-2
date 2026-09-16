@@ -24,10 +24,18 @@ import 'package:professional_connections_platform/features/home/widgets/intent_f
 void main() {
   tearDown(() => AppPalette.setMode(AppThemeMode.dark));
 
+  /// The card's fill. In dark mode FlatCard paints it as a two-stop
+  /// gradient (a faint top highlight over the surface colour); its bottom
+  /// stop is the surface itself, and the opacity contract applies to both.
   Color fillOf(WidgetTester tester, Finder container) {
     final decoration =
         tester.widget<Container>(container).decoration! as BoxDecoration;
-    return decoration.color!;
+    if (decoration.color case final color?) return color;
+    final gradient = decoration.gradient! as LinearGradient;
+    for (final stop in gradient.colors) {
+      expect(stop.a, 1.0, reason: 'every stop of the lift is opaque');
+    }
+    return gradient.colors.last;
   }
 
   for (final mode in AppThemeMode.values) {

@@ -60,8 +60,15 @@ class _ScheduleConflictSheet extends StatelessWidget {
         ? 'withdraw from it'
         : 'cancel that request';
 
+    // Bottom inset by hand: showModalBottomSheet's useSafeArea covers the
+    // top only, and a three-button navigation bar would sit over I'LL WAIT.
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        10,
+        20,
+        16 + MediaQuery.viewPaddingOf(context).bottom,
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

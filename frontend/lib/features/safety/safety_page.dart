@@ -10,7 +10,10 @@ import 'package:professional_connections_platform/core/utils/location.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
-import 'package:professional_connections_platform/core/widgets/section_label.dart';
+import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
+import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
+import 'package:professional_connections_platform/core/widgets/section_heading.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/features/safety/manage_trusted_contacts_page.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
@@ -97,7 +100,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SectionLabel('PRE MEETUP CHECKLIST'),
+                const SectionHeading('PRE MEETUP CHECKLIST'),
                 const SizedBox(height: 12),
                 // One scrolling column rather than a ListView of checklist
                 // items alone: the trusted-contacts section below has to share
@@ -138,7 +141,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
                           ),
                         ),
                       const SizedBox(height: 14),
-                      const SectionLabel('TRUSTED CONTACTS'),
+                      const SectionHeading('TRUSTED CONTACTS'),
                       const SizedBox(height: 12),
                       _TrustedContactsSection(trustLevel: trustLevel),
                     ],
@@ -319,24 +322,24 @@ class _TrustedContactsSection extends ConsumerWidget {
 
     final contactsAsync = ref.watch(trustedContactsProvider);
     return contactsAsync.when(
-      // Neither a skeleton nor an error state here: this is supporting
-      // detail under a checklist, and the section collapsing to a spinner
-      // or a red message would be louder than the thing it supports.
+      // A skeleton in the shape of the rows it stands in for, inside the
+      // same card, so the section keeps its size while it loads. On a
+      // failure the skeleton holds a moment, then the card says so in the
+      // app's one failure style, still tappable through to manage.
       loading: () => _ContactsCard(
         onTap: () => _openManage(context, ref),
-        children: [
-          _ContactsHint(
-            icon: Icons.people_outline_rounded,
-            text: 'Loading your trusted contacts…',
-          ),
-        ],
+        children: const [_ContactsSkeletonRows()],
       ),
-      error: (_, _) => _ContactsCard(
+      error: (error, _) => _ContactsCard(
         onTap: () => _openManage(context, ref),
         children: [
-          _ContactsHint(
-            icon: Icons.people_outline_rounded,
-            text: 'Tap to manage your trusted contacts.',
+          SkeletonThenFailure(
+            skeleton: const _ContactsSkeletonRows(),
+            failure: LoadFailedState(
+              compact: true,
+              failure: LoadFailure.of(error),
+              onRetry: () => ref.invalidate(trustedContactsProvider),
+            ),
           ),
         ],
       ),
@@ -682,5 +685,36 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
           ),
         ];
     }
+  }
+}
+
+/// Two placeholder contact rows, shimmering, for the card while the list
+/// loads or (briefly) after it failed.
+class _ContactsSkeletonRows extends StatelessWidget {
+  const _ContactsSkeletonRows();
+
+  @override
+  Widget build(BuildContext context) {
+    return SkeletonLoader(
+      child: Column(
+        children: [
+          for (var i = 0; i < 2; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                children: const [
+                  SkeletonBox(width: 17, height: 17, radius: 9),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: SkeletonBox(width: double.infinity, height: 12),
+                  ),
+                  SizedBox(width: 24),
+                  SkeletonBox(width: 60, height: 10),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }

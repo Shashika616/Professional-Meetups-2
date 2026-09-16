@@ -8,8 +8,8 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
-import 'package:professional_connections_platform/core/widgets/primary_button.dart';
-import 'package:professional_connections_platform/core/widgets/section_label.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
+import 'package:professional_connections_platform/core/widgets/section_heading.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 
@@ -96,19 +96,26 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
     }
 
     if (_error != null) {
-      return _CentredMessage(
-        icon: Icons.cloud_off_rounded,
-        title: "Couldn't load your notifications.",
-        action: PrimaryButton(
-          label: 'TRY AGAIN',
-          height: 44,
-          onPressed: () {
-            setState(() {
-              _loading = true;
-              _error = null;
-            });
-            _load();
-          },
+      return SkeletonThenFailure(
+        skeleton: const SingleChildScrollView(
+          physics: AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(20, 4, 20, 32),
+          child: SkeletonLoader(child: _NotificationsSkeleton()),
+        ),
+        failure: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            LoadFailedState(
+              failure: LoadFailure.of(_error),
+              onRetry: () {
+                setState(() {
+                  _loading = true;
+                  _error = null;
+                });
+                _load();
+              },
+            ),
+          ],
         ),
       );
     }
@@ -142,7 +149,7 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (index > 0) const SizedBox(height: 22),
-            SectionLabel(group.label),
+            SectionHeading(group.label),
             const SizedBox(height: 12),
             for (final notification in group.notifications)
               Padding(
@@ -302,37 +309,6 @@ class _NotificationRow extends StatelessWidget {
 @visibleForTesting
 String formatNotificationTime(DateTime value) =>
     '${_two(value.hour)}:${_two(value.minute)}';
-
-class _CentredMessage extends StatelessWidget {
-  const _CentredMessage({required this.icon, required this.title, this.action});
-
-  final IconData icon;
-  final String title;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    // Scrollable so pull-to-refresh still works with nothing in the list.
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(32, 120, 32, 32),
-      children: [
-        Icon(icon, size: 42, color: AppPalette.textSecondary),
-        const SizedBox(height: 14),
-        Text(
-          title,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: AppPalette.textPrimary,
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        if (action != null) ...[const SizedBox(height: 20), action!],
-      ],
-    );
-  }
-}
 
 class _NotificationsSkeleton extends StatelessWidget {
   const _NotificationsSkeleton();

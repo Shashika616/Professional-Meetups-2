@@ -10,7 +10,7 @@ import 'package:professional_connections_platform/core/widgets/ambient_animation
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_role_chips.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
-import 'package:professional_connections_platform/core/widgets/section_label.dart';
+import 'package:professional_connections_platform/core/widgets/section_heading.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/review/meetup_review_page.dart';
 
@@ -123,7 +123,7 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (cancelled.isNotEmpty) ...[
-            const SectionLabel('CANCELLED'),
+            const SectionHeading('CANCELLED'),
             const SizedBox(height: 16),
             for (final m in cancelled) ...[
               _ReviewInvitationCard(meetup: m),
@@ -132,13 +132,13 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
             const SizedBox(height: 12),
           ],
           if (happeningNow.isNotEmpty) ...[
-            const SectionLabel('HAPPENING NOW'),
+            const SectionHeading('HAPPENING NOW'),
             const SizedBox(height: 16),
             _PersistentMeetupCardSet(meetups: happeningNow),
             const SizedBox(height: 24),
           ],
           if (waitingReview.isNotEmpty) ...[
-            const SectionLabel('WAITING FOR YOUR REVIEW'),
+            const SectionHeading('WAITING FOR YOUR REVIEW'),
             const SizedBox(height: 16),
             _PersistentMeetupCardSet(meetups: waitingReview),
             const SizedBox(height: 24),
@@ -147,7 +147,7 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
           // meetup has its card above; repeating it here as a greyed row
           // made the list read as a history it is not.
           if (live.isNotEmpty) ...[
-            const SectionLabel('ACTIVE MEETUPS'),
+            const SectionHeading('ACTIVE MEETUPS'),
             const SizedBox(height: 16),
             // Deliberately `Column`/`.map`, not `ListView.builder` (2026-08-31
             // round-3 hardening, Fix 2 — see frontend/round-3-performance-
@@ -241,11 +241,14 @@ class _PersistentMeetupCardSetState extends State<_PersistentMeetupCardSet> {
             Positioned.fill(
               child: PageView.builder(
                 controller: _controller,
+                // A PageView clips its pages to its own rectangle, which cut
+                // the card's soft cast shadow into a hard-edged grey block
+                // under the card. Letting it paint outside its bounds keeps
+                // the shadow the same as every other card's.
+                clipBehavior: Clip.none,
                 onPageChanged: (index) => setState(() => _page = index),
                 itemCount: widget.meetups.length,
                 itemBuilder: (context, index) => Padding(
-                  // Room for the elevated card's cast shadow, which would
-                  // otherwise be clipped by the PageView's own bounds.
                   padding: const EdgeInsets.fromLTRB(2, 2, 2, 10),
                   child: _PersistentMeetupCard(meetup: widget.meetups[index]),
                 ),
@@ -362,16 +365,11 @@ class _PersistentMeetupCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // The accent, as a bar rather than a tint over the whole card.
-              Container(
-                width: 4,
-                decoration: BoxDecoration(
-                  color: AppPalette.candyBlue,
-                  borderRadius: const BorderRadius.horizontal(
-                    left: Radius.circular(14),
-                  ),
-                ),
-              ),
+              // The accent, as a bar rather than a tint over the whole
+              // card. A plain rectangle: FlatCard clips it to the card's
+              // corners, and a radius of its own on a 4px bar rounded it
+              // into a pill that pulled away from the corner.
+              Container(width: 4, color: AppPalette.candyBlue),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
@@ -810,15 +808,8 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                width: 4,
-                decoration: BoxDecoration(
-                  color: tone,
-                  borderRadius: const BorderRadius.horizontal(
-                    left: Radius.circular(14),
-                  ),
-                ),
-              ),
+              // A plain rectangle, clipped by the card (see the live card).
+              Container(width: 4, color: tone),
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),

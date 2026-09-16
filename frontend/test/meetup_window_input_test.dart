@@ -63,19 +63,22 @@ void main() {
       expect(r.end, DateTime(2026, 9, 11, 17, 0));
     });
 
-    test('00 after 23 is the next day: 22:00 - 01:00 ends tomorrow at 01:00', () {
-      final r = resolveMeetupWindow(
-        date: today,
-        from: const TimeOfDay(hour: 22, minute: 0),
-        to: const TimeOfDay(hour: 1, minute: 0),
-        now: now,
-      );
-      expect(r.isValid, isTrue);
-      expect(r.endsNextDay, isTrue);
-      expect(r.start, DateTime(2026, 9, 11, 22, 0));
-      expect(r.end, DateTime(2026, 9, 12, 1, 0));
-      expect(r.end.isAfter(r.start), isTrue);
-    });
+    test(
+      '00 after 23 is the next day: 22:00 - 01:00 ends tomorrow at 01:00',
+      () {
+        final r = resolveMeetupWindow(
+          date: today,
+          from: const TimeOfDay(hour: 22, minute: 0),
+          to: const TimeOfDay(hour: 1, minute: 0),
+          now: now,
+        );
+        expect(r.isValid, isTrue);
+        expect(r.endsNextDay, isTrue);
+        expect(r.start, DateTime(2026, 9, 11, 22, 0));
+        expect(r.end, DateTime(2026, 9, 12, 1, 0));
+        expect(r.end.isAfter(r.start), isTrue);
+      },
+    );
 
     test(
       'an end at 00:00 exactly is midnight tonight, i.e. tomorrow 00:00',

@@ -62,7 +62,7 @@ class IntentFilterBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: options.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
+        separatorBuilder: (context, index) => const SizedBox(width: 14),
         itemBuilder: (context, index) {
           final intent = options[index];
           final isSelected = intent == selected;
@@ -86,10 +86,11 @@ class IntentFilterBar extends StatelessWidget {
   }
 }
 
-/// A compact pill. Deliberately flat — a thin border and a faint tint for the
-/// selected state, no gradient or glow — matching how LinkedIn/Meetup/
-/// Eventbrite present a category filter row, where the chips are navigation
-/// furniture rather than the content.
+/// One tab: the icon in front of the word, and a short bar under the
+/// chosen one in the accent colour. Text tabs rather than pills, the way
+/// a shop's category row reads: the words are navigation, not buttons, so
+/// they carry no box of their own. The bar is what says which is on. A
+/// locked intent is dimmed with its lock in place of its icon.
 class _FilterChip extends StatelessWidget {
   const _FilterChip({
     super.key,
@@ -108,47 +109,45 @@ class _FilterChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = AppPalette.brandGreen;
     final foreground = locked
-        ? AppPalette.textSecondary
-        : (selected ? AppPalette.candyBlue : AppPalette.textPrimary);
+        ? AppPalette.textSecondary.withValues(alpha: 0.7)
+        : (selected ? accent : AppPalette.textSecondary);
 
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          // Opaque, and derived from the theme.
-          //
-          // The unselected fill was a hardcoded `Colors.white` at 4% — which
-          // in dark mode was a barely-there wash of the background photo,
-          // and in light mode was 4% white on an almost-white page, i.e.
-          // invisible. Either way the chip read as a translucent smear
-          // rather than a control. Both states now sit on the real card
-          // surface, with the selected one tinted onto it.
-          color: selected
-              ? AppPalette.tintedSurface(
-                  AppPalette.candyBlue.withValues(alpha: 0.12),
-                )
-              : AppPalette.card,
-          border: Border.all(
-            color: selected
-                ? AppPalette.candyBlue.withValues(alpha: 0.55)
-                : AppPalette.hairline,
-          ),
-        ),
-        child: Row(
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: foreground),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
-                color: foreground,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 15, color: foreground),
+                const SizedBox(width: 6),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                    letterSpacing: 0.6,
+                    color: foreground,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              height: 3,
+              width: selected ? 28 : 0,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
           ],

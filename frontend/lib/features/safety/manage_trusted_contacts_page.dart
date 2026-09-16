@@ -11,6 +11,7 @@ import 'package:professional_connections_platform/core/validation/validators.dar
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
@@ -92,8 +93,18 @@ class _ManageTrustedContactsPageState
                 Expanded(
                   child: contactsAsync.when(
                     loading: () => const _ContactsSkeleton(),
-                    error: (error, stack) => _ErrorState(
-                      onRetry: () => ref.invalidate(trustedContactsProvider),
+                    error: (error, stack) => SkeletonThenFailure(
+                      skeleton: const _ContactsSkeleton(),
+                      failure: ListView(
+                        children: [
+                          LoadFailedState(
+                            compact: true,
+                            failure: LoadFailure.of(error),
+                            onRetry: () =>
+                                ref.invalidate(trustedContactsProvider),
+                          ),
+                        ],
+                      ),
                     ),
                     data: (contacts) => _ContactsList(
                       contacts: contacts,
@@ -464,39 +475,6 @@ class _ContactsSkeleton extends StatelessWidget {
         (index) => const Padding(
           padding: EdgeInsets.only(bottom: 10),
           child: SkeletonBox(width: double.infinity, height: 64, radius: 16),
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.onRetry});
-
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: FlatCard(
-        radius: 12,
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.wifi_off_outlined,
-              color: AppPalette.textSecondary,
-              size: 28,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Could not load your trusted contacts.',
-              style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            SecondaryButton(label: 'RETRY', onPressed: onRetry, height: 40),
-          ],
         ),
       ),
     );

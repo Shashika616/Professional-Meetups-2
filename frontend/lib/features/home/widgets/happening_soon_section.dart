@@ -13,11 +13,12 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
-import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
+import 'package:professional_connections_platform/core/widgets/faded_picture.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
-import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
+import 'package:professional_connections_platform/core/widgets/section_heading.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/core/widgets/slow_load_notice.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
@@ -169,7 +170,7 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
       children: [
         const Padding(
           padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
-          child: SectionLabel('HAPPENING SOON'),
+          child: SectionHeading('HAPPENING SOON'),
         ),
         const SizedBox(height: 10),
         // Directly under the heading it belongs to, and above every body
@@ -260,9 +261,25 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
 
         if (page == null) {
           if (meetupsAsync.error case final error?) {
-            return _ErrorState(
-              error: error,
-              onRetry: () => ref.invalidate(openMeetupsProvider(key)),
+            // The skeleton stays a moment, then the failure, with the
+            // picture every failed load in the app shares.
+            return SkeletonThenFailure(
+              skeleton: const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: MeetupsSkeleton(shrinkWrap: true),
+              ),
+              failure: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                child: FlatCard(
+                  radius: 16,
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: LoadFailedState(
+                    compact: true,
+                    failure: LoadFailure.of(error),
+                    onRetry: () => ref.invalidate(openMeetupsProvider(key)),
+                  ),
+                ),
+              ),
             );
           }
           // A genuine FIRST load, with nothing to hold on to. The notice
@@ -449,115 +466,36 @@ class _LocationBlockedState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The app's one failure look, with the location's own sentence and the
+    // way to fix it first: settings is the only thing that resolves a
+    // denied permission or a disabled service, so it takes the button and
+    // TRY AGAIN follows.
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
       child: FlatCard(
-        radius: 12,
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.location_off_outlined,
-              color: AppPalette.textSecondary,
-              size: 28,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Turn on location to see meetups near you',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppPalette.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              reason.message,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 16),
-            PrimaryButton(
-              label: 'OPEN LOCATION SETTINGS',
+        radius: 16,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: LoadFailedState(
+          compact: true,
+          failure: LoadFailure(
+            LoadFailureKind.location,
+            'Turn on location to see meetups near you',
+            reason.message,
+          ),
+          retryLabel: 'OPEN LOCATION SETTINGS',
+          retryIcon: Icons.settings_outlined,
+          onRetry: () =>
+              reason.reason == LocationUnavailableReason.permissionDenied
+              ? Geolocator.openAppSettings()
+              : Geolocator.openLocationSettings(),
+          extraAction: SizedBox(
+            width: 200,
+            child: SecondaryButton(
+              label: 'TRY AGAIN',
               height: 42,
-              onPressed: () =>
-                  reason.reason == LocationUnavailableReason.permissionDenied
-                  ? Geolocator.openAppSettings()
-                  : Geolocator.openLocationSettings(),
+              onPressed: onRetry,
             ),
-            const SizedBox(height: 8),
-            SecondaryButton(label: 'TRY AGAIN', height: 42, onPressed: onRetry),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Shown when the fetch FAILED — never when it succeeded and returned
-/// nothing. That case is [_NoMeetupsYet], and conflating the two tells a
-/// user their connection is broken when the truth is that their area is
-/// quiet this week.
-///
-/// The connectivity copy is reserved for [MeetupOfflineException], the one
-/// error type that actually means the request never left the device. A 500,
-/// a 400 or a malformed body all reached the server, so blaming the user's
-/// network for them would send them to go restart their router over a
-/// problem on our side.
-class _ErrorState extends StatelessWidget {
-  const _ErrorState({required this.error, required this.onRetry});
-
-  final Object error;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    // The offline exception's own sentence: "no connection" and "too slow"
-    // are different situations with different fixes, and the service
-    // already told them apart. (A field, not a local, does not promote on
-    // an `is` check, hence the pattern.)
-    final offline = error is MeetupOfflineException;
-    final offlineDetail = switch (error) {
-      MeetupOfflineException e => e.message,
-      _ => 'This one is on us, not you. Please try again in a moment.',
-    };
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-      child: FlatCard(
-        radius: 12,
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              offline ? Icons.wifi_off_outlined : Icons.error_outline_rounded,
-              color: AppPalette.textSecondary,
-              size: 26,
-            ),
-            const SizedBox(height: 10),
-            Text(
-              offline
-                  ? 'Connection problem'
-                  : 'Could not load meetups right now',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppPalette.textPrimary,
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              offlineDetail,
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-            ),
-            const SizedBox(height: 14),
-            PrimaryButton(label: 'RETRY', height: 40, onPressed: onRetry),
-          ],
+          ),
         ),
       ),
     );
@@ -588,14 +526,35 @@ class _NoMeetupsYet extends StatelessWidget {
 
     return FlatCard(
       radius: 16,
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
-      child: EmptyStateDeck(
-        compact: true,
-        title: 'No $scope near you this week',
-        message:
-            'Be the first to put one on the calendar, or check back soon. '
-            'New meetups appear here as soon as someone nearby schedules one.',
-        scenes: EmptyDeckScenes.meetups,
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
+      child: Column(
+        children: [
+          const FadedPicture(
+            asset: 'assets/images/states/no_meetups_soon.jpg',
+            height: 150,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'No $scope near you this week',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: AppPalette.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Host one and let people come to you, or stay ready to join '
+            'the moment someone nearby posts one.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.45,
+              color: AppPalette.textSecondary,
+            ),
+          ),
+        ],
       ),
     );
   }

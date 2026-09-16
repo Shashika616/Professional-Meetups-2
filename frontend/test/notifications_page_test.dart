@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
+
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
@@ -122,12 +124,15 @@ void main() {
 
     await tester.pumpWidget(_appWith(service));
     await tester.pumpAndSettle();
+    // The skeleton is held for a moment after the failure lands.
+    await tester.pump(const Duration(milliseconds: 1400));
+    await tester.pumpAndSettle();
 
-    expect(find.textContaining("Couldn't load"), findsOneWidget);
+    expect(find.byType(LoadFailedState), findsOneWidget);
     expect(find.text('TRY AGAIN'), findsOneWidget);
     // The empty state must not be shown for a failure — they mean different
     // things and only one of them is the user's fault to wait out.
-    expect(find.text('Nothing yet.'), findsNothing);
+    expect(find.text('All quiet for now'), findsNothing);
 
     service.notificationsError = null;
     service.notifications = [_notification(createdAt: DateTime.now())];

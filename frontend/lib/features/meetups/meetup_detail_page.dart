@@ -9,6 +9,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/schedule_conflict_sheet.dart';
@@ -44,7 +45,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   Meetup? _meetup;
   SafetyState? _safetyState;
   bool _loading = true;
-  String? _loadError;
+  Object? _loadError;
 
   /// Set once the viewer confirms (SubmitMeetupFeedback, happened=true)
   /// that this meetup happened — one of three triggers for mounting
@@ -110,9 +111,9 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     } catch (error) {
       if (!mounted) return;
       setState(() {
-        _loadError = error is MeetupException
-            ? error.message
-            : 'Something went wrong. Please try again.';
+        // The error itself, so the failure state can tell offline from
+        // the rest.
+        _loadError = error;
         _loading = false;
       });
     }
@@ -422,10 +423,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
           child: _loading
               ? const _MeetupDetailSkeleton()
               : _loadError != null
-              ? Center(
-                  child: Text(
-                    _loadError!,
-                    style: TextStyle(color: AppPalette.textSecondary),
+              ? SkeletonThenFailure(
+                  skeleton: const _MeetupDetailSkeleton(),
+                  failure: ListView(
+                    children: [
+                      LoadFailedState(
+                        failure: LoadFailure.of(_loadError),
+                        onRetry: _load,
+                      ),
+                    ],
                   ),
                 )
               : _buildContent(context, _meetup!),

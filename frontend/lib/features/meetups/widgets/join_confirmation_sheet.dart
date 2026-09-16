@@ -121,9 +121,17 @@ class _JoinConfirmationSheetState
               ),
             ),
             // Pinned below the scroll so it is reachable without reading to
-            // the end — the sheet's one action.
+            // the end — the sheet's one action. The bottom inset is added
+            // by hand: showModalBottomSheet's useSafeArea covers the top
+            // only, and on phones with a three-button navigation bar the
+            // NOT NOW link sat underneath it.
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 16),
+              padding: EdgeInsets.fromLTRB(
+                20,
+                10,
+                20,
+                16 + MediaQuery.viewPaddingOf(context).bottom,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [

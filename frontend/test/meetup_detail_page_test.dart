@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
+
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -691,10 +693,7 @@ void main() {
         expect(find.text('CHECK IN'), findsNothing);
         // The page itself still loaded fine — Forbidden on the safety
         // fetch alone must not surface as a page-level load error.
-        expect(
-          find.text('Something went wrong. Please try again.'),
-          findsNothing,
-        );
+        expect(find.byType(LoadFailedState), findsNothing);
       },
     );
   });
