@@ -16,6 +16,10 @@ import 'package:professional_connections_platform/core/widgets/primary_button.da
 /// Shape follows the reference: a headline, one brand-coloured card for
 /// the featured plan with its perks listed inside a white inset, a
 /// monthly/annual choice as two rows, and the one button at the bottom.
+/// Every price on this page until billing is wired: the amounts are not
+/// decided, and a made-up number in a screenshot becomes a promise.
+const _pricePlaceholder = 'Rs xxxx';
+
 class PremiumPlansPage extends StatefulWidget {
   const PremiumPlansPage({super.key});
 
@@ -99,7 +103,7 @@ class _PremiumPlansPageState extends State<PremiumPlansPage> {
                     const SizedBox(height: 16),
                     _BillingRow(
                       label: 'Monthly',
-                      price: 'Rs 1,490',
+                      price: _pricePlaceholder,
                       trailing: 'Billed monthly',
                       selected: _billing == _Billing.monthly,
                       onTap: () => setState(() => _billing = _Billing.monthly),
@@ -107,7 +111,7 @@ class _PremiumPlansPageState extends State<PremiumPlansPage> {
                     const SizedBox(height: 10),
                     _BillingRow(
                       label: 'Annual',
-                      price: 'Rs 12,900',
+                      price: _pricePlaceholder,
                       trailing: 'Popular',
                       trailingIsBadge: true,
                       selected: _billing == _Billing.annual,
@@ -182,9 +186,13 @@ class _FeaturedPlanCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                const _Price(amount: 'Rs 1,075', period: '/month', large: true),
+                const _Price(
+                  amount: _pricePlaceholder,
+                  period: '/month',
+                  large: true,
+                ),
                 const Spacer(),
-                const _Price(amount: 'Rs 12,900', period: '/year'),
+                const _Price(amount: _pricePlaceholder, period: '/year'),
               ],
             ),
             const SizedBox(height: 18),
