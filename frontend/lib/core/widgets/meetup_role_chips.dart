@@ -82,10 +82,12 @@ class MeetupRoleChips extends StatelessWidget {
             Icons.hourglass_top_rounded,
             AppPalette.gold,
           ),
+          // Never "rejected" or "declined" where the requester reads it.
+          // A muted tone: it is a fact about fit, not a fault to flag.
           MeetupRequestStatus.rejected => (
-            'NOT SELECTED',
-            Icons.cancel_rounded,
-            AppPalette.danger,
+            'NOT THIS TIME',
+            Icons.explore_outlined,
+            AppPalette.textSecondary,
           ),
           MeetupRequestStatus.withdrawn => (
             'WITHDRAWN',

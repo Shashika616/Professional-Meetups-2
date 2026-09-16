@@ -580,8 +580,12 @@ void main() {
       await tester.tap(find.text('Requested Meetings'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('NOT SELECTED'), findsOneWidget);
-      expect(find.text('DECLINED BY HOST'), findsOneWidget);
+      // Both outcomes read as timing to the requester; neither says
+      // rejected or declined.
+      expect(find.text('FILLED UP BEFORE YOUR TURN'), findsOneWidget);
+      expect(find.text('NOT THIS TIME'), findsOneWidget);
+      expect(find.textContaining('DECLINED'), findsNothing);
+      expect(find.textContaining('REJECTED'), findsNothing);
     },
   );
 

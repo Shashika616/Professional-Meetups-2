@@ -202,7 +202,7 @@ func TestTrigger_AcceptRequest_NotifiesRequesterTwice_Integration(t *testing.T) 
 	assertNotified(t, h, "Review your safety checklist", map[string]string{f.requester: "the requester"})
 }
 
-// Row 5: RespondToRequest(reject) -> requester, "Request declined".
+// Row 5: RespondToRequest(reject) -> requester, "Not this time".
 func TestTrigger_RejectRequest_NotifiesRequester_Integration(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -220,7 +220,7 @@ func TestTrigger_RejectRequest_NotifiesRequester_Integration(t *testing.T) {
 		t.Fatalf("RespondToRequest(reject): %v", err)
 	}
 
-	assertNotified(t, h, "Request declined", map[string]string{f.requester: "the requester"})
+	assertNotified(t, h, "Not this time", map[string]string{f.requester: "the requester"})
 }
 
 // Row 6: auto-reject on capacity -> each auto-rejected requester, "Meetup is
@@ -246,7 +246,7 @@ func TestTrigger_AutoRejectOnCapacity_NotifiesEachRejectedRequester_Integration(
 		t.Fatalf("RespondToRequest(accept): %v", err)
 	}
 
-	assertNotified(t, h, "Meetup is full", map[string]string{f.other: "the auto-rejected requester"})
+	assertNotified(t, h, "That one filled up fast", map[string]string{f.other: "the auto-rejected requester"})
 	// And the accepted one still gets their own notifications, not the
 	// capacity notice.
 	assertNotified(t, h, "Request accepted", map[string]string{f.requester: "the accepted requester"})

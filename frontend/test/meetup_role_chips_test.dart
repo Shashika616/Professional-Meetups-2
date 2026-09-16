@@ -117,7 +117,9 @@ void main() {
           concluded: true,
         ),
       );
-      expect(find.text('NOT SELECTED'), findsOneWidget);
+      // Never "rejected" where the requester reads it.
+      expect(find.text('NOT THIS TIME'), findsOneWidget);
+      expect(find.textContaining('REJECTED'), findsNothing);
     });
   });
 }

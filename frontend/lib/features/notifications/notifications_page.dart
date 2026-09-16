@@ -218,9 +218,11 @@ class _NotificationRow extends StatelessWidget {
   (IconData, Color) _glyph() => switch (notification.type) {
     'join_request' => (Icons.person_add_alt_1_rounded, AppPalette.candyBlue),
     'request_accepted' => (Icons.check_circle_rounded, AppPalette.verified),
+    // A "not this time" is pointed forward (a compass), not marked with a
+    // red cross: the row should read as a nudge to look around.
     'request_declined' ||
+    'meetup_full' => (Icons.explore_outlined, AppPalette.candyBlue),
     'meetup_cancelled' ||
-    'meetup_full' ||
     'participant_declined' => (Icons.cancel_rounded, AppPalette.danger),
     'request_withdrawn' => (Icons.undo_rounded, AppPalette.textSecondary),
     'meetup_closed' => (Icons.auto_awesome_rounded, AppPalette.gold),

@@ -159,9 +159,13 @@ class _AppShellState extends ConsumerState<AppShell>
     switch (type) {
       case 'request_accepted':
         return ToastType.success;
+      // A turned-down or missed-out requester gets calm blue, not red: the
+      // server copy already reframes it as "not this time, here is what is
+      // next", and a red banner would undo that in the first half second.
       case 'request_declined':
-      case 'meetup_cancelled':
       case 'meetup_full':
+        return ToastType.info;
+      case 'meetup_cancelled':
       case 'participant_declined':
         return ToastType.error;
       default:

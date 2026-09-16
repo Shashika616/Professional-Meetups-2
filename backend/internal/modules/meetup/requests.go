@@ -198,8 +198,8 @@ func (s *service) acceptRequest(ctx context.Context, requestID string, m reposit
 			for _, rejected := range autoRejected {
 				if err := queueNotification(ctx, tx, rejected.RequesterID,
 					TypeMeetupFull,
-					"Meetup is full",
-					fmt.Sprintf("This %s meetup reached capacity before your request was accepted", Intent(m.Intent).DisplayName()),
+					"That one filled up fast",
+					fmt.Sprintf("The %s meetup filled up before your turn. More are happening near you, and new ones every day.", Intent(m.Intent).DisplayName()),
 					map[string]string{"meetup_id": m.ID, "request_id": rejected.ID},
 				); err != nil {
 					return err
@@ -229,13 +229,19 @@ func (s *service) acceptRequest(ctx context.Context, requestID string, m reposit
 	return requestFromRepo(full), nil
 }
 
+// The requester is told "not this time", never "declined" or "rejected":
+// a host turning down a stranger is a fit decision about a small group,
+// and the word the requester reads is the word they carry. The copy names
+// the meetup, not the host's choice, and points at what is next. The
+// client's own labels (frontend meetup_role_chips, meetup_card,
+// meetup_detail_page) follow the same rule.
 func (s *service) rejectRequest(ctx context.Context, requestID string, m repository.Meetup) (MeetupRequest, error) {
 	rejected, err := s.requests.Reject(ctx, requestID, m.HostUserID,
 		func(ctx context.Context, tx repository.NotifyTx, rejected repository.MeetupRequest) error {
 			return queueNotification(ctx, tx, rejected.RequesterID,
 				TypeRequestDeclined,
-				"Request declined",
-				fmt.Sprintf("The host declined your request to join their %s meetup", Intent(m.Intent).DisplayName()),
+				"Not this time",
+				fmt.Sprintf("The %s meetup was not the right fit this round. More are happening near you, and new ones every day.", Intent(m.Intent).DisplayName()),
 				map[string]string{"meetup_id": m.ID, "request_id": rejected.ID},
 			)
 		})

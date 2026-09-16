@@ -77,6 +77,10 @@ Product rules that are easy to trip over while testing (each has an ADR in
 - **Sign-out is local first** (ADR-005). The session is cleared at once; one
   background `POST /v1/auth/logout` (refresh token + FCM token + bearer)
   revokes the session and drops the device's push registration.
+- **A turned-down request reads as NOT THIS TIME** (ADR-006). Nothing the
+  requester sees says rejected or declined; the meetup page explains it as
+  fit and lists other meetups nearby. The host's REJECT button and REJECTED
+  tab keep their names. The `rejected` wire status is unchanged.
 - **The `lunch` intent is shown as MEAL** with the sitting named from the
   local start hour (breakfast / lunch / evening meal / dinner / late-night
   meal). The wire value stays `lunch`.

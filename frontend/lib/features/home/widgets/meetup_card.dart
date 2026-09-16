@@ -185,7 +185,7 @@ class MeetupCard extends StatelessWidget {
                                         MeetupRequestStatus.accepted =>
                                           Icons.check_circle_rounded,
                                         MeetupRequestStatus.rejected =>
-                                          Icons.cancel_rounded,
+                                          Icons.explore_outlined,
                                         MeetupRequestStatus.withdrawn =>
                                           Icons.undo_rounded,
                                       },
@@ -195,7 +195,7 @@ class MeetupCard extends StatelessWidget {
                                         MeetupRequestStatus.accepted =>
                                           'YOU\'RE IN',
                                         MeetupRequestStatus.rejected =>
-                                          'REQUEST DECLINED',
+                                          'NOT THIS TIME',
                                         MeetupRequestStatus.withdrawn =>
                                           'WITHDRAWN',
                                       },
@@ -542,7 +542,9 @@ class _StatusChip extends StatelessWidget {
       _StatusTone.host => AppPalette.brandGreen,
       _StatusTone.pending => AppPalette.gold,
       _StatusTone.accepted => AppPalette.verified,
-      _StatusTone.declined => AppPalette.danger,
+      // Calm, not alarmed: the requester was not picked for a small
+      // group, and the card should not look like something went wrong.
+      _StatusTone.declined => AppPalette.textSecondary,
       _StatusTone.muted => AppPalette.textSecondary,
     };
     return Container(

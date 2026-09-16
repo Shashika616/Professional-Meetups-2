@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/other_meetups_nearby.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/schedule_conflict_sheet.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -660,6 +661,21 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
             _buildJoinAction(context, meetup)
           else if (!meetup.isHostedByMe && meetup.myRequestStatus != null) ...[
             _RequestStatusBanner(status: meetup.myRequestStatus!),
+            // A turned-down requester is handed the next step on the same
+            // screen, before the page can read as a dead end. Only while
+            // the meetup is still ahead: for a finished one there is
+            // nothing to redirect from.
+            if (meetup.myRequestStatus == MeetupRequestStatus.rejected) ...[
+              const SizedBox(height: 20),
+              OtherMeetupsNearby(
+                excludeMeetupId: meetup.id,
+                onOpen: (other) => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => MeetupDetailPage(meetupId: other.id),
+                  ),
+                ),
+              ),
+            ],
             if (_canWithdraw(meetup)) ...[
               const SizedBox(height: 10),
               // Before the host answers, taking the request back is a
@@ -786,8 +802,8 @@ class _MeetupDetailSkeleton extends StatelessWidget {
 
 /// Where the viewer's request stands. A STATE, not a control: it is
 /// left-aligned with an icon and a sentence, carries no press affordance,
-/// and is coloured by outcome (amber while waiting, green when in, red
-/// when declined, grey when withdrawn), so it cannot be mistaken for the
+/// and is coloured by outcome (amber while waiting, green when in, blue
+/// when not this time, grey when withdrawn), so it cannot be mistaken for the
 /// LOCATION button above it or the cancel/withdraw button below it.
 class _RequestStatusBanner extends StatelessWidget {
   const _RequestStatusBanner({required this.status});
@@ -809,11 +825,15 @@ class _RequestStatusBanner extends StatelessWidget {
         Icons.check_circle_rounded,
         AppPalette.verified,
       ),
+      // Not red and not "declined": hosts keep groups small, so a no is
+      // about fit, and the section under this banner points at what is
+      // next.
       MeetupRequestStatus.rejected => (
-        'REQUEST DECLINED',
-        'The host did not accept this request.',
-        Icons.cancel_rounded,
-        AppPalette.danger,
+        'NOT THIS TIME',
+        'Hosts keep their groups small, so not every request can fit. '
+            'There are more meetups near you.',
+        Icons.explore_outlined,
+        AppPalette.candyBlue,
       ),
       MeetupRequestStatus.withdrawn => (
         'WITHDRAWN',

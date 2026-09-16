@@ -15,6 +15,9 @@ import 'package:professional_connections_platform/core/widgets/app_background.da
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
 
+import 'package:professional_connections_platform/features/meetups/widgets/other_meetups_nearby.dart';
+import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
+import 'support/fake_geolocator_platform.dart';
 import 'support/scripted_meetup_service.dart';
 
 // Every meetup requires a real window now, "today" included (ADR-016) — no
@@ -509,6 +512,159 @@ void main() {
         await tester.pump(const Duration(seconds: 3));
       },
     );
+  });
+
+  group('a turned-down requester is handed the next step, not a verdict', () {
+    Meetup upcoming({
+      String id = 'meetup-1',
+      String host = 'Grace Hopper',
+      MeetupRequestStatus? myRequestStatus,
+      bool isHostedByMe = false,
+    }) => Meetup(
+      id: id,
+      hostUserId: 'host-$id',
+      hostFullName: host,
+      hostTrustLevel: 3,
+      intent: IntentType.coffee,
+      windowStart: DateTime.now().add(const Duration(hours: 3)),
+      windowEnd: DateTime.now().add(const Duration(hours: 4)),
+      locationLat: 6.9271,
+      locationLng: 79.8612,
+      locationLabel: 'Colombo Fort Cafe',
+      capacity: 4,
+      acceptedCount: 1,
+      status: MeetupStatus.open,
+      createdAt: DateTime.now().subtract(const Duration(days: 1)),
+      isHostedByMe: isHostedByMe,
+      myRequestStatus: myRequestStatus,
+    );
+
+    Future<void> pump(
+      WidgetTester tester, {
+      required Meetup detail,
+      List<Meetup> nearby = const [],
+    }) async {
+      tester.view.physicalSize = const Size(1080, 3200);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.reset);
+      final service = ScriptedMeetupService(
+        meetupDetail: detail,
+        openMeetups: nearby,
+        safetyState: const SafetyState(meetupId: 'meetup-1'),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            meetupServiceProvider.overrideWithValue(service),
+            viewerLocationSourceProvider.overrideWithValue(
+              () async => testPosition(),
+            ),
+          ],
+          child: const MaterialApp(
+            home: MeetupDetailPage(meetupId: 'meetup-1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the banner never says rejected or declined, and is not red', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        detail: upcoming(myRequestStatus: MeetupRequestStatus.rejected),
+      );
+
+      expect(find.text('NOT THIS TIME'), findsOneWidget);
+      expect(find.textContaining('keep their groups small'), findsOneWidget);
+      expect(find.textContaining('DECLINED'), findsNothing);
+      expect(find.textContaining('REJECTED'), findsNothing);
+      expect(find.textContaining('did not accept'), findsNothing);
+      expect(find.byIcon(Icons.cancel_rounded), findsNothing);
+    });
+
+    testWidgets('other open meetups nearby are suggested, minus this one and '
+        'anything the viewer already has a hand in', (tester) async {
+      await pump(
+        tester,
+        detail: upcoming(myRequestStatus: MeetupRequestStatus.rejected),
+        nearby: [
+          // This very meetup, as the browse list would also return it.
+          upcoming(myRequestStatus: MeetupRequestStatus.rejected),
+          upcoming(id: 'meetup-2', host: 'Ada Lovelace'),
+          upcoming(
+            id: 'meetup-3',
+            host: 'Alan Turing',
+            myRequestStatus: MeetupRequestStatus.pending,
+          ),
+          upcoming(id: 'meetup-4', host: 'Linus Torvalds', isHostedByMe: true),
+          upcoming(id: 'meetup-5', host: 'Barbara Liskov'),
+        ],
+      );
+
+      expect(find.byType(OtherMeetupsNearby), findsOneWidget);
+      expect(find.text('OTHERS HAPPENING SOON'), findsOneWidget);
+      expect(find.text('Ada Lovelace'), findsOneWidget);
+      expect(find.text('Barbara Liskov'), findsOneWidget);
+      expect(find.text('Alan Turing'), findsNothing);
+      expect(find.text('Linus Torvalds'), findsNothing);
+      // The page's own meetup is never a suggestion of itself.
+      expect(
+        find.descendant(
+          of: find.byType(OtherMeetupsNearby),
+          matching: find.text('Grace Hopper'),
+        ),
+        findsNothing,
+      );
+      expect(find.text('SEE ALL NEARBY'), findsOneWidget);
+    });
+
+    testWidgets('with nothing else on, the section still points forward', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        detail: upcoming(myRequestStatus: MeetupRequestStatus.rejected),
+      );
+
+      expect(find.byType(OtherMeetupsNearby), findsOneWidget);
+      expect(
+        find.textContaining('New meetups go up every day'),
+        findsOneWidget,
+      );
+      expect(find.text('BROWSE MEETUPS'), findsOneWidget);
+      expect(find.byType(LoadFailedState), findsNothing);
+    });
+
+    testWidgets('a pending or accepted requester is not shown suggestions', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        detail: upcoming(myRequestStatus: MeetupRequestStatus.pending),
+        nearby: [upcoming(id: 'meetup-2', host: 'Ada Lovelace')],
+      );
+      expect(find.byType(OtherMeetupsNearby), findsNothing);
+
+      await pump(
+        tester,
+        detail: upcoming(myRequestStatus: MeetupRequestStatus.accepted),
+        nearby: [upcoming(id: 'meetup-2', host: 'Ada Lovelace')],
+      );
+      expect(find.byType(OtherMeetupsNearby), findsNothing);
+    });
+
+    testWidgets('a finished meetup carries no suggestions either', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        detail: _endedMeetup(myRequestStatus: MeetupRequestStatus.rejected),
+        nearby: [upcoming(id: 'meetup-2', host: 'Ada Lovelace')],
+      );
+      expect(find.byType(OtherMeetupsNearby), findsNothing);
+    });
   });
 
   group('a finished meetup is a different page', () {

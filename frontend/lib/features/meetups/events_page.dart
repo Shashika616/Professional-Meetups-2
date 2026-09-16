@@ -884,10 +884,12 @@ class _MyMeetupTile extends StatelessWidget {
     final (label, color) = switch (status) {
       MeetupRequestStatus.pending => ('REQUEST PENDING', AppPalette.gold),
       MeetupRequestStatus.accepted => ('YOU\'RE IN', AppPalette.verified),
+      // The requester's own list never says rejected or declined; both
+      // outcomes read as timing, in the same muted tone.
       MeetupRequestStatus.rejected =>
         meetup.myRequestAutoRejected
-            ? ('NOT SELECTED, MEETUP FILLED UP', AppPalette.textSecondary)
-            : ('DECLINED BY HOST', AppPalette.danger),
+            ? ('FILLED UP BEFORE YOUR TURN', AppPalette.textSecondary)
+            : ('NOT THIS TIME', AppPalette.textSecondary),
       MeetupRequestStatus.withdrawn => ('WITHDRAWN', AppPalette.textSecondary),
     };
     return Text(

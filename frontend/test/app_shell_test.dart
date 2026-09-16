@@ -1204,8 +1204,12 @@ void main() {
       ('join_request', 'Ada wants to join your coffee meetup'),
       // The host accepts -> the REQUESTER hears about it.
       ('request_accepted', 'The host accepted your request'),
-      // The host declines -> the REQUESTER hears about it.
-      ('request_declined', 'The host declined your request'),
+      // The host declines -> the REQUESTER hears about it, worded by the
+      // server as "not this time", never "declined".
+      (
+        'request_declined',
+        'The coffee meetup was not the right fit this round',
+      ),
       // The host calls it off -> every accepted PARTICIPANT hears about it.
       ('meetup_cancelled', 'The host cancelled your coffee meetup'),
       // An accepted participant pulls out -> the HOST hears about it.
