@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
 /// A settable `GeolocatorPlatform.instance` for widget tests
@@ -30,6 +32,15 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   /// UI shows while a fix is in flight.
   Duration delay;
 
+  /// When set, any read below high accuracy times out and only a high
+  /// (GPS) read answers, which is how an emulator behaves: no network
+  /// positioning, only the injected GPS fix. Lets a test prove the
+  /// medium-to-GPS escalation in `requestCurrentLocation`.
+  bool onlyGpsAnswers = false;
+
+  /// The accuracy of every getCurrentPosition call, in order.
+  final List<LocationAccuracy?> requestedAccuracies = [];
+
   @override
   Future<bool> isLocationServiceEnabled() async => serviceEnabled;
 
@@ -44,8 +55,17 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
     LocationSettings? locationSettings,
   }) async {
     getCurrentPositionCalls++;
+    requestedAccuracies.add(locationSettings?.accuracy);
     if (delay > Duration.zero) await Future<void>.delayed(delay);
     if (getCurrentPositionError != null) throw getCurrentPositionError!;
+    if (onlyGpsAnswers) {
+      final accuracy = locationSettings?.accuracy ?? LocationAccuracy.best;
+      final isGps =
+          accuracy == LocationAccuracy.high ||
+          accuracy == LocationAccuracy.best ||
+          accuracy == LocationAccuracy.bestForNavigation;
+      if (!isGps) throw TimeoutException('no network positioning');
+    }
     return position!;
   }
 

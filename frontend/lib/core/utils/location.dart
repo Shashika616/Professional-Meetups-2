@@ -57,11 +57,30 @@ class LocationUnavailableException implements Exception {
 /// [accuracy] defaults to high. Browsing passes medium, which lets the
 /// platform answer from network positioning in a second or two instead of
 /// waiting on GPS; SOS keeps the default.
+///
+/// A medium read that times out with nothing cached is retried ONCE at
+/// high accuracy for [gpsFallbackLimit] before giving up. On a phone that
+/// only happens where network positioning has nothing to go on (Wi-Fi off,
+/// out of town), which is exactly when the GPS is the right next step. On
+/// Android, medium means "balanced power", which never turns the GPS on,
+/// so without this an emulator (whose only location source is the injected
+/// GPS fix) could never answer a browse read at all; that is how the
+/// Sep-2026 switch to medium went unnoticed until the emulator went blind.
+/// The common path is unchanged: a medium read that answers never touches
+/// the GPS.
 Future<Position> requestCurrentLocation({
   Duration timeLimit = const Duration(seconds: 12),
   LocationAccuracy accuracy = LocationAccuracy.high,
   bool fallbackToLastKnown = true,
+  Duration gpsFallbackLimit = const Duration(seconds: 10),
 }) async {
+  // A high read has nowhere further to escalate to.
+  final escalation =
+      accuracy == LocationAccuracy.high ||
+          accuracy == LocationAccuracy.best ||
+          accuracy == LocationAccuracy.bestForNavigation
+      ? Duration.zero
+      : gpsFallbackLimit;
   // Every failure leaves as LocationUnavailableException, including a
   // platform-channel one from the service/permission probes themselves
   // (a missing plugin, a device with no location service at all). Callers
@@ -78,7 +97,8 @@ Future<Position> requestCurrentLocation({
       timeLimit: timeLimit,
       accuracy: accuracy,
       fallbackToLastKnown: fallbackToLastKnown,
-    ).timeout(timeLimit + const Duration(seconds: 4));
+      gpsFallbackLimit: escalation,
+    ).timeout(timeLimit + escalation + const Duration(seconds: 4));
   } on LocationUnavailableException {
     rethrow;
   } on TimeoutException {
@@ -98,6 +118,7 @@ Future<Position> _requestCurrentLocation({
   required Duration timeLimit,
   required LocationAccuracy accuracy,
   required bool fallbackToLastKnown,
+  required Duration gpsFallbackLimit,
 }) async {
   if (!await Geolocator.isLocationServiceEnabled()) {
     throw const LocationUnavailableException(
@@ -130,6 +151,12 @@ Future<Position> _requestCurrentLocation({
       final last = await _lastKnownOrNull();
       if (last != null) return last;
     }
+    // Nothing cached and the cheap read found nothing: one GPS read
+    // before giving up. See requestCurrentLocation's doc for why.
+    if (gpsFallbackLimit > Duration.zero) {
+      final fix = await _gpsOrNull(gpsFallbackLimit);
+      if (fix != null) return fix;
+    }
     throw const LocationUnavailableException(
       'Couldn\'t pin down your location. Move somewhere with a clearer '
       'signal, or check that location is on, and try again.',
@@ -143,6 +170,22 @@ Future<Position> _requestCurrentLocation({
     throw const LocationUnavailableException(
       'Could not get your current location.',
     );
+  }
+}
+
+/// One high-accuracy read bounded by [limit], or null. Wrapped for the
+/// same reason as [_lastKnownOrNull]: the escalation is a second chance,
+/// and its own failure must not replace the timeout the caller reports.
+Future<Position?> _gpsOrNull(Duration limit) async {
+  try {
+    return await Geolocator.getCurrentPosition(
+      locationSettings: LocationSettings(
+        accuracy: LocationAccuracy.high,
+        timeLimit: limit,
+      ),
+    );
+  } catch (_) {
+    return null;
   }
 }
 

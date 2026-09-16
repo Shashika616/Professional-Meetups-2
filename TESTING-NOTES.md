@@ -269,8 +269,52 @@ curl -s -X POST localhost:8080/v1/meetups -H "Authorization: Bearer $AT" \
 # → 409 {"error":"You are already hosting ...","code":"schedule_conflict","conflict":{...}}
 ```
 
-The emulator's GPS has not produced a fix since the macOS upgrade, so the
-Happening Soon list is empty there. To reach another host's meetup for the
-join-side check, seed a notification for the test account that points at
-it (`meetup.notification_outbox`, `data.meetup_id`, `processed_at = now()`)
-and open it from the Notifications page.
+To reach another host's meetup for the join-side check without the browse
+list, seed a notification for the test account that points at it
+(`meetup.notification_outbox`, `data.meetup_id`, `processed_at = now()`)
+and open it from the Notifications page. The browse list itself works on
+the emulator again; see the next section for what had broken it.
+
+## The Android emulator and location (2026-09-17)
+
+For two days the Happening Soon list never loaded on the emulator while
+every real phone was fine. Two separate causes, both now handled:
+
+**1. The app stopped asking for GPS.** The browse read requests medium
+accuracy (`viewer_location_provider.dart`, since `76068f6` on 2026-09-15)
+so a phone answers from network positioning in a second. On Android that
+maps to "balanced power", which never turns the GPS on. A phone has Wi-Fi
+and cell databases to answer from; an emulator has nothing but the injected
+GPS fix, so a medium read there could never resolve. `requestCurrentLocation`
+now escalates ONCE to a high-accuracy read (10 s) when a lower-accuracy read
+times out with nothing cached (`core/utils/location.dart`,
+`test/location_request_test.dart`). On a phone that only triggers where
+network positioning has failed, which is when GPS is the right next step.
+The fast path, the 110 m coordinate quantisation and the keyed cache are
+untouched; it adds no server traffic.
+
+**2. The AVD was rendering in software.** `~/.android/avd/Pixel_8.avd/config.ini`
+had `hw.gpu.mode=software`, so every frame was drawn on the CPU: qemu at
+650%+ of the host's 8 cores, `surfaceflinger` at 30% in the guest, ANRs in
+our app, Settings and Messages alike, and one hang inside the geolocator
+plugin's NMEA unregistration (a binder call the starved system server never
+answered). Set to `hw.gpu.mode=auto` (the previous file is kept as
+`config.ini.bak-2026-09-17`); qemu now idles around 60%.
+
+Injecting a fix: `adb emu geo fix <lng> <lat>` (longitude first), repeated
+every couple of seconds while the app is reading; one shot is not always
+picked up. `adb shell dumpsys location | grep -A3 "gps provider"` shows
+whether the app's request reached the GPS (`HIGH_ACCURACY, WorkSource{...
+profconn...}`) and whether a fix landed (`last location=Location[gps ...]`).
+
+The emulated Wi-Fi (`netsimd`) has been flapping after cold boots; if the
+gateway never sees a request, `adb shell svc wifi disable` routes the guest
+over the emulated cellular link, which reaches the host at `10.0.2.2` fine.
+
+A cold boot with `-no-snapshot-load` also wiped the installed app on this
+AVD; reinstall and sign in again (l3.a@meetups.test, code 123456).
+
+**iOS simulator:** a different, simpler thing. It reports a location only
+when one is set (Features > Location in the Simulator menu, or
+`xcrun simctl location booted set 6.9271,79.8612`), and that setting does not
+always survive a reboot; accuracy does not come into it.
