@@ -3,6 +3,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icon.dart';
 
 /// Covers a page while a sign-in or sign-up is in flight: the page blurs
 /// and dims, every control under it stops taking taps, and one loader with
@@ -75,12 +76,39 @@ class _Veil extends StatelessWidget {
       label: message,
       child: BackdropFilter(
         key: const Key('signingInOverlay'),
-        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+        filter: ImageFilter.blur(sigmaX: 6, sigmaY: 6),
         child: Material(
           type: MaterialType.transparency,
           child: ColoredBox(
-            color: AppPalette.onyx.withValues(alpha: 0.45),
-            child: Center(child: _ProgressCard(message: message)),
+            color: AppPalette.onyx.withValues(
+              alpha: AppPalette.isLight ? 0.6 : 0.62,
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const _MarkInRing(),
+                  const SizedBox(height: 22),
+                  Text(
+                    message,
+                    style: TextStyle(
+                      color: AppPalette.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Just a moment',
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -88,54 +116,80 @@ class _Veil extends StatelessWidget {
   }
 }
 
-/// A small surface with a slim ring and one line, the shape of a system
-/// progress dialog: nothing decorative, nothing to read twice.
-class _ProgressCard extends StatelessWidget {
-  const _ProgressCard({required this.message});
+/// The launcher mark at rest inside a thin brand-green arc that sweeps
+/// around it, over a soft glow. The arc is the "still working" signal; the
+/// mark is so the wait belongs to this app and not to whichever provider's
+/// sheet just closed. Proportions: mark 56, a 10-point breath of space,
+/// then a 2.5-point ring at 88, which is what keeps it from reading as an
+/// icon jammed inside a spinner.
+class _MarkInRing extends StatelessWidget {
+  const _MarkInRing();
 
-  final String message;
+  static const double _ring = 88;
+  static const double _mark = 56;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 16, 24, 16),
-      decoration: BoxDecoration(
-        color: AppPalette.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppPalette.hairline),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(
-              alpha: AppPalette.isLight ? 0.10 : 0.35,
-            ),
-            blurRadius: 24,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+    final green = AppPalette.brandGreen;
+    return SizedBox(
+      width: _ring + 32,
+      height: _ring + 32,
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          SizedBox(
-            width: 22,
-            height: 22,
+          // Glow: a soft radial wash so the mark sits in light rather than
+          // on a flat scrim.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: RadialGradient(
+                colors: [
+                  green.withValues(alpha: 0.22),
+                  green.withValues(alpha: 0.0),
+                ],
+                stops: const [0.35, 1],
+              ),
+            ),
+            child: const SizedBox.square(dimension: _ring + 32),
+          ),
+          // Track, faint, so the arc has something to travel along.
+          SizedBox.square(
+            dimension: _ring,
             child: CircularProgressIndicator(
-              strokeWidth: 2.4,
+              value: 1,
+              strokeWidth: 2.5,
+              color: green.withValues(alpha: 0.14),
+            ),
+          ),
+          // The sweeping arc.
+          SizedBox.square(
+            dimension: _ring,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.5,
               strokeCap: StrokeCap.round,
-              color: AppPalette.brandGreen,
-              backgroundColor: AppPalette.brandGreen.withValues(alpha: 0.15),
+              color: green,
             ),
           ),
-          const SizedBox(width: 14),
-          Text(
-            message,
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontSize: 15,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.2,
+          // A plate under the mark so its own white or dark tile has a
+          // clean edge against the blur.
+          Container(
+            width: _mark + 12,
+            height: _mark + 12,
+            decoration: BoxDecoration(
+              color: AppPalette.surface,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(
+                    alpha: AppPalette.isLight ? 0.10 : 0.40,
+                  ),
+                  blurRadius: 18,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
           ),
+          const AppIcon(size: _mark, radius: 14),
         ],
       ),
     );
