@@ -411,13 +411,19 @@ class _FindingYouButtonState extends State<_FindingYouButton>
 /// a fresh fix, which indoors on Android can take tens of seconds or
 /// never). Medium accuracy: a pin the user then fine-tunes by dragging
 /// does not need a GPS-grade fix, and network positioning answers in a
-/// second or two.
+/// second or two. Shorter limits than the helper's defaults: the user is
+/// watching a button spin, and past ten-odd seconds a clear "could not"
+/// with a settings shortcut beats more spinning.
 ///
 /// A denied permission or a disabled service gets a SETTINGS action on the
 /// message, since that is the only fix and it lives outside the app.
 Future<Position?> resolveCurrentLocationForMap(BuildContext context) async {
   try {
-    return await requestCurrentLocation(accuracy: LocationAccuracy.medium);
+    return await requestCurrentLocation(
+      accuracy: LocationAccuracy.medium,
+      timeLimit: const Duration(seconds: 8),
+      gpsFallbackLimit: const Duration(seconds: 6),
+    );
   } on LocationUnavailableException catch (error) {
     if (!context.mounted) return null;
     final settingsAction = switch (error.reason) {

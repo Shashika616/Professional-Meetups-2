@@ -1,8 +1,11 @@
 import 'dart:async';
 
+import 'package:fake_async/fake_async.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
+import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
 
 import 'support/fake_geolocator_platform.dart';
 
@@ -94,5 +97,59 @@ void main() {
       LocationAccuracy.medium,
       LocationAccuracy.high,
     ]);
+  });
+
+  group('the browse read gives up quickly when nothing answers', () {
+    test('cheap read, then GPS, then the failure, all inside twelve seconds '
+        '(it was twenty-six)', () {
+      fakeAsync((async) {
+        fake.delay = const Duration(minutes: 1);
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
+
+        Object? failure;
+        unawaited(
+          container
+              .read(viewerLocationSourceProvider)()
+              .then<void>(
+                (_) {},
+                onError: (Object e) {
+                  failure = e;
+                },
+              ),
+        );
+
+        async.elapse(const Duration(seconds: 5));
+        expect(failure, isNull, reason: 'still on the cheap read');
+        expect(fake.requestedAccuracies, [LocationAccuracy.medium]);
+
+        async.elapse(const Duration(seconds: 2));
+        expect(fake.requestedAccuracies, [
+          LocationAccuracy.medium,
+          LocationAccuracy.high,
+        ], reason: 'escalated to GPS once the 6 s network budget passed');
+        expect(failure, isNull);
+
+        async.elapse(const Duration(seconds: 5));
+        expect(
+          failure,
+          isA<LocationUnavailableException>().having(
+            (e) => e.reason,
+            'reason',
+            LocationUnavailableReason.timedOut,
+          ),
+        );
+      });
+    });
+
+    test('the budget is what the provider says it is', () {
+      expect(browseFixTimeLimit, const Duration(seconds: 6));
+      expect(browseGpsFallbackLimit, const Duration(seconds: 5));
+      // Well under the old 12 + 10 + 4.
+      expect(
+        (browseFixTimeLimit + browseGpsFallbackLimit).inSeconds,
+        lessThanOrEqualTo(12),
+      );
+    });
   });
 }

@@ -56,7 +56,17 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   }) async {
     getCurrentPositionCalls++;
     requestedAccuracies.add(locationSettings?.accuracy);
-    if (delay > Duration.zero) await Future<void>.delayed(delay);
+    if (delay > Duration.zero) {
+      // The real platform enforces LocationSettings.timeLimit natively and
+      // throws TimeoutException when it passes; a read slower than its
+      // limit must do the same here or budget tests measure the fake.
+      final limit = locationSettings?.timeLimit;
+      if (limit != null && delay > limit) {
+        await Future<void>.delayed(limit);
+        throw TimeoutException('no fix within $limit');
+      }
+      await Future<void>.delayed(delay);
+    }
     if (getCurrentPositionError != null) throw getCurrentPositionError!;
     if (onlyGpsAnswers) {
       final accuracy = locationSettings?.accuracy ?? LocationAccuracy.best;

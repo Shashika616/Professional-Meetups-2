@@ -33,10 +33,28 @@ final viewerLocationProvider =
 /// Medium accuracy: a 40km radius does not need GPS precision, and network
 /// positioning answers in a second or two where a GPS fix indoors may not
 /// answer at all.
+///
+/// Tighter limits than the helper's defaults, on purpose. This read gates
+/// the first thing Home shows, and the only thing the full budget bought
+/// was a longer stare at the skeleton when nothing was coming: a phone
+/// that can answer does so in the first two seconds, and a phone that
+/// cannot is better served by the location card and its TRY AGAIN after
+/// eleven seconds than after twenty-six. SOS keeps the long budget; a
+/// browse list does not need it.
 final viewerLocationSourceProvider = Provider<Future<Position> Function()>(
   (ref) =>
-      () => requestCurrentLocation(accuracy: LocationAccuracy.medium),
+      () => requestCurrentLocation(
+        accuracy: LocationAccuracy.medium,
+        timeLimit: browseFixTimeLimit,
+        gpsFallbackLimit: browseGpsFallbackLimit,
+      ),
 );
+
+/// How long the browse read waits on the cheap (network) fix.
+const browseFixTimeLimit = Duration(seconds: 6);
+
+/// How long its one GPS retry may take after that.
+const browseGpsFallbackLimit = Duration(seconds: 5);
 
 enum ViewerLocationStatus { loading, blocked, ready }
 
