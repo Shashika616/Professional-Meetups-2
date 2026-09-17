@@ -686,7 +686,7 @@ func (s *service) NotifyStartingSoonSweep(ctx context.Context) (int, error) {
 				if _, err := queueNotifications(ctx, tx, recipients,
 					TypeMeetupStartingSoon,
 					"Meetup starting soon",
-					fmt.Sprintf("Your %s meetup starts soon — review your safety checklist.", Intent(m.Intent).DisplayName()),
+					fmt.Sprintf("Your %s meetup starts soon. Review your safety checklist.", Intent(m.Intent).DisplayName()),
 					map[string]string{"meetup_id": m.ID},
 				); err != nil {
 					return err
