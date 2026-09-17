@@ -35,3 +35,4 @@ coverage.html
 coverage-all.out
 /backend/backfill-user-display-cache
 /backend/backfill-user-location-cache
+__pycache__/
