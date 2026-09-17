@@ -12,6 +12,8 @@ import 'package:professional_connections_platform/features/safety/manage_trusted
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/features/meetups/events_page.dart'
+    show RequestManagementPage;
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
 
@@ -664,6 +666,60 @@ void main() {
         nearby: [upcoming(id: 'meetup-2', host: 'Ada Lovelace')],
       );
       expect(find.byType(OtherMeetupsNearby), findsNothing);
+    });
+  });
+
+  group('VIEW REQUESTS on the meetup page', () {
+    Meetup live({bool isHostedByMe = false}) => Meetup(
+      id: 'meetup-1',
+      hostUserId: 'host-1',
+      hostFullName: 'Grace Hopper',
+      hostTrustLevel: 3,
+      intent: IntentType.coffee,
+      windowStart: DateTime.now().add(const Duration(hours: 3)),
+      windowEnd: DateTime.now().add(const Duration(hours: 4)),
+      locationLat: 6.9271,
+      locationLng: 79.8612,
+      locationLabel: 'Colombo Fort Cafe',
+      capacity: 4,
+      acceptedCount: 2,
+      status: MeetupStatus.open,
+      createdAt: DateTime.now().subtract(const Duration(days: 1)),
+      isHostedByMe: isHostedByMe,
+    );
+
+    testWidgets('the host of a live meetup gets the tile, under LOCATION, '
+        'and it opens request management', (tester) async {
+      tester.view.physicalSize = const Size(1080, 3200);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.reset);
+      await _pumpDetail(tester, live(isHostedByMe: true));
+
+      expect(find.text('VIEW REQUESTS'), findsOneWidget);
+      expect(
+        find.text('See who asked to join, accept or pass'),
+        findsOneWidget,
+      );
+      expect(
+        tester.getTopLeft(find.text('VIEW REQUESTS')).dy,
+        greaterThan(tester.getTopLeft(find.text('LOCATION')).dy),
+      );
+
+      await tester.tap(find.text('VIEW REQUESTS'));
+      await tester.pumpAndSettle();
+      expect(find.byType(RequestManagementPage), findsOneWidget);
+    });
+
+    testWidgets('a viewer who is not the host never sees it', (tester) async {
+      await _pumpDetail(tester, live());
+      expect(find.text('VIEW REQUESTS'), findsNothing);
+    });
+
+    testWidgets('a finished hosted meetup has nothing left to manage', (
+      tester,
+    ) async {
+      await _pumpDetail(tester, _endedMeetup(isHostedByMe: true));
+      expect(find.text('VIEW REQUESTS'), findsNothing);
     });
   });
 

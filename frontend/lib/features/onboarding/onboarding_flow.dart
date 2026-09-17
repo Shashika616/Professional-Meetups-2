@@ -7,6 +7,7 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/cafe_scene.dart';
+import 'package:professional_connections_platform/core/widgets/signing_in_overlay.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
@@ -243,15 +244,21 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: AppBackground(
-        child: switch (_step) {
-          _OnboardingStep.ageConfirmation => AgeConfirmationStep(
-            onContinue: _onAgeConfirmed,
-          ),
-          _OnboardingStep.chooseMethod => _chooseMethodStep(),
-        },
+    // One page-level loader for every way in (provider, guest): the
+    // buttons underneath stop taking taps and stop competing to spin.
+    return SigningInOverlay(
+      busy: _busy,
+      message: 'Setting up your account',
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: AppBackground(
+          child: switch (_step) {
+            _OnboardingStep.ageConfirmation => AgeConfirmationStep(
+              onContinue: _onAgeConfirmed,
+            ),
+            _OnboardingStep.chooseMethod => _chooseMethodStep(),
+          },
+        ),
       ),
     );
   }

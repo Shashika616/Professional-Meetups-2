@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 
 import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
@@ -30,9 +33,13 @@ class _FakeAuthService implements AuthService {
   Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) =>
       throw UnimplementedError();
 
-  _FakeAuthService({this.error, this.linkedInSession});
+  _FakeAuthService({this.error, this.linkedInSession, this.hang = false});
 
   final Object? error;
+
+  /// When true, a LinkedIn sign-in never completes, so a test can look at
+  /// the page while a provider is running.
+  final bool hang;
 
   /// What CONTINUE WITH LINKEDIN resolves to; null means the test does not
   /// exercise it and a tap is a bug.
@@ -78,6 +85,7 @@ class _FakeAuthService implements AuthService {
   }) async {
     linkedInCallCount++;
     lastAgeConfirmedOver18 = ageConfirmedOver18;
+    if (hang) return Completer<AuthSession>().future;
     final session = linkedInSession;
     if (session == null) throw UnimplementedError();
     return session;
@@ -265,6 +273,63 @@ void main() {
     expect(find.text('CONTINUE WITH GOOGLE'), findsNothing);
     expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
   }, variant: const TargetPlatformVariant({TargetPlatform.iOS}));
+
+  group('while a provider sign-in runs', () {
+    testWidgets('one page-level loader covers the page; only the tapped '
+        'button spins, the other dims, and nothing underneath takes taps', (
+      tester,
+    ) async {
+      final auth = _FakeAuthService(hang: true);
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      expect(find.byKey(const Key('signingInOverlay')), findsNothing);
+
+      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+
+      // The overlay, once, with the app's own copy.
+      expect(find.byKey(const Key('signingInOverlay')), findsOneWidget);
+      expect(find.text('Signing you in'), findsOneWidget);
+      // The veil is above the Scaffold, so it must bring its own Material
+      // or its text renders with the fallback yellow underline.
+      expect(
+        find.ancestor(
+          of: find.text('Signing you in'),
+          matching: find.byType(Material),
+        ),
+        findsWidgets,
+      );
+
+      // Exactly one button is in its loading state: the one that was
+      // tapped. The other keeps its label (PrimaryButton swaps the label
+      // for a spinner only while loading).
+      expect(find.text('CONTINUE WITH LINKEDIN'), findsNothing);
+      expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
+      final google = tester.widget<PrimaryButton>(
+        find.byKey(const Key('continueWithGoogle')),
+      );
+      expect(google.isLoading, isFalse);
+      expect(google.onPressed, isNull);
+
+      // Taps on the covered page go nowhere: the other provider, the email
+      // button.
+      await tester.tap(
+        find.byKey(const Key('continueWithGoogle')),
+        warnIfMissed: false,
+      );
+      await tester.tap(
+        find.byKey(const Key('continueWithEmail')),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+      expect(find.text('Sign in with email'), findsNothing);
+      expect(auth.linkedInCallCount, 1);
+      expect(find.byType(EmailLoginPage), findsOneWidget);
+    });
+  });
 
   testWidgets('a returning member signing in with a provider goes straight to '
       'AppShell, with no profile-setup detour', (tester) async {

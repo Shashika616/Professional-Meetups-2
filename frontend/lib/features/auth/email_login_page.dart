@@ -9,6 +9,7 @@ import 'package:professional_connections_platform/core/widgets/cafe_scene.dart';
 import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
+import 'package:professional_connections_platform/core/widgets/signing_in_overlay.dart';
 import 'package:professional_connections_platform/features/auth/social_sign_in_section.dart';
 import 'package:professional_connections_platform/features/onboarding/age_confirmation_checkbox.dart';
 import 'package:professional_connections_platform/features/onboarding/profile_setup_screen.dart';
@@ -142,34 +143,40 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
   }
 
   Widget _scaffold(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      // Without this, the AppBar's own (transparent) region isn't covered
-      // by AppBackground at all — body painting starts below the app bar,
-      // so that strip shows through to nothing but plain black instead of
-      // the same image/gradient as the rest of the screen. This also
-      // widens MediaQuery's top padding to include the app bar's height,
-      // so the SafeArea below still pushes content clear of the title row.
-      // Same fix as profile_setup_screen.dart's identical Scaffold shape.
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: const Text('SIGN IN'),
-        // The email step is a page within the page: back returns to the
-        // method choice rather than leaving sign-in altogether. The first
-        // and last steps keep the default back (pop to LandingPage).
-        leading: _step == _Step.email
-            ? BackButton(onPressed: _backToMethods)
-            : null,
-      ),
-      body: AppBackground(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: switch (_step) {
-              _Step.method => _methodStep(),
-              _Step.email => _emailStep(),
-              _Step.otp => _otpStep(),
-            },
+    // The overlay wraps the whole Scaffold so the app bar's back button is
+    // covered too; a sign-in half-way through its token exchange must not
+    // be backed out of.
+    return SigningInOverlay(
+      busy: _socialBusy,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        // Without this, the AppBar's own (transparent) region isn't covered
+        // by AppBackground at all — body painting starts below the app bar,
+        // so that strip shows through to nothing but plain black instead of
+        // the same image/gradient as the rest of the screen. This also
+        // widens MediaQuery's top padding to include the app bar's height,
+        // so the SafeArea below still pushes content clear of the title row.
+        // Same fix as profile_setup_screen.dart's identical Scaffold shape.
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          title: const Text('SIGN IN'),
+          // The email step is a page within the page: back returns to the
+          // method choice rather than leaving sign-in altogether. The first
+          // and last steps keep the default back (pop to LandingPage).
+          leading: _step == _Step.email
+              ? BackButton(onPressed: _backToMethods)
+              : null,
+        ),
+        body: AppBackground(
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: switch (_step) {
+                _Step.method => _methodStep(),
+                _Step.email => _emailStep(),
+                _Step.otp => _otpStep(),
+              },
+            ),
           ),
         ),
       ),

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
@@ -293,13 +295,111 @@ class UseCurrentLocationButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (busy) return const _FindingYouButton();
     return SecondaryButton(
-      label: busy ? 'FINDING YOU...' : 'USE MY CURRENT LOCATION',
-      icon: busy ? Icons.gps_not_fixed_rounded : Icons.my_location_rounded,
+      label: 'USE MY CURRENT LOCATION',
+      icon: Icons.my_location_rounded,
       height: 44,
       color: AppPalette.candyBlue,
       borderColor: AppPalette.candyBlue.withValues(alpha: 0.6),
-      onPressed: busy ? null : onPressed,
+      onPressed: onPressed,
+    );
+  }
+}
+
+/// The button while a fix is in flight. A label swap alone read as a
+/// frozen button for the ten-odd seconds a fix can take indoors, so this
+/// keeps moving the whole time: a ring sweeps around the crosshair and the
+/// label breathes. Same size and border as the idle button so nothing
+/// jumps when it swaps in; disabled, since a second tap would only start a
+/// second read.
+class _FindingYouButton extends StatefulWidget {
+  const _FindingYouButton();
+
+  @override
+  State<_FindingYouButton> createState() => _FindingYouButtonState();
+}
+
+class _FindingYouButtonState extends State<_FindingYouButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = AppPalette.candyBlue;
+    return OutlinedButton(
+      key: const Key('findingYouButton'),
+      onPressed: null,
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(44),
+        side: BorderSide(color: color.withValues(alpha: 0.6)),
+      ),
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          final t = _controller.value;
+          // Ease in and out of full strength so the text reads as breathing
+          // rather than blinking.
+          final breath = 0.55 + 0.45 * (0.5 - 0.5 * math.cos(t * 2 * math.pi));
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Transform.rotate(
+                      angle: t * 2 * math.pi,
+                      child: CircularProgressIndicator(
+                        value: 0.28,
+                        strokeWidth: 2,
+                        color: color,
+                        backgroundColor: color.withValues(alpha: 0.18),
+                      ),
+                    ),
+                    Icon(Icons.my_location_rounded, size: 11, color: color),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'FINDING YOU',
+                maxLines: 1,
+                style: TextStyle(
+                  color: color.withValues(alpha: breath),
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              // Three dots that light up in turn, the oldest "still working"
+              // signal there is.
+              for (var i = 0; i < 3; i++)
+                Text(
+                  '.',
+                  style: TextStyle(
+                    color: color.withValues(
+                      alpha: ((t * 3).floor() % 3) >= i ? 1 : 0.25,
+                    ),
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 }

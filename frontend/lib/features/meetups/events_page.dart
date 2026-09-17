@@ -38,7 +38,7 @@ import 'package:professional_connections_platform/features/meetups/widgets/ratin
 /// RENAMED from `MyMeetupsPage`, and promoted from a pushed route to one of
 /// AppShell's five bottom-nav destinations. The data layer is untouched by
 /// that move: same `myMeetupsProvider`, same independent hosted/requested
-/// cursors, same `_RequestManagementPage`, same rating-prompt-on-reject flow.
+/// cursors, same `RequestManagementPage`, same rating-prompt-on-reject flow.
 ///
 /// Two levels of navigation, drawn deliberately differently so they read as
 /// two levels rather than one four-item control:
@@ -75,7 +75,7 @@ import 'package:professional_connections_platform/features/meetups/widgets/ratin
 /// a bottom-nav destination, and it avoids a swipe that means something
 /// different depending on which page you happen to be on.
 ///
-/// NOT applied to `_RequestManagementPage`'s tabs: that screen is a PUSHED
+/// NOT applied to `RequestManagementPage`'s tabs: that screen is a PUSHED
 /// route, so it sits outside AppShell's PageView entirely and has no
 /// competing ancestor to yield to. Its tabs still swipe.
 const _noSwipeInsideAppShell = NeverScrollableScrollPhysics();
@@ -239,7 +239,7 @@ class _EventsPageState extends ConsumerState<EventsPage>
                       MaterialPageRoute(
                         builder: (_) => _isFinished(meetup)
                             ? MeetupDetailPage(meetupId: meetup.id)
-                            : _RequestManagementPage(meetup: meetup),
+                            : RequestManagementPage(meetup: meetup),
                       ),
                     );
                     ref.invalidate(myMeetupsProvider);
@@ -906,18 +906,20 @@ class _MyMeetupTile extends StatelessWidget {
 
 /// A host's view of every request on one of their meetups — Accept/Reject
 /// per pending request (frontend/meetup-scheduling-PLAN.md Step 8).
-class _RequestManagementPage extends ConsumerStatefulWidget {
-  const _RequestManagementPage({required this.meetup});
+/// The host's request list for one meetup: accept, reject, cancel, close.
+/// Public because the meetup page's VIEW REQUESTS tile opens it too; the
+/// Events tab remains its home.
+class RequestManagementPage extends ConsumerStatefulWidget {
+  const RequestManagementPage({super.key, required this.meetup});
 
   final Meetup meetup;
 
   @override
-  ConsumerState<_RequestManagementPage> createState() =>
-      _RequestManagementPageState();
+  ConsumerState<RequestManagementPage> createState() =>
+      RequestManagementPageState();
 }
 
-class _RequestManagementPageState
-    extends ConsumerState<_RequestManagementPage> {
+class RequestManagementPageState extends ConsumerState<RequestManagementPage> {
   late Meetup _meetup;
   List<MeetupRequestModel>? _requests;
   bool _loading = true;
@@ -1194,7 +1196,7 @@ class _RequestManagementPageState
   }
 }
 
-/// One requester's card in `_RequestManagementPage`'s Pending/Accepted/
+/// One requester's card in `RequestManagementPage`'s Pending/Accepted/
 /// Rejected tabs (ADR-020 §2) — the same row shape the old single combined
 /// list used, just now reused across three filtered lists instead of one.
 class _RequestCard extends StatelessWidget {

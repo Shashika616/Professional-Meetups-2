@@ -522,8 +522,31 @@ void main() {
 
         await tester.tap(find.text('USE MY CURRENT LOCATION'));
         await tester.pump();
-        expect(find.text('FINDING YOU...'), findsOneWidget);
-        await tester.tap(find.text('FINDING YOU...'), warnIfMissed: false);
+        // Not a label swap: the busy button is its own animating widget,
+        // so the user can see the read is still running.
+        final busy = find.byKey(const Key('findingYouButton'));
+        expect(busy, findsOneWidget);
+        expect(find.text('FINDING YOU'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: busy,
+            matching: find.byType(CircularProgressIndicator),
+          ),
+          findsOneWidget,
+        );
+        // It keeps animating while waiting: the ring's angle differs
+        // between two frames.
+        double angleOf() => tester
+            .widget<Transform>(
+              find.descendant(of: busy, matching: find.byType(Transform)).first,
+            )
+            .transform
+            .getRotation()
+            .entry(0, 0);
+        final before = angleOf();
+        await tester.pump(const Duration(milliseconds: 350));
+        expect(angleOf(), isNot(closeTo(before, 0.01)));
+        await tester.tap(busy, warnIfMissed: false);
         await tester.pump(const Duration(seconds: 3));
 
         expect(fake.getCurrentPositionCalls, 1);

@@ -54,12 +54,17 @@ class SocialSignInSection extends ConsumerStatefulWidget {
 }
 
 class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
-  bool _busy = false;
+  /// Which provider is running, or null. A name rather than a bool so
+  /// only the tapped button shows its spinner: with one shared flag both
+  /// buttons spun and a tap on Google made LinkedIn look busy too.
+  String? _busySource;
 
-  void _setBusy(bool value) {
+  bool get _busy => _busySource != null;
+
+  void _setBusy(String? source) {
     if (!mounted) return;
-    setState(() => _busy = value);
-    widget.onBusyChanged?.call(value);
+    setState(() => _busySource = source);
+    widget.onBusyChanged?.call(source != null);
   }
 
   Future<void> _run(String source, Future<void> Function() signIn) async {
@@ -67,7 +72,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
     // Belt and braces with the disabled buttons below: a provider call
     // never leaves this widget without the user's confirmation.
     if (!widget.ageConfirmedOver18) return;
-    _setBusy(true);
+    _setBusy(source);
     try {
       await signIn();
       if (!mounted) return;
@@ -77,7 +82,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
     } catch (error) {
       _handleError(source, error);
     } finally {
-      _setBusy(false);
+      _setBusy(null);
     }
   }
 
@@ -114,6 +119,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
     // visually co-equal by construction — same widget, same height.
     Widget provider({
       Key? key,
+      required String source,
       required String label,
       required Widget mark,
       required VoidCallback onPressed,
@@ -121,9 +127,13 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
       // Disabled, not hidden, until the attestation is given: the user
       // sees what confirming unlocks. Dimmed as a whole, mark and label
       // included: PrimaryButton's own disabled state only fades the fill,
-      // which on the neutral card surface is invisible in dark mode.
+      // which on the neutral card surface is invisible in dark mode. The
+      // provider that is NOT running dims the same way while the other
+      // one is, so exactly one button ever looks busy.
+      final isRunning = _busySource == source;
+      final dimmed = !widget.ageConfirmedOver18 || (_busy && !isRunning);
       return Opacity(
-        opacity: widget.ageConfirmedOver18 ? 1 : 0.45,
+        opacity: dimmed ? 0.45 : 1,
         child: PrimaryButton(
           key: key,
           label: label,
@@ -131,8 +141,8 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
           fillColor: AppPalette.card,
           foregroundColor: AppPalette.textPrimary,
           borderColor: AppPalette.hairline,
-          isLoading: _busy,
-          onPressed: widget.ageConfirmedOver18 ? onPressed : null,
+          isLoading: isRunning,
+          onPressed: widget.ageConfirmedOver18 && !_busy ? onPressed : null,
         ),
       );
     }
@@ -145,6 +155,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
         if (isIOS)
           provider(
             key: const Key('continueWithApple'),
+            source: 'signInWithApple',
             label: 'CONTINUE WITH APPLE',
             mark: AppleMark(size: 20, color: AppPalette.textPrimary),
             onPressed: () => _run(
@@ -155,6 +166,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
         else
           provider(
             key: const Key('continueWithGoogle'),
+            source: 'signInWithGoogle',
             label: 'CONTINUE WITH GOOGLE',
             mark: const GoogleMark(size: 20),
             onPressed: () => _run(
@@ -165,6 +177,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
         const SizedBox(height: 12),
         provider(
           key: const Key('continueWithLinkedIn'),
+          source: 'signInWithLinkedIn',
           label: 'CONTINUE WITH LINKEDIN',
           mark: const LinkedInMark(size: 20),
           onPressed: () => _run(

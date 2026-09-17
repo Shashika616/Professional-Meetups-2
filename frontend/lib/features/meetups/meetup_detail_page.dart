@@ -21,6 +21,8 @@ import 'package:professional_connections_platform/core/widgets/skeleton_box.dart
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart'
     show LockedCardHeader;
+import 'package:professional_connections_platform/features/meetups/events_page.dart'
+    show RequestManagementPage;
 import 'package:professional_connections_platform/features/meetups/location_view_page.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/host_meetup_controls.dart';
 import 'package:professional_connections_platform/features/meetups/review/meetup_review_section.dart';
@@ -640,6 +642,28 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
                 ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0,
           ),
         ),
+        // The host's way into their request list from here. Hosts reach this
+        // page from the Home card and from notifications, and before this
+        // tile their only route to the requests was back out to the Events
+        // tab. Live meetups only: a finished one has nothing left to manage.
+        if (meetup.isHostedByMe && !_isPastMeetup) ...[
+          const SizedBox(height: 12),
+          _ActionTile(
+            icon: Icons.people_outline_rounded,
+            label: 'VIEW REQUESTS',
+            detail: 'See who asked to join, accept or pass',
+            onTap: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => RequestManagementPage(meetup: meetup),
+                ),
+              );
+              // Accepting or rejecting over there changes what this page
+              // shows (counts, participants), so reload on the way back.
+              if (mounted) _load();
+            },
+          ),
+        ],
         const SizedBox(height: 12),
         // Everything from here down is about GETTING to a meetup. A finished
         // one gets the review instead — see _isPastMeetup.
