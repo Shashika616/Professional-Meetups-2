@@ -119,13 +119,13 @@ class _Veil extends StatelessWidget {
 /// The launcher mark at rest inside a thin brand-green arc that sweeps
 /// around it, over a soft glow. The arc is the "still working" signal; the
 /// mark is so the wait belongs to this app and not to whichever provider's
-/// sheet just closed. Proportions: mark 56, a 10-point breath of space,
-/// then a 2.5-point ring at 88, which is what keeps it from reading as an
-/// icon jammed inside a spinner.
+/// sheet just closed. Proportions: mark 56, a breath of space, then a
+/// 4-point ring at 92: thick enough to read as a made object rather than a
+/// hairline, with enough air that it is not an icon jammed in a spinner.
 class _MarkInRing extends StatelessWidget {
   const _MarkInRing();
 
-  static const double _ring = 88;
+  static const double _ring = 92;
   static const double _mark = 56;
 
   @override
@@ -157,15 +157,15 @@ class _MarkInRing extends StatelessWidget {
             dimension: _ring,
             child: CircularProgressIndicator(
               value: 1,
-              strokeWidth: 2.5,
-              color: green.withValues(alpha: 0.14),
+              strokeWidth: 4,
+              color: green.withValues(alpha: 0.16),
             ),
           ),
           // The sweeping arc.
           SizedBox.square(
             dimension: _ring,
             child: CircularProgressIndicator(
-              strokeWidth: 2.5,
+              strokeWidth: 4,
               strokeCap: StrokeCap.round,
               color: green,
             ),
