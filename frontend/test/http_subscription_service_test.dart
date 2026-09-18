@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/http_subscription_service.dart';
@@ -185,4 +186,64 @@ void main() {
       expect(requestsSent, 0);
     });
   });
+  group('a device with no store', () {
+    test('availableProducts answers empty without a product query', () async {
+      final store = _AbsentStore();
+      final service = HttpSubscriptionService(
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+        baseUrl: _baseUrl,
+        getAccessToken: () async => 'token',
+        inAppPurchase: store,
+      );
+
+      final products = await service.availableProducts(const [
+        'premium_weekly',
+        'premium_monthly',
+        'premium_yearly',
+      ]);
+
+      expect(products, isEmpty);
+      expect(store.queryCalls, 0, reason: 'the query is what loops forever');
+    });
+
+    test('restorePurchases is a no-op', () async {
+      final store = _AbsentStore();
+      final service = HttpSubscriptionService(
+        httpClient: MockClient((_) async => http.Response('{}', 200)),
+        baseUrl: _baseUrl,
+        getAccessToken: () async => 'token',
+        inAppPurchase: store,
+      );
+      await service.restorePurchases();
+      expect(store.restoreCalls, 0);
+    });
+  });
+}
+
+/// A store that is not there. On such a device the Android billing plugin
+/// retries a product query forever with no delay (gap found 2026-09-18 on
+/// an emulator without Play Billing); the service must not ask it.
+class _AbsentStore implements InAppPurchase {
+  int queryCalls = 0;
+  int restoreCalls = 0;
+
+  @override
+  Future<bool> isAvailable() async => false;
+
+  @override
+  Future<ProductDetailsResponse> queryProductDetails(
+    Set<String> identifiers,
+  ) async {
+    queryCalls++;
+    throw StateError('must not be called when the store is absent');
+  }
+
+  @override
+  Future<void> restorePurchases({String? applicationUserName}) async {
+    restoreCalls++;
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('${invocation.memberName}');
 }

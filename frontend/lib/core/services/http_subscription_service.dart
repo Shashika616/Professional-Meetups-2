@@ -73,6 +73,18 @@ class HttpSubscriptionService implements SubscriptionService {
   Future<List<ProductDetails>> availableProducts(
     List<String> productIds,
   ) async {
+    // Ask whether the store is there BEFORE asking it for products. On a
+    // device without Play Billing (an emulator with no Play account, a
+    // de-Googled phone) in_app_purchase_android's BillingClientManager
+    // answers a product query with serviceDisconnected and then reconnects
+    // and retries it with no delay and no cap: a tight loop that logs
+    // "In-app billing API version 3 is not supported" hundreds of times a
+    // second for the life of the process and never returns. isAvailable()
+    // is the plugin's non-retrying probe; false means "nothing on sale
+    // here", which the screen already knows how to show.
+    if (!await _inAppPurchase.isAvailable()) {
+      return const <ProductDetails>[];
+    }
     final response = await _inAppPurchase.queryProductDetails(
       productIds.toSet(),
     );
@@ -99,7 +111,12 @@ class HttpSubscriptionService implements SubscriptionService {
   }
 
   @override
-  Future<void> restorePurchases() => _inAppPurchase.restorePurchases();
+  Future<void> restorePurchases() async {
+    // Same guard as availableProducts: a restore against a store that is
+    // not there would enter the same retry loop.
+    if (!await _inAppPurchase.isAvailable()) return;
+    await _inAppPurchase.restorePurchases();
+  }
 
   Map<String, dynamic> _decodeOrThrow(http.Response response) {
     if (response.statusCode == 200) {

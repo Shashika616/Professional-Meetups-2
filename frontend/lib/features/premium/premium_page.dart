@@ -250,9 +250,20 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
+                    // The card with the perks is always here: what Premium
+                    // gets you does not depend on the store answering.
+                    // Prices, tier rows and the button do, so they follow
+                    // the store's reply below.
+                    _FeaturedPlanCard(
+                      tier: featured ?? featuredTier,
+                      product: featured == null ? null : products?[featured],
+                      isCurrent: featured != null && currentTier == featured,
+                    ),
+                    const SizedBox(height: 16),
                     if (_loadError != null)
                       Text(
                         _loadError!,
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           color: AppPalette.danger,
                           fontSize: 12,
@@ -262,26 +273,22 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                       const SkeletonLoader(
                         child: SkeletonBox(
                           width: double.infinity,
-                          height: 320,
-                          radius: 24,
+                          height: 132,
+                          radius: 16,
                         ),
                       )
                     else if (products.isEmpty)
                       Text(
-                        'Premium isn\'t available on this device right now.',
+                        'Plans and prices come from the App Store or Google '
+                        'Play, and Premium isn\'t available on this device '
+                        'right now.',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           color: AppPalette.textSecondary,
                           fontSize: 12,
                         ),
                       )
                     else ...[
-                      if (featured != null)
-                        _FeaturedPlanCard(
-                          tier: featured,
-                          product: products[featured]!,
-                          isCurrent: currentTier == featured,
-                        ),
-                      const SizedBox(height: 16),
                       for (final tier in PremiumTier.values)
                         if (products[tier] != null) ...[
                           _TierRow(
@@ -431,7 +438,11 @@ class _FeaturedPlanCard extends StatelessWidget {
   });
 
   final PremiumTier tier;
-  final ProductDetails product;
+
+  /// Null while the store has not answered, or has nothing: the card then
+  /// shows the perks under a generic title and no price at all, rather
+  /// than a made-up one.
+  final ProductDetails? product;
   final bool isCurrent;
 
   @override
@@ -459,11 +470,21 @@ class _FeaturedPlanCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(
-                  child: _Price(
-                    amount: product.price,
-                    period: '/${tier.period}',
-                    large: true,
-                  ),
+                  child: product == null
+                      ? const Text(
+                          'TieHere Premium',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                          ),
+                        )
+                      : _Price(
+                          amount: product!.price,
+                          period: '/${tier.period}',
+                          large: true,
+                        ),
                 ),
                 if (isCurrent)
                   Container(
@@ -489,19 +510,21 @@ class _FeaturedPlanCard extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             Text(
-              product.title.isEmpty
-                  ? 'Premium ${tier.label} Plan'
-                  : product.title,
+              product == null
+                  ? 'Everything TieHere has'
+                  : (product!.title.isEmpty
+                        ? 'Premium ${tier.label} Plan'
+                        : product!.title),
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 17,
                 fontWeight: FontWeight.w700,
               ),
             ),
-            if (product.description.isNotEmpty) ...[
+            if (product != null && product!.description.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(
-                product.description,
+                product!.description,
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.85),
                   fontSize: 12.5,

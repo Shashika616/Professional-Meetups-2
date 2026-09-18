@@ -171,12 +171,20 @@ void main() {
   testWidgets('with nothing on sale the screen says so and has no buy button', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1080, 3400);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
     final service = _FakeSubscriptionService();
     await tester.pumpWidget(_app(service));
     await tester.pumpAndSettle();
 
     expect(find.textContaining("isn't available"), findsOneWidget);
     expect(find.byKey(const Key('premiumSubscribe')), findsNothing);
+    // The perks card is still there: what Premium gets you does not depend
+    // on the store; only prices do, and none is shown.
+    expect(find.text('This plan gets'), findsOneWidget);
+    expect(find.text('TieHere Premium'), findsOneWidget);
+    expect(find.textContaining('/year'), findsNothing);
     // Restore stays reachable regardless.
     expect(find.text('Restore Purchases'), findsOneWidget);
   });
@@ -184,12 +192,16 @@ void main() {
   testWidgets('a store failure shows the load error, not a crash', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1080, 3400);
+    tester.view.devicePixelRatio = 2.0;
+    addTearDown(tester.view.reset);
     final service = _FakeSubscriptionService(error: Exception('store down'));
     await tester.pumpWidget(_app(service));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Could not load'), findsOneWidget);
     expect(find.byKey(const Key('premiumSubscribe')), findsNothing);
+    expect(find.text('This plan gets'), findsOneWidget);
   });
 
   testWidgets('an entitled account sees CURRENT PLAN on its own tier and '
