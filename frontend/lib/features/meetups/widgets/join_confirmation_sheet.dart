@@ -73,21 +73,58 @@ class _JoinConfirmationSheetState
               ),
             ),
             const SizedBox(height: 14),
+            // The eyebrow stays quiet; what the person is agreeing to (which
+            // meetup, when) is the line that has to be read, so it carries
+            // the weight: the intent in brand green, the window in the
+            // primary colour, both bold.
             Text(
               'YOUR HOST',
               style: TextStyle(
                 color: AppPalette.textSecondary,
-                fontSize: 11,
+                fontSize: 11.5,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1.6,
+                letterSpacing: 1.8,
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              '${meetup.intentLabel} · ${meetup.formattedWindow}',
-              style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    TextSpan(
+                      text: meetup.intentLabel,
+                      style: TextStyle(
+                        color: AppPalette.brandGreen,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                    TextSpan(
+                      text: '  ·  ',
+                      style: TextStyle(
+                        color: AppPalette.textSecondary,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    TextSpan(
+                      text: meetup.formattedWindow,
+                      style: TextStyle(
+                        color: AppPalette.textPrimary,
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.1,
+                      ),
+                    ),
+                  ],
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+              ),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             Expanded(
               child: FutureBuilder<PublicProfile>(
                 future: _host,

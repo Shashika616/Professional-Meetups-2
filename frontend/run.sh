@@ -261,6 +261,21 @@ boot_ios_simulator() {
     fi
   fi
   open_simulator_app
+  set_ios_simulator_location "$udid"
+}
+
+# A freshly booted simulator has Features > Location set to None, so
+# CoreLocation answers every request with "location unknown" and the app
+# shows its location card no matter what Settings says. Give it Colombo
+# (the test accounts' meetups are seeded around there) the way a phone in
+# your pocket would have a fix. Override with SIM_LOCATION="lat,lng".
+set_ios_simulator_location() {
+  local loc="${SIM_LOCATION:-6.9271,79.8612}"
+  if xcrun simctl location "$1" set "$loc" >/dev/null 2>&1; then
+    echo "Simulator location set to $loc (SIM_LOCATION to change)."
+  else
+    echo "Note: could not set the simulator's location; set it in Features > Location if the app cannot find one." >&2
+  fi
 }
 
 # The device window. Xcode 26 and earlier ship Simulator.app; Xcode 27
@@ -292,6 +307,9 @@ has_android=$([ -n "$android_device_id" ] && echo true || echo false)
 
 if [ "$has_ios" = false ] && [ -n "$ios_emulator_id" ]; then
   boot_ios_simulator
+elif [ "$has_ios" = true ]; then
+  # Already booted, possibly by hand, possibly with no location.
+  set_ios_simulator_location booted
 elif [ -z "$ios_emulator_id" ]; then
   echo "No iOS simulator emulator found via 'flutter emulators' — skipping it."
 fi
