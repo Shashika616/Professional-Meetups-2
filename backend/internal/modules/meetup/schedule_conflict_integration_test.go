@@ -163,3 +163,80 @@ func TestScheduleConflict_OneMeetupAtATime(t *testing.T) {
 		}
 	})
 }
+
+// TestScheduleConflict_OnlyTheCallersOwnMeetupsCount is the regression
+// guard for gap #42 (Plan 20 Fix 1). The query used to scan every live
+// meetup on the platform and narrow to the caller afterwards; the rewrite
+// looks only at meetups the caller hosts or has requested. Seed a crowd of
+// OTHER people's live meetups and requests, all overlapping the window
+// under test, and confirm that a person with nothing of their own in that
+// window is told the window is free, by the advisory check and by the
+// locked create and join paths alike.
+func TestScheduleConflict_OnlyTheCallersOwnMeetupsCount(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	base := time.Now().Add(3 * time.Hour).Truncate(time.Second)
+	window := func(offset time.Duration) (time.Time, time.Time) {
+		return base.Add(offset), base.Add(offset + time.Hour)
+	}
+
+	// Forty hosts, each with a live meetup overlapping the window, and a
+	// requester on each: eighty other-people commitments in the way of a
+	// platform-wide scan, none of them the caller's.
+	const crowd = 40
+	var hosted []meetup.Meetup
+	for i := 0; i < crowd; i++ {
+		host := newUserID(t, h)
+		start, end := window(time.Duration(i) * time.Minute)
+		m, err := h.createMeetupAt(t, host, start, end)
+		if err != nil {
+			t.Fatalf("crowd meetup %d: %v", i, err)
+		}
+		hosted = append(hosted, m)
+		requester := newUserID(t, h)
+		if _, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{
+			MeetupID: m.ID, RequesterID: requester, RequesterTrustLevel: 4,
+		}); err != nil {
+			t.Fatalf("crowd request %d: %v", i, err)
+		}
+	}
+
+	clean := newUserID(t, h)
+	start, end := window(20 * time.Minute)
+
+	t.Run("the advisory check finds nothing for a clean user", func(t *testing.T) {
+		conflict, found, err := h.svc.CheckSchedule(ctx, clean, start, end)
+		if err != nil {
+			t.Fatalf("CheckSchedule: %v", err)
+		}
+		if found {
+			t.Fatalf("CheckSchedule found %s (host %s) for a user with no commitments: another user's meetup leaked into the caller's conflict check", conflict.ID, conflict.HostUserID)
+		}
+	})
+
+	t.Run("a clean user can join a crowded window", func(t *testing.T) {
+		if _, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{
+			MeetupID: hosted[20].ID, RequesterID: clean, RequesterTrustLevel: 4,
+		}); err != nil {
+			t.Fatalf("RequestToJoin: %v, want success", err)
+		}
+	})
+
+	t.Run("having joined one, the same user is blocked from a second, by their own request only", func(t *testing.T) {
+		_, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{
+			MeetupID: hosted[21].ID, RequesterID: clean, RequesterTrustLevel: 4,
+		})
+		conflict := asScheduleConflict(t, err)
+		if conflict.Conflict.ID != hosted[20].ID {
+			t.Errorf("conflict = %s, want the meetup this user requested, %s", conflict.Conflict.ID, hosted[20].ID)
+		}
+	})
+
+	t.Run("a second clean user can host in the crowded window", func(t *testing.T) {
+		another := newUserID(t, h)
+		if _, err := h.createMeetupAt(t, another, start, end); err != nil {
+			t.Fatalf("CreateMeetup: %v, want success", err)
+		}
+	})
+}

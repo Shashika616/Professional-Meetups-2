@@ -292,6 +292,31 @@ func (q *Queries) CreateMeetup(ctx context.Context, arg CreateMeetupParams) (Mee
 }
 
 const findScheduleConflict = `-- name: FindScheduleConflict :one
+WITH hosting AS (
+  SELECT m.id
+  FROM meetup.meetups m
+  WHERE m.host_user_id = $1
+    AND m.status IN ('open', 'full')
+    AND m.window_end > now()
+    AND m.window_start < $2
+    AND m.window_end > $3
+    AND m.id <> $4
+), requested AS (
+  SELECT m.id
+  FROM meetup.meetup_requests r
+  JOIN meetup.meetups m ON m.id = r.meetup_id
+  WHERE r.requester_id = $1
+    AND r.status IN ('pending', 'accepted')
+    AND m.status IN ('open', 'full')
+    AND m.window_end > now()
+    AND m.window_start < $2
+    AND m.window_end > $3
+    AND m.id <> $4
+), candidate_ids AS (
+  SELECT id FROM hosting
+  UNION
+  SELECT id FROM requested
+)
 SELECT
   m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location,
   COALESCE(u.full_name, '') AS host_full_name,
@@ -302,7 +327,8 @@ SELECT
   (SELECT count(*) FROM meetup.meetup_requests r2 WHERE r2.meetup_id = m.id AND r2.status = 'accepted') AS accepted_count,
   r.status AS my_request_status,
   r.id AS my_request_id
-FROM meetup.meetups m
+FROM candidate_ids c
+JOIN meetup.meetups m ON m.id = c.id
 LEFT JOIN meetup.user_display_cache u ON u.user_id = m.host_user_id
 LEFT JOIN LATERAL (
   SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
@@ -312,12 +338,6 @@ LEFT JOIN meetup.meetup_requests r
   ON r.meetup_id = m.id
  AND r.requester_id = $1
  AND r.status IN ('pending', 'accepted')
-WHERE m.status IN ('open', 'full')
-  AND m.window_end > now()
-  AND m.window_start < $2
-  AND m.window_end > $3
-  AND m.id <> $4
-  AND (m.host_user_id = $1 OR r.id IS NOT NULL)
 ORDER BY m.window_start ASC, m.id ASC
 LIMIT 1
 `
@@ -368,9 +388,19 @@ type FindScheduleConflictRow struct {
 // Same joined shape as ListMeetupsByHost so it converts through the same
 // code; my_request_status is read so the caller can say "you asked to
 // join" versus "you're hosting".
-// LIVE, defined here, in the service's ListActiveMeetups isLive closure,
-// and (as BROWSABLE, 'open' only) in ListOpenMeetupsFirstPage/AfterCursor
-// above. Keep the three in step.
+//
+// Rewritten 2026-09-18 (gap #42) from a single OR-across-a-join query,
+// which could not use an index for the caller-scoping condition and scanned
+// every live meetup on the platform. Split into two independently indexed
+// branches (idx_meetups_host_live, idx_meetup_requests_requester_active,
+// migration 0013) combined with UNION, each returning only the caller's own
+// candidate meetup ids before the full row shape is ever assembled. A
+// meetup's host and requester are never the same person (self-requests are
+// rejected before this runs), so UNION has nothing to dedupe; it is UNION
+// rather than UNION ALL only so a row can never appear twice by accident.
+// LIVE, defined here (in both branches above), in the service's
+// ListActiveMeetups isLive closure, and (as BROWSABLE, 'open' only) in
+// ListOpenMeetupsFirstPage/AfterCursor above. Keep the three in step.
 func (q *Queries) FindScheduleConflict(ctx context.Context, arg FindScheduleConflictParams) (FindScheduleConflictRow, error) {
 	row := q.db.QueryRow(ctx, findScheduleConflict,
 		arg.UserID,

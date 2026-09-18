@@ -267,9 +267,19 @@ type Querier interface {
 	// Same joined shape as ListMeetupsByHost so it converts through the same
 	// code; my_request_status is read so the caller can say "you asked to
 	// join" versus "you're hosting".
-	// LIVE, defined here, in the service's ListActiveMeetups isLive closure,
-	// and (as BROWSABLE, 'open' only) in ListOpenMeetupsFirstPage/AfterCursor
-	// above. Keep the three in step.
+	//
+	// Rewritten 2026-09-18 (gap #42) from a single OR-across-a-join query,
+	// which could not use an index for the caller-scoping condition and scanned
+	// every live meetup on the platform. Split into two independently indexed
+	// branches (idx_meetups_host_live, idx_meetup_requests_requester_active,
+	// migration 0013) combined with UNION, each returning only the caller's own
+	// candidate meetup ids before the full row shape is ever assembled. A
+	// meetup's host and requester are never the same person (self-requests are
+	// rejected before this runs), so UNION has nothing to dedupe; it is UNION
+	// rather than UNION ALL only so a row can never appear twice by accident.
+	// LIVE, defined here (in both branches above), in the service's
+	// ListActiveMeetups isLive closure, and (as BROWSABLE, 'open' only) in
+	// ListOpenMeetupsFirstPage/AfterCursor above. Keep the three in step.
 	FindScheduleConflict(ctx context.Context, arg FindScheduleConflictParams) (FindScheduleConflictRow, error)
 	// my_request_status is the *latest* request this specific user (viewerID)
 	// has made on this meetup, or NULL if they never requested — the frontend
