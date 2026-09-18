@@ -210,9 +210,12 @@ print("\n".join(d["id"] for d in devices if d["targetPlatform"].startswith("andr
 # `flutter emulators --launch` left zero devices booted; `simctl boot`
 # immediately booted one), so use it directly instead of going through
 # `flutter emulators --launch` for iOS.
-boot_ios_simulator() {
-  local udid
-  udid=$(xcrun simctl list devices available -j 2>/dev/null | python3 -c "
+# Prints "<udid>\t<name>\t<runtime>" for the first preferred simulator
+# that exists on this machine (newest runtime when a name exists on
+# several), or nothing. Split out of boot_ios_simulator so the "Booting..."
+# line can name the device that was actually picked.
+pick_ios_simulator() {
+  xcrun simctl list devices available -j 2>/dev/null | python3 -c "
 import json, re, sys
 data = json.load(sys.stdin)
 wanted = [n.strip() for n in sys.argv[1].split(',') if n.strip()]
@@ -226,20 +229,37 @@ for name in wanted:
     for runtime, devices in data.get('devices', {}).items():
         for d in devices:
             if d['name'] == name:
-                found.append((version(runtime), d['udid']))
+                found.append((version(runtime), d['udid'], runtime))
     if found:
         found.sort(reverse=True)
-        print(found[0][1])
+        v, udid, runtime = found[0]
+        print(udid + '\t' + name + '\t' + runtime.rsplit('.', 1)[-1])
         sys.exit()
-" "$PREFERRED_IOS_SIMULATOR_NAMES" 2>/dev/null || true)
-  if [ -z "$udid" ]; then
+" "$PREFERRED_IOS_SIMULATOR_NAMES" 2>/dev/null || true
+}
+
+boot_ios_simulator() {
+  local choice udid name runtime
+  choice=$(pick_ios_simulator)
+  IFS=$'\t' read -r udid name runtime <<<"$choice"
+  if [ -z "${udid:-}" ]; then
     # None of the named simulators exist on this machine — fall back to
     # Flutter's own resolution, which is at least not a no-op when nothing
     # is open.
+    echo "None of the preferred simulators ($PREFERRED_IOS_SIMULATOR_NAMES) exist here; letting Flutter pick one."
     flutter emulators --launch "$ios_emulator_id"
     return
   fi
-  xcrun simctl boot "$udid" 2>/dev/null || true
+  echo "Booting iOS simulator: $name ($runtime, $udid)"
+  # Already booted is not an error (exit 149); anything else is, and
+  # surfacing it beats a silent three-minute wait below.
+  if ! xcrun simctl boot "$udid" 2>/tmp/simctl-boot.err; then
+    if ! grep -q "already booted" /tmp/simctl-boot.err; then
+      echo "xcrun simctl boot failed:" >&2
+      cat /tmp/simctl-boot.err >&2
+      return 1
+    fi
+  fi
   open_simulator_app
 }
 
@@ -271,7 +291,6 @@ android_device_id=$(find_preferred_android_device_id_in_snapshot "$devices_snaps
 has_android=$([ -n "$android_device_id" ] && echo true || echo false)
 
 if [ "$has_ios" = false ] && [ -n "$ios_emulator_id" ]; then
-  echo "Booting an iOS simulator ($PREFERRED_IOS_SIMULATOR_NAME)..."
   boot_ios_simulator
 elif [ -z "$ios_emulator_id" ]; then
   echo "No iOS simulator emulator found via 'flutter emulators' — skipping it."
