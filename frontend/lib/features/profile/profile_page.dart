@@ -18,7 +18,7 @@ import 'package:professional_connections_platform/core/widgets/verification_badg
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
-import 'package:professional_connections_platform/features/premium/premium_plans_page.dart';
+import 'package:professional_connections_platform/features/premium/premium_page.dart';
 import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
 import 'package:professional_connections_platform/features/safety/safety_page.dart';
 import 'package:professional_connections_platform/features/verification/corporate_email_verification_page.dart';
@@ -440,7 +440,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             ),
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute<void>(builder: (context) => const PremiumPlansPage()),
+        MaterialPageRoute<void>(builder: (context) => const PremiumPage()),
       ),
     );
   }

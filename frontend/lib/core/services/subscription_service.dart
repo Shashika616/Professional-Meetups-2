@@ -82,6 +82,7 @@ class SubscriptionStatus {
     required this.tier,
     required this.status,
     this.platform,
+    this.productId,
     this.currentPeriodEnd,
     this.autoRenewStatus = false,
   });
@@ -89,6 +90,15 @@ class SubscriptionStatus {
   final SubscriptionTier tier;
   final SubscriptionLifecycleStatus status;
   final String? platform;
+
+  /// The store product the active subscription was bought as (one of the
+  /// `premium*ProductId` constants), when the backend reports it; null
+  /// otherwise. With three tiers on sale (Plan 20 Fix 3) this is how the
+  /// Premium screen knows which row to mark CURRENT PLAN. The wire key is
+  /// `product_id`; a backend that does not send it yet leaves this null and
+  /// the screen still treats the account as entitled, it just cannot point
+  /// at one tier.
+  final String? productId;
   final DateTime? currentPeriodEnd;
   final bool autoRenewStatus;
 
@@ -99,6 +109,7 @@ class SubscriptionStatus {
       tier: _tierFromWire(json['tier'] as String? ?? 'free'),
       status: _statusFromWire(json['status'] as String? ?? 'none'),
       platform: json['platform'] as String?,
+      productId: json['product_id'] as String?,
       currentPeriodEnd: json['current_period_end_unix_seconds'] != null
           ? DateTime.fromMillisecondsSinceEpoch(
               (json['current_period_end_unix_seconds'] as int) * 1000,
