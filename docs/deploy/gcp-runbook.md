@@ -160,10 +160,20 @@ Client: the mobile app's production gateway URL is set at build time in
 | Admin / migrations | direct connection (IPv6 only on the free tier; works from a Mac on IPv6): `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/monolith_db`. `migrate -path migrations -database '<direct url>' up`. Schema version 12. |
 | Data | full copy of Cloud SQL taken 2026-09-15 (all 20 tables, row counts verified equal). Final Cloud SQL backups kept at `~/Documents/Professional Meetups/backups/` (custom-format `.dump` + plain data `.sql`), outside git. |
 | Cloud Run change | `run.googleapis.com/cloudsql-instances` annotation removed from `service.yaml`; `r23`/`r24` reused the `r22` images; `r25` (2026-09-15) adds email-address validation on the unauthenticated start endpoints; `r28`/`r28b` (2026-09-16) carry ADR-005 (one meetup at a time, logout with `fcm_token`) and the Android notification icon/colour on every push; `r29` (2026-09-16) adds the advisory `GET /v1/meetups/schedule-check` and the x/crypto + compress bumps; `r30` (2026-09-17) rewords the `request_declined` and `meetup_full` push copy per ADR-006 ("Not this time"), no wire change; `r31` (2026-09-17) drops the dash from the starting-soon push. |
-| Free-tier caveats | project pauses after 7 idle days (unpause in the dashboard); no PITR/backups on free (take `pg_dump` via the direct URL periodically); pooler ~15 server connections shared, 200 client connections. |
+| Free-tier caveats | project pauses after 7 idle days (unpause in the dashboard); no PITR and no managed backups on free, so the backup is ours: `.github/workflows/backup-database.yml` runs `backend/scripts/backup-database.sh` daily at 18:00 UTC (and on demand via *Run workflow*), a `pg_dump -Fc` over the direct URL uploaded to the GCS bucket in the `BACKUP_GCS_BUCKET` secret, kept 30 days by the bucket's lifecycle policy (`backend/scripts/backup-lifecycle.json`); a failed run shows as a failed workflow. See ADR-007. Pooler ~15 server connections shared, 200 client connections. |
 | Latency note | Cloud Run and Supabase are both in Mumbai now; the earlier Tokyo project cost ~70 ms per DB round trip. |
 
 Restore-from-dump into a fresh database: strip pg_dump's
 `set_config('search_path', '', false)` line (the PostGIS trigger resolves
 `geography` through the search path) and clear the migration-seeded
 `auth.known_companies` before loading data, as was done here.
+
+Restore from an automated backup: the nightly files are custom-format
+(`pg_dump -Fc`), so fetch one with `gsutil cp gs://<bucket>/backup-<stamp>.dump .`
+and load it with `pg_restore --no-owner --no-privileges -d '<direct url>' backup-<stamp>.dump`
+against a database that already has the migrations applied. The same two
+gotchas above apply: pass `--no-privileges` and restore data after
+migrations so the PostGIS trigger and `auth.known_companies` behave as
+described; if `pg_restore` reports the search_path or known_companies
+conflicts, use `pg_restore -l`/`-L` to drop those items from the list and
+re-run. Test a restore into a scratch database before relying on it.

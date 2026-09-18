@@ -1,0 +1,66 @@
+name: Database backup
+
+# Nightly pg_dump of the production Supabase database to Google Cloud
+# Storage (ADR-007, Plan 20 Fix 2). The free tier has no managed backups,
+# so this workflow is the backup. A failed run is the alert: GitHub shows a
+# failed scheduled workflow and emails the repo owner; nothing else is
+# wired on purpose for this round.
+#
+# Secrets this needs (Settings > Secrets and variables > Actions):
+#   SUPABASE_DIRECT_URL  the direct (not pooler) connection URL
+#   BACKUP_GCS_BUCKET    the bucket name, without gs://
+#   GCP_BACKUP_SA_KEY    JSON key of a service account that holds
+#                        roles/storage.objectAdmin on that bucket ONLY
+# Bucket retention is the lifecycle policy in
+# backend/scripts/backup-lifecycle.json, applied once with
+# `gsutil lifecycle set`.
+
+on:
+  schedule:
+    # 18:00 UTC daily (23:30 in Colombo), a quiet hour for the app; the
+    # meetup lifecycle poller's 60 s cadence has no interaction with a
+    # read-only dump.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pg_dump must be at least the server's major version (Postgres 17 on
+      # Supabase, runbook §6); an older client refuses to dump a newer
+      # server. Ubuntu's own package lags, so install from PGDG.
+      - name: Install PostgreSQL 17 client
+        run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          pg_dump --version
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_BACKUP_SA_KEY }}
+
+      # Provides gsutil on PATH, authenticated by the step above.
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Dump and upload
+        env:
+          SUPABASE_DIRECT_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
+          BACKUP_GCS_BUCKET: ${{ secrets.BACKUP_GCS_BUCKET }}
+        run: backend/scripts/backup-database.sh

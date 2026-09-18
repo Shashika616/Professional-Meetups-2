@@ -13,18 +13,20 @@ spec:
       name: meetups-backend-r22
       annotations:
         # Instance ceiling, derived from the DATABASE rather than from
-        # traffic. db.MaxConns is 20 per instance, and Cloud SQL derives
-        # max_connections from tier RAM (~400 on db-custom-1-3840, ~200 on a
-        # shared-core tier). Cloud Run's default of 100 instances would
-        # therefore demand up to 2000 connections and start REFUSING them at
-        # roughly 20 — a hard failure, not a slowdown, and nothing in the app
-        # guards against it.
+        # traffic. db.MaxConns is 20 per instance, and the database is
+        # Supabase's transaction pooler (ADR-007, runbook §6), which admits
+        # 200 client connections and multiplexes them onto about 15 server
+        # connections. Cloud Run's default of 100 instances would therefore
+        # demand up to 2000 client connections and the pooler would start
+        # REFUSING them at instance 10 — a hard failure, not a slowdown, and
+        # nothing in the app guards against it.
         #
-        # 8 x 20 = 160 leaves headroom under EITHER tier, so this stays
-        # correct if the instance is ever downsized. It is also a spend
-        # ceiling: a retry loop or traffic spike cannot scale to 100
-        # instances and bill for them. Raise it only together with
-        # max_connections, a smaller MaxConns, or a pooler.
+        # 8 x 20 = 160 leaves 40 under the pooler's 200 (thinner than the
+        # old Cloud SQL margin, so re-do this arithmetic before raising
+        # either number). It is also a spend ceiling: a retry loop or
+        # traffic spike cannot scale to 100 instances and bill for them.
+        # Raise it only together with a smaller MaxConns or a paid Supabase
+        # tier with a higher pooler limit.
         autoscaling.knative.dev/maxScale: "8"
         run.googleapis.com/cloudsql-instances: project-285b9289-549d-4fef-92c:asia-south1:meetups-db
         run.googleapis.com/container-dependencies: '{"gateway":["monolith"]}'
