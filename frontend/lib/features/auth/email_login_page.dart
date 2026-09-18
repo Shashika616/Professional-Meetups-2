@@ -222,6 +222,9 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
           onSignedIn: _onSocialSignedIn,
           ageConfirmedOver18: _ageConfirmed,
           onBusyChanged: (busy) => setState(() => _socialBusy = busy),
+          // _socialBusy raises SigningInOverlay around this Scaffold, so
+          // the overlay is the one loading indicator.
+          pageShowsOverlay: true,
         ),
         const SizedBox(height: 18),
         const OrDivider(),

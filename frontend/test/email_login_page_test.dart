@@ -303,16 +303,31 @@ void main() {
         findsWidgets,
       );
 
-      // Exactly one button is in its loading state: the one that was
-      // tapped. The other keeps its label (PrimaryButton swaps the label
-      // for a spinner only while loading).
-      expect(find.text('CONTINUE WITH LINKEDIN'), findsNothing);
+      // The overlay is the ONE loading indicator (gap #49): neither button
+      // spins underneath it. Both keep their labels (PrimaryButton swaps
+      // the label for a spinner only while loading) and both are disabled.
+      expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
       expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
-      final google = tester.widget<PrimaryButton>(
-        find.byKey(const Key('continueWithGoogle')),
+      for (final key in const ['continueWithLinkedIn', 'continueWithGoogle']) {
+        final button = tester.widget<PrimaryButton>(find.byKey(Key(key)));
+        expect(button.isLoading, isFalse, reason: '$key must not spin');
+        expect(button.onPressed, isNull, reason: '$key must be disabled');
+      }
+      // One ring on the whole page: the overlay's.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('signingInOverlay')),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsWidgets,
       );
-      expect(google.isLoading, isFalse);
-      expect(google.onPressed, isNull);
+      expect(
+        find.descendant(
+          of: find.byType(PrimaryButton),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsNothing,
+      );
 
       // Taps on the covered page go nowhere: the other provider, the email
       // button.

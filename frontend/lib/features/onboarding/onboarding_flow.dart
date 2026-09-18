@@ -296,6 +296,9 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
               // was checked and continued (see _onAgeConfirmed).
               ageConfirmedOver18: _ageConfirmed,
               onBusyChanged: (busy) => setState(() => _busy = busy),
+              // _busy raises SigningInOverlay around this Scaffold, so the
+              // overlay is the one loading indicator.
+              pageShowsOverlay: true,
             ),
             const SizedBox(height: 18),
             // A divider, so the OAuth buttons read as one group and the two

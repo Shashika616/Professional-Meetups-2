@@ -13,8 +13,11 @@ import 'package:professional_connections_platform/features/meetups/widgets/andro
 /// - **iOS**: [IosMapLocationStep] — Apple MapKit, no API key, settled as
 ///   the iOS decision (not provisional).
 /// - **Everything else (Android, and a reasonable fallback for any other
-///   target)**: [AndroidMapLocationStep] — the existing Stadia Maps
-///   implementation, still provisional (see TESTING-NOTES.md).
+///   target)**: [AndroidMapLocationStep] — MapLibre over OpenStreetMap by
+///   default since 2026-09-13 (OpenFreeMap tiles, Photon type-ahead with a
+///   Nominatim fallback, no key). Stadia Maps remains only as an explicit
+///   opt-in build flag (`MAP_PROVIDER=stadia` with `STADIA_MAPS_API_KEY` in
+///   `frontend/.env`; see TESTING-NOTES.md and `frontend/lib/core/maps/`).
 ///
 /// `defaultTargetPlatform` (not `dart:io`'s `Platform.isIOS`, which throws
 /// on web — this codebase already builds for web per `CLAUDE.md`'s

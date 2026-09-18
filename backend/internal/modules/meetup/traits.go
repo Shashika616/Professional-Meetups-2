@@ -90,9 +90,12 @@ var traitKeys = func() map[string]bool {
 
 // validateTraits rejects anything outside the vocabulary, anything repeated,
 // and more than the cap. Validated server-side rather than trusted from the
-// client for the usual reason: these end up displayed on someone else's
-// profile, so an arbitrary string from a modified client would be text one
-// user gets to write onto another user's name.
+// client for the usual reason: a modified client must not be able to store
+// an arbitrary string against a named real person. Traits are private to
+// the rater (see the file header: read back only to whoever chose them,
+// never aggregated or shown on anyone's profile), so the exposure is the
+// stored record itself and the closed vocabulary that keeps it
+// aggregatable, not a public display.
 func validateTraits(traits []string) error {
 	if len(traits) > maxTraitsPerParticipant {
 		return fmt.Errorf("meetup: at most %d traits per participant: %w", maxTraitsPerParticipant, apperror.ErrInvalidInput)

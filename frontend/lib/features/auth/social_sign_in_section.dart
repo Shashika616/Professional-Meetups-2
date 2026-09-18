@@ -9,6 +9,8 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/brand_marks.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/signing_in_overlay.dart'
+    show SigningInOverlay;
 
 /// The one-tap sign-in pair, platform-appropriate: Apple + LinkedIn on iOS,
 /// Google + LinkedIn elsewhere. One widget, used by both the sign-up flow
@@ -35,6 +37,7 @@ class SocialSignInSection extends ConsumerStatefulWidget {
     required this.onSignedIn,
     required this.ageConfirmedOver18,
     this.onBusyChanged,
+    this.pageShowsOverlay = false,
   });
 
   /// Called after a successful sign-in. `isNewUser` is true when the
@@ -47,6 +50,13 @@ class SocialSignInSection extends ConsumerStatefulWidget {
 
   /// Lets a parent disable its own controls while a provider flow is open.
   final ValueChanged<bool>? onBusyChanged;
+
+  /// True when the hosting page raises a [SigningInOverlay] from
+  /// [onBusyChanged]. Then the overlay's ring is THE loading indicator and
+  /// the tapped button does not spin as well: two indicators for one wait
+  /// is what the overlay exists to prevent (gap #49). False keeps the
+  /// per-button spinner for a host that shows nothing page-level.
+  final bool pageShowsOverlay;
 
   @override
   ConsumerState<SocialSignInSection> createState() =>
@@ -129,8 +139,10 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
       // included: PrimaryButton's own disabled state only fades the fill,
       // which on the neutral card surface is invisible in dark mode. The
       // provider that is NOT running dims the same way while the other
-      // one is, so exactly one button ever looks busy.
+      // one is, so exactly one button ever looks busy, and none does when
+      // the page's overlay is carrying the loading state instead.
       final isRunning = _busySource == source;
+      final spins = isRunning && !widget.pageShowsOverlay;
       final dimmed = !widget.ageConfirmedOver18 || (_busy && !isRunning);
       return Opacity(
         opacity: dimmed ? 0.45 : 1,
@@ -141,7 +153,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
           fillColor: AppPalette.card,
           foregroundColor: AppPalette.textPrimary,
           borderColor: AppPalette.hairline,
-          isLoading: isRunning,
+          isLoading: spins,
           onPressed: widget.ageConfirmedOver18 && !_busy ? onPressed : null,
         ),
       );
