@@ -12,11 +12,19 @@ import 'package:professional_connections_platform/core/widgets/primary_button.da
 import 'package:professional_connections_platform/core/widgets/signing_in_overlay.dart'
     show SigningInOverlay;
 
-/// The one-tap sign-in pair, platform-appropriate: Apple + LinkedIn on iOS,
-/// Google + LinkedIn elsewhere. One widget, used by both the sign-up flow
-/// and the sign-in page, because the buttons, the busy handling and the
-/// error toasts are identical — only what happens after success differs,
-/// and that is the caller's [onSignedIn].
+/// The one-tap sign-in buttons, platform-appropriate: Apple + Google +
+/// LinkedIn on iOS, Google + LinkedIn elsewhere. One widget, used by both
+/// the sign-up flow and the sign-in page, because the buttons, the busy
+/// handling and the error toasts are identical — only what happens after
+/// success differs, and that is the caller's [onSignedIn].
+///
+/// Every button is the same [PrimaryButton] treatment at the same height:
+/// App Store Guideline 4.8 requires Sign in with Apple to be no less
+/// prominent than any other sign-in option, and `onboarding_flow_test`
+/// asserts the sizes are equal. What separates the group is spacing, not
+/// a different button: Apple and Google are generic identity providers
+/// and sit 12 apart; LinkedIn is this app's professional-identity anchor,
+/// a different kind of thing, and sits 20 below them (Plan 21).
 ///
 /// Every provider call is resolve-or-create on the server: an identity
 /// that already exists signs in, a new one signs up. [onSignedIn] is told
@@ -119,8 +127,12 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
   @override
   Widget build(BuildContext context) {
     // defaultTargetPlatform, not dart:io Platform, so this stays testable
-    // under `flutter test`. Apple has no native Android SDK and Google has
-    // no first-class iOS placement requirement the way Apple does on iOS.
+    // under `flutter test`. Only Apple is platform-specific, and only by
+    // Apple's own rules: there is no native Sign in with Apple SDK on
+    // Android, and on iOS the App Store requires it beside any other
+    // one-tap option. Google is offered on both platforms because nothing
+    // platform-side prevents it: `signInWithGoogle` has no platform check
+    // and posts to the same federated endpoint from either OS.
     final isIOS = defaultTargetPlatform == TargetPlatform.iOS;
     final notifier = ref.read(authSessionProvider.notifier);
 
@@ -164,7 +176,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (isIOS)
+        if (isIOS) ...[
           provider(
             key: const Key('continueWithApple'),
             source: 'signInWithApple',
@@ -174,19 +186,22 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
               'signInWithApple',
               () => notifier.signInWithApple(ageConfirmedOver18: ageConfirmed),
             ),
-          )
-        else
-          provider(
-            key: const Key('continueWithGoogle'),
-            source: 'signInWithGoogle',
-            label: 'CONTINUE WITH GOOGLE',
-            mark: const GoogleMark(size: 20),
-            onPressed: () => _run(
-              'signInWithGoogle',
-              () => notifier.signInWithGoogle(ageConfirmedOver18: ageConfirmed),
-            ),
           ),
-        const SizedBox(height: 12),
+          const SizedBox(height: 12),
+        ],
+        provider(
+          key: const Key('continueWithGoogle'),
+          source: 'signInWithGoogle',
+          label: 'CONTINUE WITH GOOGLE',
+          mark: const GoogleMark(size: 20),
+          onPressed: () => _run(
+            'signInWithGoogle',
+            () => notifier.signInWithGoogle(ageConfirmedOver18: ageConfirmed),
+          ),
+        ),
+        // Wider than the 12 above on purpose: the identity providers are a
+        // pair, LinkedIn is the professional anchor. See the class comment.
+        const SizedBox(height: 20),
         provider(
           key: const Key('continueWithLinkedIn'),
           source: 'signInWithLinkedIn',

@@ -265,13 +265,24 @@ void main() {
     variant: const TargetPlatformVariant({TargetPlatform.android}),
   );
 
-  testWidgets('iOS shows Apple in place of Google', (tester) async {
+  testWidgets('iOS shows Apple, then Google, then LinkedIn (Plan 21)', (
+    tester,
+  ) async {
     await tester.pumpWidget(_appWith(_FakeAuthService()));
     await tester.pumpAndSettle();
 
     expect(find.text('CONTINUE WITH APPLE'), findsOneWidget);
-    expect(find.text('CONTINUE WITH GOOGLE'), findsNothing);
+    expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
     expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
+    final apple = tester.getTopLeft(find.byKey(const Key('continueWithApple')));
+    final google = tester.getTopLeft(
+      find.byKey(const Key('continueWithGoogle')),
+    );
+    final linkedIn = tester.getTopLeft(
+      find.byKey(const Key('continueWithLinkedIn')),
+    );
+    expect(apple.dy, lessThan(google.dy));
+    expect(google.dy, lessThan(linkedIn.dy));
   }, variant: const TargetPlatformVariant({TargetPlatform.iOS}));
 
   group('while a provider sign-in runs', () {

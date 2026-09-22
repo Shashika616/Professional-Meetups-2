@@ -67,6 +67,7 @@ class _FakeAuthService implements AuthService {
   final Completer<AuthSession>? _completer;
   final UserProfile? _profile;
   int callCount = 0;
+  int googleCallCount = 0;
   bool? lastAgeConfirmedOver18;
 
   @override
@@ -85,10 +86,18 @@ class _FakeAuthService implements AuthService {
     required bool ageConfirmedOver18,
   }) async => throw UnimplementedError();
 
+  /// Same script as LinkedIn: the widget under test treats every provider
+  /// identically, so the fake does too.
   @override
   Future<AuthSession> signInWithGoogle({
     required bool ageConfirmedOver18,
-  }) async => throw UnimplementedError();
+  }) async {
+    googleCallCount++;
+    lastAgeConfirmedOver18 = ageConfirmedOver18;
+    if (_completer != null) return _completer.future;
+    if (_error != null) throw _error;
+    return _session!;
+  }
 
   @override
   Future<AuthSession> signUpWithEmail({
@@ -473,8 +482,9 @@ void main() {
 
   group('Apple Guideline 4.8 — equal visual weight on iOS', () {
     testWidgets(
-      'CONTINUE WITH APPLE and CONTINUE WITH LINKEDIN render at the same '
-      'size — a real layout assertion, not just "looks right"',
+      'CONTINUE WITH APPLE, CONTINUE WITH GOOGLE and CONTINUE WITH LINKEDIN '
+      'all render at the same size on iOS — a real layout assertion, not '
+      'just "looks right"',
       (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
 
@@ -485,6 +495,8 @@ void main() {
         await _confirmAge(tester);
 
         expect(find.text('CONTINUE WITH APPLE'), findsOneWidget);
+        // Plan 21: Google is offered on iOS too, as the same button.
+        expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
         expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
 
         final appleSize = tester.getSize(
@@ -493,9 +505,23 @@ void main() {
             matching: find.byType(PrimaryButton),
           ),
         );
+        final googleSize = tester.getSize(
+          find.byKey(const Key('continueWithGoogle')),
+        );
         final linkedInSize = tester.getSize(
           find.byKey(const Key('continueWithLinkedIn')),
         );
+        // And in the order the plan lays them out: Apple, Google, LinkedIn,
+        // with the identity pair 12 apart and LinkedIn 20 below Google.
+        final appleTop = tester
+            .getTopLeft(find.byKey(const Key('continueWithApple')))
+            .dy;
+        final googleTop = tester
+            .getTopLeft(find.byKey(const Key('continueWithGoogle')))
+            .dy;
+        final linkedInTop = tester
+            .getTopLeft(find.byKey(const Key('continueWithLinkedIn')))
+            .dy;
 
         // Reset before the test body returns — the framework asserts every
         // debug var is back to its default as soon as the test body
@@ -503,8 +529,32 @@ void main() {
         debugDefaultTargetPlatformOverride = null;
 
         expect(appleSize, linkedInSize);
+        expect(googleSize, linkedInSize);
+        expect(googleTop - appleTop, appleSize.height + 12);
+        expect(linkedInTop - googleTop, googleSize.height + 20);
       },
     );
+
+    testWidgets('a tap on the iOS Google button calls signInWithGoogle with '
+        'the recorded attestation', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+
+      final auth = _FakeAuthService.success(_testSession);
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+      await _confirmAge(tester);
+
+      await tester.tap(find.byKey(const Key('continueWithGoogle')));
+      await tester.pumpAndSettle();
+
+      // Reset before any expect can throw, for the reason above.
+      debugDefaultTargetPlatformOverride = null;
+
+      expect(auth.googleCallCount, 1);
+      expect(auth.callCount, 0, reason: 'LinkedIn must not have been called');
+      expect(auth.lastAgeConfirmedOver18, isTrue);
+      expect(find.text('COMPLETE YOUR PROFILE'), findsOneWidget);
+    });
   });
 }
 
