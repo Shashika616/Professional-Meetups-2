@@ -38,6 +38,8 @@ class _FakeAuthService implements AuthService {
     this.logoutShouldThrow = false,
     UserProfile? profile,
     this.completeProfileSetupError,
+    this.linkedInSuggestedName = '',
+    this.profileAfterLink,
   }) : _profile =
            profile ??
            // An already-LinkedIn-connected user is this fake's default —
@@ -59,6 +61,14 @@ class _FakeAuthService implements AuthService {
 
   final bool logoutShouldThrow;
   final UserProfile _profile;
+
+  // Plan 22: what the LinkedIn link response suggests the user's name
+  // should be ('' when the server has nothing to suggest), and the profile
+  // the refetch after linking returns.
+  final String linkedInSuggestedName;
+  final UserProfile? profileAfterLink;
+  int linkLinkedInCallCount = 0;
+  bool _linked = false;
   int logoutCallCount = 0;
   String? lastLogoutRefreshToken;
 
@@ -98,7 +108,23 @@ class _FakeAuthService implements AuthService {
   }) async => throw UnimplementedError();
 
   @override
-  Future<AuthSession> linkLinkedIn() async => throw UnimplementedError();
+  Future<AuthSession> linkLinkedIn() async {
+    linkLinkedInCallCount++;
+    _linked = true;
+    return AuthSession(
+      userId: 'user-1',
+      accessToken: 'a.b.c',
+      refreshToken: 'refresh-token-abc',
+      trustLevel: 1,
+      isNewUser: false,
+      accessTokenExpiresAt: DateTime.now().add(const Duration(minutes: 15)),
+      // The account's own name, unchanged by the link — the suggestion is a
+      // separate field precisely because the server did not apply it.
+      fullName: _profile.fullName,
+      profilePhotoUrl: '',
+      suggestedNameUpdate: linkedInSuggestedName,
+    );
+  }
 
   @override
   Future<int> startEmailSignupOtp(String email) async =>
@@ -148,7 +174,8 @@ class _FakeAuthService implements AuthService {
   // this fake exercises this, so it needs a real implementation, not
   // UnimplementedError.
   @override
-  Future<UserProfile> getProfile() async => _profile;
+  Future<UserProfile> getProfile() async =>
+      _linked ? (profileAfterLink ?? _profile) : _profile;
 
   @override
   Future<int> startPhoneVerification(String phoneNumber) async =>
@@ -456,6 +483,118 @@ void main() {
         expect(find.byIcon(Icons.lock_outline_rounded), findsNWidgets(4));
       },
     );
+
+    // --- Plan 22: LinkedIn's name is offered, never imposed. ---
+
+    // A Level 0 account with everything else already verified. The
+    // already-verified flags are here for one reason: they make
+    // pendingVerificationSteps empty, so the post-link verification
+    // sequence pushes no screens and these tests are about the name dialog
+    // alone. profileAfterLink is what the refetch after linking returns.
+    const level0BeforeLink = UserProfile(
+      id: 'user-1',
+      fullName: 'Ada Lovelace',
+      trustLevel: 0,
+      phoneVerified: true,
+      personalEmailVerified: true,
+      personalDetailsComplete: true,
+      workEmailVerified: true,
+    );
+    const level1AfterLink = UserProfile(
+      id: 'user-1',
+      fullName: 'Ada Lovelace',
+      trustLevel: 1,
+      linkedInConnectedFlag: true,
+      phoneVerified: true,
+      personalEmailVerified: true,
+      personalDetailsComplete: true,
+      workEmailVerified: true,
+    );
+
+    Future<_FakeAuthService> tapConnect(
+      WidgetTester tester, {
+      required String suggestedName,
+    }) async {
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final auth = _FakeAuthService(
+        profile: level0BeforeLink,
+        profileAfterLink: level1AfterLink,
+        linkedInSuggestedName: suggestedName,
+      );
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('CONNECT LINKEDIN'));
+      await tester.pumpAndSettle();
+      return auth;
+    }
+
+    testWidgets('a differing LinkedIn name is offered, and accepting it goes '
+        'through the ordinary name update', (tester) async {
+      final auth = await tapConnect(tester, suggestedName: 'Grace Hopper');
+
+      expect(auth.linkLinkedInCallCount, 1);
+      expect(find.text('Update your name?'), findsOneWidget);
+      expect(
+        find.textContaining('LinkedIn shows your name as Grace Hopper'),
+        findsOneWidget,
+      );
+      // Nothing has changed yet — the dialog is a question, not a report.
+      expect(auth.completeProfileSetupCallCount, 0);
+
+      await tester.tap(find.widgetWithText(TextButton, 'UPDATE'));
+      await tester.pumpAndSettle();
+
+      expect(auth.completeProfileSetupCallCount, 1);
+      expect(auth.lastCompleteProfileSetupFullName, 'Grace Hopper');
+      // A pure name edit must not drag a work-email verification along with
+      // it, exactly as the Edit Name dialog is careful not to.
+      expect(auth.lastCompleteProfileSetupCompanyName, isNull);
+      expect(auth.lastCompleteProfileSetupCompanyEmail, isNull);
+      expect(find.text('Update your name?'), findsNothing);
+    });
+
+    testWidgets('KEEP MINE closes the dialog and changes nothing', (
+      tester,
+    ) async {
+      final auth = await tapConnect(tester, suggestedName: 'Grace Hopper');
+      expect(find.text('Update your name?'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(TextButton, 'KEEP MINE'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Update your name?'), findsNothing);
+      expect(
+        auth.completeProfileSetupCallCount,
+        0,
+        reason: 'declining must never write the name',
+      );
+      // And it is not asked again: the suggestion belonged to that one link.
+      expect(find.text('Update your name?'), findsNothing);
+    });
+
+    testWidgets('dismissing the dialog by tapping outside changes nothing', (
+      tester,
+    ) async {
+      final auth = await tapConnect(tester, suggestedName: 'Grace Hopper');
+      expect(find.text('Update your name?'), findsOneWidget);
+
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Update your name?'), findsNothing);
+      expect(auth.completeProfileSetupCallCount, 0);
+    });
+
+    testWidgets('no dialog at all when the server suggests nothing (the '
+        'names already match, or LinkedIn had none)', (tester) async {
+      final auth = await tapConnect(tester, suggestedName: '');
+
+      expect(auth.linkLinkedInCallCount, 1);
+      expect(find.text('Update your name?'), findsNothing);
+      expect(auth.completeProfileSetupCallCount, 0);
+    });
 
     testWidgets('the banner is absent once LinkedIn is connected (Level 1+)', (
       tester,

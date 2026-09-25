@@ -212,16 +212,13 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
       // sits as a flat band above the image. Same shape as
       // verification_checklist_page.dart's Scaffold.
       extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        title: const Text('PREMIUM'),
-        leading: const SizedBox.shrink(),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: _CloseButton(onTap: () => Navigator.of(context).pop()),
-          ),
-        ],
-      ),
+      // The ordinary pushed-page bar: title, and Flutter's own back button
+      // on the left. This screen used to suppress that and put a custom
+      // round X on the right instead — the only screen in the app that did,
+      // so leaving is where nothing else puts it. Consistency wins over the
+      // modal flavour a close button implies; this is a pushed route like
+      // any other (profile_page.dart pushes it).
+      appBar: AppBar(title: const Text('PREMIUM')),
       body: AppBackground(
         child: SafeArea(
           child: Column(
@@ -340,11 +337,15 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
               if (products != null && products.isNotEmpty)
                 Padding(
                   padding: EdgeInsets.fromLTRB(20, 8, 20, 16 + bottomInset),
+                  // PrimaryButton's own default fill, not a green override:
+                  // the app has exactly one primary-CTA colour and this page
+                  // was the only screen opting out of it. Green stays on
+                  // this page as a MARK (the card's hairline, the perk
+                  // icons, the selected tier's tick); at full width it read
+                  // as a different app's button.
                   child: PrimaryButton(
                     key: const Key('premiumSubscribe'),
                     label: entitled ? 'CURRENT PLAN' : 'SUBSCRIBE',
-                    fillColor: AppPalette.brandGreen,
-                    foregroundColor: Colors.white,
                     isLoading: _controller.busy,
                     onPressed: canBuy
                         ? () => _controller.buy(selectedProduct)
@@ -447,119 +448,153 @@ class _FeaturedPlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final green = AppPalette.brandGreen;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 22, 20, 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        color: green,
-        boxShadow: [
-          BoxShadow(
-            color: green.withValues(alpha: AppPalette.isLight ? 0.28 : 0.45),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: CustomPaint(
-        painter: const _DotTexture(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: product == null
-                      ? const Text(
-                          'TieHere Premium',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 26,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.5,
-                          ),
-                        )
-                      : _Price(
-                          amount: product!.price,
-                          period: '/${tier.period}',
-                          large: true,
+    // # WHY THIS IS NOT A GREEN SLAB ANY MORE
+    //
+    // It used to be the whole card: a full-bleed AppPalette.brandGreen fill
+    // with a coloured glow under it, a white inset panel and white dot
+    // texture. It was the one surface in the app that belonged to no palette
+    // — every other card is the onyx/surface/card ramp with a hairline, and
+    // the brand's blue/green only ever appears as a MARK (a verified tick,
+    // the logo, a selected radio), never as a page-sized fill. At that size
+    // the green stopped reading as the brand and started reading as a
+    // sticker, and the white panel inside it glared out of an otherwise
+    // near-black page.
+    //
+    // So the surface is the shared one now, and the green does what it does
+    // everywhere else in the app: it marks. The hairline, the perk icons and
+    // the CURRENT PLAN pill carry it; the type is the theme's own ink, which
+    // is also what finally makes this card correct in light mode. The glow
+    // is gone for the same reason ADR-032 removed every other one.
+    final accent = AppPalette.brandGreen;
+    // The tint has to be STRONGER on light, not equal. The dark page is
+    // near-black, so a 5% green wash on a #181D24 card is already a visible
+    // shift; the light page is #F3F6F9 with white cards, where that same 5%
+    // lands between two near-whites and the card dissolves into the page.
+    // One number for both themes would be "consistent" and would look
+    // unfinished in one of them — the same reason FlatCard's own elevation
+    // and SkeletonBox's tint each carry a per-theme value.
+    final light = AppPalette.isLight;
+    return FlatCard(
+      radius: 20,
+      // The one card on this screen meant to be read first — FlatCard lifts
+      // it the way each theme actually reads (a real shadow on light, a
+      // lighter surface on dark), instead of a coloured halo.
+      elevated: true,
+      tint: accent.withValues(alpha: light ? 0.14 : 0.05),
+      border: accent.withValues(alpha: light ? 0.55 : 0.35),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: product == null
+                    ? Text(
+                        'TieHere Premium',
+                        style: TextStyle(
+                          color: AppPalette.textPrimary,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
                         ),
-                ),
-                if (isCurrent)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      'CURRENT PLAN',
-                      style: TextStyle(
-                        color: green,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1,
+                      )
+                    : _Price(
+                        amount: product!.price,
+                        period: '/${tier.period}',
+                        large: true,
                       ),
+              ),
+              if (isCurrent)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    // Tinted ONTO the card rather than laid over it at
+                    // alpha — the house rule for accents on an opaque
+                    // surface (AppPalette.tintedSurface's own comment).
+                    color: AppPalette.tintedSurface(
+                      accent.withValues(alpha: 0.18),
+                    ),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: accent.withValues(alpha: 0.5)),
+                  ),
+                  child: Text(
+                    'CURRENT PLAN',
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1,
                     ),
                   ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            Text(
-              product == null
-                  ? 'Everything TieHere has'
-                  : (product!.title.isEmpty
-                        ? 'Premium ${tier.label} Plan'
-                        : product!.title),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 17,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            if (product != null && product!.description.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              Text(
-                product!.description,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.85),
-                  fontSize: 12.5,
-                  height: 1.4,
                 ),
-              ),
             ],
-            const SizedBox(height: 16),
-            const Text(
-              'This plan gets',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
-              ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            product == null
+                ? 'Everything TieHere has'
+                : (product!.title.isEmpty
+                      ? 'Premium ${tier.label} Plan'
+                      : product!.title),
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
             ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                children: [
-                  for (var i = 0; i < premiumPerks.length; i++)
-                    _PerkRow(
-                      perk: premiumPerks[i],
-                      last: i == premiumPerks.length - 1,
-                    ),
-                ],
+          ),
+          if (product != null && product!.description.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              product!.description,
+              style: TextStyle(
+                color: AppPalette.textSecondary,
+                fontSize: 12.5,
+                height: 1.4,
               ),
             ),
           ],
-        ),
+          const SizedBox(height: 16),
+          Text(
+            'This plan gets',
+            style: TextStyle(
+              color: AppPalette.textSecondary,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+            decoration: BoxDecoration(
+              // A step away from the card it sits on, in whichever direction
+              // that theme reads as nearer: the plain white card colour
+              // against the tinted ground on light, a lighter surface on
+              // dark (FlatCard's own elevated cue).
+              color: light
+                  ? AppPalette.card
+                  : AppPalette.tintedSurface(
+                      AppPalette.textPrimary.withValues(alpha: 0.04),
+                    ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppPalette.hairline),
+            ),
+            child: Column(
+              children: [
+                for (var i = 0; i < premiumPerks.length; i++)
+                  _PerkRow(
+                    perk: premiumPerks[i],
+                    last: i == premiumPerks.length - 1,
+                  ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -582,7 +617,7 @@ class _Price extends StatelessWidget {
       TextSpan(
         text: amount,
         style: TextStyle(
-          color: Colors.white,
+          color: AppPalette.textPrimary,
           fontSize: large ? 30 : 18,
           fontWeight: FontWeight.w800,
           letterSpacing: -0.5,
@@ -591,7 +626,7 @@ class _Price extends StatelessWidget {
           TextSpan(
             text: period,
             style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.85),
+              color: AppPalette.textSecondary,
               fontSize: large ? 15 : 12,
               fontWeight: FontWeight.w500,
             ),
@@ -603,8 +638,12 @@ class _Price extends StatelessWidget {
 }
 
 /// One perk: an outlined round icon, the sentence with its key phrase in
-/// weight, and a hairline down to the next icon. Drawn on the white inset,
-/// so its ink is fixed rather than themed.
+/// weight, and a hairline down to the next icon.
+///
+/// Its ink used to be fixed (dark on a hardcoded white inset, back when the
+/// card was a green slab). It is themed now, like the rest of the app — the
+/// icon is the one thing still carrying the brand green, which is the size
+/// green is supposed to appear at.
 class _PerkRow extends StatelessWidget {
   const _PerkRow({required this.perk, required this.last});
 
@@ -613,7 +652,7 @@ class _PerkRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const ink = Color(0xFF1B2A24);
+    final ink = AppPalette.textPrimary;
     final (icon, before, strong, after) = perk;
     return IntrinsicHeight(
       child: Row(
@@ -626,15 +665,15 @@ class _PerkRow extends StatelessWidget {
                 height: 32,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFDDE5E1)),
+                  border: Border.all(color: AppPalette.hairline),
                 ),
-                child: Icon(icon, size: 16, color: ink),
+                child: Icon(icon, size: 16, color: AppPalette.brandGreen),
               ),
               if (!last)
-                const Expanded(
+                Expanded(
                   child: SizedBox(
                     width: 1,
-                    child: ColoredBox(color: Color(0xFFE6ECE9)),
+                    child: ColoredBox(color: AppPalette.hairline),
                   ),
                 ),
             ],
@@ -646,11 +685,7 @@ class _PerkRow extends StatelessWidget {
               child: Text.rich(
                 TextSpan(
                   text: before,
-                  style: const TextStyle(
-                    color: ink,
-                    fontSize: 13.5,
-                    height: 1.35,
-                  ),
+                  style: TextStyle(color: ink, fontSize: 13.5, height: 1.35),
                   children: [
                     TextSpan(
                       text: strong,
@@ -794,53 +829,4 @@ class _TierRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CloseButton extends StatelessWidget {
-  const _CloseButton({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppPalette.card,
-          border: Border.all(color: AppPalette.hairline),
-        ),
-        child: Icon(
-          Icons.close_rounded,
-          size: 20,
-          color: AppPalette.textPrimary,
-        ),
-      ),
-    );
-  }
-}
-
-/// A faint dot grid over the plan card's top-left, fading out towards the
-/// right so the price stays clean.
-class _DotTexture extends CustomPainter {
-  const _DotTexture();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const spacing = 12.0;
-    final paint = Paint()..color = Colors.white.withValues(alpha: 0.12);
-    for (var y = 0.0; y < size.height * 0.55; y += spacing) {
-      for (var x = 0.0; x < size.width * 0.6; x += spacing) {
-        final fade = 1 - (x / (size.width * 0.6));
-        paint.color = Colors.white.withValues(alpha: 0.14 * fade);
-        canvas.drawCircle(Offset(x, y), 1.1, paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DotTexture oldDelegate) => false;
 }

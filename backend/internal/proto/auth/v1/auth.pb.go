@@ -175,7 +175,21 @@ type CompleteFederatedSignupRequest struct {
 	// pre-image is what they cannot produce. Same construction Apple documents
 	// for Sign in with Apple and that Firebase's own
 	// OAuthProvider.credential(idToken:rawNonce:) uses.
-	Nonce         string `protobuf:"bytes,4,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	Nonce string `protobuf:"bytes,4,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	// full_name_hint is the name the provider handed the CLIENT out-of-band,
+	// outside the id_token (Plan 22). Apple is the only provider that does
+	// this: its id_token carries no name claim at all, but its native SDK
+	// puts givenName/familyName on the credential object on a user's very
+	// first authorization. Google's id_token already carries a standard OIDC
+	// `name` claim, so its client sends "" here and nothing changes for it.
+	//
+	// Optional, and a FALLBACK ONLY: it is used solely when the verified
+	// token carries no name, and solely at the moment a brand-new account is
+	// created, as that account's display name. It is never consulted for
+	// identity, email or trust level, and never overwrites a name an
+	// existing account already has — it is no more trusted than the name the
+	// same user could type into profile editing a minute later (ADR-023).
+	FullNameHint  string `protobuf:"bytes,5,opt,name=full_name_hint,json=fullNameHint,proto3" json:"full_name_hint,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -234,6 +248,13 @@ func (x *CompleteFederatedSignupRequest) GetAgeConfirmedOver_18() bool {
 func (x *CompleteFederatedSignupRequest) GetNonce() string {
 	if x != nil {
 		return x.Nonce
+	}
+	return ""
+}
+
+func (x *CompleteFederatedSignupRequest) GetFullNameHint() string {
+	if x != nil {
+		return x.FullNameHint
 	}
 	return ""
 }
@@ -528,9 +549,19 @@ type SessionResponse struct {
 	// to build the same jwt.Claims{UserID, TrustLevel} pair the auth service
 	// used to build internally — without it, every issued token would claim
 	// trust level 0.
-	TrustLevel    int32 `protobuf:"varint,8,opt,name=trust_level,json=trustLevel,proto3" json:"trust_level,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	TrustLevel int32 `protobuf:"varint,8,opt,name=trust_level,json=trustLevel,proto3" json:"trust_level,omitempty"`
+	// suggested_name_update is set ONLY by LinkIdentity's LinkedIn branch, and
+	// only when LinkedIn's own name differs from the name already on the
+	// account (empty when they match, when LinkedIn has none, or on every
+	// other session-issuing RPC). It is a SUGGESTION the client may offer the
+	// user, never an applied change: connecting LinkedIn to an existing
+	// account must never silently rewrite a name that user already has (Plan
+	// 22; see LinkIdentityToUser's LinkedIn branch, which deliberately does
+	// not touch full_name). Purely additive — a client that ignores this
+	// field behaves exactly as before.
+	SuggestedNameUpdate string `protobuf:"bytes,9,opt,name=suggested_name_update,json=suggestedNameUpdate,proto3" json:"suggested_name_update,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *SessionResponse) Reset() {
@@ -603,6 +634,13 @@ func (x *SessionResponse) GetTrustLevel() int32 {
 		return x.TrustLevel
 	}
 	return 0
+}
+
+func (x *SessionResponse) GetSuggestedNameUpdate() string {
+	if x != nil {
+		return x.SuggestedNameUpdate
+	}
+	return ""
 }
 
 type RefreshSessionRequest struct {
@@ -1896,12 +1934,13 @@ var File_auth_v1_auth_proto protoreflect.FileDescriptor
 
 const file_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
-	"\x12auth/v1/auth.proto\x12\aauth.v1\"\xc0\x01\n" +
+	"\x12auth/v1/auth.proto\x12\aauth.v1\"\xe6\x01\n" +
 	"\x1eCompleteFederatedSignupRequest\x12:\n" +
 	"\bprovider\x18\x01 \x01(\x0e2\x1e.auth.v1.IdentityProviderProtoR\bprovider\x12\x19\n" +
 	"\bid_token\x18\x02 \x01(\tR\aidToken\x121\n" +
 	"\x15age_confirmed_over_18\x18\x03 \x01(\bR\x12ageConfirmedOver18\x12\x14\n" +
-	"\x05nonce\x18\x04 \x01(\tR\x05nonce\"\xbd\x01\n" +
+	"\x05nonce\x18\x04 \x01(\tR\x05nonce\x12$\n" +
+	"\x0efull_name_hint\x18\x05 \x01(\tR\ffullNameHint\"\xbd\x01\n" +
 	"!CompleteLinkedInOnboardingRequest\x12-\n" +
 	"\x12authorization_code\x18\x01 \x01(\tR\x11authorizationCode\x12!\n" +
 	"\fredirect_uri\x18\x02 \x01(\tR\vredirectUri\x121\n" +
@@ -1918,7 +1957,7 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x1aCompleteEmailSignupRequest\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x12\n" +
 	"\x04code\x18\x02 \x01(\tR\x04code\x121\n" +
-	"\x15age_confirmed_over_18\x18\x04 \x01(\bR\x12ageConfirmedOver18J\x04\b\x03\x10\x04R\bpassword\"\x94\x02\n" +
+	"\x15age_confirmed_over_18\x18\x04 \x01(\bR\x12ageConfirmedOver18J\x04\b\x03\x10\x04R\bpassword\"\xc8\x02\n" +
 	"\x0fSessionResponse\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12#\n" +
 	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\x12\x1e\n" +
@@ -1926,7 +1965,8 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\tfull_name\x18\x06 \x01(\tR\bfullName\x12*\n" +
 	"\x11profile_photo_url\x18\a \x01(\tR\x0fprofilePhotoUrl\x12\x1f\n" +
 	"\vtrust_level\x18\b \x01(\x05R\n" +
-	"trustLevelJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\faccess_tokenR\x1faccess_token_expires_in_seconds\"<\n" +
+	"trustLevel\x122\n" +
+	"\x15suggested_name_update\x18\t \x01(\tR\x13suggestedNameUpdateJ\x04\b\x02\x10\x03J\x04\b\x04\x10\x05R\faccess_tokenR\x1faccess_token_expires_in_seconds\"<\n" +
 	"\x15RefreshSessionRequest\x12#\n" +
 	"\rrefresh_token\x18\x01 \x01(\tR\frefreshToken\";\n" +
 	"\x14RevokeSessionRequest\x12#\n" +

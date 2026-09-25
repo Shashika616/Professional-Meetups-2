@@ -10,6 +10,7 @@ import 'package:professional_connections_platform/core/widgets/ambient_animation
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_role_chips.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/section_heading.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/review/meetup_review_page.dart';
@@ -332,7 +333,7 @@ class _PersistentMeetupCard extends StatelessWidget {
       return _ReviewInvitationCard(meetup: meetup);
     }
 
-    return GestureDetector(
+    return Pressable(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => MeetupDetailPage(meetupId: meetup.id),
@@ -542,7 +543,7 @@ class _ActiveMeetupRow extends StatelessWidget {
         : AppPalette.verified;
     final start = meetup.windowStart;
 
-    return GestureDetector(
+    return Pressable(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => MeetupDetailPage(meetupId: meetup.id),
@@ -791,7 +792,7 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
     // participant is being asked to weigh.
     final cancelled = meetup.status == MeetupStatus.cancelled;
     final tone = cancelled ? AppPalette.cancelled : AppPalette.gold;
-    return GestureDetector(
+    return Pressable(
       onTap: _openReview,
       child: FlatCard(
         radius: 14,

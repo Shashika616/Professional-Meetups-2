@@ -9,6 +9,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/validation/validators.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
 import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
@@ -137,13 +138,14 @@ class _ManageTrustedContactsPageState
     );
   }
 
-  /// Presents [_AddContactForm] as a centered modal, matching the dialog
-  /// style already used by `safety_page.dart`'s `_SosConfirmDialog` and
-  /// this file's own remove-contact confirmation (AppPalette.card
-  /// background, 20px rounded corners) rather than inventing a new one.
+  /// Presents [_AddContactForm] as a bottom sheet — the app's one modal
+  /// presentation (`showAppSheet`), the same arrival the join flow's
+  /// "who is hosting" sheet uses. It was a centred dialog; a form with
+  /// three fields belongs near the keyboard that is about to cover half
+  /// the screen, not floating in the middle of it.
   Future<void> _showAddContactDialog() {
-    return showDialog<void>(
-      context: context,
+    return showAppSheet<void>(
+      context,
       builder: (dialogContext) => _AddContactForm(
         onCancel: () => Navigator.pop(dialogContext),
         onSaved: () {
@@ -375,84 +377,70 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
 
   @override
   Widget build(BuildContext context) {
-    // AlertDialog, not the FlatCard this used to be wrapped in — a single
-    // wrapper, styled to match _SosConfirmDialog and the remove-contact
-    // confirmation (AppPalette.card, 20px radius). Everything below the
-    // wrapper (fields, validation, save/loading, error display) is
-    // unchanged. SingleChildScrollView + MainAxisSize.min keep the form
-    // usable when the keyboard shrinks the available height, which the
-    // old bounded inline card didn't have to worry about.
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'ADD CONTACT',
-        style: TextStyle(
-          color: AppPalette.textPrimary,
-          letterSpacing: 1.2,
-          fontSize: 15,
-        ),
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            GlassTextField(
-              controller: _nameController,
-              icon: Icons.badge_outlined,
-              hint: 'Name',
-            ),
-            const SizedBox(height: 10),
-            GlassTextField(
-              controller: _phoneController,
-              icon: Icons.phone_iphone_rounded,
-              hint: 'Phone number',
-              keyboardType: TextInputType.phone,
-            ),
-            const SizedBox(height: 10),
-            GlassTextField(
-              controller: _emailController,
-              icon: Icons.email_outlined,
-              hint: 'Email (optional)',
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 6),
+    // AppSheet, not an AlertDialog: the shell owns the handle, the title
+    // and the keyboard/home-indicator insets, so everything below here
+    // (fields, validation, save/loading, error display) is exactly what it
+    // was — only where it arrives from changed.
+    return AppSheet(
+      title: 'ADD CONTACT',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GlassTextField(
+            controller: _nameController,
+            icon: Icons.badge_outlined,
+            hint: 'Name',
+          ),
+          const SizedBox(height: 10),
+          GlassTextField(
+            controller: _phoneController,
+            icon: Icons.phone_iphone_rounded,
+            hint: 'Phone number',
+            keyboardType: TextInputType.phone,
+          ),
+          const SizedBox(height: 10),
+          GlassTextField(
+            controller: _emailController,
+            icon: Icons.email_outlined,
+            hint: 'Email (optional)',
+            keyboardType: TextInputType.emailAddress,
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'A phone number is required so we can reach them fast. Email '
+            'is optional.',
+            style: TextStyle(color: AppPalette.textSecondary, fontSize: 11),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
             Text(
-              'A phone number is required so we can reach them fast. Email '
-              'is optional.',
-              style: TextStyle(color: AppPalette.textSecondary, fontSize: 11),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _error!,
-                style: TextStyle(color: AppPalette.danger, fontSize: 12),
-              ),
-            ],
-            const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: SecondaryButton(
-                    label: 'CANCEL',
-                    onPressed: _saving ? null : widget.onCancel,
-                    height: 48,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: PrimaryButton(
-                    label: 'SAVE',
-                    height: 48,
-                    isLoading: _saving,
-                    onPressed: (_canSave && !_saving) ? _save : null,
-                  ),
-                ),
-              ],
+              _error!,
+              style: TextStyle(color: AppPalette.danger, fontSize: 12),
             ),
           ],
-        ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: SecondaryButton(
+                  label: 'CANCEL',
+                  onPressed: _saving ? null : widget.onCancel,
+                  height: 48,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: PrimaryButton(
+                  label: 'SAVE',
+                  height: 48,
+                  isLoading: _saving,
+                  onPressed: (_canSave && !_saving) ? _save : null,
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -100,7 +100,7 @@ final subscriptionStatusProvider = FutureProvider<SubscriptionStatus>(
 /// round-9's scaffolding, the same way [authServiceProvider]/
 /// [meetupServiceProvider] used to be bound to `Mock*` implementations
 /// before their real backends existed) — the real
-/// `professional-meetups-976d2` Firebase project now exists, with real
+/// `project-285b9289-549d-4fef-92c` Firebase project now exists, with real
 /// `google-services.json`/`GoogleService-Info.plist`/`firebase_options.dart`
 /// in place. `onTokenRefreshed` re-runs the exact same
 /// `registerDeviceToken` call `AuthSessionNotifier` already makes at
@@ -432,9 +432,17 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
   /// semantics (the same shape every Level 2/3 verification-completing call
   /// already uses) rather than [_completeSignIn], which is for the
   /// four account-creation paths specifically.
-  Future<void> linkLinkedIn() async {
+  ///
+  /// Returns [AuthSession.suggestedNameUpdate] — LinkedIn's name for this
+  /// person when it differs from the one on the account, `''` otherwise
+  /// (Plan 22). Nothing here acts on it: the caller decides whether to ask
+  /// the user, and a yes goes through [completeProfileSetup] like any other
+  /// self-edit. Returned rather than stored so it cannot outlive the link
+  /// that produced it.
+  Future<String> linkLinkedIn() async {
     final session = await ref.read(authServiceProvider).linkLinkedIn();
     await completeVerification(session);
+    return session.suggestedNameUpdate;
   }
 
   /// Called after any verification-completing [AuthService] call succeeds

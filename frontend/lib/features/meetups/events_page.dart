@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/core/widgets/app_background.da
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
@@ -707,7 +708,7 @@ class _MyMeetupTile extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: GestureDetector(
+      child: Pressable(
         onTap: onTap,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),

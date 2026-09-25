@@ -9,7 +9,10 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
@@ -148,7 +151,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
                   ),
                 ),
                 const SizedBox(height: 12),
-                GestureDetector(
+                Pressable(
                   onTap: () => _onSosTapped(context, ref, trustLevel),
                   child: FlatCard(
                     radius: 12,
@@ -239,8 +242,11 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
       return;
     }
 
-    await showDialog<void>(
-      context: context,
+    // A sheet, not a centred dialog (showAppSheet's own comment has the
+    // reasoning): this is the hardest confirmation in the app to get right,
+    // and it belongs where the thumb already is.
+    await showAppSheet<void>(
+      context,
       builder: (dialogContext) => _SosConfirmDialog(ref: ref),
     );
   }
@@ -561,19 +567,21 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'EMERGENCY SOS',
-        style: TextStyle(
-          color: AppPalette.danger,
-          letterSpacing: 1.6,
-          fontSize: 15,
-        ),
+    return AppSheet(
+      title: 'EMERGENCY SOS',
+      titleColor: AppPalette.danger,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildContent(),
+          const SizedBox(height: 18),
+          // Stacked full-width, not a right-aligned row of text buttons:
+          // the dialog's actions were three words in a corner, and in a
+          // sheet the action the user came for should be the widest thing
+          // on it. Same labels, same order of preference, same behaviour.
+          ..._buildActions(context),
+        ],
       ),
-      content: _buildContent(),
-      actions: _buildActions(context),
     );
   }
 
@@ -651,22 +659,20 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
     switch (_phase) {
       case _SosDialogPhase.confirming:
         return [
+          PrimaryButton(
+            label: 'CONFIRM',
+            height: 50,
+            fillColor: AppPalette.danger,
+            foregroundColor: Colors.white,
+            onPressed: _confirm,
+          ),
+          const SizedBox(height: 8),
+          callAction,
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
               'CANCEL',
               style: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-          callAction,
-          TextButton(
-            onPressed: _confirm,
-            child: Text(
-              'CONFIRM',
-              style: TextStyle(
-                color: AppPalette.danger,
-                fontWeight: FontWeight.w700,
-              ),
             ),
           ),
         ];

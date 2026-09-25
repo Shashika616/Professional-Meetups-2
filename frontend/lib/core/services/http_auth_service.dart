@@ -199,11 +199,18 @@ class HttpAuthService implements AuthService {
   /// Apple only ever includes [AuthorizationCredentialAppleID.givenName]/
   /// `familyName` out-of-band on the native credential object, never inside
   /// the JWT itself — the backend's id_token verification
-  /// (`internal/identity`) has no way to see it, so a brand-new Apple
-  /// signup's `full_name` comes back empty from the server, same as any
-  /// other "name not yet known" case this app already renders as "Member"
-  /// (`ProfilePage`/`HomePage`'s existing fallback display, not a new gap
-  /// introduced here).
+  /// (`internal/identity`) has no way to see it. So this reads the name off
+  /// the credential here and sends it as the request's `full_name_hint`
+  /// (Plan 22), which the server uses ONLY to name a brand-new account when
+  /// the token itself carried no name. It was previously read and discarded,
+  /// which is why every Apple signup came back nameless.
+  ///
+  /// Apple supplies that name on a user's VERY FIRST authorization with this
+  /// app and never again — so a reinstall, or any later sign-in, still sends
+  /// an empty hint. That is expected, not a failure: `full_name` then comes
+  /// back empty exactly as before and the app renders its existing "Member"
+  /// fallback (`ProfilePage`/`HomePage`). The hint never overwrites a name an
+  /// account already has; the server only ever applies it at creation.
   @override
   Future<AuthSession> signInWithApple({
     required bool ageConfirmedOver18,
@@ -243,7 +250,22 @@ class HttpAuthService implements AuthService {
       idToken: idToken,
       nonce: nonce.raw,
       ageConfirmedOver18: ageConfirmedOver18,
+      fullNameHint: appleFullNameHint(credential),
     );
+  }
+
+  /// Apple's one-time out-of-band name, as a single string — the two parts
+  /// joined with a space, with either missing or blank part simply left out,
+  /// and `''` when Apple gave neither (the common case on every
+  /// authorization after the user's first). Never throws and never guesses:
+  /// an empty result means "no name", which the server treats as "no hint".
+  @visibleForTesting
+  static String appleFullNameHint(AuthorizationCredentialAppleID credential) {
+    return [credential.givenName, credential.familyName]
+        .whereType<String>()
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .join(' ');
   }
 
   /// Google Sign-In (ADR-014) — same "native SDK hands us an id_token,
@@ -273,6 +295,10 @@ class HttpAuthService implements AuthService {
         idToken: idToken,
         nonce: nonce.raw,
         ageConfirmedOver18: ageConfirmedOver18,
+        // Google's id_token carries a standard OIDC `name` claim, which the
+        // server verifies and prefers over any hint — there is nothing for
+        // this path to add, and Plan 22 changes its behavior in no way.
+        fullNameHint: '',
       );
     } on GoogleSignInException catch (error) {
       // Dispatch on error.code happens inside mapGoogleSignInError.
@@ -314,11 +340,15 @@ class HttpAuthService implements AuthService {
 
   /// [nonce] is the RAW pre-image, never the value handed to the provider —
   /// see [SignInNonce]. The backend rejects the call outright if it is empty.
+  /// [fullNameHint] is the provider's out-of-band name, or `''` when there
+  /// is none — always sent rather than conditionally omitted, so the body
+  /// shape is the same on every call and the server has one case to handle.
   Future<AuthSession> _completeFederatedSignup({
     required String provider,
     required String idToken,
     required String nonce,
     required bool ageConfirmedOver18,
+    required String fullNameHint,
   }) async {
     final response = await _httpClient.post(
       Uri.parse('$_baseUrl/v1/auth/federated/signup'),
@@ -328,6 +358,7 @@ class HttpAuthService implements AuthService {
         'id_token': idToken,
         'nonce': nonce,
         'age_confirmed_over_18': ageConfirmedOver18,
+        'full_name_hint': fullNameHint,
       }),
     );
     return _parseSessionResponse(response);

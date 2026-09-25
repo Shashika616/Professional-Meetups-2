@@ -65,3 +65,24 @@ func validateEmailShape(value string) error {
 
 // maxEmailLength is RFC 5321's maximum forward-path length.
 const maxEmailLength = 254
+
+// sanitizedNameHint applies the profile self-edit name rule
+// (CompleteProfileSetup: trim, then reject anything past
+// maxFullNameLength) to CompleteFederatedSignupRequest.FullNameHint — the
+// same rule rather than a second one invented for this field, since the two
+// end up writing the same users.full_name column.
+//
+// It DROPS a hint that fails the rule instead of failing the call. This is
+// the one deliberate difference from CompleteProfileSetup, and the reason is
+// the difference between the two callers: there, the name IS the request, so
+// rejecting it is the only sensible answer; here it is an optional extra on
+// an account-creation call, so a malformed one degrades to exactly the old
+// behavior (no name, client renders "Member") rather than turning a
+// working signup into a 400 over a field the user never typed.
+func sanitizedNameHint(hint string) string {
+	hint = strings.TrimSpace(hint)
+	if len(hint) > maxFullNameLength {
+		return ""
+	}
+	return hint
+}

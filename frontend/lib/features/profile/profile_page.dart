@@ -111,9 +111,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             // can unlock matching/messaging/meetups.
             if (profile != null && !profile.linkedInConnected) ...[
               const SizedBox(height: 20),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 20),
-                child: ConnectLinkedInBanner(),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                // The follow-up work runs HERE, on the page, not inside the
+                // banner: a successful link flips profile.linkedInConnected,
+                // which removes the banner from this very build. Anything
+                // the banner awaited afterwards would be running on a
+                // defunct State, and its `mounted` guards would silently
+                // swallow it. The page stays.
+                child: ConnectLinkedInBanner(
+                  onLinked: (suggestedName) =>
+                      _afterLinkedInConnected(context, ref, suggestedName),
+                ),
               ),
             ],
             const SizedBox(height: 28),
@@ -311,6 +320,61 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
       MaterialPageRoute(builder: (context) => const LandingPage()),
       (route) => false,
     );
+  }
+
+  /// Everything that happens after "Connect LinkedIn" succeeds, owned by the
+  /// page because the banner that started it has just removed itself (see
+  /// the call site). Two steps, in order: offer LinkedIn's name if the
+  /// server suggested one, then walk the Level 2 verification steps this
+  /// account can now actually complete.
+  Future<void> _afterLinkedInConnected(
+    BuildContext context,
+    WidgetRef ref,
+    String suggestedName,
+  ) async {
+    if (suggestedName.isNotEmpty) {
+      await _offerSuggestedName(context, ref, suggestedName);
+      if (!context.mounted) return;
+    }
+    final profile = ref.read(authSessionProvider).value?.profile;
+    await runVerificationSequence(context, pendingVerificationSteps(profile));
+  }
+
+  /// LinkedIn knows this person by a different name than their profile does
+  /// (Plan 22). The link itself deliberately left the name alone, so this
+  /// asks rather than informs: connecting an account is not a request to be
+  /// renamed. A yes goes through the same self-edit update [_editFullName]
+  /// uses (ADR-023 §5), not a new write path; a no, or a dismiss, does
+  /// nothing at all, and nothing asks again — the suggestion belongs to the
+  /// one link event that produced it.
+  Future<void> _offerSuggestedName(
+    BuildContext context,
+    WidgetRef ref,
+    String suggestedName,
+  ) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (_) => _SuggestedNameDialog(suggestedName: suggestedName),
+    );
+    if (accepted != true || !context.mounted) return;
+    try {
+      await ref
+          .read(authSessionProvider.notifier)
+          .completeProfileSetup(fullName: suggestedName);
+      if (!context.mounted) return;
+      showSnack(context, 'Name updated.', type: ToastType.success);
+    } catch (error) {
+      if (!context.mounted) return;
+      // The link itself already succeeded — only the optional rename
+      // failed, so this must not read like the connection went wrong.
+      showSnack(
+        context,
+        error is AuthException
+            ? error.message
+            : 'Could not update your name. You can change it from Profile.',
+        type: ToastType.error,
+      );
+    }
   }
 
   /// ADR-023 §5's full-name inline edit — a plain dialog, not a pushed
@@ -567,11 +631,21 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
 /// Profile's "Connect LinkedIn" entry point (ADR-014 Step 7) — calls
 /// [AuthSessionNotifier.linkLinkedIn], not `signInWithLinkedIn` (that
 /// creates/resolves an account; this links to the caller's already-
-/// authenticated one). On success, runs the same pending-verification
-/// sequence a fresh-onboarding LinkedIn signup would have shown, so
-/// connecting from Profile doesn't skip the Level 2 steps.
+/// authenticated one).
+///
+/// This widget owns the button, the busy state and the failure toast, and
+/// nothing else. What follows a SUCCESS — the suggested-name offer and the
+/// pending-verification sequence a fresh LinkedIn signup would have shown —
+/// is handed to [onLinked], because success is exactly what takes this
+/// widget off the screen.
 class ConnectLinkedInBanner extends ConsumerStatefulWidget {
-  const ConnectLinkedInBanner({super.key});
+  const ConnectLinkedInBanner({super.key, this.onLinked});
+
+  /// Run once the link succeeds, with the server's suggested name (`''`
+  /// when there is nothing to suggest). Owned by the page rather than this
+  /// widget on purpose: a successful link removes this banner from the
+  /// tree, so work awaited here would be abandoned half-done.
+  final Future<void> Function(String suggestedName)? onLinked;
 
   @override
   ConsumerState<ConnectLinkedInBanner> createState() =>
@@ -585,10 +659,13 @@ class ConnectLinkedInBannerState extends ConsumerState<ConnectLinkedInBanner> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await ref.read(authSessionProvider.notifier).linkLinkedIn();
-      if (!mounted) return;
-      final profile = ref.read(authSessionProvider).value?.profile;
-      await runVerificationSequence(context, pendingVerificationSteps(profile));
+      final suggestedName = await ref
+          .read(authSessionProvider.notifier)
+          .linkLinkedIn();
+      // No `mounted` check before this call, deliberately: by now this
+      // banner may already be gone (the profile it is conditioned on just
+      // changed), and the callback belongs to the page, which is not.
+      await widget.onLinked?.call(suggestedName);
     } catch (error) {
       if (mounted) {
         // A cancellation (closed the browser without finishing) gets a
@@ -785,6 +862,56 @@ class _Divider extends StatelessWidget {
       height: 1,
       color: AppPalette.hairline,
       margin: const EdgeInsets.symmetric(vertical: 2),
+    );
+  }
+}
+
+/// Offers LinkedIn's name after a Profile-initiated link when it differs
+/// from the one on the account (Plan 22). Resolves to true on UPDATE, and
+/// to null on KEEP MINE or a tap outside — only an explicit yes changes
+/// anything, which is the whole point of asking.
+///
+/// Stateless and unbusy by design: the update it triggers runs on the page
+/// behind it, reported by the same toast a manual name edit uses, so this
+/// dialog closes the moment it is answered.
+class _SuggestedNameDialog extends StatelessWidget {
+  const _SuggestedNameDialog({required this.suggestedName});
+
+  final String suggestedName;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppPalette.card,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(
+        'Update your name?',
+        style: TextStyle(color: AppPalette.textPrimary, fontSize: 15),
+      ),
+      content: Text(
+        'LinkedIn shows your name as $suggestedName. '
+        'Update your profile to match?',
+        style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text(
+            'KEEP MINE',
+            style: TextStyle(color: AppPalette.textSecondary),
+          ),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(
+            'UPDATE',
+            style: TextStyle(
+              color: AppPalette.candyBlue,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

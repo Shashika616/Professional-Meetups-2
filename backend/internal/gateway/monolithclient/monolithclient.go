@@ -43,6 +43,10 @@ type Session struct {
 	FullName        string
 	ProfilePhotoURL string
 	TrustLevel      int
+	// SuggestedNameUpdate is non-empty only after a LinkedIn link whose
+	// name differs from the account's own (Plan 22) — a suggestion for the
+	// app to offer, never a change the server made.
+	SuggestedNameUpdate string
 }
 
 // Profile is this package's own representation of GetProfile's (and
@@ -92,7 +96,9 @@ type Client interface {
 	// handlers, so that mapping lives in exactly one place. nonce is the
 	// client-generated per-attempt value bound to the id_token (see the
 	// proto's own comment); required.
-	CompleteFederatedSignup(ctx context.Context, provider, idToken, nonce string, ageConfirmedOver18 bool) (Session, error)
+	// fullNameHint is the provider's out-of-band name (Apple only in
+	// practice; "" from every other caller) — see the proto field.
+	CompleteFederatedSignup(ctx context.Context, provider, idToken, nonce string, ageConfirmedOver18 bool, fullNameHint string) (Session, error)
 	CompleteLinkedInOnboarding(ctx context.Context, authorizationCode, redirectURI string, ageConfirmedOver18 bool) (Session, error)
 	// LinkIdentity links an identity to the caller's already-authenticated
 	// account. idToken/nonce are used for apple/google, authorizationCode/
@@ -256,7 +262,7 @@ func providerFromWire(provider string) (authv1.IdentityProviderProto, error) {
 }
 
 func (c *grpcClient) CompleteFederatedSignup(
-	ctx context.Context, provider, idToken, nonce string, ageConfirmedOver18 bool,
+	ctx context.Context, provider, idToken, nonce string, ageConfirmedOver18 bool, fullNameHint string,
 ) (Session, error) {
 	providerProto, err := providerFromWire(provider)
 	if err != nil {
@@ -268,6 +274,7 @@ func (c *grpcClient) CompleteFederatedSignup(
 		IdToken:             idToken,
 		Nonce:               nonce,
 		AgeConfirmedOver_18: ageConfirmedOver18,
+		FullNameHint:        fullNameHint,
 	})
 	if err != nil {
 		return Session{}, err
@@ -581,6 +588,8 @@ func sessionFromProto(resp *authv1.SessionResponse) Session {
 		FullName:        resp.GetFullName(),
 		ProfilePhotoURL: resp.GetProfilePhotoUrl(),
 		TrustLevel:      int(resp.GetTrustLevel()),
+
+		SuggestedNameUpdate: resp.GetSuggestedNameUpdate(),
 	}
 }
 

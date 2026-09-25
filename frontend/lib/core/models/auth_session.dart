@@ -17,6 +17,7 @@ class AuthSession {
     required this.accessTokenExpiresAt,
     required this.fullName,
     required this.profilePhotoUrl,
+    this.suggestedNameUpdate = '',
   });
 
   final String userId;
@@ -39,6 +40,20 @@ class AuthSession {
   final String fullName;
   final String profilePhotoUrl;
 
+  /// What LinkedIn calls this person, when that differs from the name
+  /// already on the account and the account just linked LinkedIn (Plan 22).
+  /// Empty on every other response, including every sign-in.
+  ///
+  /// A SUGGESTION to offer, not a change the server made: linking LinkedIn
+  /// deliberately never rewrites a name the user already has, so [fullName]
+  /// above is still the real one. Acting on it means the user saying yes,
+  /// which goes through the ordinary self-edit name update (ADR-023 §5).
+  ///
+  /// Not persisted by [SessionStorage] on purpose — it belongs to the one
+  /// link event that produced it, and a suggestion that survived a restart
+  /// would be asked again forever.
+  final String suggestedNameUpdate;
+
   factory AuthSession.fromJson(Map<String, dynamic> json) {
     final accessToken = json['access_token'] as String;
     final expiresInSeconds = json['expires_in'] as int;
@@ -53,6 +68,9 @@ class AuthSession {
       ),
       fullName: json['full_name'] as String? ?? '',
       profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+      // Absent from every response but a LinkedIn link's (the gateway omits
+      // it entirely rather than sending ""), so the null case is the norm.
+      suggestedNameUpdate: json['suggested_name_update'] as String? ?? '',
     );
   }
 

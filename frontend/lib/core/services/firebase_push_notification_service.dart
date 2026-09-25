@@ -10,7 +10,7 @@ import 'package:professional_connections_platform/core/services/push_notificatio
 /// swaps in behind the interface Round 9 built; every existing call site
 /// (`AuthSessionNotifier`'s token registration, `AppShell`'s message
 /// listener) already targets that interface and needs no changes. Talks to
-/// the real `professional-meetups-976d2` Firebase project via
+/// the real `project-285b9289-549d-4fef-92c` Firebase project via
 /// `google-services.json`/`GoogleService-Info.plist`/`firebase_options.dart`,
 /// all already placed and verified — `main.dart` calls
 /// `Firebase.initializeApp` before this is ever constructed.

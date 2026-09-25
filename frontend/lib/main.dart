@@ -74,7 +74,8 @@ void main() async {
   // (core/services/firebase_push_notification_service.dart) and the
   // background handler below both assume Firebase is already initialized
   // by the time anything touches FirebaseMessaging. Real project
-  // (professional-meetups-976d2); firebase_options.dart is hand-authored
+  // (project-285b9289-549d-4fef-92c, migrated 2026-09-25);
+  // firebase_options.dart is hand-authored
   // from the real, already-placed google-services.json/
   // GoogleService-Info.plist, not a placeholder.
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);

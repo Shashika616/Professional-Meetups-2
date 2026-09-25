@@ -6,6 +6,7 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
@@ -288,26 +289,23 @@ class _HomePageState extends ConsumerState<HomePage>
               // button when it shared this block with FIND MATCHES; with
               // that gone, leaving it outlined would read as the leftover
               // half of a removed pair rather than the page's main action.
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  key: const Key('hostYourOwnMeetup'),
-                  onPressed: onHostMeetup,
-                  icon: const Icon(Icons.add_circle_outline, size: 18),
-                  label: const Text(
-                    'HOST YOUR OWN MEETUP',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.0,
-                    ),
-                  ),
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(50),
-                    backgroundColor: AppPalette.verified,
-                    foregroundColor: Colors.black,
-                  ),
-                ),
+              //
+              // PrimaryButton, not a hand-rolled FilledButton (Plan 23,
+              // Finding 2): this was the one primary action in the app that
+              // opted out of the shared button, and with it out of the
+              // tap-scale press feedback, the loading state and the
+              // shrink-the-label-instead-of-truncating-it behaviour that
+              // live there. The green fill and 50pt height are carried over
+              // exactly; only the label's own type comes from the shared
+              // widget now, which is the point of using it.
+              child: PrimaryButton(
+                key: const Key('hostYourOwnMeetup'),
+                label: 'HOST YOUR OWN MEETUP',
+                icon: Icons.add_circle_outline,
+                height: 50,
+                fillColor: AppPalette.verified,
+                foregroundColor: Colors.black,
+                onPressed: onHostMeetup,
               ),
             ),
           ],

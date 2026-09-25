@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/step_hero.dart';
 import 'package:professional_connections_platform/core/widgets/time_field_24h.dart';
@@ -740,7 +741,7 @@ class _IllustratedCard extends StatelessWidget {
       ),
     );
     if (onTap == null) return card;
-    return GestureDetector(onTap: onTap, child: card);
+    return Pressable(onTap: onTap, child: card);
   }
 }
 

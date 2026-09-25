@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/email"
@@ -265,11 +266,29 @@ func (s *service) CompleteFederatedSignup(ctx context.Context, req CompleteFeder
 	// The id_token itself is discarded after this call — never persisted,
 	// same "verify, extract, discard" discipline as LinkedIn's access token.
 
-	// full_name may be "" here (Apple in particular only ever includes a name
-	// on a user's very first authorization with this app) — the client
-	// already knows to render a fallback ("Member").
+	// The verified token's own name wins whenever it has one — that is the
+	// authoritative value, signed by the provider, and it is what Google
+	// always supplies. req.FullNameHint is consulted only when the token
+	// carries no name, which today means Apple and Apple alone: its
+	// id_token has no name claim at all, while its native SDK hands the
+	// client givenName/familyName out-of-band on the credential object,
+	// once, on the user's first authorization (Plan 22). That name was
+	// being read and discarded before this.
+	//
+	// Both may still be empty (Apple on any LATER authorization returns no
+	// name anywhere), in which case nothing changes: full_name is created
+	// empty and the client renders its existing "Member" fallback.
+	//
+	// ResolveOrCreateIdentity only ever writes this at CREATION, so a hint
+	// can never overwrite the name on an account that already exists — its
+	// signature is deliberately unchanged, this is a call-site decision.
+	name := verified.Name
+	if name == "" {
+		name = sanitizedNameHint(req.FullNameHint)
+	}
+
 	user, isNewUser, err := s.ResolveOrCreateIdentity(
-		ctx, req.Provider, verified.Subject, verified.Email, verified.Name, "", req.AgeConfirmedOver18,
+		ctx, req.Provider, verified.Subject, verified.Email, name, "", req.AgeConfirmedOver18,
 	)
 	if err != nil {
 		return SessionResult{}, err
@@ -348,6 +367,11 @@ func (s *service) finishSignupSession(ctx context.Context, user repository.User,
 // accounts.
 func (s *service) LinkIdentity(ctx context.Context, req LinkIdentityRequest) (SessionResult, error) {
 	var subject string
+	// linkedInName is LinkedIn's own name for whoever just authorized, kept
+	// only to compare against the account's current name once the link
+	// succeeds (see the SuggestedNameUpdate block at the end). It is never
+	// written anywhere by this method.
+	var linkedInName string
 
 	switch req.Provider {
 	case FederatedProviderLinkedIn:
@@ -363,6 +387,7 @@ func (s *service) LinkIdentity(ctx context.Context, req LinkIdentityRequest) (Se
 			return SessionResult{}, fmt.Errorf("linkedin sign-in failed, please try again: %w", apperror.ErrInvalidInput)
 		}
 		subject = info.Sub
+		linkedInName = strings.TrimSpace(info.Name)
 
 	case FederatedProviderApple, FederatedProviderGoogle:
 		idProvider, err := s.federatedProvider(req.Provider)
@@ -388,7 +413,23 @@ func (s *service) LinkIdentity(ctx context.Context, req LinkIdentityRequest) (Se
 	if err != nil {
 		return SessionResult{}, err
 	}
-	return s.issueSession(ctx, user)
+	session, err := s.issueSession(ctx, user)
+	if err != nil {
+		return SessionResult{}, err
+	}
+
+	// Offer, never impose (Plan 22). The link above deliberately left
+	// full_name alone — connecting LinkedIn must not silently rewrite a name
+	// the user already has, whether it came from their original signup or
+	// they typed it themselves (ADR-023). But LinkedIn knowing them by a
+	// different name is worth mentioning, so it is reported here and the
+	// client asks. Empty when the names already agree, when LinkedIn has no
+	// name, and on every non-LinkedIn branch, so the client has nothing to
+	// ask about in the ordinary case.
+	if linkedInName != "" && linkedInName != user.FullName {
+		session.SuggestedNameUpdate = linkedInName
+	}
+	return session, nil
 }
 
 // StartEmailSignup sends an OTP to email as the first step of the email-OTP

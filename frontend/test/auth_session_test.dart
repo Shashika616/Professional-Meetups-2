@@ -72,6 +72,28 @@ void main() {
 
       expect(session.fullName, '');
       expect(session.profilePhotoUrl, '');
+      // Plan 22's field is absent from every response but a LinkedIn link's.
+      expect(session.suggestedNameUpdate, '');
+    });
+
+    test('reads suggested_name_update off a LinkedIn link response, without '
+        'touching full_name', () {
+      final json = {
+        'user_id': 'user-1',
+        'access_token': _fakeJwt({'trust_level': 1}),
+        'refresh_token': 'refresh-token',
+        'expires_in': 900,
+        'is_new_user': false,
+        'full_name': 'Ada Lovelace',
+        'suggested_name_update': 'Grace Hopper',
+      };
+
+      final session = AuthSession.fromJson(json);
+
+      expect(session.suggestedNameUpdate, 'Grace Hopper');
+      // The account's real name is still the account's real name — the
+      // suggestion sits beside it until the user accepts it.
+      expect(session.fullName, 'Ada Lovelace');
     });
   });
 }

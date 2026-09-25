@@ -289,6 +289,64 @@ void main() {
     });
   });
 
+  // Plan 22: Apple hands the name over on the credential object, beside the
+  // token, and only on a user's first authorization. Joining those two
+  // nullable parts is the only client-side logic in that path, and getting
+  // it wrong writes a name like "Grace null" into a real account.
+  group('appleFullNameHint', () {
+    AuthorizationCredentialAppleID credential({String? given, String? family}) =>
+        AuthorizationCredentialAppleID(
+          userIdentifier: 'apple-user-1',
+          givenName: given,
+          familyName: family,
+          authorizationCode: 'code',
+          email: 'ada@example.com',
+          identityToken: 'id-token',
+          state: null,
+        );
+
+    test('joins both parts with a single space', () {
+      expect(
+        HttpAuthService.appleFullNameHint(
+          credential(given: 'Grace', family: 'Hopper'),
+        ),
+        'Grace Hopper',
+      );
+    });
+
+    test('uses whichever single part Apple gave, with no stray space', () {
+      expect(
+        HttpAuthService.appleFullNameHint(credential(given: 'Grace')),
+        'Grace',
+      );
+      expect(
+        HttpAuthService.appleFullNameHint(credential(family: 'Hopper')),
+        'Hopper',
+      );
+    });
+
+    test('is empty when Apple gave no name — the common case on every '
+        'authorization after the first', () {
+      expect(HttpAuthService.appleFullNameHint(credential()), '');
+    });
+
+    test('is empty for blank parts rather than whitespace', () {
+      expect(
+        HttpAuthService.appleFullNameHint(credential(given: '  ', family: '')),
+        '',
+      );
+    });
+
+    test('trims each part', () {
+      expect(
+        HttpAuthService.appleFullNameHint(
+          credential(given: ' Grace ', family: ' Hopper '),
+        ),
+        'Grace Hopper',
+      );
+    });
+  });
+
   group('mapAppleSignInError', () {
     test('a user-initiated cancellation maps to SignInCancelledException', () {
       const error = SignInWithAppleAuthorizationException(

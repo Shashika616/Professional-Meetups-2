@@ -5,6 +5,8 @@ import 'package:geolocator_platform_interface/geolocator_platform_interface.dart
 
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/features/home/widgets/home_header.dart';
@@ -412,13 +414,29 @@ void main() {
 
     testWidgets(
       'HOST YOUR OWN MEETUP is the page\'s only bottom CTA, and it is the '
-      'primary (filled) one now that it no longer shares the block',
+      'shared PrimaryButton now, not a hand-rolled FilledButton (Plan 23)',
       (tester) async {
         await tester.pumpWidget(app());
         await tester.pumpAndSettle();
 
-        expect(find.byType(FilledButton), findsOneWidget);
         expect(find.byKey(const Key('hostYourOwnMeetup')), findsOneWidget);
+        // The type matters, not just the key: going through PrimaryButton is
+        // what gives this button the same press feedback, loading state and
+        // label-shrink behaviour every other primary action in the app has.
+        expect(find.byType(PrimaryButton), findsOneWidget);
+        expect(find.byType(FilledButton), findsNothing);
+
+        final button = tester.widget<PrimaryButton>(
+          find.byKey(const Key('hostYourOwnMeetup')),
+        );
+        // The visual identity that was hand-rolled before is carried over
+        // verbatim — this swap must not be visible as a colour or size
+        // change, only as a change in how the button behaves under a finger.
+        expect(button.label, 'HOST YOUR OWN MEETUP');
+        expect(button.icon, Icons.add_circle_outline);
+        expect(button.height, 50);
+        expect(button.fillColor, AppPalette.verified);
+        expect(button.foregroundColor, Colors.black);
       },
     );
   });

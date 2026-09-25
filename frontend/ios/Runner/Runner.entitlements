@@ -2,6 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Sign In with Apple capability (ADR-014) — required for the native
+	     SignInWithApple.getAppleIDCredential() call in
+	     http_auth_service.dart to work on a real device/simulator; without
+	     this entitlement (and the matching capability enabled on the App ID
+	     in the Apple Developer Portal) the native call fails outright. -->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
 	<!-- ADR-030 (round-10) — Push Notifications capability. "development"
 	     is correct for local/debug builds and Xcode-run builds; a real
 	     release/TestFlight build needs this switched to "production" (Xcode

@@ -329,3 +329,100 @@ func isInvalidInput(err error) bool {
 func isConflict(err error) bool {
 	return errors.Is(err, apperror.ErrConflict)
 }
+
+// TestLinkIdentityToUser_LinkedIn_NeverOverwritesExistingFullName is the
+// guarantee Plan 22 exists to protect, tested at the lowest level that can
+// break it. Connecting LinkedIn to an account that already has a name must
+// leave that name alone, no matter what LinkedIn calls the same person.
+//
+// The name is the user's: they either typed it into profile editing
+// (ADR-023 §5) or it arrived with their original signup, including from
+// Apple's one-time out-of-band hint. Renaming them as a side effect of
+// connecting an account is not a thing they asked for, and they would have
+// no way to work out why it happened.
+//
+// This is a regression test, not a bug fix — the LinkedIn branch has never
+// written FullName. It fails the moment somebody "harmonizes" this branch
+// with resolveOrCreateLinkedIn, which takes LinkedIn's name because it is
+// creating the account and has nothing to overwrite. The supported way to
+// act on a mismatch is LinkIdentity's SuggestedNameUpdate, which asks
+// (TestLinkIdentity_LinkedInNameSuggestion).
+func TestLinkIdentityToUser_LinkedIn_NeverOverwritesExistingFullName(t *testing.T) {
+	// The whole matrix of "the account already has a name" cases: hand-typed,
+	// provider-supplied, and one that differs only in case/spacing (a
+	// tempting thing to "normalize" away).
+	for _, existingName := range []string{"Ada Lovelace", "A. Lovelace", "ada lovelace"} {
+		t.Run(existingName, func(t *testing.T) {
+			svc, deps := newFederatedTestService(t)
+			user, err := deps.users.Create(context.Background(), repository.NewUser{
+				FullName: existingName, TrustLevel: 0, AgeConfirmedOver18: true,
+			})
+			if err != nil {
+				t.Fatalf("seed user: %v", err)
+			}
+
+			// li-sub-77 is whatever LinkedIn just authorized; the userinfo
+			// name ("Ada Lovelace", per newTestLinkedInServer) is deliberately
+			// NOT passed in — LinkIdentityToUser takes no name parameter at
+			// all, which is itself the guarantee. If a future change adds one,
+			// this test's assertion is what catches it writing.
+			if err := svc.LinkIdentityToUser(context.Background(), user.ID, FederatedProviderLinkedIn, "li-sub-77"); err != nil {
+				t.Fatalf("LinkIdentityToUser() error: %v", err)
+			}
+
+			linked := deps.users.byID[user.ID]
+			if linked.FullName != existingName {
+				t.Errorf("FullName = %q after linking LinkedIn, want unchanged %q — linking must never rename the user", linked.FullName, existingName)
+			}
+			// The link itself still has to have happened, or the assertion
+			// above would pass for the wrong reason.
+			if linked.LinkedInSub != "li-sub-77" {
+				t.Errorf("LinkedInSub = %q, want %q — the link itself must still succeed", linked.LinkedInSub, "li-sub-77")
+			}
+			if linked.TrustLevel != 1 {
+				t.Errorf("TrustLevel = %d, want 1 — linking still raises trust", linked.TrustLevel)
+			}
+		})
+	}
+}
+
+// TestLinkIdentity_LinkedIn_SuggestionNeverTouchesTheStoredName is the same
+// guarantee one level up, through the full LinkIdentity path that DOES know
+// LinkedIn's name and DOES return a suggestion. A suggestion is a field on a
+// response; it must never be a write.
+func TestLinkIdentity_LinkedIn_SuggestionNeverTouchesTheStoredName(t *testing.T) {
+	svc, deps := newFederatedTestService(t, func(d *testServiceDeps) {
+		li, closeLI := newTestLinkedInServerNamed(t, "Grace Hopper")
+		t.Cleanup(closeLI)
+		d.linkedin = li
+	})
+	user, err := deps.users.Create(context.Background(), repository.NewUser{
+		FullName: "Ada Lovelace", TrustLevel: 0, AgeConfirmedOver18: true,
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	resp, err := svc.LinkIdentity(context.Background(), LinkIdentityRequest{
+		UserID:            user.ID,
+		Provider:          FederatedProviderLinkedIn,
+		AuthorizationCode: "auth-code",
+		RedirectURI:       "app://callback",
+	})
+	if err != nil {
+		t.Fatalf("LinkIdentity() error: %v", err)
+	}
+
+	if resp.SuggestedNameUpdate != "Grace Hopper" {
+		t.Errorf("SuggestedNameUpdate = %q, want %q", resp.SuggestedNameUpdate, "Grace Hopper")
+	}
+	if stored := deps.users.byID[user.ID].FullName; stored != "Ada Lovelace" {
+		t.Errorf("stored FullName = %q, want unchanged %q — the suggestion must not be applied server-side", stored, "Ada Lovelace")
+	}
+	// The session the caller gets back still reports the account's real
+	// name, not the suggested one: a client that ignores the new field shows
+	// exactly what it showed before.
+	if resp.FullName != "Ada Lovelace" {
+		t.Errorf("session FullName = %q, want the account's own %q", resp.FullName, "Ada Lovelace")
+	}
+}

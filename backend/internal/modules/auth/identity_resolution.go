@@ -133,6 +133,26 @@ func (s *service) LinkIdentityToUser(ctx context.Context, userID string, provide
 	}
 
 	if provider == FederatedProviderLinkedIn {
+		// THIS DELIBERATELY NEVER WRITES FullName, AND MUST NOT START.
+		//
+		// Signup (resolveOrCreateLinkedIn, above) takes LinkedIn's name
+		// because it is creating the account and there is nothing to
+		// overwrite. Linking is the opposite case: the account already
+		// exists, and the name on it is the user's — typed into profile
+		// editing (ADR-023 §5), or carried in from whichever provider they
+		// originally signed up with, including the Apple out-of-band hint
+		// (Plan 22). Connecting LinkedIn is not a request to be renamed, and
+		// a user who has no idea their LinkedIn profile says "A. Lovelace"
+		// would have no way to explain why their name changed by itself.
+		//
+		// Making the two paths "consistent" by copying the name here is the
+		// specific mistake this comment exists to prevent. The supported way
+		// to act on a mismatch is LinkIdentity's SuggestedNameUpdate, which
+		// asks the user and routes a yes through the existing self-edit
+		// path — see service.go's LinkIdentity and
+		// TestLinkIdentityToUser_LinkedIn_NeverOverwritesExistingFullName,
+		// which fails if this branch ever gains a FullName write.
+		//
 		// The linkedin_sub is applied to the locked row by the repository
 		// before this runs; afterVerification supplies the is_guest change
 		// the same statement makes (gap-tracker #17).

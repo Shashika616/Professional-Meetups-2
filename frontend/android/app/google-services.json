@@ -1,26 +1,51 @@
 {
   "project_info": {
-    "project_number": "762300092898",
-    "project_id": "professional-meetups-976d2",
-    "storage_bucket": "professional-meetups-976d2.firebasestorage.app"
+    "project_number": "740861671089",
+    "project_id": "project-285b9289-549d-4fef-92c",
+    "storage_bucket": "project-285b9289-549d-4fef-92c.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:762300092898:android:f5cbcf66dd507cdfae69bb",
+        "mobilesdk_app_id": "1:740861671089:android:8e236a00b3589f0a2fd490",
         "android_client_info": {
           "package_name": "com.profconn.professional_connections_platform"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "740861671089-00ruvi05bpsiipj1uumqgor8j4kf76i0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.profconn.professional_connections_platform",
+            "certificate_hash": "6d38a58ba517b5b88ac0c6fc08ee5164b14777db"
+          }
+        },
+        {
+          "client_id": "740861671089-cjsiocfa8b2chf8iiqsj170etnp2gnaf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyAHXpJo26EOccLmyF39GkkcBNucg3626T8"
+          "current_key": "AIzaSyDYToXRszJQVOq0Jy5EiXioOyto195Asis"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "740861671089-059fniskfdqvdi6n85rtr9p30t3ad4pg.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "740861671089-8slra5pv1n6ios8qt9ncum67n8205jdq.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.profconn.professionalConnectionsPlatform"
+              }
+            }
+          ]
         }
       }
     }

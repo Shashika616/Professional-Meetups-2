@@ -27,13 +27,23 @@ import (
 // newTestLinkedInServer stands in for LinkedIn's token + userinfo endpoints.
 func newTestLinkedInServer(t *testing.T) (*linkedin.Client, func()) {
 	t.Helper()
+	return newTestLinkedInServerNamed(t, "Ada Lovelace")
+}
+
+// newTestLinkedInServerNamed is newTestLinkedInServer with control over the
+// one field Plan 22's suggestion logic actually reads — what LinkedIn calls
+// this person. Everything else (sub, picture) stays fixed, so a test that
+// overrides deps.linkedin still links to the same li-sub-123 every other
+// test in this file expects.
+func newTestLinkedInServerNamed(t *testing.T, name string) (*linkedin.Client, func()) {
+	t.Helper()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"access_token":"li-access-token","expires_in":5184000}`))
 	})
 	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"sub":"li-sub-123","name":"Ada Lovelace","picture":"https://example.com/p.jpg"}`))
+		_, _ = w.Write([]byte(`{"sub":"li-sub-123","name":"` + name + `","picture":"https://example.com/p.jpg"}`))
 	})
 	server := httptest.NewServer(mux)
 
@@ -742,4 +752,218 @@ func TestRevokeSession_KnownToken(t *testing.T) {
 
 func fakeNewUser(linkedInSub string) repository.NewUser {
 	return repository.NewUser{LinkedInSub: linkedInSub, FullName: "Ada Lovelace", TrustLevel: 1}
+}
+
+// --- Plan 22: the provider's name at signup, and what a later LinkedIn
+// link may and may not do with it. ---
+
+// TestCompleteFederatedSignup_NameHintFillsAnEmptyVerifiedName is the Apple
+// case this plan exists for: Apple's id_token carries no name claim at all,
+// so verified.Name is empty, while its native SDK handed the client a name
+// beside the token. Before Plan 22 that name was read and thrown away and
+// the account was created nameless.
+func TestCompleteFederatedSignup_NameHintFillsAnEmptyVerifiedName(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	deps.apple.validTokens["good-token"] = identity.VerifiedIdentity{
+		Subject: "apple-sub-123", Email: "grace@example.com", Name: "",
+	}
+
+	resp, err := svc.CompleteFederatedSignup(context.Background(), CompleteFederatedSignupRequest{
+		Provider:           FederatedProviderApple,
+		IDToken:            "good-token",
+		AgeConfirmedOver18: true,
+		Nonce:              "test-nonce",
+		FullNameHint:       "  Grace Hopper  ", // trimmed, like the profile self-edit field
+	})
+	if err != nil {
+		t.Fatalf("CompleteFederatedSignup() error: %v", err)
+	}
+
+	if resp.FullName != "Grace Hopper" {
+		t.Errorf("session FullName = %q, want %q", resp.FullName, "Grace Hopper")
+	}
+	if created := deps.users.byID[resp.UserID]; created.FullName != "Grace Hopper" {
+		t.Errorf("created user's FullName = %q, want %q", created.FullName, "Grace Hopper")
+	}
+	if got := deps.users.createCalls[0].FullName; got != "Grace Hopper" {
+		t.Errorf("Create called with FullName = %q, want %q — the name must be written at creation, not patched afterwards", got, "Grace Hopper")
+	}
+}
+
+// TestCompleteFederatedSignup_NoNameAnywhereStillCreatesTheAccount is the
+// common Apple case on every authorization AFTER the first: Apple gives the
+// client no name either, so there is nothing to fall back to. That is not an
+// error — the account is created nameless exactly as before this plan, and
+// the client renders its existing "Member" fallback.
+func TestCompleteFederatedSignup_NoNameAnywhereStillCreatesTheAccount(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	deps.apple.validTokens["good-token"] = identity.VerifiedIdentity{
+		Subject: "apple-sub-456", Email: "anon@example.com", Name: "",
+	}
+
+	resp, err := svc.CompleteFederatedSignup(context.Background(), CompleteFederatedSignupRequest{
+		Provider:           FederatedProviderApple,
+		IDToken:            "good-token",
+		AgeConfirmedOver18: true,
+		Nonce:              "test-nonce",
+		FullNameHint:       "",
+	})
+	if err != nil {
+		t.Fatalf("CompleteFederatedSignup() error: %v", err)
+	}
+	if resp.FullName != "" {
+		t.Errorf("session FullName = %q, want empty", resp.FullName)
+	}
+	if created := deps.users.byID[resp.UserID]; created.FullName != "" {
+		t.Errorf("created user's FullName = %q, want empty", created.FullName)
+	}
+}
+
+// TestCompleteFederatedSignup_VerifiedNameBeatsTheHint pins Google's
+// behavior as unchanged. Google's id_token carries a signed `name` claim, so
+// verified.Name is authoritative and a hint sent alongside it — by a buggy
+// client, or a malicious one — is ignored outright rather than merged or
+// preferred.
+func TestCompleteFederatedSignup_VerifiedNameBeatsTheHint(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	deps.google.validTokens["good-token"] = identity.VerifiedIdentity{
+		Subject: "google-sub-123", Email: "ada@example.com", Name: "Ada Lovelace",
+	}
+
+	resp, err := svc.CompleteFederatedSignup(context.Background(), CompleteFederatedSignupRequest{
+		Provider:           FederatedProviderGoogle,
+		IDToken:            "good-token",
+		AgeConfirmedOver18: true,
+		Nonce:              "test-nonce",
+		FullNameHint:       "Someone Else Entirely",
+	})
+	if err != nil {
+		t.Fatalf("CompleteFederatedSignup() error: %v", err)
+	}
+	if resp.FullName != "Ada Lovelace" {
+		t.Errorf("session FullName = %q, want the token's own %q", resp.FullName, "Ada Lovelace")
+	}
+	if created := deps.users.byID[resp.UserID]; created.FullName != "Ada Lovelace" {
+		t.Errorf("created user's FullName = %q, want the token's own %q", created.FullName, "Ada Lovelace")
+	}
+}
+
+// TestCompleteFederatedSignup_OverlongHintIsDroppedNotFatal covers the one
+// deliberate difference between this field's validation and
+// CompleteProfileSetup's: the same length rule applies (sanitizedNameHint),
+// but a hint that breaks it is dropped rather than failing the signup. The
+// user never typed this value, so it must not be able to cost them an
+// account.
+func TestCompleteFederatedSignup_OverlongHintIsDroppedNotFatal(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	deps.apple.validTokens["good-token"] = identity.VerifiedIdentity{Subject: "apple-sub-789"}
+
+	resp, err := svc.CompleteFederatedSignup(context.Background(), CompleteFederatedSignupRequest{
+		Provider:           FederatedProviderApple,
+		IDToken:            "good-token",
+		AgeConfirmedOver18: true,
+		Nonce:              "test-nonce",
+		FullNameHint:       strings.Repeat("a", maxFullNameLength+1),
+	})
+	if err != nil {
+		t.Fatalf("CompleteFederatedSignup() error: %v — an unusable hint must not fail the signup", err)
+	}
+	if created := deps.users.byID[resp.UserID]; created.FullName != "" {
+		t.Errorf("created user's FullName = %q, want empty — the oversized hint should be dropped", created.FullName)
+	}
+}
+
+// TestLinkIdentity_LinkedInNameSuggestion covers the response half of the
+// never-overwrite guarantee: LinkIdentity reports a difference, and reports
+// nothing when there is none.
+func TestLinkIdentity_LinkedInNameSuggestion(t *testing.T) {
+	seedAndLink := func(t *testing.T, linkedInName, existingName string) SessionResult {
+		t.Helper()
+		svc, deps := newFederatedTestService(t, func(d *testServiceDeps) {
+			li, closeLI := newTestLinkedInServerNamed(t, linkedInName)
+			t.Cleanup(closeLI)
+			d.linkedin = li
+		})
+		user, err := deps.users.Create(context.Background(), repository.NewUser{
+			FullName: existingName, TrustLevel: 0, AgeConfirmedOver18: true,
+		})
+		if err != nil {
+			t.Fatalf("seed user: %v", err)
+		}
+		resp, err := svc.LinkIdentity(context.Background(), LinkIdentityRequest{
+			UserID:            user.ID,
+			Provider:          FederatedProviderLinkedIn,
+			AuthorizationCode: "auth-code",
+			RedirectURI:       "app://callback",
+		})
+		if err != nil {
+			t.Fatalf("LinkIdentity() error: %v", err)
+		}
+		// Whatever the suggestion says, the stored name is untouched — the
+		// point of the whole feature.
+		if stored := deps.users.byID[user.ID].FullName; stored != existingName {
+			t.Errorf("stored FullName = %q, want unchanged %q", stored, existingName)
+		}
+		return resp
+	}
+
+	t.Run("names differ: suggests LinkedIn's", func(t *testing.T) {
+		resp := seedAndLink(t, "Grace Hopper", "Ada Lovelace")
+		if resp.SuggestedNameUpdate != "Grace Hopper" {
+			t.Errorf("SuggestedNameUpdate = %q, want %q", resp.SuggestedNameUpdate, "Grace Hopper")
+		}
+	})
+
+	t.Run("names already match: suggests nothing", func(t *testing.T) {
+		resp := seedAndLink(t, "Ada Lovelace", "Ada Lovelace")
+		if resp.SuggestedNameUpdate != "" {
+			t.Errorf("SuggestedNameUpdate = %q, want empty when the names agree", resp.SuggestedNameUpdate)
+		}
+	})
+
+	t.Run("linkedin has no name: suggests nothing", func(t *testing.T) {
+		resp := seedAndLink(t, "", "Ada Lovelace")
+		if resp.SuggestedNameUpdate != "" {
+			t.Errorf("SuggestedNameUpdate = %q, want empty when LinkedIn returned no name", resp.SuggestedNameUpdate)
+		}
+	})
+
+	t.Run("account has no name yet: still only suggests, never applies", func(t *testing.T) {
+		resp := seedAndLink(t, "Grace Hopper", "")
+		if resp.SuggestedNameUpdate != "Grace Hopper" {
+			t.Errorf("SuggestedNameUpdate = %q, want %q", resp.SuggestedNameUpdate, "Grace Hopper")
+		}
+	})
+}
+
+// TestLinkIdentity_AppleAndGoogleNeverSuggestAName: the suggestion is the
+// LinkedIn branch's alone. Apple/Google linking verifies an id_token and has
+// no userinfo call to learn a name from in the first place.
+func TestLinkIdentity_AppleAndGoogleNeverSuggestAName(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	deps.apple.validTokens["good-token"] = identity.VerifiedIdentity{
+		Subject: "apple-sub-link", Name: "Grace Hopper",
+	}
+	user, err := deps.users.Create(context.Background(), repository.NewUser{
+		FullName: "Ada Lovelace", TrustLevel: 0, AgeConfirmedOver18: true,
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	resp, err := svc.LinkIdentity(context.Background(), LinkIdentityRequest{
+		UserID:   user.ID,
+		Provider: FederatedProviderApple,
+		IDToken:  "good-token",
+		Nonce:    "test-nonce",
+	})
+	if err != nil {
+		t.Fatalf("LinkIdentity() error: %v", err)
+	}
+	if resp.SuggestedNameUpdate != "" {
+		t.Errorf("SuggestedNameUpdate = %q, want empty on the Apple/Google branch", resp.SuggestedNameUpdate)
+	}
+	if stored := deps.users.byID[user.ID].FullName; stored != "Ada Lovelace" {
+		t.Errorf("stored FullName = %q, want unchanged %q", stored, "Ada Lovelace")
+	}
 }

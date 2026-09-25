@@ -8,10 +8,22 @@
 // add a web/macOS app), let it overwrite this file rather than
 // hand-editing around it.
 //
-// Project: professional-meetups-976d2 (Firebase Hosting for the LinkedIn
-// OAuth bridge page already lives on this same project — see
-// docs/04-decisions/adr-011-linkedin-onboarding-slice-design.md — FCM
-// reuses it rather than a second project).
+// Project: project-285b9289-549d-4fef-92c (migrated 2026-09-25 from
+// professional-meetups-976d2, alongside .env's GOOGLE_SERVER_CLIENT_ID —
+// the new project is where the Google Sign-In OAuth clients live).
+//
+// These values MUST stay in step with the two config files above. The
+// native SDK initializes the default app from the bundled file before
+// Dart runs; main()'s Firebase.initializeApp(options:) then passes what
+// is below. Identical options are a no-op, different ones throw
+// [core/duplicate-app] out of main() before runApp, which shows as an app
+// frozen on its launch icon on both platforms — that is exactly what a
+// half-done migration looked like on 2026-09-25.
+//
+// The LinkedIn OAuth bridge page still lives on the OLD project's Firebase
+// Hosting (https://professional-meetups-976d2.web.app, AppConfig
+// .linkedInRedirectUri and backend/.env's LINKEDIN_REDIRECT_URI) — Hosting
+// is independent of which project FCM uses, so that URL is unchanged.
 
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
@@ -28,7 +40,7 @@ class DefaultFirebaseOptions {
     if (kIsWeb) {
       throw UnsupportedError(
         'DefaultFirebaseOptions have not been configured for web. '
-        'no web app exists in the professional-meetups-976d2 Firebase '
+        'no web app exists in the project-285b9289-549d-4fef-92c Firebase '
         'project. Add one in the console and regenerate this file if '
         'web support is ever needed.',
       );
@@ -42,25 +54,25 @@ class DefaultFirebaseOptions {
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform '
           '($defaultTargetPlatform). Only Android and iOS apps exist in '
-          'the professional-meetups-976d2 Firebase project today.',
+          'the project-285b9289-549d-4fef-92c Firebase project today.',
         );
     }
   }
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyAHXpJo26EOccLmyF39GkkcBNucg3626T8',
-    appId: '1:762300092898:android:f5cbcf66dd507cdfae69bb',
-    messagingSenderId: '762300092898',
-    projectId: 'professional-meetups-976d2',
-    storageBucket: 'professional-meetups-976d2.firebasestorage.app',
+    apiKey: 'AIzaSyDYToXRszJQVOq0Jy5EiXioOyto195Asis',
+    appId: '1:740861671089:android:8e236a00b3589f0a2fd490',
+    messagingSenderId: '740861671089',
+    projectId: 'project-285b9289-549d-4fef-92c',
+    storageBucket: 'project-285b9289-549d-4fef-92c.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyCSAdGsEgZEs3A5ogcYItb1CeaxFuPM_xM',
-    appId: '1:762300092898:ios:d93232f8987672a7ae69bb',
-    messagingSenderId: '762300092898',
-    projectId: 'professional-meetups-976d2',
-    storageBucket: 'professional-meetups-976d2.firebasestorage.app',
+    apiKey: 'AIzaSyBqpu27NXSapgLH0-5-xk6jfQ76sGHLMJ0',
+    appId: '1:740861671089:ios:ce6ddab3d32d622c2fd490',
+    messagingSenderId: '740861671089',
+    projectId: 'project-285b9289-549d-4fef-92c',
+    storageBucket: 'project-285b9289-549d-4fef-92c.firebasestorage.app',
     iosBundleId: 'com.profconn.professionalConnectionsPlatform',
   );
 }

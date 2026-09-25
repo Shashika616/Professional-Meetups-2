@@ -47,6 +47,8 @@ func sessionToProto(s auth.SessionResult) *authv1.SessionResponse {
 		FullName:        s.FullName,
 		ProfilePhotoUrl: s.ProfilePhotoURL,
 		TrustLevel:      int32(s.TrustLevel),
+		// Empty on every RPC but LinkIdentity's LinkedIn branch (Plan 22).
+		SuggestedNameUpdate: s.SuggestedNameUpdate,
 	}
 }
 
@@ -136,6 +138,7 @@ func (s *AuthServer) CompleteFederatedSignup(ctx context.Context, req *authv1.Co
 		IDToken:            req.GetIdToken(),
 		Nonce:              req.GetNonce(),
 		AgeConfirmedOver18: req.GetAgeConfirmedOver_18(),
+		FullNameHint:       req.GetFullNameHint(),
 	})
 	if err != nil {
 		return nil, apperror.ToGRPCStatus(err)

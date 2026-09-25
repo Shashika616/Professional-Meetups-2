@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>AIzaSyCSAdGsEgZEs3A5ogcYItb1CeaxFuPM_xM</string>
+	<string>AIzaSyBqpu27NXSapgLH0-5-xk6jfQ76sGHLMJ0</string>
 	<key>GCM_SENDER_ID</key>
-	<string>762300092898</string>
+	<string>740861671089</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
 	<string>com.profconn.professionalConnectionsPlatform</string>
 	<key>PROJECT_ID</key>
-	<string>professional-meetups-976d2</string>
+	<string>project-285b9289-549d-4fef-92c</string>
 	<key>STORAGE_BUCKET</key>
-	<string>professional-meetups-976d2.firebasestorage.app</string>
+	<string>project-285b9289-549d-4fef-92c.firebasestorage.app</string>
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:762300092898:ios:d93232f8987672a7ae69bb</string>
+	<string>1:740861671089:ios:ce6ddab3d32d622c2fd490</string>
 </dict>
 </plist>

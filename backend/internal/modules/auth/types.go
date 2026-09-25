@@ -73,6 +73,19 @@ type SessionResult struct {
 	FullName        string
 	ProfilePhotoURL string
 	TrustLevel      int
+
+	// SuggestedNameUpdate is set by LinkIdentity's LinkedIn branch alone,
+	// and only when LinkedIn's own name differs from the one already on the
+	// account (Plan 22). Empty everywhere else, including when the two names
+	// match or LinkedIn returned none.
+	//
+	// It is a suggestion for the client to OFFER, never a change that was
+	// made: linking LinkedIn to an existing account must never silently
+	// rewrite a name the user already has, whether they typed it themselves
+	// or it arrived with their original signup. LinkIdentityToUser's
+	// LinkedIn branch is where that guarantee actually lives; this field is
+	// the "ask them instead" half of it.
+	SuggestedNameUpdate string
 }
 
 // CompleteFederatedSignupRequest creates a Level 0 account via Sign in with
@@ -91,6 +104,22 @@ type CompleteFederatedSignupRequest struct {
 	// Required: an empty nonce is rejected, not treated as "skip the check".
 	Nonce              string
 	AgeConfirmedOver18 bool
+	// FullNameHint is the name the provider gave the CLIENT out-of-band,
+	// beside the id_token rather than inside it (Plan 22). In practice this
+	// is Apple only: Apple's id_token carries no name claim at all, while
+	// its native SDK hands the app givenName/familyName on the credential
+	// object, on a user's very first authorization with this app. Google's
+	// token already carries an OIDC `name` claim, so its client sends "".
+	//
+	// Optional, and a FALLBACK ONLY — CompleteFederatedSignup consults it
+	// solely when the verified token has no name of its own, and only at
+	// the moment a brand-new account is created. It never feeds identity,
+	// email or trust level, and never rewrites the name on an account that
+	// already exists. That makes it no more trusted than what the same user
+	// could type into the profile-name field a minute later (ADR-023), which
+	// is why accepting client-supplied text here crosses no boundary this
+	// app doesn't already cross.
+	FullNameHint string
 }
 
 // CompleteLinkedInOnboardingRequest creates a Level 1 account directly via

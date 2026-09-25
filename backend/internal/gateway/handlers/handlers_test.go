@@ -57,14 +57,24 @@ type fakeMonolith struct {
 	gotProvider         string
 	gotIDToken          string
 	gotNonce            string
+	gotFullNameHint     string
 	gotRefreshToken     string
 	gotContextMessage   string
 	gotContactID        string
 	gotLat, gotLng      float64
 }
 
-func (f *fakeMonolith) CompleteFederatedSignup(_ context.Context, provider, idToken, nonce string, _ bool) (monolithclient.Session, error) {
+func (f *fakeMonolith) CompleteFederatedSignup(_ context.Context, provider, idToken, nonce string, _ bool, fullNameHint string) (monolithclient.Session, error) {
 	f.gotProvider, f.gotIDToken, f.gotNonce = provider, idToken, nonce
+	f.gotFullNameHint = fullNameHint
+	return f.session, f.err
+}
+
+// LinkIdentity records nothing beyond the caller id: the routes' own
+// forwarding is covered elsewhere, and this exists so the link route can be
+// exercised for its RESPONSE shape (Plan 22's suggested_name_update).
+func (f *fakeMonolith) LinkIdentity(_ context.Context, userID, provider, _, _, _, _ string) (monolithclient.Session, error) {
+	f.gotUserID, f.gotProvider = userID, provider
 	return f.session, f.err
 }
 
@@ -279,6 +289,61 @@ func TestSessionResponse_AccessTokenIsSignedByTheGateway(t *testing.T) {
 	}
 	if body["is_new_user"] != true || body["full_name"] != "Ada Lovelace" || body["user_id"] != "user-1" {
 		t.Errorf("session response fields = %+v, want the monolith's values passed through", body)
+	}
+}
+
+// TestFederatedSignup_ForwardsFullNameHint (Plan 22): Apple's out-of-band
+// name reaches the module, and a body without the field — every client
+// shipped before this — still decodes, as "" rather than a 400.
+func TestFederatedSignup_ForwardsFullNameHint(t *testing.T) {
+	s := newTestServer(t)
+	s.do(http.MethodPost, "/v1/auth/federated/signup",
+		`{"provider":"apple","id_token":"tok","nonce":"n","age_confirmed_over_18":true,"full_name_hint":"Grace Hopper"}`, "")
+	if s.monolith.gotFullNameHint != "Grace Hopper" {
+		t.Errorf("full_name_hint forwarded = %q, want %q", s.monolith.gotFullNameHint, "Grace Hopper")
+	}
+
+	older := newTestServer(t)
+	rec := older.do(http.MethodPost, "/v1/auth/federated/signup",
+		`{"provider":"apple","id_token":"tok","nonce":"n","age_confirmed_over_18":true}`, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d for a body with no full_name_hint, want 200 — the field is optional", rec.Code)
+	}
+	if older.monolith.gotFullNameHint != "" {
+		t.Errorf("full_name_hint forwarded = %q for an absent field, want empty", older.monolith.gotFullNameHint)
+	}
+}
+
+// TestSessionResponse_SuggestedNameUpdate (Plan 22): the LinkedIn-link
+// suggestion reaches the client when there is one, and the field is absent
+// from every other session response rather than serialized as "".
+func TestSessionResponse_SuggestedNameUpdate(t *testing.T) {
+	s := newTestServer(t)
+	s.monolith.session = monolithclient.Session{
+		UserID: "user-1", RefreshToken: "r", FullName: "Ada Lovelace",
+		SuggestedNameUpdate: "Grace Hopper",
+	}
+	rec := s.do(http.MethodPost, "/v1/auth/identities/link",
+		`{"provider":"linkedin","authorization_code":"code","redirect_uri":"app://cb"}`, s.tokenFor(t, "user-1", 1))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+	}
+	body := decodeBody(t, rec)
+	if body["suggested_name_update"] != "Grace Hopper" {
+		t.Errorf("suggested_name_update = %v, want %q", body["suggested_name_update"], "Grace Hopper")
+	}
+	// The account's own name is still what it was — the suggestion is beside
+	// it, not instead of it.
+	if body["full_name"] != "Ada Lovelace" {
+		t.Errorf("full_name = %v, want %q", body["full_name"], "Ada Lovelace")
+	}
+
+	plain := newTestServer(t)
+	plain.monolith.session = monolithclient.Session{UserID: "user-1", RefreshToken: "r"}
+	rec = plain.do(http.MethodPost, "/v1/auth/federated/signup",
+		`{"provider":"apple","id_token":"tok","nonce":"n","age_confirmed_over_18":true}`, "")
+	if _, present := decodeBody(t, rec)["suggested_name_update"]; present {
+		t.Error("suggested_name_update is present on an ordinary signup response, want it omitted entirely")
 	}
 }
 

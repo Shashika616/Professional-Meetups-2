@@ -200,6 +200,12 @@ type federatedSignupRequest struct {
 	IDToken            string `json:"id_token"`
 	Nonce              string `json:"nonce"`
 	AgeConfirmedOver18 bool   `json:"age_confirmed_over_18"`
+	// FullNameHint is optional: absent in a body an older client sends, and
+	// "" from Google's path, where the id_token already carries the name.
+	// Apple is the one provider that hands its client a name outside the
+	// token, once, on the first authorization (Plan 22). A missing field
+	// decodes to "", which the module treats exactly as "no hint".
+	FullNameHint string `json:"full_name_hint"`
 }
 
 // federatedSignup creates a Level 0 account via Sign in with Apple/Google, or
@@ -217,7 +223,9 @@ func (h *Handler) federatedSignup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.monolith.CompleteFederatedSignup(r.Context(), req.Provider, req.IDToken, req.Nonce, req.AgeConfirmedOver18)
+	session, err := h.monolith.CompleteFederatedSignup(
+		r.Context(), req.Provider, req.IDToken, req.Nonce, req.AgeConfirmedOver18, req.FullNameHint,
+	)
 	if err != nil {
 		writeGRPCError(w, err)
 		return
@@ -437,6 +445,11 @@ type sessionResponse struct {
 	IsNewUser       bool   `json:"is_new_user"`
 	FullName        string `json:"full_name"`
 	ProfilePhotoURL string `json:"profile_photo_url"`
+	// SuggestedNameUpdate is present only after a LinkedIn link whose name
+	// differs from the account's own (Plan 22). omitempty keeps every other
+	// session response byte-for-byte what it was — this route is shared by
+	// six endpoints, and only one of them can ever set it.
+	SuggestedNameUpdate string `json:"suggested_name_update,omitempty"`
 }
 
 type refreshRequest struct {
@@ -540,6 +553,8 @@ func (h *Handler) writeSession(w http.ResponseWriter, s monolithclient.Session) 
 		IsNewUser:       s.IsNewUser,
 		FullName:        s.FullName,
 		ProfilePhotoURL: s.ProfilePhotoURL,
+
+		SuggestedNameUpdate: s.SuggestedNameUpdate,
 	})
 }
 

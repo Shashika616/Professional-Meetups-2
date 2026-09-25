@@ -6,6 +6,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
@@ -94,7 +95,7 @@ class MeetupCard extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
-      child: GestureDetector(
+      child: Pressable(
         onTap: locked ? () => _handleLockedTap(context) : onTap,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(14),

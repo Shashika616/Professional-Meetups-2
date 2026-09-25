@@ -203,6 +203,20 @@ message CompleteFederatedSignupRequest {
   // for Sign in with Apple and that Firebase's own
   // OAuthProvider.credential(idToken:rawNonce:) uses.
   string nonce = 4;
+  // full_name_hint is the name the provider handed the CLIENT out-of-band,
+  // outside the id_token (Plan 22). Apple is the only provider that does
+  // this: its id_token carries no name claim at all, but its native SDK
+  // puts givenName/familyName on the credential object on a user's very
+  // first authorization. Google's id_token already carries a standard OIDC
+  // `name` claim, so its client sends "" here and nothing changes for it.
+  //
+  // Optional, and a FALLBACK ONLY: it is used solely when the verified
+  // token carries no name, and solely at the moment a brand-new account is
+  // created, as that account's display name. It is never consulted for
+  // identity, email or trust level, and never overwrites a name an
+  // existing account already has — it is no more trusted than the name the
+  // same user could type into profile editing a minute later (ADR-023).
+  string full_name_hint = 5;
 }
 
 message CompleteLinkedInOnboardingRequest {
@@ -280,6 +294,16 @@ message SessionResponse {
   // used to build internally — without it, every issued token would claim
   // trust level 0.
   int32 trust_level = 8;
+  // suggested_name_update is set ONLY by LinkIdentity's LinkedIn branch, and
+  // only when LinkedIn's own name differs from the name already on the
+  // account (empty when they match, when LinkedIn has none, or on every
+  // other session-issuing RPC). It is a SUGGESTION the client may offer the
+  // user, never an applied change: connecting LinkedIn to an existing
+  // account must never silently rewrite a name that user already has (Plan
+  // 22; see LinkIdentityToUser's LinkedIn branch, which deliberately does
+  // not touch full_name). Purely additive — a client that ignores this
+  // field behaves exactly as before.
+  string suggested_name_update = 9;
 }
 
 message RefreshSessionRequest {

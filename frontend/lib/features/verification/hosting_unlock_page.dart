@@ -5,6 +5,7 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/features/verification/corporate_email_verification_page.dart';
@@ -351,7 +352,7 @@ class _HostingRow extends StatelessWidget {
     );
 
     if (locked) return row;
-    return GestureDetector(onTap: onTap, child: row);
+    return Pressable(onTap: onTap, child: row);
   }
 }
 
