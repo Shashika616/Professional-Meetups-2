@@ -45,9 +45,7 @@ void main() {
     tester,
   ) async {
     var taps = 0;
-    await tester.pumpWidget(
-      app(Pressable(onTap: () => taps++, child: child)),
-    );
+    await tester.pumpWidget(app(Pressable(onTap: () => taps++, child: child)));
 
     expect(currentScale(tester), 1.0);
 
@@ -70,9 +68,7 @@ void main() {
   testWidgets('a cancelled press (finger dragged away) springs back and does '
       'not fire onTap', (tester) async {
     var taps = 0;
-    await tester.pumpWidget(
-      app(Pressable(onTap: () => taps++, child: child)),
-    );
+    await tester.pumpWidget(app(Pressable(onTap: () => taps++, child: child)));
 
     final gesture = await tester.startGesture(
       tester.getCenter(find.byType(Pressable)),

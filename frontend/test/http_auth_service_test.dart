@@ -294,16 +294,18 @@ void main() {
   // nullable parts is the only client-side logic in that path, and getting
   // it wrong writes a name like "Grace null" into a real account.
   group('appleFullNameHint', () {
-    AuthorizationCredentialAppleID credential({String? given, String? family}) =>
-        AuthorizationCredentialAppleID(
-          userIdentifier: 'apple-user-1',
-          givenName: given,
-          familyName: family,
-          authorizationCode: 'code',
-          email: 'ada@example.com',
-          identityToken: 'id-token',
-          state: null,
-        );
+    AuthorizationCredentialAppleID credential({
+      String? given,
+      String? family,
+    }) => AuthorizationCredentialAppleID(
+      userIdentifier: 'apple-user-1',
+      givenName: given,
+      familyName: family,
+      authorizationCode: 'code',
+      email: 'ada@example.com',
+      identityToken: 'id-token',
+      state: null,
+    );
 
     test('joins both parts with a single space', () {
       expect(
