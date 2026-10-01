@@ -62,8 +62,8 @@ func TestRateLimit_IPPathBoundary(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); got != "application/json" {
 		t.Errorf("Content-Type = %q, want application/json", got)
 	}
-	if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"rate limited"}` {
-		t.Errorf("body = %q, want %q", got, `{"error":"rate limited"}`)
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"Too many attempts. Please wait a moment and try again."}` {
+		t.Errorf("body = %q, want %q", got, `{"error":"Too many attempts. Please wait a moment and try again."}`)
 	}
 	if next.calls != requestsPerMinute {
 		t.Errorf("handler ran %d times, want %d — the rejected request must not reach it", next.calls, requestsPerMinute)

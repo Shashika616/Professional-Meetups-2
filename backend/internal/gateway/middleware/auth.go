@@ -119,5 +119,5 @@ func bearerToken(r *http.Request) (string, bool) {
 func writeUnauthorized(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusUnauthorized)
-	_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+	_, _ = w.Write([]byte(`{"error":"Please sign in again."}`))
 }

@@ -186,7 +186,7 @@ func writeRateLimited(w http.ResponseWriter, window time.Duration) {
 	w.Header().Set("Retry-After", strconv.Itoa(seconds))
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusTooManyRequests)
-	_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+	_, _ = w.Write([]byte(`{"error":"Too many attempts. Please wait a moment and try again."}`))
 }
 
 // peekRequestField reads r.Body to extract a named top-level string field

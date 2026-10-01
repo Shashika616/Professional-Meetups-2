@@ -52,6 +52,30 @@ RETURNING *;
 -- the four real signup paths, so a guest doing it stops being a guest.
 UPDATE auth.users SET linkedin_sub = $2, trust_level = $3, is_guest = false WHERE id = $1 RETURNING *;
 
+-- name: UpdateUserProfilePhoto :one
+-- The profile photo follows LinkedIn, and only LinkedIn (2026-09-26).
+--
+-- # WHY THIS EXISTS AND FULL NAME'S EQUIVALENT IS NOT USED THE SAME WAY
+--
+-- profile_photo_url used to be write-once: set from LinkedIn's userinfo at
+-- account creation and never touched again. That produced two wrong results.
+-- Someone who signed up with Apple or Google and connected LinkedIn later
+-- kept their initials forever, even though their professional photo was
+-- sitting in the very userinfo response the link flow already fetched. And
+-- anyone whose LinkedIn photo changed kept the old one indefinitely.
+--
+-- The photo is SYNCED automatically where the name is only ever SUGGESTED
+-- (see LinkIdentity's SuggestedNameUpdate). That asymmetry is deliberate:
+-- the app sources photos from LinkedIn exclusively, precisely because a
+-- LinkedIn photo is the one people curate to look professional, so LinkedIn
+-- is the source of truth and mirroring it is the whole point. A name is not
+-- like that — a user may have typed their own in profile editing (ADR-023
+-- §5), and overwriting that silently is what Plan 22 exists to prevent.
+--
+-- Callers must not pass an empty URL: a LinkedIn response without a picture
+-- must leave an existing photo alone rather than blank it.
+UPDATE auth.users SET profile_photo_url = $2 WHERE id = $1 RETURNING *;
+
 -- name: UpdateUserFullName :one
 -- ADR-019 §2's post-auth profile-completion screen — CompleteProfileSetup
 -- is the only caller. fullName is always required there, unlike every
@@ -200,13 +224,44 @@ UPDATE auth.users SET is_guest = false, trust_level = $2 WHERE id = $1 RETURNING
 -- Batched by id the same way DeleteExpiredRefreshTokens is, and for the same
 -- reason: the caller loops until a batch comes back short, so no single
 -- statement holds a long lock.
-DELETE FROM auth.users
-WHERE id IN (
-  SELECT u.id FROM auth.users u
-  WHERE u.is_guest = true
-    AND u.updated_at < sqlc.arg(abandoned_before)::timestamptz
-    AND NOT EXISTS (
-      SELECT 1 FROM auth.refresh_tokens rt WHERE rt.user_id = u.id
-    )
-  LIMIT sqlc.arg(batch_size)
-);
+--
+-- Every guest removed here is ANNOUNCED, in the same statement: the
+-- data-modifying CTE deletes the rows and writes one user-deleted outbox row
+-- per id it actually removed. Without that, guest cleanup was a second,
+-- silent way to delete an account, and the meetup module kept each abandoned
+-- guest's cached display name, last-known location and device tokens
+-- forever, because nothing ever told it. Being one statement, the delete and
+-- the announcement cannot come apart. (Guests cannot add trusted contacts or
+-- trigger SOS, both gated at Level 2, so neither table needs handling here.)
+--
+-- The row count is the INSERT's, which equals the number of guests deleted.
+WITH gone AS (
+  DELETE FROM auth.users
+  WHERE id IN (
+    SELECT u.id FROM auth.users u
+    WHERE u.is_guest = true
+      AND u.updated_at < sqlc.arg(abandoned_before)::timestamptz
+      AND NOT EXISTS (
+        SELECT 1 FROM auth.refresh_tokens rt WHERE rt.user_id = u.id
+      )
+    LIMIT sqlc.arg(batch_size)
+  )
+  RETURNING id
+)
+INSERT INTO auth.user_deleted_outbox (user_id)
+SELECT id FROM gone;
+
+-- name: DeleteUser :execrows
+-- Account deletion (App Store 5.1.1(v), Play's data-deletion policy).
+--
+-- Removes the account and, by ON DELETE CASCADE declared in 0001_auth_schema,
+-- user_identities, refresh_tokens, verification_codes and
+-- unverified_company_claims. It does NOT reach trusted_contacts or
+-- sos_events — those carry a logical FK with no constraint, by design — so
+-- the repository deletes them explicitly, in the same transaction, first.
+--
+-- It does NOT reach the meetup schema, which holds no foreign key to this
+-- table on purpose (ADR-001 §3) — the meetup module purges its own rows
+-- first, before this runs. See the auth service's DeleteAccount for the
+-- ordering and why it is that way round.
+DELETE FROM auth.users WHERE id = $1;

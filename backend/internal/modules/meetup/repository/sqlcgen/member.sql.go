@@ -21,6 +21,13 @@ SELECT
   )
   OR EXISTS (
     SELECT 1
+    FROM meetup.meetup_requests r
+    JOIN meetup.meetups m ON m.id = r.meetup_id
+    WHERE r.requester_id = $2::uuid
+      AND m.host_user_id = $1::uuid
+  )
+  OR EXISTS (
+    SELECT 1
     FROM (
       SELECT m.id AS meetup_id, m.host_user_id AS user_id FROM meetup.meetups m
       UNION ALL
@@ -46,10 +53,32 @@ type CanViewMemberProfileParams struct {
 // member.go in the service layer for the rule.
 // True when the viewer may open the target's profile: they are the same
 // person; the target hosts (or has hosted) a meetup — a host is public by
-// design, since you must be able to judge them before asking to join; or
-// the two were both on one meetup as host/accepted. "Shared" deliberately
-// counts past meetups: once you have sat at a table with someone, their
-// profile stays open to you.
+// design, since you must be able to judge them before asking to join; the
+// viewer HOSTS a meetup the target asked to join (see below); or the two
+// were both on one meetup as host/accepted. "Shared" deliberately counts
+// past meetups: once you have sat at a table with someone, their profile
+// stays open to you.
+//
+// # WHY A HOST SEES EVERY REQUESTER, INCLUDING PENDING ONES
+//
+// The host has to decide whether to let this person sit down with them.
+// A name, a photo and a level badge is not enough to decide on, which is
+// exactly why the request card in the app opens this profile. Withholding
+// it until after the host accepts inverts the decision: it would mean
+// accepting someone in order to find out who they are.
+//
+// Deliberately ONE-DIRECTIONAL. This clause only ever opens the requester
+// to the host, never the other way round and never requester to requester:
+// a pending requester still cannot see who else is on the meetup (that is
+// ListMeetupParticipants' redaction, and it stays until they are accepted).
+// The reverse direction needs no clause anyway — a host is already public
+// to everyone by the rule above.
+//
+// Status-agnostic on purpose. A withdrawn or turned-down requester stays
+// visible to that host: they approached the host, the host already saw
+// them in the request list, and the host may still have to rate them for
+// withdrawing (ADR-020 §4). Re-hiding a profile the host could already
+// read would only break the rating screen.
 func (q *Queries) CanViewMemberProfile(ctx context.Context, arg CanViewMemberProfileParams) (pgtype.Bool, error) {
 	row := q.db.QueryRow(ctx, canViewMemberProfile, arg.ViewerID, arg.TargetID)
 	var can_view pgtype.Bool

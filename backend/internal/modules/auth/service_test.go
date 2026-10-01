@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -31,11 +32,17 @@ func newTestLinkedInServer(t *testing.T) (*linkedin.Client, func()) {
 }
 
 // newTestLinkedInServerNamed is newTestLinkedInServer with control over the
-// one field Plan 22's suggestion logic actually reads — what LinkedIn calls
-// this person. Everything else (sub, picture) stays fixed, so a test that
-// overrides deps.linkedin still links to the same li-sub-123 every other
-// test in this file expects.
+// name. The sub stays fixed, so a test that overrides deps.linkedin still
+// links to the same li-sub-123 every other test in this file expects.
 func newTestLinkedInServerNamed(t *testing.T, name string) (*linkedin.Client, func()) {
+	t.Helper()
+	return newTestLinkedInServerWith(t, name, "https://example.com/p.jpg")
+}
+
+// newTestLinkedInServerWith also varies the picture, for the photo-sync
+// behaviour (the photo follows LinkedIn; the name only ever gets suggested).
+// An empty picture stands for a LinkedIn response that omits the field.
+func newTestLinkedInServerWith(t *testing.T, name, picture string) (*linkedin.Client, func()) {
 	t.Helper()
 
 	mux := http.NewServeMux()
@@ -43,7 +50,7 @@ func newTestLinkedInServerNamed(t *testing.T, name string) (*linkedin.Client, fu
 		_, _ = w.Write([]byte(`{"access_token":"li-access-token","expires_in":5184000}`))
 	})
 	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"sub":"li-sub-123","name":"` + name + `","picture":"https://example.com/p.jpg"}`))
+		_, _ = w.Write([]byte(`{"sub":"li-sub-123","name":"` + name + `","picture":"` + picture + `"}`))
 	})
 	server := httptest.NewServer(mux)
 
@@ -965,5 +972,228 @@ func TestLinkIdentity_AppleAndGoogleNeverSuggestAName(t *testing.T) {
 	}
 	if stored := deps.users.byID[user.ID].FullName; stored != "Ada Lovelace" {
 		t.Errorf("stored FullName = %q, want unchanged %q", stored, "Ada Lovelace")
+	}
+}
+
+// --- The profile photo follows LinkedIn (2026-09-26). ---
+
+// seedAndLinkLinkedIn links li-sub-123 to a fresh user carrying the given
+// name and photo, with LinkedIn answering with linkedInName/linkedInPhoto.
+func seedAndLinkLinkedIn(t *testing.T, existingName, existingPhoto, linkedInName, linkedInPhoto string) (repository.User, SessionResult, *testServiceDeps) {
+	t.Helper()
+	svc, deps := newFederatedTestService(t, func(d *testServiceDeps) {
+		li, closeLI := newTestLinkedInServerWith(t, linkedInName, linkedInPhoto)
+		t.Cleanup(closeLI)
+		d.linkedin = li
+	})
+	user, err := deps.users.Create(context.Background(), repository.NewUser{
+		FullName: existingName, ProfilePhotoURL: existingPhoto,
+		TrustLevel: 0, AgeConfirmedOver18: true,
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	resp, err := svc.LinkIdentity(context.Background(), LinkIdentityRequest{
+		UserID:            user.ID,
+		Provider:          FederatedProviderLinkedIn,
+		AuthorizationCode: "auth-code",
+		RedirectURI:       "app://callback",
+	})
+	if err != nil {
+		t.Fatalf("LinkIdentity() error: %v", err)
+	}
+	return deps.users.byID[user.ID], resp, deps
+}
+
+// TestLinkIdentity_LinkedIn_GivesAnApplePhotolessAccountItsPhoto is the case
+// this feature exists for: someone signs up with Apple or Google (no photo —
+// Apple issues none, and this app deliberately does not take Google's), then
+// connects LinkedIn. Their professional photo was already in the userinfo
+// response the link flow fetches; before this it was read and dropped, and
+// they kept initials forever.
+func TestLinkIdentity_LinkedIn_GivesAnApplePhotolessAccountItsPhoto(t *testing.T) {
+	stored, resp, _ := seedAndLinkLinkedIn(t,
+		"Ada Lovelace", "", "Ada Lovelace", "https://media.licdn.com/ada.jpg")
+
+	if stored.ProfilePhotoURL != "https://media.licdn.com/ada.jpg" {
+		t.Errorf("stored photo = %q, want LinkedIn's", stored.ProfilePhotoURL)
+	}
+	// The session carries it immediately, so the app shows the avatar without
+	// waiting for a later profile refetch.
+	if resp.ProfilePhotoURL != "https://media.licdn.com/ada.jpg" {
+		t.Errorf("session photo = %q, want LinkedIn's", resp.ProfilePhotoURL)
+	}
+}
+
+// TestLinkIdentity_LinkedIn_PhotoIsSyncedButNameIsOnlySuggested pins the
+// asymmetry that makes this safe. Both fields differ from the account's; the
+// photo is written, the name is not — it comes back as a suggestion for the
+// user to accept or decline (Plan 22).
+func TestLinkIdentity_LinkedIn_PhotoIsSyncedButNameIsOnlySuggested(t *testing.T) {
+	stored, resp, _ := seedAndLinkLinkedIn(t,
+		"Ada Lovelace", "https://old.example.com/old.jpg",
+		"Grace Hopper", "https://media.licdn.com/grace.jpg")
+
+	if stored.ProfilePhotoURL != "https://media.licdn.com/grace.jpg" {
+		t.Errorf("photo = %q, want LinkedIn's — the photo follows LinkedIn", stored.ProfilePhotoURL)
+	}
+	if stored.FullName != "Ada Lovelace" {
+		t.Errorf("FullName = %q, want unchanged — linking must never rename the user", stored.FullName)
+	}
+	if resp.SuggestedNameUpdate != "Grace Hopper" {
+		t.Errorf("SuggestedNameUpdate = %q, want LinkedIn's name offered", resp.SuggestedNameUpdate)
+	}
+}
+
+// TestLinkIdentity_LinkedIn_MissingPictureLeavesTheExistingPhotoAlone: a
+// LinkedIn response with no picture must not blank a photo the account
+// already has. Losing one because the provider omitted a field would be
+// strictly worse than keeping a stale one.
+func TestLinkIdentity_LinkedIn_MissingPictureLeavesTheExistingPhotoAlone(t *testing.T) {
+	stored, _, deps := seedAndLinkLinkedIn(t,
+		"Ada Lovelace", "https://old.example.com/old.jpg", "Ada Lovelace", "")
+
+	if stored.ProfilePhotoURL != "https://old.example.com/old.jpg" {
+		t.Errorf("photo = %q, want the existing one kept", stored.ProfilePhotoURL)
+	}
+	if len(deps.users.photoUpdates) != 0 {
+		t.Errorf("photo writes = %d, want 0 for an empty incoming picture", len(deps.users.photoUpdates))
+	}
+}
+
+// TestLinkIdentity_LinkedIn_UnchangedPhotoIsNotRewritten: the write publishes
+// a user-profile-updated event the meetup module consumes to refresh its
+// display cache, so a no-op write is real wasted work downstream.
+func TestLinkIdentity_LinkedIn_UnchangedPhotoIsNotRewritten(t *testing.T) {
+	same := "https://media.licdn.com/ada.jpg"
+	stored, _, deps := seedAndLinkLinkedIn(t, "Ada Lovelace", same, "Ada Lovelace", same)
+
+	if stored.ProfilePhotoURL != same {
+		t.Errorf("photo = %q, want %q", stored.ProfilePhotoURL, same)
+	}
+	if len(deps.users.photoUpdates) != 0 {
+		t.Errorf("photo writes = %d, want 0 when the photo has not changed", len(deps.users.photoUpdates))
+	}
+}
+
+// TestCompleteLinkedInOnboarding_ReturningUserPicksUpAChangedPhoto is the
+// other half of "changed on LinkedIn, changed here": a LinkedIn signup who
+// swaps their photo there gets it mirrored on their next sign-in, rather than
+// keeping the one captured at account creation forever.
+func TestCompleteLinkedInOnboarding_ReturningUserPicksUpAChangedPhoto(t *testing.T) {
+	svc, deps := newFederatedTestService(t, func(d *testServiceDeps) {
+		li, closeLI := newTestLinkedInServerWith(t, "Ada Lovelace", "https://media.licdn.com/first.jpg")
+		t.Cleanup(closeLI)
+		d.linkedin = li
+	})
+	first, err := svc.CompleteLinkedInOnboarding(context.Background(), CompleteLinkedInOnboardingRequest{
+		AuthorizationCode: "auth-code", RedirectURI: "app://callback", AgeConfirmedOver18: true,
+	})
+	if err != nil {
+		t.Fatalf("first onboarding: %v", err)
+	}
+	if got := deps.users.byID[first.UserID].ProfilePhotoURL; got != "https://media.licdn.com/first.jpg" {
+		t.Fatalf("photo at creation = %q, want the first one", got)
+	}
+
+	// They change it on LinkedIn, then sign in again.
+	li2, close2 := newTestLinkedInServerWith(t, "Ada Lovelace", "https://media.licdn.com/second.jpg")
+	t.Cleanup(close2)
+	svc.linkedin = li2
+
+	second, err := svc.CompleteLinkedInOnboarding(context.Background(), CompleteLinkedInOnboardingRequest{
+		AuthorizationCode: "auth-code", RedirectURI: "app://callback", AgeConfirmedOver18: true,
+	})
+	if err != nil {
+		t.Fatalf("second onboarding: %v", err)
+	}
+	if second.UserID != first.UserID {
+		t.Fatalf("second sign-in made a new account: %q vs %q", second.UserID, first.UserID)
+	}
+	if got := deps.users.byID[first.UserID].ProfilePhotoURL; got != "https://media.licdn.com/second.jpg" {
+		t.Errorf("photo after re-login = %q, want the updated one", got)
+	}
+	if second.ProfilePhotoURL != "https://media.licdn.com/second.jpg" {
+		t.Errorf("session photo = %q, want the updated one", second.ProfilePhotoURL)
+	}
+}
+
+// --- Account deletion (App Store 5.1.1(v), Play data-deletion). ---
+//
+// The auth service's share of deletion is its own data only. The meetup
+// module is never called from here: it hears about the deletion through the
+// user-deleted outbox row the repository writes in the same transaction
+// (covered by the Postgres-backed integration test), and the "not while you
+// have a live meetup" rule is asked of the meetup service by the gateway.
+
+func seedDeletable(t *testing.T) (*service, *testServiceDeps, string) {
+	t.Helper()
+	svc, deps := newFederatedTestService(t)
+	user, err := deps.users.Create(context.Background(), repository.NewUser{
+		FullName: "Ada Lovelace", TrustLevel: 1, AgeConfirmedOver18: true,
+	})
+	if err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	return svc, deps, user.ID
+}
+
+func TestDeleteAccount_RemovesTheAccount(t *testing.T) {
+	svc, deps, userID := seedDeletable(t)
+
+	if err := svc.DeleteAccount(context.Background(), userID); err != nil {
+		t.Fatalf("DeleteAccount() error: %v", err)
+	}
+	if _, ok := deps.users.byID[userID]; ok {
+		t.Error("the account still exists after deletion")
+	}
+	if len(deps.users.deleted) != 1 || deps.users.deleted[0] != userID {
+		t.Errorf("Delete calls = %v, want exactly this user once", deps.users.deleted)
+	}
+}
+
+// TestDeleteAccount_IsIdempotent: deleting an account that is already gone
+// SUCCEEDS. The id comes from a verified JWT, so the only ways to arrive here
+// with no row are a retry after the first call worked (a dropped response, a
+// double tap) or a token that outlived its account. Both mean "my account is
+// deleted"; erroring would turn a completed deletion into a visible failure.
+func TestDeleteAccount_IsIdempotent(t *testing.T) {
+	svc, deps, userID := seedDeletable(t)
+
+	if err := svc.DeleteAccount(context.Background(), userID); err != nil {
+		t.Fatalf("first DeleteAccount() error: %v", err)
+	}
+	if err := svc.DeleteAccount(context.Background(), userID); err != nil {
+		t.Fatalf("second DeleteAccount() error: %v, a repeat must succeed", err)
+	}
+	if len(deps.users.deleted) != 1 {
+		t.Errorf("Delete called %d times, want 1: the repeat must not try again", len(deps.users.deleted))
+	}
+}
+
+// TestDeleteAccount_ConcurrentDeleteIsNotAnError: two devices, one tap each.
+// The loser finds the row gone between its read and its delete; it has still
+// got exactly what it asked for.
+func TestDeleteAccount_ConcurrentDeleteIsNotAnError(t *testing.T) {
+	svc, deps, userID := seedDeletable(t)
+	deps.users.deleteErr = fmt.Errorf("fake: %w", apperror.ErrNotFound)
+
+	if err := svc.DeleteAccount(context.Background(), userID); err != nil {
+		t.Errorf("DeleteAccount() error = %v, want nil when a concurrent delete won", err)
+	}
+}
+
+// TestDeleteAccount_RealFailuresPropagate: idempotent must not decay into
+// "always returns nil". A database failure has to reach the caller, or the
+// app would tell someone their account is gone when it is not.
+func TestDeleteAccount_RealFailuresPropagate(t *testing.T) {
+	svc, deps, userID := seedDeletable(t)
+	deps.users.deleteErr = errors.New("repository: delete user: connection reset")
+
+	if err := svc.DeleteAccount(context.Background(), userID); err == nil {
+		t.Fatal("DeleteAccount() returned nil for a real failure")
+	}
+	if _, ok := deps.users.byID[userID]; !ok {
+		t.Error("the account was removed even though the delete failed")
 	}
 }

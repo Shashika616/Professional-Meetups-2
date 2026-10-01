@@ -329,6 +329,13 @@ func (s *AuthServer) UpdateLastKnownLocation(ctx context.Context, req *authv1.Up
 	return &authv1.UpdateLastKnownLocationResponse{Success: true}, nil
 }
 
+func (s *AuthServer) DeleteAccount(ctx context.Context, req *authv1.DeleteAccountRequest) (*authv1.DeleteAccountResponse, error) {
+	if err := s.svc.DeleteAccount(ctx, req.GetUserId()); err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.DeleteAccountResponse{}, nil
+}
+
 func trustedContactToProto(c auth.TrustedContact) *authv1.TrustedContactResponse {
 	return &authv1.TrustedContactResponse{
 		Id:                   c.ID,

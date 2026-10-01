@@ -1,9 +1,11 @@
 # Google Cloud deployment record and redeploy runbook
 
-> **Status 2026-09-15:** the database moved to Supabase and the Cloud SQL
-> instance `meetups-db` was deleted (see §6). Cloud Run `meetups-backend`
-> stays, serving revision `r31` against Supabase (Mumbai). §1–§5 below describe the
-> Cloud SQL era as it was, so it can be recreated if Supabase is ever left.
+> **Status 2026-09-25:** Cloud Run `meetups-backend` serves revision
+> `r32b` against Supabase (Mumbai). The database moved to Supabase on
+> 2026-09-15 and the Cloud SQL instance `meetups-db` was deleted (see §6);
+> §1–§5 below describe the Cloud SQL era as it was, so it can be recreated
+> if Supabase is ever left. See §7 for the 2026-09-25 outage and what it
+> changed about scaling.
 
 Snapshot of the production deployment as it stood before the move (revision
 `meetups-backend-r22`), written so the whole thing can be torn down for a
@@ -21,14 +23,14 @@ as `service.yaml.template` (the real `backend/service.yaml` is gitignored).
 | Cloud Run service | `meetups-backend`, public URL `https://meetups-backend-k7eklebcwq-el.a.run.app` (also `https://meetups-backend-740861671089.asia-south1.run.app`) |
 | Last serving revision | `meetups-backend-r22`, images tagged `r22` |
 | Containers (sidecars, one Cloud Run service) | `gateway` (HTTP :8080, 1 CPU / 512Mi) and `monolith` (gRPC :9090 on localhost, 1 CPU / 1Gi); `container-dependencies: gateway → monolith` |
-| Scaling | maxScale 8, containerConcurrency 80, timeout 300s, no minScale (scales to zero) |
+| Scaling | maxScale 8, containerConcurrency 80, timeout 300s, minScale **0** (scales to zero — a deliberate cost choice, §7) |
 | Service account | `740861671089-compute@developer.gserviceaccount.com` (needs Secret Manager accessor + Cloud SQL client) |
 | Artifact Registry | `asia-south1-docker.pkg.dev/project-285b9289-549d-4fef-92c/meetups-repo` (Docker), images `gateway:rNN`, `monolith:rNN` |
 | Cloud SQL instance | `meetups-db`, PostgreSQL 18, tier `db-g1-small`, zonal, 10 GB PD_SSD, public IPv4 with NO authorized networks (access only via the Cloud SQL connector/proxy), IAM auth flag on, automated backups + PITR (7-day log retention), deletion protection ON |
 | Cloud SQL connection name | `project-285b9289-549d-4fef-92c:asia-south1:meetups-db` |
 | Databases / users | database `monolith_db`; users `app` (application), `postgres` (admin) |
 | Postgres extensions | `pgcrypto`, `postgis` (created by migrations 0001/0002) |
-| Schema | golang-migrate, `backend/migrations/`, 24 files = versions 0001–0012, current version **12** |
+| Schema | golang-migrate, `backend/migrations/`, 26 files = versions 0001–0013, current version **13** (`0013_schedule_conflict_indexes` applied 2026-09-26 over the direct connection; it adds `meetup.idx_meetups_host_live` and `meetup.idx_meetup_requests_requester_active`, both partial indexes for `FindScheduleConflict`). **Pending:** 0014-0016 (account deletion, ADR-008) are in the repo but not yet applied; apply them before deploying a revision built from code that includes `DELETE /v1/users/me`, since that code writes to `auth.user_deleted_outbox` and `auth.safety_holds`. |
 | Auth bridge page | LinkedIn redirect `https://professional-meetups-976d2.web.app` (Firebase Hosting, project `professional-meetups-976d2`) — separate from this GCP project |
 
 ### Secret Manager secrets (names; values live only in Secret Manager and the owner's password manager)
@@ -157,9 +159,9 @@ Client: the mobile app's production gateway URL is set at build time in
 | Supabase project | ref `wvsrtbactwawxhcyokep`, region `ap-south-1` (Mumbai), Postgres 17.6, PostGIS 3.3.7, pgcrypto. (A first project in Tokyo, `vglymgqqljzywxownoma`, served for ~30 minutes on 2026-09-15 and was deleted; its data was re-seeded from the Cloud SQL final backup.) |
 | Database | a dedicated `monolith_db` inside the project (NOT `postgres`): Supabase's own `auth` schema in `postgres` collides with this app's `auth` schema. Created with `CREATE DATABASE monolith_db` as the `postgres` role; the Supavisor pooler routes to it by database name. |
 | App connection (Cloud Run) | transaction pooler, IPv4: `postgresql://postgres.<ref>:<pw>@aws-0-ap-south-1.pooler.supabase.com:6543/monolith_db?sslmode=require&default_query_exec_mode=cache_describe&application_name=monolith-cloudrun` — stored as Secret Manager `database-url` version 3 (v1 = old Cloud SQL URL, v2 = the deleted Tokyo project). `cache_describe` keeps pgx compatible with transaction pooling; the app has no session-level SQL. |
-| Admin / migrations | direct connection (IPv6 only on the free tier; works from a Mac on IPv6): `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/monolith_db`. `migrate -path migrations -database '<direct url>' up`. Schema version 12. |
+| Admin / migrations | direct connection (IPv6 only on the free tier; works from a Mac on IPv6): `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/monolith_db`. `migrate -path migrations -database '<direct url>' up`. Schema version 13. The direct host is IPv6-only on the free tier and resolves to `db.wvsrtbactwawxhcyokep.supabase.co`; `migrate` over the POOLER does not work, since golang-migrate holds a session-scoped advisory lock and the pooler hands each transaction a different server connection. The `postgres` password is the same one embedded in the `database-url` secret's pooler URL. |
 | Data | full copy of Cloud SQL taken 2026-09-15 (all 20 tables, row counts verified equal). Final Cloud SQL backups kept at `~/Documents/Professional Meetups/backups/` (custom-format `.dump` + plain data `.sql`), outside git. |
-| Cloud Run change | `run.googleapis.com/cloudsql-instances` annotation removed from `service.yaml`; `r23`/`r24` reused the `r22` images; `r25` (2026-09-15) adds email-address validation on the unauthenticated start endpoints; `r28`/`r28b` (2026-09-16) carry ADR-005 (one meetup at a time, logout with `fcm_token`) and the Android notification icon/colour on every push; `r29` (2026-09-16) adds the advisory `GET /v1/meetups/schedule-check` and the x/crypto + compress bumps; `r30` (2026-09-17) rewords the `request_declined` and `meetup_full` push copy per ADR-006 ("Not this time"), no wire change; `r31` (2026-09-17) drops the dash from the starting-soon push. |
+| Cloud Run change | `run.googleapis.com/cloudsql-instances` annotation removed from `service.yaml`; `r23`/`r24` reused the `r22` images; `r25` (2026-09-15) adds email-address validation on the unauthenticated start endpoints; `r28`/`r28b` (2026-09-16) carry ADR-005 (one meetup at a time, logout with `fcm_token`) and the Android notification icon/colour on every push; `r29` (2026-09-16) adds the advisory `GET /v1/meetups/schedule-check` and the x/crypto + compress bumps; `r30` (2026-09-17) rewords the `request_declined` and `meetup_full` push copy per ADR-006 ("Not this time"), no wire change; `r31` (2026-09-17) drops the dash from the starting-soon push; `r32` (2026-09-25) carries the five commits that had accumulated since r31 — Plan 22's `full_name_hint`/`suggested_name_update` (proto change, so `auth.pb.go` regenerated), the `FindScheduleConflict` rewrite, the starting-soon push wording and the traits comment — and was briefly deployed with `minScale: "1"` during the 2026-09-25 incident (since set back to `"0"`, see §7); `r32b` (2026-09-25) is the same images rolled again so instances re-read `firebase-sa` version 2; `r32c` (2026-09-25) adds the missing `GOOGLE_CLIENT_ID` and `APPLE_SERVICES_ID` env vars, without which Apple/Google sign-in failed in production (see §7). |
 | Free-tier caveats | project pauses after 7 idle days (unpause in the dashboard); no PITR and no managed backups on free, so the backup is ours: `.github/workflows/backup-database.yml` runs `backend/scripts/backup-database.sh` daily at 18:00 UTC (and on demand via *Run workflow*), a `pg_dump -Fc` over the direct URL uploaded to the GCS bucket in the `BACKUP_GCS_BUCKET` secret, kept 30 days by the bucket's lifecycle policy (`backend/scripts/backup-lifecycle.json`); a failed run shows as a failed workflow. See ADR-007. Pooler ~15 server connections shared, 200 client connections. |
 | Latency note | Cloud Run and Supabase are both in Mumbai now; the earlier Tokyo project cost ~70 ms per DB round trip. |
 
@@ -177,3 +179,115 @@ migrations so the PostGIS trigger and `auth.known_companies` behave as
 described; if `pg_restore` reports the search_path or known_companies
 conflicts, use `pg_restore -l`/`-L` to drop those items from the list and
 re-run. Test a restore into a scratch database before relying on it.
+
+## 7. The 2026-09-25 outage: billing, cold starts, and `minScale`
+
+A full outage, then a partial one that looked like rate limiting and was not.
+Recorded here because the second half is a standing property of the service,
+not a one-off.
+
+### What happened
+
+1. **Billing was detached from the project.** Cloud Run refuses to start an
+   instance at all in that state; every request returned Google's own 503
+   page. The logs say it plainly: `The request failed because billing is
+   disabled for this project.` Nothing was wrong with the service, the image
+   or the database. Re-attaching a billing account fixed it, and no redeploy
+   was needed.
+2. **Then onboarding kept failing intermittently with HTTP 429 and the body
+   `Rate exceeded.`** This is NOT this app's rate limiter — that one answers
+   `{"error":"rate limited"}` with a `Retry-After` header
+   (`internal/gateway/middleware/ratelimit.go`). The plain-text 429 is Cloud
+   Run shedding a request it could not place, logged as *"The request was
+   aborted because there was no available instance."* It hits every client
+   equally, so different IPs and mobile data make no difference — a useful
+   way to tell the two apart from the outside.
+
+### Why the 429s happened
+
+`minScale` was unset (so 0), which had always been true and had always been
+fine. Cold starts normally cost latency, not errors: measured here at
+**6.2 s cold vs 0.27 s warm**. Two things turned that into failures:
+
+- hours at zero instances (the billing outage) meant nearly every request was
+  a cold start rather than the occasional one, and
+- several clients arriving inside the ~6 s startup window (two devices, a
+  LinkedIn callback, health probes) were shed rather than queued.
+
+A cold start with one caller usually queues and succeeds; the same cold start
+with several callers sheds the extras. That is the whole mechanism.
+
+### What changed, and what was deliberately left alone
+
+`minScale: "1"` was applied during the incident and **then set back to `"0"`
+the same day, on Shashika's call**, after weighing it against cost. The
+service runs at zero minimum today. That is a decision, not drift:
+
+- At `"0"` you pay only while a request is served. At `"1"` a reserved
+  instance bills continuously at the idle rate — roughly US$10-15/mo for this
+  2 vCPU / 1.5 GiB pair (gateway 1/512Mi + monolith 1/1Gi).
+- The accepted cost of `"0"` is the behaviour described above: a slow first
+  request after an idle gap, and shed 429s for anyone arriving inside that
+  window. The agreement is to watch for it in real use and raise `minScale`
+  if it starts costing users, rather than pay for warmth pre-emptively.
+- A middle option, if that trade goes sour: a Cloud Scheduler ping every ~5
+  minutes keeps an instance alive for near-zero cost, but leaves a smaller
+  window where a cold start can still land.
+
+**Whichever value is in force, keep it in the manifest.** The annotation is
+now written explicitly in `docs/deploy/service.yaml.template` and
+`backend/service.yaml` rather than being left absent. The file previously had
+no `minScale` at all, which meant a `gcloud run services replace` would
+silently revert whatever `gcloud run services update --min-instances=N` had
+set. That trap was hit on 2026-09-25 and is the reason the value is spelled
+out even when it is the same as the default.
+
+### Apple and Google sign-in were dead in production (same day)
+
+Separate from the outage, found while investigating a report that Google
+sign-in failed: the deployed service had **no `GOOGLE_CLIENT_ID` and no
+`APPLE_SERVICES_ID`**. Both were present in `backend/.env`, so both providers
+worked against a local backend and failed against production — the worst
+shape a config bug can take.
+
+Nothing logs this. `identity.NewGoogleProvider`/`NewAppleProvider` accept an
+empty client id on purpose, so the service boots normally and then rejects
+every token that arrives ("Verify will then reject every token, never accept
+one", their own doc comments). The client sees a generic sign-in failure.
+
+The app side was already correct and was verified rather than assumed:
+
+- Android: the release APK's signing certificate SHA-1
+  (`6d38a58ba517b5b88ac0c6fc08ee5164b14777db`, via `apksigner verify
+  --print-certs`) matches `certificate_hash` in `android/app/google-services.json`.
+- iOS: `Info.plist` carries `GIDClientID` and the reversed-client-id URL
+  scheme for the iOS OAuth client.
+- `frontend/.env`'s `GOOGLE_SERVER_CLIENT_ID` equals `backend/.env`'s
+  `GOOGLE_CLIENT_ID` — the WEB client, which is what makes one audience valid
+  for every platform.
+
+Fixed in `r32c`, and both variables are now declared in
+`docs/deploy/service.yaml.template` so a manifest rebuilt from it cannot lose
+them again. If federated sign-in ever fails everywhere at once while email
+still works, check these two env vars on the running revision first:
+
+```bash
+gcloud run revisions describe <revision> --region asia-south1 --format=json \
+  | python3 -c "import json,sys;print([e for c in json.load(sys.stdin)['spec']['containers'] if c['name']=='monolith' for e in c['env'] if 'CLIENT_ID' in e['name'] or 'SERVICES_ID' in e['name']])"
+```
+
+### Also corrected in the same pass
+
+`firebase-sa` held a service account for the OLD Firebase project
+(`professional-meetups-976d2`) while the app had migrated to
+`project-285b9289-549d-4fef-92c`. FCM tokens are project-scoped, so
+production push could not have been delivered; local push was unaffected
+because `backend/.env` had already been migrated. Fixed as secret version 2,
+and `r32b` exists solely so instances re-read it — secrets are resolved at
+instance start, so adding a version does nothing until a new instance boots.
+Verify with:
+
+```bash
+gcloud logging read 'resource.labels.service_name="meetups-backend" AND jsonPayload.message:"push notification"' \
+  --limit 2 --freshness=20m --format="value(jsonPayload.message,jsonPayload.project_id)"
+```

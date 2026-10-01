@@ -98,7 +98,8 @@ func truncateAuthTables(t *testing.T, pool *pgxpool.Pool) {
 	_, err := pool.Exec(context.Background(), `
 		TRUNCATE auth.users, auth.refresh_tokens, auth.verification_codes,
 		         auth.user_identities, auth.unverified_company_claims,
-		         auth.trusted_contacts, auth.sos_events
+		         auth.trusted_contacts, auth.sos_events, auth.user_deleted_outbox,
+		         auth.safety_holds
 		RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)

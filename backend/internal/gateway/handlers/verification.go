@@ -19,7 +19,7 @@ type phoneStartRequest struct {
 func (h *Handler) startPhoneVerification(w http.ResponseWriter, r *http.Request) {
 	var req phoneStartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -39,7 +39,7 @@ type phoneVerifyRequest struct {
 func (h *Handler) verifyPhoneCode(w http.ResponseWriter, r *http.Request) {
 	var req phoneVerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -58,7 +58,7 @@ type emailStartRequest struct {
 func (h *Handler) startPersonalEmailVerification(w http.ResponseWriter, r *http.Request) {
 	var req emailStartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -78,7 +78,7 @@ type emailVerifyRequest struct {
 func (h *Handler) verifyPersonalEmailCode(w http.ResponseWriter, r *http.Request) {
 	var req emailVerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -98,7 +98,7 @@ type personalDetailsRequest struct {
 func (h *Handler) submitPersonalDetails(w http.ResponseWriter, r *http.Request) {
 	var req personalDetailsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -113,7 +113,7 @@ func (h *Handler) submitPersonalDetails(w http.ResponseWriter, r *http.Request) 
 func (h *Handler) startCorporateEmailVerification(w http.ResponseWriter, r *http.Request) {
 	var req emailStartRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -134,7 +134,7 @@ type corporateEmailVerifyRequest struct {
 func (h *Handler) verifyCorporateEmailCode(w http.ResponseWriter, r *http.Request) {
 	var req corporateEmailVerifyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -251,11 +251,11 @@ type memberMeetupCommentResponse struct {
 //
 // Two monolith calls, in this order on purpose. GetMemberActivity is the
 // GATE: it answers PermissionDenied unless the caller shares a meetup with
-// this member or the member hosts one, and that decision is made before the
-// profile is fetched at all — so a caller who may not open a member learns
-// nothing, not even whether the id exists. Only then is the profile read,
-// projected through publicProfileResponse so just the public subset is
-// ever serialised.
+// this member, the member hosts one, or the caller hosts a meetup this
+// member asked to join. That decision is made before the profile is fetched
+// at all — so a caller who may not open a member learns nothing, not even
+// whether the id exists. Only then is the profile read, projected through
+// publicProfileResponse so just the public subset is ever serialised.
 func (h *Handler) getPublicProfile(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	viewerID := middleware.UserIDFromContext(ctx)

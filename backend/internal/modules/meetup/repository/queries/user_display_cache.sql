@@ -15,3 +15,7 @@ SET full_name = excluded.full_name,
     trust_level = excluded.trust_level,
     updated_at = excluded.updated_at
 WHERE excluded.updated_at > meetup.user_display_cache.updated_at;
+
+-- name: DeleteUserDisplayCache :exec
+-- Cached copy of auth-owned data; must not outlive the account.
+DELETE FROM meetup.user_display_cache WHERE user_id = $1;

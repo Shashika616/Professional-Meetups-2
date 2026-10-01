@@ -138,16 +138,21 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (AuthUse
 }
 
 const deleteAbandonedGuests = `-- name: DeleteAbandonedGuests :execrows
-DELETE FROM auth.users
-WHERE id IN (
-  SELECT u.id FROM auth.users u
-  WHERE u.is_guest = true
-    AND u.updated_at < $1::timestamptz
-    AND NOT EXISTS (
-      SELECT 1 FROM auth.refresh_tokens rt WHERE rt.user_id = u.id
-    )
-  LIMIT $2
+WITH gone AS (
+  DELETE FROM auth.users
+  WHERE id IN (
+    SELECT u.id FROM auth.users u
+    WHERE u.is_guest = true
+      AND u.updated_at < $1::timestamptz
+      AND NOT EXISTS (
+        SELECT 1 FROM auth.refresh_tokens rt WHERE rt.user_id = u.id
+      )
+    LIMIT $2
+  )
+  RETURNING id
 )
+INSERT INTO auth.user_deleted_outbox (user_id)
+SELECT id FROM gone
 `
 
 type DeleteAbandonedGuestsParams struct {
@@ -178,8 +183,43 @@ type DeleteAbandonedGuestsParams struct {
 // Batched by id the same way DeleteExpiredRefreshTokens is, and for the same
 // reason: the caller loops until a batch comes back short, so no single
 // statement holds a long lock.
+//
+// Every guest removed here is ANNOUNCED, in the same statement: the
+// data-modifying CTE deletes the rows and writes one user-deleted outbox row
+// per id it actually removed. Without that, guest cleanup was a second,
+// silent way to delete an account, and the meetup module kept each abandoned
+// guest's cached display name, last-known location and device tokens
+// forever, because nothing ever told it. Being one statement, the delete and
+// the announcement cannot come apart. (Guests cannot add trusted contacts or
+// trigger SOS, both gated at Level 2, so neither table needs handling here.)
+//
+// The row count is the INSERT's, which equals the number of guests deleted.
 func (q *Queries) DeleteAbandonedGuests(ctx context.Context, arg DeleteAbandonedGuestsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteAbandonedGuests, arg.AbandonedBefore, arg.BatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteUser = `-- name: DeleteUser :execrows
+DELETE FROM auth.users WHERE id = $1
+`
+
+// Account deletion (App Store 5.1.1(v), Play's data-deletion policy).
+//
+// Removes the account and, by ON DELETE CASCADE declared in 0001_auth_schema,
+// user_identities, refresh_tokens, verification_codes and
+// unverified_company_claims. It does NOT reach trusted_contacts or
+// sos_events — those carry a logical FK with no constraint, by design — so
+// the repository deletes them explicitly, in the same transaction, first.
+//
+// It does NOT reach the meetup schema, which holds no foreign key to this
+// table on purpose (ADR-001 §3) — the meetup module purges its own rows
+// first, before this runs. See the auth service's DeleteAccount for the
+// ordering and why it is that way round.
+func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUser, id)
 	if err != nil {
 		return 0, err
 	}
@@ -695,6 +735,73 @@ type UpdateUserPhoneNumberParams struct {
 // Idempotent: it is already false for every non-guest account.
 func (q *Queries) UpdateUserPhoneNumber(ctx context.Context, arg UpdateUserPhoneNumberParams) (AuthUser, error) {
 	row := q.db.QueryRow(ctx, updateUserPhoneNumber, arg.ID, arg.PhoneNumber, arg.TrustLevel)
+	var i AuthUser
+	err := row.Scan(
+		&i.ID,
+		&i.LinkedinSub,
+		&i.FullName,
+		&i.ProfilePhotoUrl,
+		&i.Headline,
+		&i.TrustLevel,
+		&i.AccountStatus,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PhoneNumber,
+		&i.PersonalEmail,
+		&i.LegalName,
+		&i.Address,
+		&i.CompanyDomain,
+		&i.WorkEmailVerified,
+		&i.WorkEmailVerifiedAt,
+		&i.AgeConfirmedOver18,
+		&i.AgeConfirmedAt,
+		&i.WorkEmailHash,
+		&i.RatingAverage,
+		&i.RatingCount,
+		&i.RatingUpdatedAt,
+		&i.LastLocationLat,
+		&i.LastLocationLng,
+		&i.LastLocationUpdatedAt,
+		&i.IsGuest,
+		&i.CompanyName,
+		&i.MeetupsCompleted,
+		&i.MeetupsCompletedUpdatedAt,
+	)
+	return i, err
+}
+
+const updateUserProfilePhoto = `-- name: UpdateUserProfilePhoto :one
+UPDATE auth.users SET profile_photo_url = $2 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
+`
+
+type UpdateUserProfilePhotoParams struct {
+	ID              uuid.UUID   `json:"id"`
+	ProfilePhotoUrl pgtype.Text `json:"profile_photo_url"`
+}
+
+// The profile photo follows LinkedIn, and only LinkedIn (2026-09-26).
+//
+// # WHY THIS EXISTS AND FULL NAME'S EQUIVALENT IS NOT USED THE SAME WAY
+//
+// profile_photo_url used to be write-once: set from LinkedIn's userinfo at
+// account creation and never touched again. That produced two wrong results.
+// Someone who signed up with Apple or Google and connected LinkedIn later
+// kept their initials forever, even though their professional photo was
+// sitting in the very userinfo response the link flow already fetched. And
+// anyone whose LinkedIn photo changed kept the old one indefinitely.
+//
+// The photo is SYNCED automatically where the name is only ever SUGGESTED
+// (see LinkIdentity's SuggestedNameUpdate). That asymmetry is deliberate:
+// the app sources photos from LinkedIn exclusively, precisely because a
+// LinkedIn photo is the one people curate to look professional, so LinkedIn
+// is the source of truth and mirroring it is the whole point. A name is not
+// like that — a user may have typed their own in profile editing (ADR-023
+// §5), and overwriting that silently is what Plan 22 exists to prevent.
+//
+// Callers must not pass an empty URL: a LinkedIn response without a picture
+// must leave an existing photo alone rather than blank it.
+func (q *Queries) UpdateUserProfilePhoto(ctx context.Context, arg UpdateUserProfilePhotoParams) (AuthUser, error) {
+	row := q.db.QueryRow(ctx, updateUserProfilePhoto, arg.ID, arg.ProfilePhotoUrl)
 	var i AuthUser
 	err := row.Scan(
 		&i.ID,

@@ -42,7 +42,7 @@ func trustedContactResponseFromClient(c monolithclient.TrustedContact) trustedCo
 func (h *Handler) addTrustedContact(w http.ResponseWriter, r *http.Request) {
 	var req addTrustedContactRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -104,7 +104,7 @@ type triggerSOSResponse struct {
 func (h *Handler) triggerSOS(w http.ResponseWriter, r *http.Request) {
 	var req triggerSOSRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -130,7 +130,7 @@ type updateLastKnownLocationRequest struct {
 func (h *Handler) updateLastKnownLocation(w http.ResponseWriter, r *http.Request) {
 	var req updateLastKnownLocationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 

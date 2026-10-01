@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
@@ -234,6 +235,18 @@ class _FakeAuthService implements AuthService {
     required double longitude,
   }) async => throw UnimplementedError();
 
+  // What DELETE /v1/users/me does in this test: null deletes, anything
+  // else is thrown as the server's answer.
+  Object? deleteAccountError;
+  int deleteAccountCallCount = 0;
+
+  @override
+  Future<void> deleteAccount() async {
+    deleteAccountCallCount++;
+    final error = deleteAccountError;
+    if (error != null) throw error;
+  }
+
   @override
   Future<void> updateLastKnownLocation({
     required double latitude,
@@ -426,6 +439,154 @@ void main() {
         storage: const FlutterSecureStorage(),
       );
       expect(await storage.loadSession(), isNotNull);
+    });
+  });
+
+  group('account deletion', () {
+    Future<void> openDeleteSheet(WidgetTester tester) async {
+      await tester.scrollUntilVisible(
+        find.text('Delete account'),
+        500.0,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Delete account'));
+      await tester.pumpAndSettle();
+    }
+
+    Future<bool> hasStoredSession() async =>
+        await SecureSessionStorage(
+          storage: const FlutterSecureStorage(),
+        ).loadSession() !=
+        null;
+
+    testWidgets('sits in a card above SIGN OUT', (tester) async {
+      await tester.pumpWidget(_appWith(_FakeAuthService()));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('SIGN OUT'),
+        500.0,
+        scrollable: find.byType(Scrollable).first,
+      );
+
+      // Two different shapes for two different kinds of action: the
+      // destructive one is a row in a card, the reversible one the slab.
+      expect(
+        find.ancestor(
+          of: find.text('Delete account'),
+          matching: find.byType(FlatCard),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        tester.getCenter(find.text('Delete account')).dy,
+        lessThan(tester.getCenter(find.text('SIGN OUT')).dy),
+      );
+    });
+
+    testWidgets('opening the sheet explains what happens and deletes nothing', (
+      tester,
+    ) async {
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+
+      await openDeleteSheet(tester);
+
+      expect(find.text('DELETE ACCOUNT'), findsOneWidget);
+      expect(find.textContaining('cannot be undone'), findsOneWidget);
+      expect(find.textContaining('kept for 90 days'), findsOneWidget);
+      expect(auth.deleteAccountCallCount, 0);
+
+      await tester.tap(find.widgetWithText(TextButton, 'CANCEL'));
+      await tester.pumpAndSettle();
+      expect(find.text('DELETE ACCOUNT'), findsNothing);
+      expect(auth.deleteAccountCallCount, 0);
+      expect(await hasStoredSession(), isTrue);
+    });
+
+    testWidgets('confirming deletes, clears the session, and lands on '
+        'LandingPage with a confirmation', (tester) async {
+      final auth = _FakeAuthService();
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+
+      await openDeleteSheet(tester);
+      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await _pumpUntilSignedOut(tester);
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(auth.deleteAccountCallCount, 1);
+      expect(
+        auth.logoutCallCount,
+        0,
+        reason: 'the server already deleted the tokens with the account',
+      );
+      expect(find.byType(LandingPage), findsOneWidget);
+      expect(find.byType(ProfilePage), findsNothing);
+      expect(find.text('Your account has been deleted.'), findsOneWidget);
+      expect(await hasStoredSession(), isFalse);
+    });
+
+    testWidgets('meetups still to happen: the server\'s sentence is shown '
+        'and the person stays signed in', (tester) async {
+      const reason =
+          'You are hosting a meetup that has not happened yet. Attend it, '
+          'or cancel it, then delete your account.';
+      final auth = _FakeAuthService()
+        ..deleteAccountError = const AccountDeletionBlockedException(reason);
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+
+      await openDeleteSheet(tester);
+      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('NOT JUST YET'), findsOneWidget);
+      expect(find.text(reason), findsOneWidget);
+      expect(find.text('DELETE MY ACCOUNT'), findsNothing);
+
+      await tester.tap(find.text('GOT IT'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ProfilePage), findsOneWidget);
+      expect(find.byType(LandingPage), findsNothing);
+      expect(await hasStoredSession(), isTrue);
+    });
+
+    testWidgets('a failure is a readable toast, and the sheet stays so '
+        'trying again is one tap', (tester) async {
+      final auth = _FakeAuthService()
+        ..deleteAccountError = Exception('SocketException: errno 61');
+      await tester.pumpWidget(_appWith(auth));
+      await tester.pumpAndSettle();
+
+      await openDeleteSheet(tester);
+      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        find.textContaining('SocketException'),
+        findsNothing,
+        reason: 'no developer error ever reaches the screen',
+      );
+      expect(
+        find.text(
+          'We couldn’t delete your account just now. Please try again in a '
+          'moment.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('DELETE MY ACCOUNT'), findsOneWidget);
+      expect(await hasStoredSession(), isTrue);
+
+      auth.deleteAccountError = null;
+      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await _pumpUntilSignedOut(tester);
+      expect(auth.deleteAccountCallCount, 2);
+      expect(find.byType(LandingPage), findsOneWidget);
+      // Let the toasts' own timers run out before the test ends.
+      await tester.pump(const Duration(seconds: 5));
     });
   });
 

@@ -216,61 +216,82 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
                   step: _sequence.indexOf(_step) + 1,
                   total: _sequence.length,
                 ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: switch (_step) {
-                      _Step.intent => _IntentStep(
-                        trustLevel: trustLevel,
-                        selected: _draft.intent,
-                        onPick: (intent) {
-                          _draft.intent = intent;
-                          _goNext();
-                        },
-                      ),
-                      _Step.timing => _TimingStep(
-                        initialStart: _draft.windowStart,
-                        initialEnd: _draft.windowEnd,
-                        onPick: _pickWindow,
-                      ),
-                      // MapLocationStep, not the commented-out _LocationStep
-                      // stopgap below — frontend/meetup-scheduling-PLAN.md's
-                      // 2026-08-18 testing addendum (Stadia Maps, provisional,
-                      // see TESTING-NOTES.md). Provider-neutral name on
-                      // purpose: swapping providers later means writing a new
-                      // widget, not renaming this call site again.
-                      _Step.location => MapLocationStep(
-                        onSubmit: (lat, lng, label) {
-                          _draft.locationLat = lat;
-                          _draft.locationLng = lng;
-                          _draft.locationLabel = label;
-                          _goNext();
-                        },
-                      ),
-                      _Step.capacity => _CapacityStep(
-                        initial: _draft.capacity,
-                        onSubmit: (capacity) {
-                          _draft.capacity = capacity;
-                          _goNext();
-                        },
-                      ),
-                      _Step.review => _ReviewStep(
-                        intent: _draft.intent!,
-                        windowStart: _draft.windowStart!,
-                        windowEnd: _draft.windowEnd!,
-                        locationLabel: _draft.locationLabel,
-                        capacity: _draft.capacity,
-                        submitting: _submitting,
-                        onConfirm: _submit,
-                      ),
-                    },
-                  ),
-                ),
+                Expanded(child: _stepBody(trustLevel)),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  /// One step's body, wrapped the way that step needs.
+  ///
+  /// # WHY THE LOCATION STEP IS NOT SCROLLED
+  ///
+  /// Every other step is a column of controls that can outgrow the screen,
+  /// so each gets a scroll view and the flow's 24pt gutter. The location
+  /// step is a map: it has to fill the space it is given, edge to edge,
+  /// with its own panel on the bottom edge — a scroll view would hand it
+  /// unbounded height (a Stack cannot lay out in that) and the gutter
+  /// would leave the map floating in a frame.
+  ///
+  /// So the wrapper is chosen per step rather than applied to all of them.
+  /// The switch below still covers every case, so adding a step is still a
+  /// compile error until it is handled.
+  Widget _stepBody(int trustLevel) {
+    final body = switch (_step) {
+      _Step.intent => _IntentStep(
+        trustLevel: trustLevel,
+        selected: _draft.intent,
+        onPick: (intent) {
+          _draft.intent = intent;
+          _goNext();
+        },
+      ),
+      _Step.timing => _TimingStep(
+        initialStart: _draft.windowStart,
+        initialEnd: _draft.windowEnd,
+        onPick: _pickWindow,
+      ),
+      // MapLocationStep, not the commented-out _LocationStep
+      // stopgap below — frontend/meetup-scheduling-PLAN.md's
+      // 2026-08-18 testing addendum (Stadia Maps, provisional,
+      // see TESTING-NOTES.md). Provider-neutral name on
+      // purpose: swapping providers later means writing a new
+      // widget, not renaming this call site again.
+      _Step.location => MapLocationStep(
+        onSubmit: (lat, lng, label) {
+          _draft.locationLat = lat;
+          _draft.locationLng = lng;
+          _draft.locationLabel = label;
+          _goNext();
+        },
+      ),
+      _Step.capacity => _CapacityStep(
+        initial: _draft.capacity,
+        onSubmit: (capacity) {
+          _draft.capacity = capacity;
+          _goNext();
+        },
+      ),
+      _Step.review => _ReviewStep(
+        intent: _draft.intent!,
+        windowStart: _draft.windowStart!,
+        windowEnd: _draft.windowEnd!,
+        locationLabel: _draft.locationLabel,
+        capacity: _draft.capacity,
+        submitting: _submitting,
+        onConfirm: _submit,
+      ),
+    };
+
+    // The map fills whatever it is handed; everything else scrolls inside
+    // the flow's own gutter.
+    if (_step == _Step.location) return body;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: body,
     );
   }
 }

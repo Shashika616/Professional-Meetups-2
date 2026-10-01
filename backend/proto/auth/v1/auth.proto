@@ -158,6 +158,12 @@ service AuthService {
   // the outbox; auth never queries population-wide location data itself.
   rpc UpdateLastKnownLocation(UpdateLastKnownLocationRequest) returns (UpdateLastKnownLocationResponse);
 
+  // DeleteAccount erases the caller's account for good (App Store
+  // 5.1.1(v), Play's data-deletion policy). Refuses with FAILED_PRECONDITION
+  // while the caller still has a live meetup or join request outstanding;
+  // the message says what is outstanding and how to clear it.
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
+
   // Trusted contacts + SOS (ADR-026) — all four self-scoped via the
   // verified JWT's user_id, never a client-supplied one.
   rpc AddTrustedContact(AddTrustedContactRequest) returns (TrustedContactResponse);
@@ -447,6 +453,15 @@ message CompleteProfileSetupRequest {
 }
 
 // 50km geo-visibility (ADR-021 §4).
+message DeleteAccountRequest {
+  string user_id = 1; // set by the gateway from the verified JWT, never client-supplied
+}
+
+// Deliberately empty: there is nothing to return about an account that no
+// longer exists. A message rather than google.protobuf.Empty so fields can be
+// added later without changing the RPC's signature.
+message DeleteAccountResponse {}
+
 message UpdateLastKnownLocationRequest {
   string user_id = 1; // set by the gateway from the verified JWT
   double lat = 2;

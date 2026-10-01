@@ -9,7 +9,11 @@ import 'package:professional_connections_platform/features/auth/email_login_page
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
 
 class LandingPage extends StatefulWidget {
-  const LandingPage({super.key, this.sessionExpired = false});
+  const LandingPage({
+    super.key,
+    this.sessionExpired = false,
+    this.accountDeleted = false,
+  });
 
   /// True when this page was reached via AppShell's involuntary-sign-out
   /// safety net (`frontend/PLAN.md`'s "Session refresh wiring fix"
@@ -17,6 +21,10 @@ class LandingPage extends StatefulWidget {
   /// out — shows a brief explanation once, so the redirect doesn't read as
   /// an unexplained kick-out.
   final bool sessionExpired;
+
+  /// True when the person has just deleted their account from Profile:
+  /// confirms, once, that it went through.
+  final bool accountDeleted;
 
   @override
   State<LandingPage> createState() => _LandingPageState();
@@ -26,12 +34,22 @@ class _LandingPageState extends State<LandingPage> {
   @override
   void initState() {
     super.initState();
-    if (widget.sessionExpired) {
+    if (widget.accountDeleted) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           showSnack(
             context,
-            'Your session expired... Please sign in again.',
+            'Your account has been deleted.',
+            type: ToastType.success,
+          );
+        }
+      });
+    } else if (widget.sessionExpired) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          showSnack(
+            context,
+            'Your session has expired. Please sign in again.',
             type: ToastType.warning,
           );
         }

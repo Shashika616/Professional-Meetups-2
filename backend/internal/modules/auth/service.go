@@ -122,6 +122,9 @@ type Service interface {
 	// and no way back in (plan 14 Part B). Driven by the same sweeper, on
 	// the same tick, right after the token sweep.
 	SweepAbandonedGuests(ctx context.Context) (deleted int, err error)
+	// SweepExpiredSafetyHolds purges safety holds whose purge_after has
+	// passed (0016_safety_holds). Called hourly by RefreshTokenSweeper.
+	SweepExpiredSafetyHolds(ctx context.Context) (purged int, err error)
 
 	// --- trusted contacts + SOS (sos sub-package) ---
 	AddTrustedContact(ctx context.Context, req AddTrustedContactRequest) (TrustedContact, error)
@@ -133,6 +136,13 @@ type Service interface {
 	// through an adapter wired in cmd/monolith — see sos.NotifyMeetupShare
 	// for why none of the message content comes from the client.
 	NotifyMeetupShare(ctx context.Context, userID string, share MeetupShare) (int, error)
+
+	// DeleteAccount erases the caller's account for good (App Store
+	// 5.1.1(v), Play's data-deletion policy), and announces it to every
+	// other module via the user-deleted outbox. It touches only this
+	// module's data; the "not while you have a live meetup" rule is the
+	// meetup module's to enforce, and the gateway asks it first.
+	DeleteAccount(ctx context.Context, userID string) error
 }
 
 // service implements Service. Every dependency is passed explicitly via New —
@@ -372,6 +382,12 @@ func (s *service) LinkIdentity(ctx context.Context, req LinkIdentityRequest) (Se
 	// succeeds (see the SuggestedNameUpdate block at the end). It is never
 	// written anywhere by this method.
 	var linkedInName string
+	// linkedInPhoto, unlike the name, IS written: the photo follows LinkedIn
+	// automatically (syncLinkedInPhoto explains why the two differ). This is
+	// what gives an Apple/Google account a real photo the moment it connects
+	// LinkedIn, instead of keeping initials forever while the photo sat
+	// unread in the userinfo response this flow already fetches.
+	var linkedInPhoto string
 
 	switch req.Provider {
 	case FederatedProviderLinkedIn:
@@ -388,6 +404,7 @@ func (s *service) LinkIdentity(ctx context.Context, req LinkIdentityRequest) (Se
 		}
 		subject = info.Sub
 		linkedInName = strings.TrimSpace(info.Name)
+		linkedInPhoto = info.Picture
 
 	case FederatedProviderApple, FederatedProviderGoogle:
 		idProvider, err := s.federatedProvider(req.Provider)
@@ -413,6 +430,10 @@ func (s *service) LinkIdentity(ctx context.Context, req LinkIdentityRequest) (Se
 	if err != nil {
 		return SessionResult{}, err
 	}
+	// Before the session is built, so the response carries the new photo and
+	// the client shows it without waiting for a later profile refetch.
+	user = s.syncLinkedInPhoto(ctx, user, linkedInPhoto)
+
 	session, err := s.issueSession(ctx, user)
 	if err != nil {
 		return SessionResult{}, err
@@ -705,4 +726,57 @@ func newRefreshToken() (raw, hash string, err error) {
 func hashToken(raw string) string {
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
+}
+
+// DeleteAccount erases the caller's account.
+//
+// # IT TOUCHES ONLY THIS MODULE'S DATA
+//
+// Nothing here calls the meetup module. The account, its identities, tokens,
+// verification codes, company claims, trusted contacts and SOS history go in
+// ONE transaction (see the repository's Delete), and in that same transaction
+// a user-deleted row is written to this module's outbox. Everything the
+// meetup module holds about this person — including its cached copy of their
+// name and photograph — is deleted by the meetup module itself when that
+// event reaches it, with retries until it does.
+//
+// That is the shape these two need if they are ever separate services with
+// separate databases: neither reaches into the other's tables, neither has to
+// be up for the other to do its job, and the only contract between them is
+// an event. A synchronous "purge your side, then I delete mine" call would
+// have meant auth could not delete an account while meetup was down.
+//
+// # WHERE THE "NOT WHILE YOU HAVE A LIVE MEETUP" RULE LIVES
+//
+// Not here. Whether someone still owes others their presence is a question
+// only the meetup module can answer, so the gateway — which composes both,
+// as a BFF does — asks it before calling this. See the meetup module's
+// CheckAccountDeletable.
+//
+// # IDEMPOTENT
+//
+// An account that is already gone is a SUCCESS, not a 404. userID comes from
+// a verified JWT, so the only ways to reach this with no row are a retry
+// after the first call already succeeded (a dropped response, a double tap)
+// and a token that outlived its account. Both mean "your account is
+// deleted", which is what was asked for; an error would turn a completed
+// deletion into a visible failure and invite retrying forever.
+func (s *service) DeleteAccount(ctx context.Context, userID string) error {
+	if _, err := s.users.GetByID(ctx, userID); err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if err := s.users.Delete(ctx, userID); err != nil {
+		// A concurrent delete of the same account (two devices, one tap
+		// each) can win the race between the read above and this; the loser
+		// has still got what it asked for.
+		if errors.Is(err, apperror.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	s.logger.Info("account deleted", "user_id", userID)
+	return nil
 }

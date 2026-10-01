@@ -9,10 +9,14 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/scroll_more_hint.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
+import 'package:professional_connections_platform/features/meetups/review/participant_review_sheet.dart';
+import 'package:professional_connections_platform/features/meetups/review/review_inputs.dart';
 
 /// The post-meetup review: how the meetup went, then how each person was.
 ///
@@ -64,6 +68,9 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
   Object? _loadError;
   bool _submitting = false;
 
+  /// Drives the people list and the "more below" chevron over it.
+  final _peopleScroll = ScrollController();
+
   ExperienceLevel? _overall;
   final Map<String, int> _scores = {};
   final Map<String, Set<String>> _traits = {};
@@ -80,6 +87,7 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
   void dispose() {
     _pageController.dispose();
     _notesController.dispose();
+    _peopleScroll.dispose();
     super.dispose();
   }
 
@@ -313,26 +321,7 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
             onChanged: (value) => setState(() => _overall = value),
           ),
           const SizedBox(height: 24),
-          FlatCard(
-            radius: 14,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-            child: TextField(
-              controller: _notesController,
-              maxLines: 3,
-              minLines: 3,
-              maxLength: 500,
-              style: TextStyle(color: AppPalette.textPrimary, fontSize: 14),
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                counterText: '',
-                hintText: 'Describe in detail (optional)',
-                hintStyle: TextStyle(
-                  color: AppPalette.textSecondary,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          ),
+          ReviewNotesField(controller: _notesController),
           const SizedBox(height: 20),
           PrimaryButton(
             label: _toRate.isEmpty ? 'SUBMIT' : 'NEXT',
@@ -347,74 +336,156 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
     );
   }
 
+  /// Opens one person's rating sheet. The page stays the single owner of
+  /// the answers: the sheet reports each change straight back here, so
+  /// dismissing it by swiping down keeps whatever was already given.
+  Future<void> _openParticipantSheet(
+    RatableParticipant participant,
+    List<RatingTrait> traits,
+  ) {
+    return showParticipantReviewSheet(
+      context,
+      participant: participant,
+      isHost: participant.userId == widget.hostUserId,
+      traits: traits,
+      initialScore: _scores[participant.userId],
+      initialTraits: _traits[participant.userId] ?? const {},
+      onScore: (score) => setState(() => _scores[participant.userId] = score),
+      onToggleTrait: (key) => setState(() {
+        final selected = _traits.putIfAbsent(
+          participant.userId,
+          () => <String>{},
+        );
+        if (selected.contains(key)) {
+          selected.remove(key);
+        } else if (selected.length < kMaxTraitsPerParticipant) {
+          selected.add(key);
+        }
+      }),
+    );
+  }
+
+  /// The people step: a fixed header, a list that scrolls, and the actions
+  /// pinned to the bottom.
+  ///
+  /// # WHY THE BUTTONS ARE NOT IN THE SCROLL VIEW
+  ///
+  /// They used to be the last children of one long scrolling column, which
+  /// is fine for three people and wrong for twelve: CONFIRM sat below the
+  /// twelfth row, so the way to finish was to scroll past everyone to find
+  /// it, and nothing on the first screen said the step even had an end.
+  /// Worse, the button that tells you whether you are DONE (it enables only
+  /// once everyone is rated) was the one thing you could not see while
+  /// rating.
+  ///
+  /// So the frame stays put and only the list moves inside it: the header
+  /// says what is being asked, the actions are always within reach, and the
+  /// list between them grows to whatever the guest list turned out to be.
   Widget _buildPeopleStep() {
     final traits = _data?.availableTraits ?? const <RatingTrait>[];
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.cancellationReason != null
-                ? 'Rate the host'
-                : 'Who did you meet?',
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontSize: 22,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            widget.cancellationReason != null
-                ? 'Nobody met, so only the host is rated. Traits are optional.'
-                : 'Rate everyone to finish. Traits are optional.',
-            style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-          ),
-          const SizedBox(height: 18),
-          for (final participant in _toRate)
-            _ParticipantCard(
-              participant: participant,
-              isHost: participant.userId == widget.hostUserId,
-              traits: traits,
-              score: _scores[participant.userId],
-              selectedTraits: _traits[participant.userId] ?? const {},
-              onScore: (score) =>
-                  setState(() => _scores[participant.userId] = score),
-              onToggleTrait: (key) => setState(() {
-                final selected = _traits.putIfAbsent(
-                  participant.userId,
-                  () => <String>{},
-                );
-                if (selected.contains(key)) {
-                  selected.remove(key);
-                } else if (selected.length < kMaxTraitsPerParticipant) {
-                  selected.add(key);
-                }
-              }),
-            ),
-          const SizedBox(height: 8),
-          PrimaryButton(
-            label: 'CONFIRM',
-            isLoading: _submitting,
-            onPressed: _allRated ? _submit : null,
-          ),
-          const SizedBox(height: 10),
-          Center(
-            child: TextButton(
-              onPressed: _submitting ? null : () => _goToStep(0),
-              child: Text(
-                'BACK',
+    final remaining = _toRate.where((p) => _scores[p.userId] == null).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.cancellationReason != null
+                    ? 'Rate the host'
+                    : 'Who did you meet?',
                 style: TextStyle(
-                  color: AppPalette.textSecondary,
-                  letterSpacing: 1.2,
-                  fontSize: 12,
+                  color: AppPalette.textPrimary,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
+              const SizedBox(height: 6),
+              Text(
+                widget.cancellationReason != null
+                    ? 'Nobody met, so only the host is rated. Traits are optional.'
+                    // With a long guest list, how many are LEFT is the more
+                    // useful thing to say — it is the progress the pinned
+                    // CONFIRM below is waiting on.
+                    : remaining == 0
+                    ? 'Everyone is rated. Traits are optional.'
+                    : '$remaining of ${_toRate.length} still to rate. Traits are optional.',
+                style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
+        // One row per person, each opening their own sheet. The page's job
+        // here is to show who is still to do; the rating itself happens in
+        // a frame where the person and the words are together (see
+        // showParticipantReviewSheet).
+        Expanded(
+          child: Stack(
+            children: [
+              ListView.builder(
+                controller: _peopleScroll,
+                // Clears the hint's fade strip, so the last row ends above
+                // it rather than dissolving under the chevron.
+                padding: const EdgeInsets.fromLTRB(
+                  20,
+                  0,
+                  20,
+                  ScrollMoreHint.stripHeight + 8,
+                ),
+                itemCount: _toRate.length,
+                itemBuilder: (context, index) {
+                  final participant = _toRate[index];
+                  return _PersonRow(
+                    participant: participant,
+                    isHost: participant.userId == widget.hostUserId,
+                    score: _scores[participant.userId],
+                    traitCount:
+                        (_traits[participant.userId] ?? const {}).length,
+                    onTap: () => _openParticipantSheet(participant, traits),
+                  );
+                },
+              ),
+              // Says the list continues. With the actions pinned below,
+              // the last visible row otherwise looks like the last row.
+              ScrollMoreHint(controller: _peopleScroll),
+            ],
+          ),
+        ),
+        // Pinned. The hairline and the ground colour separate it from the
+        // list scrolling underneath, so rows do not appear to slide out of
+        // the buttons.
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(top: BorderSide(color: AppPalette.hairline)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                PrimaryButton(
+                  label: 'CONFIRM',
+                  isLoading: _submitting,
+                  onPressed: _allRated ? _submit : null,
+                ),
+                TextButton(
+                  onPressed: _submitting ? null : () => _goToStep(0),
+                  child: Text(
+                    'BACK',
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      letterSpacing: 1.2,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -506,440 +577,123 @@ class _StepIndicator extends StatelessWidget {
   }
 }
 
-class _ParticipantCard extends StatelessWidget {
-  const _ParticipantCard({
+/// One person waiting to be rated, as a row that opens their sheet.
+///
+/// It carries its own state on its face — the stars given so far, or a
+/// prompt if none — so the page answers "who is left?" at a glance without
+/// opening anything. That is the whole reason the rating moved into a
+/// sheet: this list can now be short enough to see at once.
+class _PersonRow extends StatelessWidget {
+  const _PersonRow({
     required this.participant,
     required this.isHost,
-    required this.traits,
     required this.score,
-    required this.selectedTraits,
-    required this.onScore,
-    required this.onToggleTrait,
+    required this.traitCount,
+    required this.onTap,
   });
 
   final RatableParticipant participant;
   final bool isHost;
-  final List<RatingTrait> traits;
   final int? score;
-  final Set<String> selectedTraits;
-  final ValueChanged<int> onScore;
-  final ValueChanged<String> onToggleTrait;
+  final int traitCount;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final rated = score != null;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: FlatCard(
-        radius: 14,
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                ProfessionalAvatar(
-                  name: participant.fullName,
-                  imageUrl: participant.profilePhotoUrl.isEmpty
-                      ? null
-                      : participant.profilePhotoUrl,
-                  size: 40,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        participant.fullName,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 15,
-                        ),
-                      ),
-                      if (isHost) ...[const SizedBox(height: 4), _HostTag()],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _StarRow(score: score, onScore: onScore),
-            // The trait picker only appears once a score is given —
-            // otherwise every card opens as a wall of chips and the thing
-            // you are actually asked for is buried.
-            AnimatedSize(
-              duration: const Duration(milliseconds: 260),
-              curve: Curves.easeOutCubic,
-              alignment: Alignment.topCenter,
-              // Nothing to show without a score, and nothing to show without
-              // a vocabulary either: an empty trait list rendered the
-              // "What were they like?" header over blank space, which reads
-              // as a broken control rather than an absent one. It happens
-              // for real whenever the server is older than this screen.
-              child: (score == null || traits.isEmpty)
-                  ? const SizedBox(width: double.infinity)
-                  : Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: _TraitPicker(
-                        traits: traits,
-                        selected: selectedTraits,
-                        onToggle: onToggleTrait,
-                      ),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// How many traits, across both tabs together, one rater may attach to one
-/// person. Mirrors the server's own cap; the server still enforces it.
-const int kMaxTraitsPerParticipant = 4;
-
-/// The vocabulary under two tabs, Positive and Negative, with one shared
-/// cap. Two tabs rather than one long wrap so a rater who only wants to say
-/// something kind never has to read past a list of criticisms to do it,
-/// and so the criticisms, when wanted, are a deliberate switch away rather
-/// than mixed in. The tab remembers itself per card while the page lives.
-class _TraitPicker extends StatefulWidget {
-  const _TraitPicker({
-    required this.traits,
-    required this.selected,
-    required this.onToggle,
-  });
-
-  final List<RatingTrait> traits;
-  final Set<String> selected;
-  final ValueChanged<String> onToggle;
-
-  @override
-  State<_TraitPicker> createState() => _TraitPickerState();
-}
-
-class _TraitPickerState extends State<_TraitPicker> {
-  bool _showNegative = false;
-
-  @override
-  Widget build(BuildContext context) {
-    // Partitioned once per build from the server's order, which is already
-    // grouped; each tab keeps that order.
-    final positive = <RatingTrait>[];
-    final negative = <RatingTrait>[];
-    for (final t in widget.traits) {
-      (t.negative ? negative : positive).add(t);
-    }
-    // A vocabulary with no negative half (an older server) needs no tabs.
-    final tabbed = negative.isNotEmpty && positive.isNotEmpty;
-    final showing = _showNegative && tabbed ? negative : positive;
-    final tone = _showNegative && tabbed
-        ? AppPalette.danger
-        : AppPalette.candyBlue;
-    final atCap = widget.selected.length >= kMaxTraitsPerParticipant;
-
-    int countIn(List<RatingTrait> list) =>
-        list.where((t) => widget.selected.contains(t.key)).length;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'What were they like? (up to $kMaxTraitsPerParticipant)',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-        ),
-        if (tabbed) ...[
-          const SizedBox(height: 10),
-          _TraitTabs(
-            showNegative: _showNegative,
-            positiveCount: countIn(positive),
-            negativeCount: countIn(negative),
-            onChanged: (negative) => setState(() => _showNegative = negative),
-          ),
-          const SizedBox(height: 4),
-        ],
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final trait in showing)
-              _TraitChip(
-                trait: trait,
-                tone: tone,
-                selected: widget.selected.contains(trait.key),
-                // At the cap, the unselected chips go quiet rather than
-                // vanishing — the vocabulary stays legible.
-                dimmed: atCap && !widget.selected.contains(trait.key),
-                onTap: () => widget.onToggle(trait.key),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-/// The picker's switch between its two halves: two equal, full-width
-/// segments, read as a different KIND of thing from the chips beneath
-/// them by size and treatment, not by colour fill. The active segment is
-/// drawn at full size with its border and type in the tab's colour; the
-/// inactive one sits slightly smaller and in grey. No solid fill: a filled
-/// block in either brand colour swallowed the label, and the chips already
-/// use tint for "selected", so the tabs must not. Each side carries a
-/// count once anything there is chosen, so a rater on one tab can see
-/// they have picked something on the other without switching back.
-class _TraitTabs extends StatelessWidget {
-  const _TraitTabs({
-    required this.showNegative,
-    required this.positiveCount,
-    required this.negativeCount,
-    required this.onChanged,
-  });
-
-  final bool showNegative;
-  final int positiveCount;
-  final int negativeCount;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        _TraitSegment(
-          key: const Key('traitTabPositive'),
-          label: 'POSITIVE',
-          icon: Icons.thumb_up_alt_rounded,
-          count: positiveCount,
-          active: !showNegative,
-          tone: AppPalette.candyBlue,
-          onTap: () => onChanged(false),
-        ),
-        const SizedBox(width: 10),
-        _TraitSegment(
-          key: const Key('traitTabNegative'),
-          label: 'NEGATIVE',
-          icon: Icons.thumb_down_alt_rounded,
-          count: negativeCount,
-          active: showNegative,
-          tone: AppPalette.danger,
-          onTap: () => onChanged(true),
-        ),
-      ],
-    );
-  }
-}
-
-class _TraitSegment extends StatelessWidget {
-  const _TraitSegment({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.count,
-    required this.active,
-    required this.tone,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final int count;
-  final bool active;
-  final Color tone;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final foreground = active ? tone : AppPalette.textSecondary;
-    return Expanded(
-      child: Semantics(
-        button: true,
-        selected: active,
-        label: count == 0 ? label : '$label, $count chosen',
-        child: GestureDetector(
-          onTap: onTap,
-          behavior: HitTestBehavior.opaque,
-          child: AnimatedScale(
-            // The inactive tab steps back rather than the active one
-            // stepping forward, so the active one is always at true size
-            // and never clipped by the card.
-            scale: active ? 1.0 : 0.94,
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-              height: 42,
-              decoration: BoxDecoration(
-                color: AppPalette.card,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: active ? tone : AppPalette.hairline,
-                  width: active ? 1.8 : 1,
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, size: 15, color: foreground),
-                  const SizedBox(width: 7),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: foreground,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                  if (count > 0) ...[
-                    const SizedBox(width: 7),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: tone.withValues(alpha: active ? 0.22 : 0.14),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        '$count',
-                        style: TextStyle(
-                          color: tone,
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _HostTag extends StatelessWidget {
-  const _HostTag();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppPalette.candyBlue.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        'HOST',
-        style: TextStyle(
-          color: AppPalette.candyBlue,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.8,
-        ),
-      ),
-    );
-  }
-}
-
-class _StarRow extends StatelessWidget {
-  const _StarRow({required this.score, required this.onScore});
-
-  final int? score;
-  final ValueChanged<int> onScore;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 1; i <= 5; i++)
-          GestureDetector(
-            onTap: () => onScore(i),
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
-                tween: Tween(end: (score ?? 0) >= i ? 1.0 : 0.0),
-                builder: (context, t, _) => Transform.scale(
-                  // Filled stars pop very slightly, so tapping a score
-                  // registers as an action rather than a repaint.
-                  scale: 1 + (t * 0.12),
-                  child: Icon(
-                    t > 0.5 ? Icons.star_rounded : Icons.star_outline_rounded,
-                    size: 30,
-                    color: Color.lerp(
-                      AppPalette.textSecondary.withValues(alpha: 0.55),
-                      AppPalette.gold,
-                      t,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _TraitChip extends StatelessWidget {
-  const _TraitChip({
-    required this.trait,
-    required this.tone,
-    required this.selected,
-    required this.dimmed,
-    required this.onTap,
-  });
-
-  final RatingTrait trait;
-
-  /// The selected colour: the tab's own, so a chosen criticism reads red
-  /// and a chosen compliment reads blue wherever the chip is seen.
-  final Color tone;
-  final bool selected;
-  final bool dimmed;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: dimmed ? null : onTap,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 180),
-        opacity: dimmed ? 0.4 : 1,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? tone.withValues(alpha: 0.2) : AppPalette.card,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected ? tone : AppPalette.hairline,
-              width: selected ? 1.5 : 1,
-            ),
-          ),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Pressable(
+        onTap: onTap,
+        child: FlatCard(
+          radius: 14,
+          padding: const EdgeInsets.all(14),
+          // A rated row takes a quiet green edge, so finished and
+          // unfinished are told apart without reading either.
+          border: rated
+              ? AppPalette.verified.withValues(alpha: 0.45)
+              : AppPalette.hairline,
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
-              Text(trait.emoji, style: const TextStyle(fontSize: 13)),
-              const SizedBox(width: 6),
-              Text(
-                trait.label,
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontSize: 12.5,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ProfessionalAvatar(
+                name: participant.fullName,
+                imageUrl: participant.profilePhotoUrl.isEmpty
+                    ? null
+                    : participant.profilePhotoUrl,
+                size: 42,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            participant.fullName,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppPalette.textPrimary,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                        if (isHost) ...[
+                          const SizedBox(width: 8),
+                          const HostTag(),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    if (rated)
+                      Row(
+                        children: [
+                          for (var i = 1; i <= 5; i++)
+                            Icon(
+                              i <= score!
+                                  ? Icons.star_rounded
+                                  : Icons.star_outline_rounded,
+                              size: 15,
+                              color: i <= score!
+                                  ? AppPalette.gold
+                                  : AppPalette.textSecondary.withValues(
+                                      alpha: 0.5,
+                                    ),
+                            ),
+                          if (traitCount > 0) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              traitCount == 1
+                                  ? '1 trait'
+                                  : '$traitCount traits',
+                              style: TextStyle(
+                                color: AppPalette.textSecondary,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ],
+                      )
+                    else
+                      Text(
+                        'Tap to rate',
+                        style: TextStyle(
+                          color: AppPalette.candyBlue,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                  ],
                 ),
+              ),
+              Icon(
+                rated
+                    ? Icons.check_circle_rounded
+                    : Icons.chevron_right_rounded,
+                size: rated ? 20 : 20,
+                color: rated ? AppPalette.verified : AppPalette.textSecondary,
               ),
             ],
           ),

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gcloud run services update:*)",
+      "Bash(gcloud run services replace:*)",
+      "Bash(gcloud run services describe:*)",
+      "Bash(gcloud run revisions describe:*)",
+      "Bash(gcloud secrets versions add:*)",
+      "Bash(docker buildx build:*)",
+      "Bash(docker login:*)",
+      "Read(//Users/as/Documents/Professional Meetups/Professional-Meetups-Monolith/backend/service.yaml)",
+      "Edit(//Users/as/Documents/Professional Meetups/Professional-Meetups-Monolith/backend/service.yaml)"
+    ]
+  }
+}

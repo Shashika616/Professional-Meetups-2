@@ -11,9 +11,12 @@ import 'support/fake_geolocator_platform.dart';
 
 const _channel = MethodChannel('professionalconnections/ios_local_search');
 
-// Every step is mounted inside a SingleChildScrollView here because that is
-// exactly how ScheduleFlowPage hosts it (schedule_flow.dart) — the step's
-// content is taller than a bare test viewport and is designed to scroll.
+// Every step is mounted inside a SizedBox.expand here because that is
+// exactly how ScheduleFlowPage hosts it (schedule_flow.dart): the location
+// step is full-bleed now — a map filling whatever it is handed, with its
+// panel on the bottom edge — so it needs BOUNDED height. It used to be
+// pumped in a SingleChildScrollView, matching the old scrolled embedding;
+// that hands a Stack unbounded height and fails layout outright.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -39,7 +42,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: SingleChildScrollView(
+          body: SizedBox.expand(
             child: IosMapLocationStep(onSubmit: (_, _, _) {}),
           ),
         ),
@@ -99,7 +102,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
+            body: SizedBox.expand(
               child: IosMapLocationStep(
                 onSubmit: (lat, lng, label) {
                   submittedLat = lat;
@@ -174,7 +177,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
+            body: SizedBox.expand(
               child: IosMapLocationStep(onSubmit: (_, _, _) {}),
             ),
           ),
@@ -242,7 +245,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
+            body: SizedBox.expand(
               child: IosMapLocationStep(
                 onSubmit: (lat, lng, _) {
                   submittedLat = lat;
@@ -296,7 +299,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
+            body: SizedBox.expand(
               child: IosMapLocationStep(
                 onSubmit: (_, _, _) => submitted = true,
               ),
@@ -354,7 +357,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
+            body: SizedBox.expand(
               child: IosMapLocationStep(onSubmit: (_, _, _) {}),
             ),
           ),
@@ -385,7 +388,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: SingleChildScrollView(
+            body: SizedBox.expand(
               child: IosMapLocationStep(
                 onSubmit: (lat, lng, label) {
                   submittedLat = lat;

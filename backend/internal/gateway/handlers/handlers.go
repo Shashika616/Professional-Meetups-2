@@ -114,6 +114,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /v1/verification/corporate-email/start", h.requireAuth(http.HandlerFunc(h.startCorporateEmailVerification)))
 	mux.Handle("POST /v1/verification/corporate-email/verify", h.requireAuth(http.HandlerFunc(h.verifyCorporateEmailCode)))
 	mux.Handle("GET /v1/users/me", h.requireAuth(http.HandlerFunc(h.getProfile)))
+	// App Store 5.1.1(v) and Play's data-deletion policy: deleting the
+	// account must be possible from inside the app. DELETE on the same
+	// resource the profile is read from, so the contract reads the way a
+	// REST client expects rather than inventing a /delete verb route.
+	mux.Handle("DELETE /v1/users/me", h.requireAuth(http.HandlerFunc(h.deleteAccount)))
 	mux.Handle("GET /v1/users/{id}", h.requireAuth(http.HandlerFunc(h.getPublicProfile)))
 
 	// Trusted contacts + SOS. These live in the auth module, so all four go
@@ -219,7 +224,7 @@ type federatedSignupRequest struct {
 func (h *Handler) federatedSignup(w http.ResponseWriter, r *http.Request) {
 	var req federatedSignupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -245,7 +250,7 @@ type linkedInCallbackRequest struct {
 func (h *Handler) linkedInCallback(w http.ResponseWriter, r *http.Request) {
 	var req linkedInCallbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -256,6 +261,37 @@ func (h *Handler) linkedInCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeSession(w, session)
+}
+
+// deleteAccount erases the caller's own account. The user id comes from the
+// verified JWT and is never read from the body or the path: there is no
+// version of this endpoint that can delete somebody else.
+//
+// # TWO SERVICES, COMPOSED HERE AND NOWHERE ELSE
+//
+// The meetup service is asked first whether the caller still owes anyone
+// their presence; only then is the auth service told to delete. Neither
+// service calls the other. This is the gateway doing what a BFF is for, and
+// it is why the two could run as separate services with separate databases
+// without either changing.
+//
+// A 409 carries the reason the account cannot be deleted yet and what to do
+// about it, written for a person, and the app shows it as it is.
+//
+// Deleting in the auth service also removes the caller's refresh tokens, so
+// the session cannot be renewed. The access token already issued stays valid
+// until it expires (jwt.AccessTokenTTL); the app discards it immediately.
+func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.UserIDFromContext(r.Context())
+	if err := h.monolith.CheckAccountDeletable(r.Context(), userID); err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	if err := h.monolith.DeleteAccount(r.Context(), userID); err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type linkIdentityRequest struct {
@@ -271,7 +307,7 @@ type linkIdentityRequest struct {
 func (h *Handler) linkIdentity(w http.ResponseWriter, r *http.Request) {
 	var req linkIdentityRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -299,7 +335,7 @@ type startEmailSignupResponse struct {
 func (h *Handler) startEmailSignup(w http.ResponseWriter, r *http.Request) {
 	var req startEmailSignupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -323,7 +359,7 @@ type completeEmailSignupRequest struct {
 func (h *Handler) completeEmailSignup(w http.ResponseWriter, r *http.Request) {
 	var req completeEmailSignupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -352,7 +388,7 @@ type guestSignupRequest struct {
 func (h *Handler) guestSignup(w http.ResponseWriter, r *http.Request) {
 	var req guestSignupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -374,7 +410,7 @@ type startEmailLoginRequest struct {
 func (h *Handler) startEmailLogin(w http.ResponseWriter, r *http.Request) {
 	var req startEmailLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -398,7 +434,7 @@ type completeEmailLoginRequest struct {
 func (h *Handler) completeEmailLogin(w http.ResponseWriter, r *http.Request) {
 	var req completeEmailLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -422,7 +458,7 @@ type completeProfileSetupRequest struct {
 func (h *Handler) completeProfileSetup(w http.ResponseWriter, r *http.Request) {
 	var req completeProfileSetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -459,7 +495,7 @@ type refreshRequest struct {
 func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -493,7 +529,7 @@ type logoutResponse struct {
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	var req logoutRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -541,7 +577,7 @@ func (h *Handler) writeSession(w http.ResponseWriter, s monolithclient.Session) 
 		// The error text can carry key-material detail; log it, never return
 		// it, same discipline as apperror's Internal redaction.
 		h.logger.Error("sign access token", "user_id", s.UserID, "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		writeError(w, http.StatusInternalServerError, msgServerError)
 		return
 	}
 
@@ -602,6 +638,19 @@ func writeGRPCError(w http.ResponseWriter, err error) {
 	}
 	writeError(w, code, message)
 }
+
+// What the gateway says when it answers a request itself, without asking
+// a service. Written for the person holding the phone: every "error" field
+// the app receives is shown to them as it is, so none of these may read
+// like a log line (see apperror.UserMessage for the service side).
+const (
+	// A body that is not the JSON the route expects. The app never sends
+	// one, so this only appears after a bug; it still has to read well.
+	msgBadRequest   = "That didn't go through. Please try again."
+	msgServerError  = "Something went wrong on our side. Please try again in a moment."
+	msgCouldNotLoad = "We couldn't load that. Please try again."
+	msgNeedLocation = "We need your location to show meetups near you."
+)
 
 func writeError(w http.ResponseWriter, code int, message string) {
 	writeJSON(w, code, errorResponse{Error: message})

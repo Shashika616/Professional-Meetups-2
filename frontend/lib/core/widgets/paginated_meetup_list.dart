@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart';
-import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/empty_section.dart';
 
 /// Fetches one more page after [items], starting from [cursor].
 ///
@@ -315,18 +315,20 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
               // an empty list is exactly when a user is most likely to pull.
               if (widget.emptyState case final emptyState?)
                 emptyState
+              // Still a styled panel, not a line of grey text floating in
+              // the middle of a blank list: a caller that forgets to pass
+              // an emptyState should get something that looks designed,
+              // because "nothing here" is a state the page will really be
+              // in, not an error path.
               else
-                SizedBox(
-                  height: widget.shrinkWrap ? 160 : 300,
-                  child: Center(
-                    child: Text(
-                      widget.emptyMessage,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppPalette.textSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: EmptySection(
+                    icon: Icons.event_busy_outlined,
+                    title: 'Nothing to show yet',
+                    message: widget.emptyMessage.isEmpty
+                        ? null
+                        : widget.emptyMessage,
                   ),
                 ),
             ],

@@ -143,6 +143,9 @@ class ImmediateAuthService implements AuthService {
   }) => throw UnimplementedError();
 
   @override
+  Future<void> deleteAccount() async {}
+
+  @override
   Future<void> updateLastKnownLocation({
     required double latitude,
     required double longitude,

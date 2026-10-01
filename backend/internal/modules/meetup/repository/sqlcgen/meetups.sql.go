@@ -12,6 +12,67 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const anonymiseHostOfMeetups = `-- name: AnonymiseHostOfMeetups :exec
+UPDATE meetup.meetups
+SET host_user_id = gen_random_uuid()
+WHERE host_user_id = $1
+`
+
+// Meetups the deleted person hosted are kept (they are every attendee's
+// history, and deleting one would cascade away other members' requests,
+// reviews and ratings). Their host_user_id is the last column still pointing
+// at the person, so it is anonymised on the same terms, one fresh id per
+// meetup. The purge runs this only after checking no LIVE meetup is hosted
+// (those are cancelled first), so every meetup affected is cancelled or
+// completed and nobody can act as its host any more anyway.
+func (q *Queries) AnonymiseHostOfMeetups(ctx context.Context, hostUserID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, anonymiseHostOfMeetups, hostUserID)
+	return err
+}
+
+const anonymiseRatingsAboutUser = `-- name: AnonymiseRatingsAboutUser :exec
+UPDATE meetup.meetup_user_ratings
+SET rated_user_id = gen_random_uuid()
+WHERE rated_user_id = $1
+`
+
+// The other direction, for the same reason: ratings OTHER members wrote
+// about the deleted person are theirs and stay, but no longer name who they
+// were about. Nobody's average changes: the rated person has no profile
+// left, and every other member's rows are untouched.
+func (q *Queries) AnonymiseRatingsAboutUser(ctx context.Context, ratedUserID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, anonymiseRatingsAboutUser, ratedUserID)
+	return err
+}
+
+const anonymiseRatingsGivenByUser = `-- name: AnonymiseRatingsGivenByUser :exec
+UPDATE meetup.meetup_user_ratings
+SET rater_user_id = gen_random_uuid()
+WHERE rater_user_id = $1
+`
+
+// Tier 2 of account deletion: ANONYMISE rather than retain.
+//
+// Ratings are kept, because each one is part of another member's reputation
+// and deleting it would change their average. But a kept rating must not
+// point at the person who left. Pointing at their old id is PSEUDONYMISED,
+// not anonymised: the nightly backups hold the mapping from that id to a
+// name for 30 days, and the ICO's guidance is explicit that data only stops
+// being personal data when nothing is retained that would allow
+// re-identification. Apple's account-deletion guidance also expects reviews
+// a person wrote to go with their account; an anonymised one no longer
+// belongs to any account.
+//
+// A FRESH random id PER ROW, not one shared id for the whole account, so the
+// rows cannot even be grouped back together as "everything this person
+// rated". gen_random_uuid() is volatile, so Postgres evaluates it once per
+// row. The UNIQUE (meetup_id, rater, rated) constraint cannot be violated:
+// every new value is unique.
+func (q *Queries) AnonymiseRatingsGivenByUser(ctx context.Context, raterUserID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, anonymiseRatingsGivenByUser, raterUserID)
+	return err
+}
+
 const cancelMeetup = `-- name: CancelMeetup :one
 UPDATE meetup.meetups SET status = 'cancelled', cancelled_at = now(), cancellation_reason = $2
 WHERE id = $1 AND host_user_id = $3
@@ -241,6 +302,66 @@ func (q *Queries) CloseMeetup(ctx context.Context, arg CloseMeetupParams) (Meetu
 	return i, err
 }
 
+const countActiveCommitments = `-- name: CountActiveCommitments :one
+SELECT
+  count(*) FILTER (
+    WHERE source = 'hosting'
+  )::bigint AS hosting_count,
+  count(*) FILTER (
+    WHERE source = 'accepted'
+  )::bigint AS accepted_count,
+  count(*) FILTER (
+    WHERE source = 'pending'
+  )::bigint AS pending_count
+FROM (
+  SELECT 'hosting' AS source
+  FROM meetup.meetups m
+  WHERE m.host_user_id = $1
+    AND m.status IN ('open', 'full')
+    AND m.window_end > now()
+  UNION ALL
+  SELECT CASE WHEN r.status = 'accepted' THEN 'accepted' ELSE 'pending' END AS source
+  FROM meetup.meetup_requests r
+  JOIN meetup.meetups m ON m.id = r.meetup_id
+  WHERE r.requester_id = $1
+    AND r.status IN ('pending', 'accepted')
+    AND m.status IN ('open', 'full')
+    AND m.window_end > now()
+) commitments
+`
+
+type CountActiveCommitmentsRow struct {
+	HostingCount  int64 `json:"hosting_count"`
+	AcceptedCount int64 `json:"accepted_count"`
+	PendingCount  int64 `json:"pending_count"`
+}
+
+// Account deletion's precondition (2026-09-28). Answers "does this user still
+// owe anyone their presence?" and is the ONLY thing standing between a delete
+// request and an irreversible purge.
+//
+// The two branches are deliberately the same two FindScheduleConflict uses —
+// hosting, and requested-and-not-refused — because "active commitment" has to
+// mean one thing in this codebase. The difference is that this one has no
+// window-overlap predicate: the conflict query asks "does anything clash with
+// THIS proposed window", while deletion asks "is anything outstanding at all".
+//
+// Counted separately so the error can name what is actually outstanding
+// ("you are hosting one" reads differently from "you asked to join one") and
+// so pending requests can be described as withdrawable rather than
+// attendable.
+//
+// window_end > now() is what makes this self-correcting: a meetup whose time
+// has passed stops blocking deletion the moment the clock passes it, with no
+// dependency on the lifecycle sweep having run (see ListOpenMeetupsFirstPage's
+// comment for the production incident behind that rule).
+func (q *Queries) CountActiveCommitments(ctx context.Context, userID uuid.UUID) (CountActiveCommitmentsRow, error) {
+	row := q.db.QueryRow(ctx, countActiveCommitments, userID)
+	var i CountActiveCommitmentsRow
+	err := row.Scan(&i.HostingCount, &i.AcceptedCount, &i.PendingCount)
+	return i, err
+}
+
 const createMeetup = `-- name: CreateMeetup :one
 INSERT INTO meetup.meetups (host_user_id, intent, window_start, window_end, location_lat, location_lng, location_label, capacity)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -289,6 +410,57 @@ func (q *Queries) CreateMeetup(ctx context.Context, arg CreateMeetupParams) (Mee
 		&i.Location,
 	)
 	return i, err
+}
+
+const deleteUserDeviceTokens = `-- name: DeleteUserDeviceTokens :exec
+DELETE FROM meetup.device_tokens WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserDeviceTokens(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserDeviceTokens, userID)
+	return err
+}
+
+const deleteUserFeedback = `-- name: DeleteUserFeedback :exec
+DELETE FROM meetup.meetup_feedback WHERE user_id = $1
+`
+
+// Their own write-ups of meetups they attended.
+func (q *Queries) DeleteUserFeedback(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserFeedback, userID)
+	return err
+}
+
+const deleteUserRequests = `-- name: DeleteUserRequests :exec
+DELETE FROM meetup.meetup_requests WHERE requester_id = $1
+`
+
+// Their own join requests. Safe to remove outright: a request is a message
+// from this user to a host, and the host keeps the meetup itself.
+func (q *Queries) DeleteUserRequests(ctx context.Context, requesterID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserRequests, requesterID)
+	return err
+}
+
+const deleteUserSafetyShares = `-- name: DeleteUserSafetyShares :exec
+DELETE FROM meetup.safety_share WHERE user_id = $1
+`
+
+// Which trusted contacts this user shared each meetup with. Cascades from
+// meetup.meetups, but PurgeUser keeps past meetups (they are other
+// attendees' history), so without this these rows would outlive the account.
+func (q *Queries) DeleteUserSafetyShares(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserSafetyShares, userID)
+	return err
+}
+
+const deleteUserSafetyState = `-- name: DeleteUserSafetyState :exec
+DELETE FROM meetup.safety_state WHERE user_id = $1
+`
+
+func (q *Queries) DeleteUserSafetyState(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserSafetyState, userID)
+	return err
 }
 
 const findScheduleConflict = `-- name: FindScheduleConflict :one
@@ -584,6 +756,41 @@ func (q *Queries) GetMeetupByIDForUpdate(ctx context.Context, id uuid.UUID) (Mee
 		&i.Location,
 	)
 	return i, err
+}
+
+const listLiveHostedMeetupIDs = `-- name: ListLiveHostedMeetupIDs :many
+SELECT id FROM meetup.meetups
+WHERE host_user_id = $1
+  AND status IN ('open', 'full')
+  AND window_end > now()
+`
+
+// The user-deleted handler's first step: meetups this person still hosts that
+// have not happened yet. The gateway refuses deletion while any exist, so
+// normally this is empty; it exists for the one that slipped in between that
+// check and the delete (created from another device, or with an access token
+// that outlived the account). Those are cancelled through the ordinary cancel
+// path, so accepted participants get the usual cancellation push instead of
+// a meetup whose host has silently vanished. Same LIVE definition as
+// CountActiveCommitments.
+func (q *Queries) ListLiveHostedMeetupIDs(ctx context.Context, hostUserID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listLiveHostedMeetupIDs, hostUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMeetupParticipants = `-- name: ListMeetupParticipants :many

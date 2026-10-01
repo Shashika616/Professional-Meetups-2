@@ -144,7 +144,8 @@ func TestUserMessage(t *testing.T) {
 			"End time must be after start time."},
 		{codes.InvalidArgument, "meetup: capacity must be between 1 and 20: invalid input",
 			"Capacity must be between 1 and 20."},
-		{codes.InvalidArgument, `unknown intent "events"`, `Unknown intent "events".`},
+		{codes.InvalidArgument, `unknown intent "events"`,
+			"That kind of meetup isn't available right now. Please update the app."},
 		{codes.PermissionDenied, "meetup: hosting a coffee meetup requires trust level 3 (you are 2): forbidden",
 			"Hosting a coffee meetup requires trust level 3 (you are 2)."},
 		{codes.NotFound, "meetup: not found", "We couldn't find that."},
@@ -153,7 +154,41 @@ func TestUserMessage(t *testing.T) {
 		{codes.Unauthenticated, "auth: access token expired: unauthorized", "Please sign in again."},
 		{codes.ResourceExhausted, "auth: too many otp requests: rate limited",
 			"Too many attempts. Please wait a moment and try again."},
-		{codes.AlreadyExists, "meetup: already requested to join: conflict", "Already requested to join."},
+		{codes.AlreadyExists, "meetup: already requested to join: conflict", "You've already asked to join this meetup."},
+		// Ids interpolated for the log never reach the person, and neither
+		// does a sentence written for a developer.
+		{codes.FailedPrecondition, "repository: meetup 3f2a9c1e-1b2c-4d5e-8f90-a1b2c3d4e5f6 is full: conflict",
+			"This meetup is full."},
+		{codes.PermissionDenied, "meetup: caller does not host meetup 3f2a9c1e-1b2c-4d5e-8f90-a1b2c3d4e5f6: forbidden",
+			"Only the host can do that."},
+		{codes.InvalidArgument, "purpose mismatch for VerifyPhoneCode: invalid input",
+			"That request couldn't be completed. Please check and try again."},
+		{codes.InvalidArgument, `repository: invalid user id "nope": invalid input`,
+			"That request couldn't be completed. Please check and try again."},
+		{codes.InvalidArgument, "auth: latitude/longitude of exactly (0, 0) is not a real location — this usually means a location fix was never acquired: invalid input",
+			"We couldn't read your location. Please try again."},
+		{codes.InvalidArgument, "linkedin sign-in failed, please try again: invalid input",
+			"LinkedIn sign-in failed, please try again."},
+		{codes.InvalidArgument, "connect LinkedIn before verifying phone, email, or personal details: invalid input",
+			"Connect LinkedIn before verifying phone, email, or personal details."},
+		{codes.AlreadyExists, "You are hosting a meetup that has not happened yet. Attend it, or cancel it, then delete your account: conflict",
+			"You are hosting a meetup that has not happened yet. Attend it, or cancel it, then delete your account."},
+		{codes.InvalidArgument, "auth: note — too long: invalid input", "Note, too long."},
+		// The trust gates' real wording. The number is the message here (it
+		// arrives as a locked toast), so it must survive, minus "caller".
+		{codes.PermissionDenied, `meetup: hosting a "coffee" meetup requires trust level 3, caller has 2: forbidden`,
+			`Hosting a "coffee" meetup requires Level 3 trust. You are Level 2.`},
+		{codes.PermissionDenied, "auth: triggering SOS requires trust level 2, caller has 1: forbidden",
+			"Triggering SOS requires Level 2 trust. You are Level 1."},
+		// Two messages that both mention linkedin_sub and mean opposite
+		// things: only the repository's duplicate-account one is a
+		// sentence about an existing account.
+		{codes.InvalidArgument, `repository: user with linkedin_sub "3f2a9c1e-1b2c-4d5e-8f90-a1b2c3d4e5f6" already exists: invalid input`,
+			"That LinkedIn account already has a TieHere account."},
+		{codes.InvalidArgument, `service: "apple" has no user_identities row — LinkedIn identity lives on users.linkedin_sub: invalid input`,
+			"That request couldn't be completed. Please check and try again."},
+		{codes.InvalidArgument, `repository: invalid notification recipient "3f2a9c1e-1b2c-4d5e-8f90-a1b2c3d4e5f6": invalid input`,
+			"That request couldn't be completed. Please check and try again."},
 		// Server-side classes never expose their text.
 		{codes.Unknown, `monolithclient: unknown intent "events"`,
 			"Something went wrong on our side. Please try again in a moment."},

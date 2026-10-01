@@ -612,3 +612,10 @@ func (s *MeetupServer) CancelMeetup(ctx context.Context, req *meetupv1.CancelMee
 	}
 	return &meetupv1.CancelMeetupResponse{Success: true}, nil
 }
+
+func (s *MeetupServer) CheckAccountDeletable(ctx context.Context, req *meetupv1.CheckAccountDeletableRequest) (*meetupv1.CheckAccountDeletableResponse, error) {
+	if err := s.svc.CheckAccountDeletable(ctx, req.GetUserId()); err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &meetupv1.CheckAccountDeletableResponse{}, nil
+}

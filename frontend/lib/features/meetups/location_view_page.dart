@@ -1,11 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'package:apple_maps_flutter/apple_maps_flutter.dart' as apple_maps;
-import 'package:maplibre_gl/maplibre_gl.dart' as maplibre;
 import 'package:url_launcher/url_launcher.dart';
 
-import 'package:professional_connections_platform/core/maps/map_provider.dart';
+import 'package:professional_connections_platform/core/maps/map_canvas.dart';
+import 'package:professional_connections_platform/core/maps/map_sheet_scaffold.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
@@ -109,47 +108,106 @@ class LocationViewPage extends StatelessWidget {
     // if that stops being true (e.g. a future deep link).
     final lat = meetup.locationLat;
     final lng = meetup.locationLng;
-    return AppBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('LOCATION')),
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-            child: (lat == null || lng == null)
-                ? Center(
-                    child: Text(
-                      'Location isn\'t available for this meetup.',
-                      style: TextStyle(color: AppPalette.textSecondary),
-                    ),
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(18),
-                        child: SizedBox(
-                          height: 260,
-                          child: _LocationPreviewMap(lat: lat, lng: lng),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        meetup.locationLabel ?? 'Meetup location',
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      PrimaryButton(
-                        label: 'GET DIRECTIONS',
-                        onPressed: () => _getDirections(context),
-                      ),
-                    ],
-                  ),
+    if (lat == null || lng == null) {
+      // Nothing to draw a map of, so this one keeps the ordinary page
+      // chrome rather than floating a back button over an empty surface.
+      return AppBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(title: const Text('LOCATION')),
+          body: Center(
+            child: Text(
+              'Location isn\'t available for this meetup.',
+              style: TextStyle(color: AppPalette.textSecondary),
+            ),
           ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      // The map is the page, so the ground behind it is the map's own, not
+      // the app's photographic background.
+      backgroundColor: AppPalette.onyx,
+      body: MapSheetScaffold(
+        // Still read-only, and still every gesture off: this page shows
+        // where one meetup is, and ADR-029 chose a picture over a map you
+        // can wander away from. Full-bleed changes how big that picture
+        // is, not what it does.
+        map: MapCanvas(
+          initialCentre: MapPoint(lat, lng),
+          initialZoom: 16,
+          interactive: false,
+        ),
+        centrePin: const MapCentrePin(),
+        topOverlay: const _FloatingBackButton(),
+        sheet: MapSheet(
+          children: [
+            Text(
+              'MEETUP LOCATION',
+              style: TextStyle(
+                color: AppPalette.textSecondary,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.4,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.place_outlined,
+                  size: 18,
+                  color: AppPalette.candyBlue,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    meetup.locationLabel ?? 'Meetup location',
+                    style: TextStyle(
+                      color: AppPalette.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            PrimaryButton(
+              label: 'GET DIRECTIONS',
+              icon: Icons.directions_rounded,
+              onPressed: () => _getDirections(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A back affordance that works over a map.
+///
+/// This page has no AppBar any more — one would either cut the map off at
+/// a hard edge or float a title over tiles whose colour cannot be
+/// predicted. A circular button carrying the card colour reads on anything
+/// underneath it, which is the same reason [MapActionButton] looks the way
+/// it does.
+class _FloatingBackButton extends StatelessWidget {
+  const _FloatingBackButton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      bottom: false,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: MapActionButton(
+          icon: Icons.arrow_back_rounded,
+          semanticLabel: 'Back',
+          onPressed: () => Navigator.of(context).maybePop(),
         ),
       ),
     );
@@ -163,76 +221,3 @@ class LocationViewPage extends StatelessWidget {
 /// channel/installed maps app. Real code must never set this.
 @visibleForTesting
 Future<bool> Function(Uri url, {LaunchMode mode})? debugLaunchUrlOverride;
-
-/// Read-only map preview, platform-split the same way `MapLocationStep`
-/// dispatches its own interactive picker (`IosMapLocationStep` /
-/// `StadiaMapLocationStep`) — but two small new widgets here rather than
-/// reusing the pickers themselves in some "preview mode": the pickers are
-/// stateful and own a search controller, debounce timer, and completions
-/// list a read-only view has no use for, and retrofitting an
-/// optional-everything preview path onto that working, already-tested code
-/// would have been a larger, riskier change than mirroring just the "fixed
-/// center + overlay pin" rendering they already both use, statically, with
-/// every gesture disabled.
-class _LocationPreviewMap extends StatelessWidget {
-  const _LocationPreviewMap({required this.lat, required this.lng});
-
-  final double lat;
-  final double lng;
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        defaultTargetPlatform == TargetPlatform.iOS
-            ? apple_maps.AppleMap(
-                initialCameraPosition: apple_maps.CameraPosition(
-                  target: apple_maps.LatLng(lat, lng),
-                  zoom: 15,
-                ),
-                compassEnabled: false,
-                rotateGesturesEnabled: false,
-                scrollGesturesEnabled: false,
-                zoomGesturesEnabled: false,
-                pitchGesturesEnabled: false,
-                myLocationButtonEnabled: false,
-              )
-            : maplibre.MapLibreMap(
-                styleString: MapConfig.styleUrl(),
-                initialCameraPosition: maplibre.CameraPosition(
-                  target: maplibre.LatLng(lat, lng),
-                  zoom: 15,
-                ),
-                compassEnabled: false,
-                rotateGesturesEnabled: false,
-                scrollGesturesEnabled: false,
-                zoomGesturesEnabled: false,
-                tiltGesturesEnabled: false,
-                myLocationEnabled: false,
-              ),
-        // Same fixed-center overlay pin as both picker widgets — the
-        // preview's camera is centered exactly on (lat, lng), so a static
-        // overlay icon at the center is the marker, no annotation/symbol
-        // API needed.
-        IgnorePointer(
-          child: Icon(
-            Icons.location_on,
-            // iOS keeps the accent on Apple Maps; Android takes the colour
-            // that reads on the current tile provider.
-            color: defaultTargetPlatform == TargetPlatform.iOS
-                ? AppPalette.candyBlue
-                : MapConfig.pinColor,
-            size: 36,
-            shadows: [
-              Shadow(
-                color: AppPalette.onyx.withValues(alpha: 0.6),
-                blurRadius: 6,
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}

@@ -43,6 +43,20 @@ type postgresUserRepository struct {
 	q      *sqlcgen.Queries
 	bus    eventbus.Bus
 	logger *slog.Logger
+	// onDeleted, when set, wakes the user-deleted outbox poller after a
+	// deletion commits, so the other modules hear about it immediately
+	// rather than at the poller's next tick. Optional: without it delivery
+	// is only delayed, never lost — the row is already durable.
+	onDeleted func()
+}
+
+// SetDeletedNotifier wires the poller wake-up. A setter rather than a
+// constructor argument because the poller is built after this repository and
+// needs the store this package provides; see cmd/monolith.
+func SetDeletedNotifier(repo UserRepository, wake func()) {
+	if r, ok := repo.(*postgresUserRepository); ok {
+		r.onDeleted = wake
+	}
 }
 
 // NewUserRepository constructs a UserRepository backed by pool, publishing
@@ -471,6 +485,27 @@ func (r *postgresUserRepository) UpdateWorkEmailVerified(ctx context.Context, us
 	return updated, nil
 }
 
+func (r *postgresUserRepository) UpdateProfilePhoto(ctx context.Context, userID, photoURL string) (User, error) {
+	parsed, err := uuid.Parse(userID)
+	if err != nil {
+		return User{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+
+	row, err := r.q.UpdateUserProfilePhoto(ctx, sqlcgen.UpdateUserProfilePhotoParams{
+		ID:              parsed,
+		ProfilePhotoUrl: textOrNull(photoURL),
+	})
+	if err != nil {
+		return User{}, fmt.Errorf("repository: update user profile photo: %w", err)
+	}
+	updated := userFromRow(row)
+
+	// Same as UpdateFullName: the meetup module caches the display name and
+	// photo for meetup cards, so a change here has to reach it.
+	r.publishProfileUpdated(ctx, updated)
+	return updated, nil
+}
+
 func (r *postgresUserRepository) UpdateFullName(ctx context.Context, userID, fullName string) (User, error) {
 	parsed, err := uuid.Parse(userID)
 	if err != nil {
@@ -575,5 +610,95 @@ func (r *postgresUserRepository) DeleteAbandonedGuests(ctx context.Context, rete
 	if err != nil {
 		return 0, fmt.Errorf("repository: delete abandoned guests: %w", err)
 	}
+	// Same wake-up as an ordinary deletion: the other modules should hear
+	// about it now, not at the poller's next tick.
+	if deleted > 0 && r.onDeleted != nil {
+		r.onDeleted()
+	}
 	return int(deleted), nil
+}
+
+// SafetyHoldPeriod is how long a deleted account's SOS record is held before
+// it is purged. 90 days follows Tinder's published three-month safety window
+// for closed accounts; it is a policy choice rather than a legal minimum, and
+// the privacy policy must state it. Changing it changes only holds created
+// afterwards; existing rows keep the purge_after they were given.
+const SafetyHoldPeriod = 90 * 24 * time.Hour
+
+func (r *postgresUserRepository) Delete(ctx context.Context, userID string) error {
+	parsed, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+	// One transaction for the whole auth side, so the account and the data
+	// hanging off it disappear together or not at all. trusted_contacts and
+	// sos_events have no FK to users (a deliberate logical FK, per
+	// 0001_auth_schema's header), so the cascade does not reach them; they
+	// are deleted explicitly and first. Every statement is a single-user
+	// indexed delete, so the transaction holds a handful of row locks for
+	// milliseconds and blocks nobody else.
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("repository: begin delete transaction: %w: %w", apperror.ErrInternal, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := r.q.WithTx(tx)
+
+	if err := q.DeleteTrustedContactsForUser(ctx, parsed); err != nil {
+		return fmt.Errorf("repository: delete trusted contacts: %w", err)
+	}
+	// The one thing kept: if this account ever triggered SOS, a minimal
+	// record (who, and the events) goes into a safety hold that purges itself
+	// after SafetyHoldPeriod. It must be copied BEFORE the live SOS rows are
+	// deleted below, and in this same transaction, so there is no moment at
+	// which the events are gone and the hold is not yet written. An account
+	// with no SOS events produces no hold at all. See 0016_safety_holds.
+	if _, err := q.CreateSafetyHoldForDeletedUser(ctx, sqlcgen.CreateSafetyHoldForDeletedUserParams{
+		HoldFor: pgtype.Interval{Microseconds: SafetyHoldPeriod.Microseconds(), Valid: true},
+		UserID:  parsed,
+	}); err != nil {
+		return fmt.Errorf("repository: create safety hold: %w", err)
+	}
+	if err := q.DeleteSOSEventsForUser(ctx, parsed); err != nil {
+		return fmt.Errorf("repository: delete sos events: %w", err)
+	}
+	deleted, err := q.DeleteUser(ctx, parsed)
+	if err != nil {
+		return fmt.Errorf("repository: delete user: %w", err)
+	}
+	// Zero rows means someone else deleted this account first (two devices,
+	// or a retry). Report it rather than carrying on: continuing would commit
+	// a SECOND user-deleted event for an account that was already announced.
+	// The rollback deferred above undoes the contact and SOS deletes too,
+	// which were no-ops for the same reason.
+	if deleted == 0 {
+		return fmt.Errorf("repository: user %s: %w", userID, apperror.ErrNotFound)
+	}
+	// Announce it in the SAME transaction. Other modules keep their own
+	// copies of this person (the meetup module's display cache holds their
+	// name and photograph) and must be told; a row written here commits or
+	// rolls back with the delete itself, so there is no outcome in which the
+	// account is gone and nobody will ever hear about it. The outbox poller
+	// delivers it, with retries, after commit.
+	if err := q.EnqueueUserDeleted(ctx, parsed); err != nil {
+		return fmt.Errorf("repository: enqueue user-deleted: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("repository: commit delete: %w: %w", apperror.ErrInternal, err)
+	}
+	// Not user-profile-updated: that event UPSERTs the meetup module's display
+	// cache, so publishing it for a deleted user would put back the very name
+	// and photo the user-deleted event is about to remove.
+	if r.onDeleted != nil {
+		r.onDeleted()
+	}
+	return nil
+}
+
+func (r *postgresUserRepository) DeleteExpiredSafetyHolds(ctx context.Context, batchSize int) (int, error) {
+	n, err := r.q.DeleteExpiredSafetyHolds(ctx, int32(batchSize))
+	if err != nil {
+		return 0, fmt.Errorf("repository: delete expired safety holds: %w", err)
+	}
+	return int(n), nil
 }

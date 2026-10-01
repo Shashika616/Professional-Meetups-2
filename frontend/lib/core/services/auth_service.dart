@@ -169,6 +169,13 @@ abstract interface class AuthService {
     required double latitude,
     required double longitude,
   });
+
+  /// Permanently deletes the signed-in account (`DELETE /v1/users/me`).
+  /// Completes only once the server has deleted it; the caller then
+  /// clears the local session. Throws [AccountDeletionBlockedException]
+  /// while the account still has meetups or requests to join that have
+  /// not happened yet, carrying the server's sentence for what to do.
+  Future<void> deleteAccount();
 }
 
 /// Typed errors an [AuthService] can throw, so the UI can show a real
@@ -260,6 +267,14 @@ class ForbiddenActionException extends AuthException {
   const ForbiddenActionException([
     super.message = 'You don’t have permission to do that.',
   ]);
+}
+
+/// 409 from `DELETE /v1/users/me`: the account is hosting, joining or
+/// waiting on a meetup that has not happened yet. [message] is the
+/// server's own sentence saying which, and what to do first; it is written
+/// for the person and shown as it is.
+class AccountDeletionBlockedException extends AuthException {
+  const AccountDeletionBlockedException(super.message);
 }
 
 /// Anything else: network failure, unexpected status code, malformed
@@ -582,6 +597,11 @@ class MockAuthService implements AuthService {
     required double latitude,
     required double longitude,
   }) async {
+    await Future<void>.delayed(latency);
+  }
+
+  @override
+  Future<void> deleteAccount() async {
     await Future<void>.delayed(latency);
   }
 }

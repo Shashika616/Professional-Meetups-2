@@ -26,5 +26,5 @@ type SmsSender interface {
 }
 
 func bodyFor(code string) string {
-	return "Your Professional Connections verification code is " + code + ". It expires in 10 minutes."
+	return "Your TieHere verification code is " + code + ". It expires in 10 minutes."
 }

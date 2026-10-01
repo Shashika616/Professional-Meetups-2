@@ -1,14 +1,12 @@
 import 'dart:async';
-import 'dart:ui';
 
-import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:flutter/material.dart';
 
-import 'package:professional_connections_platform/core/theme/app_palette.dart';
-import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/maps/map_canvas.dart';
+import 'package:professional_connections_platform/core/utils/snacks.dart';
+import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/location_picker_layout.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/place_search_ui.dart';
-import 'package:professional_connections_platform/core/widgets/step_hero.dart';
-import 'package:professional_connections_platform/features/meetups/widgets/selected_place_banner.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/ios_local_search.dart';
 
 /// iOS's half of [MapLocationStep]'s platform switch (ADR-013 §4's third
@@ -29,13 +27,13 @@ class IosMapLocationStep extends StatefulWidget {
 
 /// Colombo Fort — a sane default center for the invite-only Colombo pilot
 /// (ADR-005) before the map has a real signal (search, current location).
-const _defaultCenter = LatLng(6.9271, 79.8612);
+const _defaultCenter = MapPoint(6.9271, 79.8612);
 
 class _IosMapLocationStepState extends State<IosMapLocationStep> {
   static const _search = IosLocalSearch();
 
-  AppleMapController? _controller;
-  LatLng _cameraTarget = _defaultCenter;
+  MapCanvasController? _canvas;
+  MapPoint _cameraTarget = _defaultCenter;
   final _searchController = TextEditingController();
   List<IosSearchCompletion> _completions = [];
   bool _searching = false;
@@ -102,8 +100,8 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
     try {
       final completions = await _search.autocomplete(
         text,
-        lat: _cameraTarget.latitude,
-        lon: _cameraTarget.longitude,
+        lat: _cameraTarget.lat,
+        lon: _cameraTarget.lng,
       );
       if (generation != _requestGeneration || !mounted) return;
       setState(() => _completions = completions);
@@ -160,8 +158,8 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
     try {
       final result = await _search.search(
         text,
-        lat: _cameraTarget.latitude,
-        lon: _cameraTarget.longitude,
+        lat: _cameraTarget.lat,
+        lon: _cameraTarget.lng,
       );
       if (generation != _requestGeneration || !mounted) return;
       _suppressNextSearch = true;
@@ -199,16 +197,14 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   }
 
   Future<void> _recenter(double lat, double lon) async {
-    final target = LatLng(lat, lon);
+    final target = MapPoint(lat, lon);
     setState(() => _cameraTarget = target);
-    await _controller?.animateCamera(CameraUpdate.newLatLngZoom(target, 15));
+    await _canvas?.moveTo(target, zoom: 15);
   }
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showSnack(context, message, type: ToastType.warning);
   }
 
   bool get _canContinue =>
@@ -216,182 +212,42 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
 
   void _submit() {
     widget.onSubmit(
-      _cameraTarget.latitude,
-      _cameraTarget.longitude,
+      _cameraTarget.lat,
+      _cameraTarget.lng,
       _searchController.text.trim(),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _stepTitle(),
-        // Same banner as the Android step — the provider differs, the
-        // page's look must not. Slim, since the map is the real picture.
-        const StepHero(
-          asset: 'assets/images/schedule/location_card.jpg',
-          height: 96,
-        ),
-        const SizedBox(height: 14),
-        // Choose a public place — never a stranger's home address
-        // (Safety UX Flows.md's pre-meetup safety copy, ADR-013 § 4). Same
-        // copy as the Android implementation — this requirement doesn't
-        // change with the provider.
-        Text(
-          'Choose a public place: A cafe, restaurant, or well-known '
-          'venue, not a private residence.',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-        ),
-        const SizedBox(height: 16),
-        Stack(
-          // clipBehavior: Clip.none (not the Stack default, Clip.hardEdge)
-          // is only half of it — see AndroidMapLocationStep's own doc
-          // comment on this bug (same fix applies here: the search field
-          // and the map share this one outer Stack as a single Column, so
-          // the dropdown — a later Stack child — reliably paints *above*
-          // the map too, not just above the search field).
-          clipBehavior: Clip.none,
-          children: [
-            Column(
-              children: [
-                PlaceSearchBar(
-                  controller: _searchController,
-                  hint: 'Search for a cafe, restaurant, or venue',
-                  busy: _searching,
-                  onSubmitted: _directSearch,
-                  onCleared: () => setState(() => _completions = []),
-                ),
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: SizedBox(
-                    height: 240,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        AppleMap(
-                          initialCameraPosition: const CameraPosition(
-                            target: _defaultCenter,
-                            zoom: 13,
-                          ),
-                          onMapCreated: (controller) =>
-                              _controller = controller,
-                          onCameraMove: (position) =>
-                              _cameraTarget = position.target,
-                        ),
-                        // Fixed center crosshair — same "picked location
-                        // is wherever the map is centered" pattern as
-                        // Android, per the base plan's own call (simpler
-                        // and less error-prone than a tap-to-place
-                        // gesture).
-                        IgnorePointer(
-                          child: Icon(
-                            Icons.location_on,
-                            color: AppPalette.candyBlue,
-                            size: 36,
-                            shadows: [
-                              Shadow(
-                                color: AppPalette.onyx.withValues(alpha: 0.6),
-                                blurRadius: 6,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // What CONTINUE will submit, said out loud — same banner as
-                // the Android step (see SelectedPlaceBanner for the
-                // current-location wording).
-                if (_canContinue) ...[
-                  SelectedPlaceBanner(label: _searchController.text.trim()),
-                  const SizedBox(height: 12),
-                ],
-                UseCurrentLocationButton(
-                  onPressed: _useCurrentLocation,
-                  busy: _locating,
-                ),
-                const SizedBox(height: 20),
-                PrimaryButton(
-                  label: 'CONTINUE',
-                  onPressed: _canContinue ? _submit : null,
-                ),
-              ],
-            ),
-            // Dims and blocks everything behind the dropdown (map, USE MY
-            // CURRENT LOCATION, CONTINUE) so none of it shows or is
-            // tappable through the completions list — see
-            // AndroidMapLocationStep's matching comment for why (paint
-            // order: these are earlier Column siblings, so without this
-            // scrim CONTINUE rendered visually *over* an overflowing
-            // dropdown, not under it). Tapping the scrim dismisses the
-            // dropdown without picking a completion. Starts at the search bar's height
-            // (the search field's own height), not Positioned.fill —
-            // covering the field too blurred/darkened the text being
-            // typed, making it unreadable while the dropdown was open.
-            //
-            // The ClipRect here is load-bearing, not decorative:
-            // BackdropFilter is NOT clipped to its own widget bounds by
-            // default — its blur samples/paints across the whole layer
-            // behind it (worse still since this Stack is Clip.none), so
-            // without this it bled upward into the search field, the step
-            // title, and the header above this widget entirely, which is
-            // exactly why the field stayed unreadable even after adding
-            // the top offset above.
-            if (_completions.isNotEmpty)
-              Positioned(
-                top: PlaceSearchBar.height,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: ClipRect(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _completions = []),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                      child: Container(
-                        color: AppPalette.onyx.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_completions.isNotEmpty)
-              Positioned(
-                top: PlaceSearchBar.height + 6,
-                left: 0,
-                right: 0,
-                child: PlaceSuggestionsDropdown(
-                  suggestions: [
-                    for (final c in _completions)
-                      PlaceSuggestion(title: c.title, subtitle: c.subtitle),
-                  ],
-                  onSelect: _selectCompletion,
-                ),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _stepTitle() {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 20),
-      child: Text(
-        'Where?',
-        style: TextStyle(
-          fontSize: 24,
-          fontWeight: FontWeight.w800,
-          color: AppPalette.textPrimary,
-          height: 1.2,
-        ),
+    return LocationPickerLayout(
+      // Apple Maps on iOS, chosen and settled (no key, no billing) — the
+      // only thing this file still says about rendering.
+      map: MapCanvas(
+        initialCentre: _defaultCenter,
+        initialZoom: 13,
+        onReady: (canvas) => _canvas = canvas,
+        // Kept in a plain field, not state: this fires every camera frame
+        // and nothing on screen depends on the live value. It is read on
+        // submit, and by the search calls that bias results to what the
+        // user is looking at.
+        onCameraMove: (point) => _cameraTarget = point,
       ),
+      searchController: _searchController,
+      searching: _searching,
+      suggestions: [
+        for (final c in _completions)
+          PlaceSuggestion(title: c.title, subtitle: c.subtitle),
+      ],
+      selectedLabel: _searchController.text.trim(),
+      canContinue: _canContinue,
+      locating: _locating,
+      onSubmitted: _directSearch,
+      onCleared: () => setState(() => _completions = []),
+      onSelectSuggestion: _selectCompletion,
+      onDismissSuggestions: () => setState(() => _completions = []),
+      onUseCurrentLocation: _useCurrentLocation,
+      onContinue: _submit,
     );
   }
 }

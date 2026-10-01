@@ -144,6 +144,19 @@ type UserRepository interface {
 	// only caller, the one field every one of the four auth paths lets a
 	// user (re)confirm on the new mandatory post-auth screen.
 	UpdateFullName(ctx context.Context, userID, fullName string) (User, error)
+	// UpdateProfilePhoto mirrors the caller's LinkedIn photo onto the user
+	// row. LinkedIn is the only source of profile photos in this app, so
+	// this is a sync rather than a user-facing edit — see the query's own
+	// comment for why the photo is synced while the name is only suggested.
+	// Callers must not pass an empty url.
+	UpdateProfilePhoto(ctx context.Context, userID, photoURL string) (User, error)
+	// Delete removes the account and everything cascading from it in this
+	// schema. Irreversible, and deliberately so: App Store 5.1.1(v)
+	// requires deletion, not deactivation.
+	Delete(ctx context.Context, userID string) error
+	// DeleteExpiredSafetyHolds purges safety holds past their purge_after,
+	// at most batchSize per call, and reports how many it removed.
+	DeleteExpiredSafetyHolds(ctx context.Context, batchSize int) (int, error)
 
 	// # THE recomputeTrustLevel CALLBACK (gap-tracker #17)
 	//

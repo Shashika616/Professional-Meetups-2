@@ -25,6 +25,74 @@ func (q *Queries) CountTrustedContactsForUser(ctx context.Context, userID uuid.U
 	return count, err
 }
 
+const createSafetyHoldForDeletedUser = `-- name: CreateSafetyHoldForDeletedUser :execrows
+INSERT INTO auth.safety_holds
+  (deleted_user_id, full_name, legal_name, phone_number, personal_email, sos_events, purge_after)
+SELECT
+  u.id, u.full_name, u.legal_name, u.phone_number, u.personal_email,
+  jsonb_agg(jsonb_build_object(
+    'context_message',   s.context_message,
+    'latitude',          s.latitude,
+    'longitude',         s.longitude,
+    'triggered_at',      s.triggered_at,
+    'contacts_notified', s.contacts_notified
+  ) ORDER BY s.triggered_at),
+  now() + $1::interval
+FROM auth.users u
+JOIN auth.sos_events s ON s.user_id = u.id
+WHERE u.id = $2
+GROUP BY u.id
+`
+
+type CreateSafetyHoldForDeletedUserParams struct {
+	HoldFor pgtype.Interval `json:"hold_for"`
+	UserID  uuid.UUID       `json:"user_id"`
+}
+
+// Account deletion, inside the delete's own transaction and BEFORE the SOS
+// events are deleted. Copies the minimal identity and the SOS events into a
+// safety hold that purges itself at purge_after (see 0016_safety_holds).
+//
+// The inner JOIN is the rule "only where there is a reason": an account with
+// no SOS events produces no row at all, and zero rows is the normal result.
+func (q *Queries) CreateSafetyHoldForDeletedUser(ctx context.Context, arg CreateSafetyHoldForDeletedUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, createSafetyHoldForDeletedUser, arg.HoldFor, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteExpiredSafetyHolds = `-- name: DeleteExpiredSafetyHolds :execrows
+DELETE FROM auth.safety_holds
+WHERE id IN (
+  SELECT id FROM auth.safety_holds
+  WHERE purge_after < now()
+  LIMIT $1
+)
+`
+
+// The sweeper, batched like the refresh-token sweep so no single statement
+// holds a long lock.
+func (q *Queries) DeleteExpiredSafetyHolds(ctx context.Context, batchSize int32) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSafetyHolds, batchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteSOSEventsForUser = `-- name: DeleteSOSEventsForUser :exec
+DELETE FROM auth.sos_events WHERE user_id = $1
+`
+
+// Account deletion; same logical-FK reason as above. An SOS event records
+// where the user was when they asked for help.
+func (q *Queries) DeleteSOSEventsForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSOSEventsForUser, userID)
+	return err
+}
+
 const deleteTrustedContact = `-- name: DeleteTrustedContact :execrows
 DELETE FROM auth.trusted_contacts WHERE id = $1 AND user_id = $2
 `
@@ -45,6 +113,21 @@ func (q *Queries) DeleteTrustedContact(ctx context.Context, arg DeleteTrustedCon
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteTrustedContactsForUser = `-- name: DeleteTrustedContactsForUser :exec
+DELETE FROM auth.trusted_contacts WHERE user_id = $1
+`
+
+// Account deletion. Not reached by the ON DELETE CASCADE from auth.users:
+// trusted_contacts.user_id is a logical FK with no constraint, by design
+// (0001_auth_schema's header). Without this the rows would outlive the
+// account — and they are the most sensitive thing in the schema, because
+// they are OTHER PEOPLE's names, phone numbers and email addresses, entered
+// by someone who has now asked to be forgotten.
+func (q *Queries) DeleteTrustedContactsForUser(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteTrustedContactsForUser, userID)
+	return err
 }
 
 const insertSOSEvent = `-- name: InsertSOSEvent :exec

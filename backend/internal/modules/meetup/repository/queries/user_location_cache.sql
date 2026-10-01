@@ -35,3 +35,7 @@ WHERE updated_at > sqlc.arg(not_before)::timestamptz
     50000
   )
 LIMIT 500;
+
+-- name: DeleteUserLocationCache :exec
+-- Cached copy of auth-owned data; must not outlive the account.
+DELETE FROM meetup.user_location_cache WHERE user_id = $1;

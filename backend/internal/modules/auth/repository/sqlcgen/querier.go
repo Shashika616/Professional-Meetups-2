@@ -12,6 +12,10 @@ import (
 )
 
 type Querier interface {
+	// Same claim as ClaimMeetupsCompletedOutboxBatch: bump attempts and push
+	// next_attempt_at out by the visibility timeout, so a crashed claimer's rows
+	// come back on their own and two pollers never take the same row.
+	ClaimUserDeletedOutboxBatch(ctx context.Context, arg ClaimUserDeletedOutboxBatchParams) ([]ClaimUserDeletedOutboxBatchRow, error)
 	// Linking Apple or Google to an existing account (LinkIdentityToUser's
 	// non-LinkedIn branch, ADR-002 §3). That path writes only user_identities,
 	// so unlike every other verification it has no users UPDATE to ride along
@@ -22,10 +26,18 @@ type Querier interface {
 	// would strand a freshly-upgraded guest at 0 until some unrelated write
 	// happened to recompute it.
 	ClearUserGuestFlag(ctx context.Context, arg ClearUserGuestFlagParams) (AuthUser, error)
+	CountPendingUserDeleted(ctx context.Context) (int64, error)
 	// Backs the soft cap of 3 per user (ADR-026 §1), enforced at the service
 	// layer, not a DB constraint.
 	CountTrustedContactsForUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) (AuthRefreshToken, error)
+	// Account deletion, inside the delete's own transaction and BEFORE the SOS
+	// events are deleted. Copies the minimal identity and the SOS events into a
+	// safety hold that purges itself at purge_after (see 0016_safety_holds).
+	//
+	// The inner JOIN is the rule "only where there is a reason": an account with
+	// no SOS events produces no row at all, and zero rows is the normal result.
+	CreateSafetyHoldForDeletedUser(ctx context.Context, arg CreateSafetyHoldForDeletedUserParams) (int64, error)
 	// age_confirmed_at is set to now() only when age_confirmed_over_18 is true
 	// (the only case CreateUser is ever called with, in practice — the service
 	// layer rejects false before reaching here) — never backdated, never set
@@ -59,7 +71,19 @@ type Querier interface {
 	// Batched by id the same way DeleteExpiredRefreshTokens is, and for the same
 	// reason: the caller loops until a batch comes back short, so no single
 	// statement holds a long lock.
+	//
+	// Every guest removed here is ANNOUNCED, in the same statement: the
+	// data-modifying CTE deletes the rows and writes one user-deleted outbox row
+	// per id it actually removed. Without that, guest cleanup was a second,
+	// silent way to delete an account, and the meetup module kept each abandoned
+	// guest's cached display name, last-known location and device tokens
+	// forever, because nothing ever told it. Being one statement, the delete and
+	// the announcement cannot come apart. (Guests cannot add trusted contacts or
+	// trigger SOS, both gated at Level 2, so neither table needs handling here.)
+	//
+	// The row count is the INSERT's, which equals the number of guests deleted.
 	DeleteAbandonedGuests(ctx context.Context, arg DeleteAbandonedGuestsParams) (int64, error)
+	DeleteDeadLetteredUserDeleted(ctx context.Context, arg DeleteDeadLetteredUserDeletedParams) (int64, error)
 	// The retention sweep (§B3). Every login and every refresh inserts a row and
 	// nothing ever deleted one, so this table grew without bound — cheap to trim
 	// continuously now, expensive to backfill-delete from a large table under
@@ -79,14 +103,44 @@ type Querier interface {
 	//     deliberately so a recent expiry is still visible while debugging a
 	//     "why was I logged out" report.
 	DeleteExpiredRefreshTokens(ctx context.Context, arg DeleteExpiredRefreshTokensParams) (int64, error)
+	// The sweeper, batched like the refresh-token sweep so no single statement
+	// holds a long lock.
+	DeleteExpiredSafetyHolds(ctx context.Context, batchSize int32) (int64, error)
+	DeleteProcessedUserDeleted(ctx context.Context, arg DeleteProcessedUserDeletedParams) (int64, error)
+	// Account deletion; same logical-FK reason as above. An SOS event records
+	// where the user was when they asked for help.
+	DeleteSOSEventsForUser(ctx context.Context, userID uuid.UUID) error
 	// Scoped to (id, user_id) so a caller can never delete another user's
 	// contact by guessing an id — the service layer additionally checks
 	// ownership explicitly first (same "no row for this caller -> Forbidden"
 	// pattern ratings.go/safety.go already established) rather than relying on
 	// this WHERE clause alone to produce the right error shape.
 	DeleteTrustedContact(ctx context.Context, arg DeleteTrustedContactParams) (int64, error)
+	// Account deletion. Not reached by the ON DELETE CASCADE from auth.users:
+	// trusted_contacts.user_id is a logical FK with no constraint, by design
+	// (0001_auth_schema's header). Without this the rows would outlive the
+	// account — and they are the most sensitive thing in the schema, because
+	// they are OTHER PEOPLE's names, phone numbers and email addresses, entered
+	// by someone who has now asked to be forgotten.
+	DeleteTrustedContactsForUser(ctx context.Context, userID uuid.UUID) error
+	// Account deletion (App Store 5.1.1(v), Play's data-deletion policy).
+	//
+	// Removes the account and, by ON DELETE CASCADE declared in 0001_auth_schema,
+	// user_identities, refresh_tokens, verification_codes and
+	// unverified_company_claims. It does NOT reach trusted_contacts or
+	// sos_events — those carry a logical FK with no constraint, by design — so
+	// the repository deletes them explicitly, in the same transaction, first.
+	//
+	// It does NOT reach the meetup schema, which holds no foreign key to this
+	// table on purpose (ADR-001 §3) — the meetup module purges its own rows
+	// first, before this runs. See the auth service's DeleteAccount for the
+	// ordering and why it is that way round.
+	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
 	DeleteVerificationCode(ctx context.Context, arg DeleteVerificationCodeParams) error
 	DeleteVerificationCodeByTarget(ctx context.Context, arg DeleteVerificationCodeByTargetParams) error
+	// Written in the SAME transaction as the delete of auth.users — see
+	// 0015_user_deleted_outbox.up.sql for why that is the whole point.
+	EnqueueUserDeleted(ctx context.Context, userID uuid.UUID) error
 	GetIdentityByProviderSubject(ctx context.Context, arg GetIdentityByProviderSubjectParams) (AuthUserIdentity, error)
 	// Company verification database (ADR-019 §3, migration 0007) — the
 	// previously-deferred Verification Model § 5 piece, built now.
@@ -134,6 +188,9 @@ type Querier interface {
 	ListIdentitiesForUser(ctx context.Context, userID uuid.UUID) ([]AuthUserIdentity, error)
 	ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]AuthTrustedContact, error)
 	MarkRefreshTokenReplaced(ctx context.Context, arg MarkRefreshTokenReplacedParams) error
+	MarkUserDeletedDeadLettered(ctx context.Context, arg MarkUserDeletedDeadLetteredParams) error
+	MarkUserDeletedFailed(ctx context.Context, arg MarkUserDeletedFailedParams) error
+	MarkUserDeletedProcessed(ctx context.Context, id uuid.UUID) error
 	// The reuse-detection response (docs/plans/03-hardening-pass.md §B1): when a
 	// refresh token that has already been rotated or revoked is presented again,
 	// every still-live token in that user's session family is revoked, not just
@@ -185,6 +242,28 @@ type Querier interface {
 	// stays flagged, and is stranded at Level 0 with no way to notice why.
 	// Idempotent: it is already false for every non-guest account.
 	UpdateUserPhoneNumber(ctx context.Context, arg UpdateUserPhoneNumberParams) (AuthUser, error)
+	// The profile photo follows LinkedIn, and only LinkedIn (2026-09-26).
+	//
+	// # WHY THIS EXISTS AND FULL NAME'S EQUIVALENT IS NOT USED THE SAME WAY
+	//
+	// profile_photo_url used to be write-once: set from LinkedIn's userinfo at
+	// account creation and never touched again. That produced two wrong results.
+	// Someone who signed up with Apple or Google and connected LinkedIn later
+	// kept their initials forever, even though their professional photo was
+	// sitting in the very userinfo response the link flow already fetched. And
+	// anyone whose LinkedIn photo changed kept the old one indefinitely.
+	//
+	// The photo is SYNCED automatically where the name is only ever SUGGESTED
+	// (see LinkIdentity's SuggestedNameUpdate). That asymmetry is deliberate:
+	// the app sources photos from LinkedIn exclusively, precisely because a
+	// LinkedIn photo is the one people curate to look professional, so LinkedIn
+	// is the source of truth and mirroring it is the whole point. A name is not
+	// like that — a user may have typed their own in profile editing (ADR-023
+	// §5), and overwriting that silently is what Plan 22 exists to prevent.
+	//
+	// Callers must not pass an empty URL: a LinkedIn response without a picture
+	// must leave an existing photo alone rather than blank it.
+	UpdateUserProfilePhoto(ctx context.Context, arg UpdateUserProfilePhotoParams) (AuthUser, error)
 	// work_email_hash is set alongside company_domain/work_email_verified
 	// (ADR-019 §3) — a keyed HMAC of the normalized raw address, the reuse-
 	// abuse check's UNIQUE anchor (GetUserByWorkEmailHash below is what

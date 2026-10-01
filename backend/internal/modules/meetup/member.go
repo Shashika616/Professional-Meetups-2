@@ -57,10 +57,16 @@ type MemberMeetupComment struct {
 // A member's profile is visible to a viewer who shares (or shared) a meetup
 // with them as host or accepted participant, or if the member hosts one —
 // a host is public by design, since a would-be joiner must be able to judge
-// them first. Anyone else gets ErrForbidden, so the profile endpoint cannot
-// be used as a directory by guessing ids. The rule lives in
-// repository/queries/member.sql (CanViewMemberProfile); this is the one
-// place it is enforced.
+// them first. A host also sees everyone who asked to join a meetup they
+// host, pending included: the host cannot be asked to decide on a stranger
+// without being allowed to look at them first. That one runs in the host's
+// direction only, so a pending requester still sees nothing of the other
+// people on the meetup until they are accepted.
+//
+// Anyone else gets ErrForbidden, so the profile endpoint cannot be used as
+// a directory by guessing ids. The rule lives in
+// repository/queries/member.sql (CanViewMemberProfile), with the reasoning
+// for each clause; this is the one place it is enforced.
 func (s *service) GetMemberActivity(ctx context.Context, viewerID, targetID string) (MemberActivity, error) {
 	ok, err := s.meetups.CanViewMemberProfile(ctx, viewerID, targetID)
 	if err != nil {

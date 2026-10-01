@@ -13,8 +13,9 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            // Hosted in a scroll view, as ScheduleFlowPage does.
-            body: SingleChildScrollView(
+            // Given bounded height, as ScheduleFlowPage does: the step is
+            // a full-bleed map now, not a scrolled column.
+            body: SizedBox.expand(
               child: MapLocationStep(onSubmit: (_, _, _) {}),
             ),
           ),
@@ -38,8 +39,9 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            // Hosted in a scroll view, as ScheduleFlowPage does.
-            body: SingleChildScrollView(
+            // Given bounded height, as ScheduleFlowPage does: the step is
+            // a full-bleed map now, not a scrolled column.
+            body: SizedBox.expand(
               child: MapLocationStep(onSubmit: (_, _, _) {}),
             ),
           ),

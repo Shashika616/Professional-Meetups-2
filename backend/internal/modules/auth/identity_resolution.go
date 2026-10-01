@@ -48,7 +48,9 @@ func (s *service) resolveOrCreateLinkedIn(
 ) (repository.User, bool, error) {
 	existing, err := s.users.GetByLinkedInSub(ctx, subject)
 	if err == nil {
-		return existing, false, nil
+		// A returning LinkedIn user: mirror their current LinkedIn photo, so
+		// changing it there changes it here on the next sign-in.
+		return s.syncLinkedInPhoto(ctx, existing, profilePhotoURL), false, nil
 	}
 	if !errors.Is(err, apperror.ErrNotFound) {
 		return repository.User{}, false, err
@@ -259,4 +261,46 @@ func (s *service) SignUpOrRecoverWithEmail(
 		return repository.User{}, false, err
 	}
 	return withEmail, true, nil
+}
+
+// syncLinkedInPhoto mirrors a LinkedIn photo onto an existing user, and is
+// the one place that decides whether a write is warranted.
+//
+// # WHY THE PHOTO IS SYNCED WHEN THE NAME IS ONLY SUGGESTED
+//
+// This app sources profile photos from LinkedIn and nowhere else — there is
+// no upload path, by design: a LinkedIn photo is the one a person curates to
+// look professional, which is exactly what this product wants on a meetup
+// card. That makes LinkedIn the source of truth for the photo, so mirroring
+// it is the feature rather than an overwrite.
+//
+// A name is the opposite case and must keep asking (Plan 22,
+// LinkIdentity.SuggestedNameUpdate): the user may have typed their own in
+// profile editing (ADR-023 §5), and silently replacing it is the specific
+// harm that plan exists to prevent. Do not "harmonize" these two.
+//
+// Two conditions guard the write, and both matter:
+//
+//   - An EMPTY incoming url is ignored. A LinkedIn response without a
+//     picture must leave an existing photo alone, never blank it — losing a
+//     photo because the provider omitted a field would be strictly worse
+//     than a stale one.
+//   - An UNCHANGED url is ignored. The write publishes a
+//     user-profile-updated event that the meetup module consumes to refresh
+//     its display cache, so a no-op write is real wasted work downstream.
+//
+// Errors are logged and swallowed: the caller is mid sign-in or mid link,
+// and failing that because a cosmetic mirror could not be written would
+// trade a whole session for an avatar.
+func (s *service) syncLinkedInPhoto(ctx context.Context, user repository.User, photoURL string) repository.User {
+	if photoURL == "" || photoURL == user.ProfilePhotoURL {
+		return user
+	}
+	updated, err := s.users.UpdateProfilePhoto(ctx, user.ID, photoURL)
+	if err != nil {
+		s.logger.Error("linkedin profile photo sync failed",
+			"user_id", user.ID, "error", err)
+		return user
+	}
+	return updated
 }

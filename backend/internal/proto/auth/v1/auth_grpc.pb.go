@@ -39,6 +39,7 @@ const (
 	AuthService_GetProfile_FullMethodName                      = "/auth.v1.AuthService/GetProfile"
 	AuthService_CompleteProfileSetup_FullMethodName            = "/auth.v1.AuthService/CompleteProfileSetup"
 	AuthService_UpdateLastKnownLocation_FullMethodName         = "/auth.v1.AuthService/UpdateLastKnownLocation"
+	AuthService_DeleteAccount_FullMethodName                   = "/auth.v1.AuthService/DeleteAccount"
 	AuthService_AddTrustedContact_FullMethodName               = "/auth.v1.AuthService/AddTrustedContact"
 	AuthService_ListTrustedContacts_FullMethodName             = "/auth.v1.AuthService/ListTrustedContacts"
 	AuthService_RemoveTrustedContact_FullMethodName            = "/auth.v1.AuthService/RemoveTrustedContact"
@@ -194,6 +195,11 @@ type AuthServiceClient interface {
 	// participant/trust-level gate. Publishes user-location-updated through
 	// the outbox; auth never queries population-wide location data itself.
 	UpdateLastKnownLocation(ctx context.Context, in *UpdateLastKnownLocationRequest, opts ...grpc.CallOption) (*UpdateLastKnownLocationResponse, error)
+	// DeleteAccount erases the caller's account for good (App Store
+	// 5.1.1(v), Play's data-deletion policy). Refuses with FAILED_PRECONDITION
+	// while the caller still has a live meetup or join request outstanding;
+	// the message says what is outstanding and how to clear it.
+	DeleteAccount(ctx context.Context, in *DeleteAccountRequest, opts ...grpc.CallOption) (*DeleteAccountResponse, error)
 	// Trusted contacts + SOS (ADR-026) — all four self-scoped via the
 	// verified JWT's user_id, never a client-supplied one.
 	AddTrustedContact(ctx context.Context, in *AddTrustedContactRequest, opts ...grpc.CallOption) (*TrustedContactResponse, error)
@@ -414,6 +420,16 @@ func (c *authServiceClient) UpdateLastKnownLocation(ctx context.Context, in *Upd
 	return out, nil
 }
 
+func (c *authServiceClient) DeleteAccount(ctx context.Context, in *DeleteAccountRequest, opts ...grpc.CallOption) (*DeleteAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteAccountResponse)
+	err := c.cc.Invoke(ctx, AuthService_DeleteAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authServiceClient) AddTrustedContact(ctx context.Context, in *AddTrustedContactRequest, opts ...grpc.CallOption) (*TrustedContactResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TrustedContactResponse)
@@ -603,6 +619,11 @@ type AuthServiceServer interface {
 	// participant/trust-level gate. Publishes user-location-updated through
 	// the outbox; auth never queries population-wide location data itself.
 	UpdateLastKnownLocation(context.Context, *UpdateLastKnownLocationRequest) (*UpdateLastKnownLocationResponse, error)
+	// DeleteAccount erases the caller's account for good (App Store
+	// 5.1.1(v), Play's data-deletion policy). Refuses with FAILED_PRECONDITION
+	// while the caller still has a live meetup or join request outstanding;
+	// the message says what is outstanding and how to clear it.
+	DeleteAccount(context.Context, *DeleteAccountRequest) (*DeleteAccountResponse, error)
 	// Trusted contacts + SOS (ADR-026) — all four self-scoped via the
 	// verified JWT's user_id, never a client-supplied one.
 	AddTrustedContact(context.Context, *AddTrustedContactRequest) (*TrustedContactResponse, error)
@@ -682,6 +703,9 @@ func (UnimplementedAuthServiceServer) CompleteProfileSetup(context.Context, *Com
 }
 func (UnimplementedAuthServiceServer) UpdateLastKnownLocation(context.Context, *UpdateLastKnownLocationRequest) (*UpdateLastKnownLocationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateLastKnownLocation not implemented")
+}
+func (UnimplementedAuthServiceServer) DeleteAccount(context.Context, *DeleteAccountRequest) (*DeleteAccountResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteAccount not implemented")
 }
 func (UnimplementedAuthServiceServer) AddTrustedContact(context.Context, *AddTrustedContactRequest) (*TrustedContactResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddTrustedContact not implemented")
@@ -1076,6 +1100,24 @@ func _AuthService_UpdateLastKnownLocation_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_DeleteAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).DeleteAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_DeleteAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).DeleteAccount(ctx, req.(*DeleteAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthService_AddTrustedContact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AddTrustedContactRequest)
 	if err := dec(in); err != nil {
@@ -1234,6 +1276,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateLastKnownLocation",
 			Handler:    _AuthService_UpdateLastKnownLocation_Handler,
+		},
+		{
+			MethodName: "DeleteAccount",
+			Handler:    _AuthService_DeleteAccount_Handler,
 		},
 		{
 			MethodName: "AddTrustedContact",

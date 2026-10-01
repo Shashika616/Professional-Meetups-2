@@ -175,6 +175,22 @@ func (q *Queries) DeleteProcessedNotifications(ctx context.Context, arg DeletePr
 	return result.RowsAffected(), nil
 }
 
+const deleteUserNotifications = `-- name: DeleteUserNotifications :exec
+DELETE FROM meetup.notification_outbox WHERE user_id = $1
+`
+
+// Account deletion. Every push addressed to this person: the title and body
+// they were sent (which is what their Notifications screen lists) and the
+// device tokens it went to. Their data, so it goes with them. Pending rows go
+// too, which is also correct: a notification should not be delivered to the
+// phone of an account that no longer exists. Served by
+// idx_notification_outbox_user_recent (0009), whose predicate
+// `user_id IS NOT NULL` is implied by the equality here.
+func (q *Queries) DeleteUserNotifications(ctx context.Context, userID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserNotifications, userID)
+	return err
+}
+
 const enqueueNotification = `-- name: EnqueueNotification :exec
 INSERT INTO meetup.notification_outbox (fcm_tokens, title, body, data, user_id)
 VALUES ($1::text[], $2, $3, $4, $5)

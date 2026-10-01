@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -204,8 +205,9 @@ func run(logger *slog.Logger) error {
 	emailSender := newEmailSender(cfg, logger)
 	smsSender := newSmsSender(cfg, logger)
 
+	usersRepo := repository.NewUserRepository(pool, bus, logger)
 	authService := auth.New(auth.Deps{
-		Users:                   repository.NewUserRepository(pool, bus, logger),
+		Users:                   usersRepo,
 		Identities:              repository.NewUserIdentityRepository(pool),
 		RefreshTokens:           repository.NewRefreshTokenRepository(pool),
 		VerificationCodes:       repository.NewVerificationCodeRepository(pool),
@@ -445,7 +447,39 @@ func run(logger *slog.Logger) error {
 	healthpb.RegisterHealthServer(grpcServer, healthServer)
 	healthServer.SetServingStatus("", healthpb.HealthCheckResponse_NOT_SERVING)
 
-	// Background loops. All four share one shape — `go x.Run(ctx)`, stopping
+	// --- user-deleted delivery (account deletion, 2026-09-28) ---
+	//
+	// The auth module deletes an account and, in the same transaction, writes
+	// a row to auth.user_deleted_outbox. This poller drains it. It is the one
+	// place in the process where the two modules meet over deletion, and it
+	// is a composition root doing a broker's job, not either module reaching
+	// into the other: auth knows nothing about who listens, meetup knows
+	// nothing about where the event came from, and the only contract between
+	// them is eventbus.UserDeletedPayload. As separate services this function
+	// becomes a Pub/Sub subscription and neither module changes.
+	//
+	// It calls each consumer DIRECTLY and returns the first error, rather
+	// than going through bus.Publish. That is deliberate and load-bearing:
+	// Publish always returns nil and only logs a failing handler, so routing
+	// through it would let the outbox mark a failed purge as delivered, and a
+	// deleted person's name and photo would stay in the meetup schema with no
+	// retry ever coming. Every consumer is idempotent, so re-running all of
+	// them after a partial failure is safe.
+	userDeletedOutbox := repository.NewUserDeletedOutboxRepository(pool)
+	userDeletedConsumers := []func(context.Context, eventbus.UserDeletedPayload) error{
+		meetupService.HandleUserDeleted,
+	}
+	userDeletedPoller := outbox.New(
+		userDeletedOutbox,
+		userDeletedProcess(userDeletedConsumers),
+		outbox.WithLogger(logger),
+		outbox.WithObserver(outboxObserver{}),
+	)
+	// Wake the poller the moment a deletion commits, so another module holds
+	// a deleted person's data for milliseconds rather than a tick interval.
+	repository.SetDeletedNotifier(usersRepo, userDeletedPoller.Wake)
+
+	// Background loops. All of them share one shape — `go x.Run(ctx)`, stopping
 	// cleanly when ctx is cancelled by SIGTERM — deliberately, so periodic
 	// work in this process is one recognisable pattern rather than four.
 	//
@@ -467,6 +501,9 @@ func run(logger *slog.Logger) error {
 	// job.
 	go notification.NewRetention(notificationOutbox, logger).Run(ctx)
 	go notification.NewRetentionFor("meetups-completed outbox", meetupsCompletedOutbox, logger).Run(ctx)
+	// User-deleted delivery and its retention, same shape as the two above.
+	go userDeletedPoller.Run(ctx)
+	go notification.NewRetentionFor("user-deleted outbox", userDeletedOutbox, logger).Run(ctx)
 	go auth.NewRefreshTokenSweeper(authService, logger).Run(ctx)
 
 	serveErrCh := make(chan error, 1)
@@ -617,4 +654,38 @@ func newSmsSender(cfg authconfig.Config, logger *slog.Logger) sms.SmsSender {
 	}
 	logger.Info("verification SMS delivery: LoggingSmsSender (TWILIO_* not fully set)")
 	return sms.NewLoggingSmsSender()
+}
+
+// userDeletedProcess is the user-deleted outbox's delivery step: decode the
+// row, then hand the payload to each consumer in turn.
+//
+// A named function rather than a closure at the wiring site because this is
+// the SEAM between two modules that never call each other, and a seam that
+// nothing can execute in a test is a seam that can break silently. The
+// payload crosses it as JSON; if that round trip broke, UserID would arrive
+// empty and every consumer would run happily against "no such user",
+// deleting nothing and reporting success. See the pipeline test beside this
+// file, which drives this exact function.
+//
+// Consumers are called DIRECTLY, not through bus.Publish. That is
+// load-bearing: Publish always returns nil and only logs a failing handler,
+// so routing through it would let the outbox mark a failed purge as
+// delivered, with no retry ever coming. Returning the first error instead
+// leaves the row for the poller to retry; every consumer is idempotent, so
+// re-running all of them after a partial failure is safe.
+func userDeletedProcess(
+	consumers []func(context.Context, eventbus.UserDeletedPayload) error,
+) func(context.Context, outbox.Row) error {
+	return func(ctx context.Context, row outbox.Row) error {
+		var payload eventbus.UserDeletedPayload
+		if err := json.Unmarshal(row.Payload, &payload); err != nil {
+			return fmt.Errorf("decode user-deleted payload: %w", err)
+		}
+		for _, consume := range consumers {
+			if err := consume(ctx, payload); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }

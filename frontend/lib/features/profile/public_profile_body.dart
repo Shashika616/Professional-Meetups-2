@@ -4,6 +4,7 @@ import 'package:professional_connections_platform/core/models/meetup.dart'
     show formatMeetupWindow;
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/empty_section.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
@@ -356,13 +357,12 @@ class _RecentMeetups extends StatelessWidget {
           child: _StatLabel('RECENT MEETUPS'),
         ),
         if (meetups.isEmpty)
-          FlatCard(
-            radius: 14,
-            padding: const EdgeInsets.all(18),
-            child: Text(
-              'No meetups yet.',
-              style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-            ),
+          // No message under the title: nothing the VIEWER can do puts a
+          // meetup in someone else's history, so a "do this to fix it"
+          // line would be addressed to the wrong person.
+          const EmptySection(
+            icon: Icons.event_note_outlined,
+            title: 'No meetups yet',
           )
         else
           for (final m in meetups) ...[

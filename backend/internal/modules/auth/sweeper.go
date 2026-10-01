@@ -67,6 +67,7 @@ type RefreshTokenSweeper struct {
 type refreshTokenSweeperService interface {
 	SweepExpiredRefreshTokens(ctx context.Context) (int, error)
 	SweepAbandonedGuests(ctx context.Context) (int, error)
+	SweepExpiredSafetyHolds(ctx context.Context) (int, error)
 }
 
 // NewRefreshTokenSweeper constructs a sweeper over svc.
@@ -117,11 +118,45 @@ func (s *RefreshTokenSweeper) Tick(ctx context.Context) {
 	guests, err := s.svc.SweepAbandonedGuests(ctx)
 	if err != nil {
 		s.logger.Error("guest account cleanup", "error", err)
-		return
-	}
-	if guests > 0 {
+	} else if guests > 0 {
 		s.logger.Info("guest account cleanup", "deleted", guests)
 	}
+
+	// Independent of both sweeps above: a safety hold expires on its own
+	// clock (0016_safety_holds), and a failure in either of those must not
+	// keep a deleted person's SOS record past the date the privacy policy
+	// promises it will be gone.
+	holds, err := s.svc.SweepExpiredSafetyHolds(ctx)
+	if err != nil {
+		s.logger.Error("safety hold purge", "error", err)
+		return
+	}
+	if holds > 0 {
+		s.logger.Info("safety hold purge", "purged", holds)
+	}
+}
+
+// SweepExpiredSafetyHolds purges every safety hold past its purge_after,
+// batched with the same ceiling and cancellation behaviour as
+// SweepExpiredRefreshTokens. Holds are few (one per deleted account that
+// ever triggered SOS), so a backlog is not expected; the batching is there so
+// one never has to be reasoned about.
+func (s *service) SweepExpiredSafetyHolds(ctx context.Context) (int, error) {
+	total := 0
+	for batch := 0; batch < refreshTokenSweepMaxBatches; batch++ {
+		if err := ctx.Err(); err != nil {
+			return total, nil
+		}
+		purged, err := s.users.DeleteExpiredSafetyHolds(ctx, refreshTokenSweepBatchSize)
+		if err != nil {
+			return total, err
+		}
+		total += purged
+		if purged < refreshTokenSweepBatchSize {
+			return total, nil
+		}
+	}
+	return total, nil
 }
 
 // SweepAbandonedGuests deletes every eligible abandoned guest account,

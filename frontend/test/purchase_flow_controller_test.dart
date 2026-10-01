@@ -168,7 +168,7 @@ void main() {
   );
 
   test(
-    'error status surfaces the message and completes a pending transaction',
+    'error status shows a readable message and completes a pending transaction',
     () async {
       final details = _details(
         status: PurchaseStatus.error,
@@ -179,7 +179,11 @@ void main() {
       await pumpEventQueue();
 
       expect(controller.busy, isFalse);
-      expect(controller.errorMessage, 'card declined');
+      expect(
+        controller.errorMessage,
+        'The purchase could not be completed. Please try again.',
+        reason: 'the store SDK text is never shown',
+      );
       expect(subscriptionService.verifyPurchaseCalls, 0);
       expect(completedPurchases, [details]);
     },

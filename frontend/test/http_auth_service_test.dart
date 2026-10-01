@@ -433,4 +433,85 @@ void main() {
       expect(requestsSent, 0);
     });
   });
+
+  group('deleteAccount', () {
+    test('204 sends DELETE /v1/users/me with the bearer token', () async {
+      final client = MockClient((request) async {
+        expect(request.method, 'DELETE');
+        expect(request.url.toString(), '$_baseUrl/v1/users/me');
+        expect(request.headers['Authorization'], 'Bearer token');
+        return http.Response('', 204);
+      });
+      await _serviceWith(client).deleteAccount();
+    });
+
+    test('409 carries the server sentence for the person to read', () async {
+      const reason =
+          'You have a request to join a meetup that is still open. '
+          'Withdraw it, then delete your account.';
+      final client = MockClient(
+        (request) async => http.Response(jsonEncode({'error': reason}), 409),
+      );
+      await expectLater(
+        _serviceWith(client).deleteAccount(),
+        throwsA(
+          isA<AccountDeletionBlockedException>().having(
+            (e) => e.message,
+            'message',
+            reason,
+          ),
+        ),
+      );
+    });
+
+    test('401 means the session is gone', () async {
+      final client = MockClient(
+        (request) async => http.Response('{"error":"x"}', 401),
+      );
+      await expectLater(
+        _serviceWith(client).deleteAccount(),
+        throwsA(isA<SessionExpiredException>()),
+      );
+    });
+
+    test('429 in either shape reads as rate limiting', () async {
+      for (final body in ['{"error":"rate limited"}', 'Rate exceeded.']) {
+        final client = MockClient((request) async => http.Response(body, 429));
+        await expectLater(
+          _serviceWith(client).deleteAccount(),
+          throwsA(isA<RateLimitedException>()),
+        );
+      }
+    });
+
+    test('a 5xx or a network failure never shows the raw error', () async {
+      final failing = <MockClient>[
+        MockClient(
+          (request) async =>
+              http.Response('{"error":"pq: deadlock detected"}', 500),
+        ),
+        MockClient((request) async => http.Response('upstream timeout', 503)),
+        MockClient(
+          (request) async =>
+              throw http.ClientException('Connection refused, errno 61'),
+        ),
+      ];
+      for (final client in failing) {
+        await expectLater(
+          _serviceWith(client).deleteAccount(),
+          throwsA(
+            isA<AuthNetworkException>().having(
+              (e) => e.message,
+              'message',
+              allOf(
+                isNot(contains('pq')),
+                isNot(contains('errno')),
+                isNot(contains('upstream')),
+              ),
+            ),
+          ),
+        );
+      }
+    });
+  });
 }

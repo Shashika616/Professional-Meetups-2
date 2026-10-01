@@ -539,6 +539,56 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     );
   }
 
+  /// Deletes the account on the server, then signs this device out.
+  ///
+  /// The order is the whole point: nothing local changes until the server
+  /// has confirmed the account is gone, so a refusal (meetups still to
+  /// happen) or a failed request leaves the person signed in exactly as
+  /// they were, able to act on the message and try again. Whatever the
+  /// server says is rethrown for the caller to show.
+  ///
+  /// After that there is nothing left to revoke: the server deleted the
+  /// refresh tokens and push registrations with the account, so unlike
+  /// [signOut] this makes no logout call. It only asks FCM to drop this
+  /// device's token, so a stale one is never registered to whoever signs
+  /// in next.
+  Future<void> deleteAccount() async {
+    await future;
+    // All three captured BEFORE the request, the same discipline
+    // _revokeSessionInBackground follows: this notifier is auto-disposed
+    // like any other, the round trip below is the long part of this
+    // method, and a `ref.read` after disposal throws. Reading storage
+    // afterwards instead would mean a disposal cost the person the one
+    // step that actually signs this device out.
+    final auth = ref.read(authServiceProvider);
+    final push = ref.read(pushNotificationServiceProvider);
+    final storage = ref.read(sessionStorageProvider);
+    await auth.deleteAccount();
+
+    // The account is gone from here on, so nothing below may throw. A
+    // storage hiccup, or this notifier having been disposed while the
+    // request was in flight, must never be reported to the person as a
+    // failed deletion: the deletion is done, and it cannot be undone by
+    // reporting it badly. Tokens left behind by a failed clear only fail
+    // to refresh at the next launch, which already reads as signed out.
+    try {
+      await storage.clearSession();
+    } catch (_) {}
+    try {
+      state = const AsyncData(AuthSessionState(signedOutByUser: true));
+    } catch (_) {
+      // Disposed mid-flight: nobody is signed in through this notifier
+      // any more, which is the state this line was trying to reach.
+    }
+    unawaited(() async {
+      try {
+        await push.deleteToken().timeout(const Duration(seconds: 8));
+      } catch (_) {
+        // Best-effort by contract, as in signOut.
+      }
+    }());
+  }
+
   /// The server half of sign-out. Static and handed everything it needs so
   /// it cannot reach for `ref` after the notifier is gone. Each step is
   /// independent and swallowed on failure; each is bounded so the chain

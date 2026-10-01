@@ -127,6 +127,13 @@ type Client interface {
 	CompleteProfileSetup(ctx context.Context, userID, fullName, companyName, companyEmail string) (Profile, error)
 
 	UpdateLastKnownLocation(ctx context.Context, userID string, lat, lng float64) error
+	// CheckAccountDeletable asks the meetup service whether the caller
+	// still owes anyone their presence. AlreadyExists -> HTTP 409 with a
+	// message that says what is outstanding and how to clear it.
+	CheckAccountDeletable(ctx context.Context, userID string) error
+	// DeleteAccount erases the caller's account in the auth service,
+	// which announces it to the rest of the system itself. Idempotent.
+	DeleteAccount(ctx context.Context, userID string) error
 
 	AddTrustedContact(ctx context.Context, userID, name, phoneNumber, email string, callerTrustLevel int32) (TrustedContact, error)
 	ListTrustedContacts(ctx context.Context, userID string) ([]TrustedContact, error)
@@ -502,6 +509,16 @@ func (c *grpcClient) UpdateLastKnownLocation(ctx context.Context, userID string,
 	_, err := c.auth.UpdateLastKnownLocation(ctx, &authv1.UpdateLastKnownLocationRequest{
 		UserId: userID, Lat: lat, Lng: lng,
 	})
+	return err
+}
+
+func (c *grpcClient) CheckAccountDeletable(ctx context.Context, userID string) error {
+	_, err := c.meetup.CheckAccountDeletable(ctx, &meetupv1.CheckAccountDeletableRequest{UserId: userID})
+	return err
+}
+
+func (c *grpcClient) DeleteAccount(ctx context.Context, userID string) error {
+	_, err := c.auth.DeleteAccount(ctx, &authv1.DeleteAccountRequest{UserId: userID})
 	return err
 }
 

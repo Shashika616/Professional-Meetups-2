@@ -193,6 +193,13 @@ service MeetupService {
   // unlocks a new rating-eligibility path letting each of them rate the
   // host once.
   rpc CancelMeetup(CancelMeetupRequest) returns (CancelMeetupResponse);
+
+  // CheckAccountDeletable answers the gateway before it deletes an account:
+  // OK when the caller owes nobody their presence, ALREADY_EXISTS (HTTP 409)
+  // otherwise, with a message naming what is outstanding and how to clear
+  // it. Asked of this service because only it knows who has a live meetup;
+  // the auth service never calls here, the gateway composes the two.
+  rpc CheckAccountDeletable(CheckAccountDeletableRequest) returns (CheckAccountDeletableResponse);
 }
 
 // Intent mirrors the frontend's IntentType (frontend/lib/core/models/
@@ -400,6 +407,14 @@ message ListMyMeetupsResponse {
 message ListActiveMeetupsRequest {
   string user_id = 1; // set by the gateway from the verified JWT
 }
+
+message CheckAccountDeletableRequest {
+  string user_id = 1; // set by the gateway from the verified JWT
+}
+
+// Empty on success: the refusal travels as the RPC's status, like every
+// other precondition in this service.
+message CheckAccountDeletableResponse {}
 
 message CheckScheduleRequest {
   string user_id = 1; // set by the gateway from the verified JWT

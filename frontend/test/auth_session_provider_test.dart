@@ -235,6 +235,9 @@ class _FakeAuthService implements AuthService {
   }) async => throw UnimplementedError();
 
   @override
+  Future<void> deleteAccount() async {}
+
+  @override
   Future<void> updateLastKnownLocation({
     required double latitude,
     required double longitude,

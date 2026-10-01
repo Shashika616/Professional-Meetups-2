@@ -12,6 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteUserLocationCache = `-- name: DeleteUserLocationCache :exec
+DELETE FROM meetup.user_location_cache WHERE user_id = $1
+`
+
+// Cached copy of auth-owned data; must not outlive the account.
+func (q *Queries) DeleteUserLocationCache(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserLocationCache, userID)
+	return err
+}
+
 const listUserLocationCacheWithinRadius = `-- name: ListUserLocationCacheWithinRadius :many
 SELECT user_id, lat, lng, updated_at
 FROM meetup.user_location_cache

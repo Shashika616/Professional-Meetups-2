@@ -386,7 +386,7 @@ func TestCreateMeetupRoute_HasItsOwnPerUserRateLimit(t *testing.T) {
 	if rec.Code != http.StatusTooManyRequests {
 		t.Errorf("create 11: status = %d, want 429 (the 10/hour per-user limit)", rec.Code)
 	}
-	if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"rate limited"}` {
+	if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"Too many attempts. Please wait a moment and try again."}` {
 		t.Errorf("body = %q, want the standard rate-limited shape", got)
 	}
 

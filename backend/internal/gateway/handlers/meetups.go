@@ -173,7 +173,7 @@ type createMeetupRequest struct {
 func (h *Handler) createMeetup(w http.ResponseWriter, r *http.Request) {
 	var req createMeetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -210,7 +210,7 @@ func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("within_days"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "within_days must be an integer")
+			writeError(w, http.StatusBadRequest, msgCouldNotLoad)
 			return
 		}
 		withinDays = int32(parsed)
@@ -219,7 +219,7 @@ func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 	if raw := r.URL.Query().Get("page_size"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "page_size must be an integer")
+			writeError(w, http.StatusBadRequest, msgCouldNotLoad)
 			return
 		}
 		pageSize = int32(parsed)
@@ -231,12 +231,12 @@ func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 	// means a malformed request, not a legitimate "no location" case.
 	viewerLat, err := strconv.ParseFloat(r.URL.Query().Get("viewer_lat"), 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "viewer_lat query parameter is required and must be a number")
+		writeError(w, http.StatusBadRequest, msgNeedLocation)
 		return
 	}
 	viewerLng, err := strconv.ParseFloat(r.URL.Query().Get("viewer_lng"), 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "viewer_lng query parameter is required and must be a number")
+		writeError(w, http.StatusBadRequest, msgNeedLocation)
 		return
 	}
 
@@ -327,7 +327,7 @@ func (h *Handler) checkSchedule(w http.ResponseWriter, r *http.Request) {
 	start, errStart := strconv.ParseInt(q.Get("window_start_unix_seconds"), 10, 64)
 	end, errEnd := strconv.ParseInt(q.Get("window_end_unix_seconds"), 10, 64)
 	if errStart != nil || errEnd != nil {
-		writeError(w, http.StatusBadRequest, "window_start_unix_seconds and window_end_unix_seconds are required")
+		writeError(w, http.StatusBadRequest, "Choose when the meetup starts and ends.")
 		return
 	}
 	ctx := r.Context()
@@ -386,7 +386,7 @@ type withdrawRequestRequest struct {
 func (h *Handler) withdrawRequest(w http.ResponseWriter, r *http.Request) {
 	var req withdrawRequestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -405,7 +405,7 @@ type respondToRequestRequest struct {
 func (h *Handler) respondToRequest(w http.ResponseWriter, r *http.Request) {
 	var req respondToRequestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -425,7 +425,7 @@ type registerDeviceTokenRequest struct {
 func (h *Handler) registerDeviceToken(w http.ResponseWriter, r *http.Request) {
 	var req registerDeviceTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -470,7 +470,7 @@ type setLiveLocationOptInRequest struct {
 func (h *Handler) setLiveLocationOptIn(w http.ResponseWriter, r *http.Request) {
 	var req setLiveLocationOptInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -490,11 +490,11 @@ type shareWithContactsRequest struct {
 func (h *Handler) shareWithContacts(w http.ResponseWriter, r *http.Request) {
 	var req shareWithContactsRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 	if len(req.ContactIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "pick at least one trusted contact")
+		writeError(w, http.StatusBadRequest, "Pick at least one trusted contact.")
 		return
 	}
 
@@ -526,7 +526,7 @@ type declineCheckInRequest struct {
 func (h *Handler) declineCheckIn(w http.ResponseWriter, r *http.Request) {
 	var req declineCheckInRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -550,7 +550,7 @@ type submitMeetupFeedbackRequest struct {
 func (h *Handler) submitMeetupFeedback(w http.ResponseWriter, r *http.Request) {
 	var req submitMeetupFeedbackRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -722,7 +722,7 @@ type submitMeetupReviewRequest struct {
 func (h *Handler) submitMeetupReview(w http.ResponseWriter, r *http.Request) {
 	var req submitMeetupReviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -789,7 +789,7 @@ type submitRatingRequest struct {
 func (h *Handler) submitRating(w http.ResponseWriter, r *http.Request) {
 	var req submitRatingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 
@@ -819,7 +819,7 @@ type cancelMeetupRequest struct {
 func (h *Handler) cancelMeetup(w http.ResponseWriter, r *http.Request) {
 	var req cancelMeetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 

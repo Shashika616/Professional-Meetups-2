@@ -375,7 +375,11 @@ class HttpAuthService implements AuthService {
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
       return decoded['resend_after_seconds'] as int? ?? 0;
     }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
+    throw _mapVerificationError(
+      response,
+      on400: AuthNetworkException.new,
+      isResend: true,
+    );
   }
 
   @override
@@ -424,7 +428,11 @@ class HttpAuthService implements AuthService {
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
       return decoded['resend_after_seconds'] as int? ?? 0;
     }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
+    throw _mapVerificationError(
+      response,
+      on400: AuthNetworkException.new,
+      isResend: true,
+    );
   }
 
   @override
@@ -675,6 +683,39 @@ class HttpAuthService implements AuthService {
     throw _mapVerificationError(response, on400: AuthNetworkException.new);
   }
 
+  @override
+  Future<void> deleteAccount() async {
+    final headers = await _authHeaders();
+    final http.Response response;
+    try {
+      response = await _httpClient
+          .delete(Uri.parse('$_baseUrl/v1/users/me'), headers: headers)
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {
+      // Offline, or the request never came back. Nothing was confirmed, so
+      // the account is still there and the person can simply try again.
+      throw const AuthNetworkException(
+        'We couldn’t reach TieHere. Check your connection and try again.',
+      );
+    }
+    switch (response.statusCode) {
+      case 204:
+        return;
+      case 409:
+        throw AccountDeletionBlockedException(_errorMessage(response.body));
+      case 401:
+        throw const SessionExpiredException(
+          'Your session has expired. Please sign in again.',
+        );
+      case 429:
+        throw const RateLimitedException();
+      default:
+        throw const AuthNetworkException(
+          'We couldn’t delete your account just now. Please try again in a moment.',
+        );
+    }
+  }
+
   Future<int> _startVerification(
     String path,
     Map<String, String> body, {
@@ -689,7 +730,7 @@ class HttpAuthService implements AuthService {
       final decoded = jsonDecode(response.body) as Map<String, dynamic>;
       return decoded['resend_after_seconds'] as int? ?? 0;
     }
-    throw _mapVerificationError(response, on400: on400);
+    throw _mapVerificationError(response, on400: on400, isResend: true);
   }
 
   Future<AuthSession> _verifyCode(String path, Map<String, String> body) async {
@@ -717,6 +758,11 @@ class HttpAuthService implements AuthService {
   AuthException _mapVerificationError(
     http.Response response, {
     required AuthException Function(String message) on400,
+    // Only a Start call's 429 is a resend cooldown. Anywhere else (a
+    // verify, a contact, an SOS, a profile write) it is plain rate
+    // limiting, and "wait before requesting another code" would be a
+    // wrong thing to tell someone who never asked for one.
+    bool isResend = false,
   }) {
     final message = _errorMessage(response.body);
     switch (response.statusCode) {
@@ -729,7 +775,9 @@ class HttpAuthService implements AuthService {
         // handling as a rejected refresh token.
         return SessionExpiredException(message);
       case 429:
-        return const ResendCooldownException();
+        return isResend
+            ? const ResendCooldownException()
+            : const RateLimitedException();
       default:
         return AuthNetworkException(message);
     }

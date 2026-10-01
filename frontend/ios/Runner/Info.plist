@@ -53,6 +53,8 @@
 	<string>740861671089-8slra5pv1n6ios8qt9ncum67n8205jdq.apps.googleusercontent.com</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>TieHere uses your location to help you pick a public meetup spot near you. This is a one-time lookup, not background tracking.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>TieHere uses your location to help you pick a public meetup spot near you. This is a one-time lookup, not background tracking.</string>
 	<key>UIApplicationSceneManifest</key>

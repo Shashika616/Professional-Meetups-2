@@ -19,6 +19,37 @@ type Querier interface {
 	// meetups, the same relationship the Go check already enforces. The
 	// Go-level check stays, this doesn't replace it.
 	AcceptMeetupRequest(ctx context.Context, arg AcceptMeetupRequestParams) (MeetupMeetupRequest, error)
+	// Meetups the deleted person hosted are kept (they are every attendee's
+	// history, and deleting one would cascade away other members' requests,
+	// reviews and ratings). Their host_user_id is the last column still pointing
+	// at the person, so it is anonymised on the same terms, one fresh id per
+	// meetup. The purge runs this only after checking no LIVE meetup is hosted
+	// (those are cancelled first), so every meetup affected is cancelled or
+	// completed and nobody can act as its host any more anyway.
+	AnonymiseHostOfMeetups(ctx context.Context, hostUserID uuid.UUID) error
+	// The other direction, for the same reason: ratings OTHER members wrote
+	// about the deleted person are theirs and stay, but no longer name who they
+	// were about. Nobody's average changes: the rated person has no profile
+	// left, and every other member's rows are untouched.
+	AnonymiseRatingsAboutUser(ctx context.Context, ratedUserID uuid.UUID) error
+	// Tier 2 of account deletion: ANONYMISE rather than retain.
+	//
+	// Ratings are kept, because each one is part of another member's reputation
+	// and deleting it would change their average. But a kept rating must not
+	// point at the person who left. Pointing at their old id is PSEUDONYMISED,
+	// not anonymised: the nightly backups hold the mapping from that id to a
+	// name for 30 days, and the ICO's guidance is explicit that data only stops
+	// being personal data when nothing is retained that would allow
+	// re-identification. Apple's account-deletion guidance also expects reviews
+	// a person wrote to go with their account; an anonymised one no longer
+	// belongs to any account.
+	//
+	// A FRESH random id PER ROW, not one shared id for the whole account, so the
+	// rows cannot even be grouped back together as "everything this person
+	// rated". gen_random_uuid() is volatile, so Postgres evaluates it once per
+	// row. The UNIQUE (meetup_id, rater, rated) constraint cannot be violated:
+	// every new value is unique.
+	AnonymiseRatingsGivenByUser(ctx context.Context, raterUserID uuid.UUID) error
 	// Returns the rejected rows so the caller can notify each requester
 	// (backend/meetup-scheduling-PLAN.md Step E).
 	AutoRejectPendingRequestsForMeetup(ctx context.Context, meetupID uuid.UUID) ([]MeetupMeetupRequest, error)
@@ -28,10 +59,32 @@ type Querier interface {
 	// member.go in the service layer for the rule.
 	// True when the viewer may open the target's profile: they are the same
 	// person; the target hosts (or has hosted) a meetup — a host is public by
-	// design, since you must be able to judge them before asking to join; or
-	// the two were both on one meetup as host/accepted. "Shared" deliberately
-	// counts past meetups: once you have sat at a table with someone, their
-	// profile stays open to you.
+	// design, since you must be able to judge them before asking to join; the
+	// viewer HOSTS a meetup the target asked to join (see below); or the two
+	// were both on one meetup as host/accepted. "Shared" deliberately counts
+	// past meetups: once you have sat at a table with someone, their profile
+	// stays open to you.
+	//
+	// # WHY A HOST SEES EVERY REQUESTER, INCLUDING PENDING ONES
+	//
+	// The host has to decide whether to let this person sit down with them.
+	// A name, a photo and a level badge is not enough to decide on, which is
+	// exactly why the request card in the app opens this profile. Withholding
+	// it until after the host accepts inverts the decision: it would mean
+	// accepting someone in order to find out who they are.
+	//
+	// Deliberately ONE-DIRECTIONAL. This clause only ever opens the requester
+	// to the host, never the other way round and never requester to requester:
+	// a pending requester still cannot see who else is on the meetup (that is
+	// ListMeetupParticipants' redaction, and it stays until they are accepted).
+	// The reverse direction needs no clause anyway — a host is already public
+	// to everyone by the rule above.
+	//
+	// Status-agnostic on purpose. A withdrawn or turned-down requester stays
+	// visible to that host: they approached the host, the host already saw
+	// them in the request list, and the host may still have to rate them for
+	// withdrawing (ADR-020 §4). Re-hiding a profile the host could already
+	// read would only break the rating screen.
 	CanViewMemberProfile(ctx context.Context, arg CanViewMemberProfileParams) (pgtype.Bool, error)
 	// reason is required (validated by the service layer, ADR-020 §3) —
 	// accepted participants are notified and gain a new rating-eligibility
@@ -188,6 +241,26 @@ type Querier interface {
 	// row-lock serialization point the old design incidentally had.
 	ComputeUserRatingAggregate(ctx context.Context, ratedUserID uuid.UUID) (ComputeUserRatingAggregateRow, error)
 	CountAcceptedRequests(ctx context.Context, meetupID uuid.UUID) (int64, error)
+	// Account deletion's precondition (2026-09-28). Answers "does this user still
+	// owe anyone their presence?" and is the ONLY thing standing between a delete
+	// request and an irreversible purge.
+	//
+	// The two branches are deliberately the same two FindScheduleConflict uses —
+	// hosting, and requested-and-not-refused — because "active commitment" has to
+	// mean one thing in this codebase. The difference is that this one has no
+	// window-overlap predicate: the conflict query asks "does anything clash with
+	// THIS proposed window", while deletion asks "is anything outstanding at all".
+	//
+	// Counted separately so the error can name what is actually outstanding
+	// ("you are hosting one" reads differently from "you asked to join one") and
+	// so pending requests can be described as withdrawable rather than
+	// attendable.
+	//
+	// window_end > now() is what makes this self-correcting: a meetup whose time
+	// has passed stops blocking deletion the moment the clock passes it, with no
+	// dependency on the lifecycle sweep having run (see ListOpenMeetupsFirstPage's
+	// comment for the production incident behind that rule).
+	CountActiveCommitments(ctx context.Context, userID uuid.UUID) (CountActiveCommitmentsRow, error)
 	// Backs the pending gauge. Same predicate as the claimable partial index, so
 	// it is an index-only scan over the pending set rather than a table scan.
 	CountPendingMeetupsCompleted(ctx context.Context) (int64, error)
@@ -229,6 +302,31 @@ type Querier interface {
 	// statement would hold one long transaction and a correspondingly long lock.
 	// The caller loops until a batch comes back short.
 	DeleteProcessedNotifications(ctx context.Context, arg DeleteProcessedNotificationsParams) (int64, error)
+	DeleteUserDeviceTokens(ctx context.Context, userID uuid.UUID) error
+	// Cached copy of auth-owned data; must not outlive the account.
+	DeleteUserDisplayCache(ctx context.Context, userID uuid.UUID) error
+	// Their own write-ups of meetups they attended.
+	DeleteUserFeedback(ctx context.Context, userID uuid.UUID) error
+	// Cached copy of auth-owned data; must not outlive the account.
+	DeleteUserLocationCache(ctx context.Context, userID uuid.UUID) error
+	// Account deletion. Every push addressed to this person: the title and body
+	// they were sent (which is what their Notifications screen lists) and the
+	// device tokens it went to. Their data, so it goes with them. Pending rows go
+	// too, which is also correct: a notification should not be delivered to the
+	// phone of an account that no longer exists. Served by
+	// idx_notification_outbox_user_recent (0009), whose predicate
+	// `user_id IS NOT NULL` is implied by the equality here.
+	DeleteUserNotifications(ctx context.Context, userID pgtype.UUID) error
+	// Their own join requests. Safe to remove outright: a request is a message
+	// from this user to a host, and the host keeps the meetup itself.
+	DeleteUserRequests(ctx context.Context, requesterID uuid.UUID) error
+	// Which trusted contacts this user shared each meetup with. Cascades from
+	// meetup.meetups, but PurgeUser keeps past meetups (they are other
+	// attendees' history), so without this these rows would outlive the account.
+	DeleteUserSafetyShares(ctx context.Context, userID uuid.UUID) error
+	DeleteUserSafetyState(ctx context.Context, userID uuid.UUID) error
+	// Cached copy of auth-owned data; must not outlive the account.
+	DeleteUserSubscriptionCache(ctx context.Context, userID uuid.UUID) error
 	// The outbox insert, executed on the SAME transaction handle as the close or
 	// the auto-close claim it accompanies. That co-location is the entire point,
 	// exactly as with EnqueueNotification: the completion and the record of
@@ -354,6 +452,15 @@ type Querier interface {
 	// list (not just fcm_token) so the caller can group rows back by user
 	// without a second lookup.
 	ListDeviceTokensForUsers(ctx context.Context, userIds []uuid.UUID) ([]MeetupDeviceToken, error)
+	// The user-deleted handler's first step: meetups this person still hosts that
+	// have not happened yet. The gateway refuses deletion while any exist, so
+	// normally this is empty; it exists for the one that slipped in between that
+	// check and the delete (created from another device, or with an access token
+	// that outlived the account). Those are cancelled through the ordinary cancel
+	// path, so accepted participants get the usual cancellation push instead of
+	// a meetup whose host has silently vanished. Same LIVE definition as
+	// CountActiveCommitments.
+	ListLiveHostedMeetupIDs(ctx context.Context, hostUserID uuid.UUID) ([]uuid.UUID, error)
 	// Meetups this user still owes a review on, bounded by a cutoff so an
 	// ignored review does not sit on Home forever (see service.reviewWindow).
 	//

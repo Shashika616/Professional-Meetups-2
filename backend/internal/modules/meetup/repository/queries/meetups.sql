@@ -595,3 +595,128 @@ LIMIT 1;
 -- space; a collision between two users only makes them wait for each
 -- other briefly (a false serialisation), never lets a conflict through.
 SELECT pg_advisory_xact_lock(hashtext(sqlc.arg(user_id)::text));
+
+-- name: CountActiveCommitments :one
+-- Account deletion's precondition (2026-09-28). Answers "does this user still
+-- owe anyone their presence?" and is the ONLY thing standing between a delete
+-- request and an irreversible purge.
+--
+-- The two branches are deliberately the same two FindScheduleConflict uses —
+-- hosting, and requested-and-not-refused — because "active commitment" has to
+-- mean one thing in this codebase. The difference is that this one has no
+-- window-overlap predicate: the conflict query asks "does anything clash with
+-- THIS proposed window", while deletion asks "is anything outstanding at all".
+--
+-- Counted separately so the error can name what is actually outstanding
+-- ("you are hosting one" reads differently from "you asked to join one") and
+-- so pending requests can be described as withdrawable rather than
+-- attendable.
+--
+-- window_end > now() is what makes this self-correcting: a meetup whose time
+-- has passed stops blocking deletion the moment the clock passes it, with no
+-- dependency on the lifecycle sweep having run (see ListOpenMeetupsFirstPage's
+-- comment for the production incident behind that rule).
+SELECT
+  count(*) FILTER (
+    WHERE source = 'hosting'
+  )::bigint AS hosting_count,
+  count(*) FILTER (
+    WHERE source = 'accepted'
+  )::bigint AS accepted_count,
+  count(*) FILTER (
+    WHERE source = 'pending'
+  )::bigint AS pending_count
+FROM (
+  SELECT 'hosting' AS source
+  FROM meetup.meetups m
+  WHERE m.host_user_id = sqlc.arg(user_id)
+    AND m.status IN ('open', 'full')
+    AND m.window_end > now()
+  UNION ALL
+  SELECT CASE WHEN r.status = 'accepted' THEN 'accepted' ELSE 'pending' END AS source
+  FROM meetup.meetup_requests r
+  JOIN meetup.meetups m ON m.id = r.meetup_id
+  WHERE r.requester_id = sqlc.arg(user_id)
+    AND r.status IN ('pending', 'accepted')
+    AND m.status IN ('open', 'full')
+    AND m.window_end > now()
+) commitments;
+
+-- name: DeleteUserRequests :exec
+-- Their own join requests. Safe to remove outright: a request is a message
+-- from this user to a host, and the host keeps the meetup itself.
+DELETE FROM meetup.meetup_requests WHERE requester_id = $1;
+
+-- name: DeleteUserSafetyState :exec
+DELETE FROM meetup.safety_state WHERE user_id = $1;
+
+-- name: DeleteUserFeedback :exec
+-- Their own write-ups of meetups they attended.
+DELETE FROM meetup.meetup_feedback WHERE user_id = $1;
+
+
+-- name: DeleteUserDeviceTokens :exec
+DELETE FROM meetup.device_tokens WHERE user_id = $1;
+
+-- name: DeleteUserSafetyShares :exec
+-- Which trusted contacts this user shared each meetup with. Cascades from
+-- meetup.meetups, but PurgeUser keeps past meetups (they are other
+-- attendees' history), so without this these rows would outlive the account.
+DELETE FROM meetup.safety_share WHERE user_id = $1;
+
+-- name: ListLiveHostedMeetupIDs :many
+-- The user-deleted handler's first step: meetups this person still hosts that
+-- have not happened yet. The gateway refuses deletion while any exist, so
+-- normally this is empty; it exists for the one that slipped in between that
+-- check and the delete (created from another device, or with an access token
+-- that outlived the account). Those are cancelled through the ordinary cancel
+-- path, so accepted participants get the usual cancellation push instead of
+-- a meetup whose host has silently vanished. Same LIVE definition as
+-- CountActiveCommitments.
+SELECT id FROM meetup.meetups
+WHERE host_user_id = $1
+  AND status IN ('open', 'full')
+  AND window_end > now();
+
+-- name: AnonymiseRatingsGivenByUser :exec
+-- Tier 2 of account deletion: ANONYMISE rather than retain.
+--
+-- Ratings are kept, because each one is part of another member's reputation
+-- and deleting it would change their average. But a kept rating must not
+-- point at the person who left. Pointing at their old id is PSEUDONYMISED,
+-- not anonymised: the nightly backups hold the mapping from that id to a
+-- name for 30 days, and the ICO's guidance is explicit that data only stops
+-- being personal data when nothing is retained that would allow
+-- re-identification. Apple's account-deletion guidance also expects reviews
+-- a person wrote to go with their account; an anonymised one no longer
+-- belongs to any account.
+--
+-- A FRESH random id PER ROW, not one shared id for the whole account, so the
+-- rows cannot even be grouped back together as "everything this person
+-- rated". gen_random_uuid() is volatile, so Postgres evaluates it once per
+-- row. The UNIQUE (meetup_id, rater, rated) constraint cannot be violated:
+-- every new value is unique.
+UPDATE meetup.meetup_user_ratings
+SET rater_user_id = gen_random_uuid()
+WHERE rater_user_id = $1;
+
+-- name: AnonymiseRatingsAboutUser :exec
+-- The other direction, for the same reason: ratings OTHER members wrote
+-- about the deleted person are theirs and stay, but no longer name who they
+-- were about. Nobody's average changes: the rated person has no profile
+-- left, and every other member's rows are untouched.
+UPDATE meetup.meetup_user_ratings
+SET rated_user_id = gen_random_uuid()
+WHERE rated_user_id = $1;
+
+-- name: AnonymiseHostOfMeetups :exec
+-- Meetups the deleted person hosted are kept (they are every attendee's
+-- history, and deleting one would cascade away other members' requests,
+-- reviews and ratings). Their host_user_id is the last column still pointing
+-- at the person, so it is anonymised on the same terms, one fresh id per
+-- meetup. The purge runs this only after checking no LIVE meetup is hosted
+-- (those are cancelled first), so every meetup affected is cancelled or
+-- completed and nobody can act as its host any more anyway.
+UPDATE meetup.meetups
+SET host_user_id = gen_random_uuid()
+WHERE host_user_id = $1;

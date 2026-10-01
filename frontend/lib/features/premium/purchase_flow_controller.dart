@@ -84,8 +84,12 @@ class PurchaseFlowController extends ChangeNotifier {
           await _verifyAndComplete(details);
         case PurchaseStatus.error:
           busy = false;
+          // Never the store's own text: it is SDK vocabulary
+          // ("BillingResponse.itemUnavailable", an SKErrorDomain code), and
+          // the store has already shown the person its own explanation of
+          // anything about their payment.
           errorMessage =
-              details.error?.message ?? 'The purchase could not be completed.';
+              'The purchase could not be completed. Please try again.';
           notifyListeners();
           await _completeIfPending(details);
         case PurchaseStatus.canceled:

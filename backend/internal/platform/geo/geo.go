@@ -50,7 +50,7 @@ func ValidateLatLng(lat, lng float64) error {
 	// a degree wide — around a centimetre of ocean. Anyone genuinely there
 	// can move a hand's width.
 	if lat == 0 && lng == 0 {
-		return fmt.Errorf("latitude/longitude of exactly (0, 0) is not a real location — this usually means a location fix was never acquired")
+		return fmt.Errorf("latitude/longitude of exactly (0, 0) is not a real location; this usually means a location fix was never acquired")
 	}
 	if lat < -90 || lat > 90 {
 		return fmt.Errorf("latitude %v out of range [-90, 90]", lat)

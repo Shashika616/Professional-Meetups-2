@@ -3,20 +3,19 @@
 // differs from the private `_httpClient` field it initializes — same
 // tradeoff as token_refresher.dart's own doc comment on this lint.
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:maplibre_gl/maplibre_gl.dart';
 
+import 'package:professional_connections_platform/core/utils/snacks.dart';
+import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/maps/map_provider.dart';
+import 'package:professional_connections_platform/core/maps/map_canvas.dart';
 import 'package:professional_connections_platform/core/maps/place_search.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
-import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/location_picker_layout.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/place_search_ui.dart';
-import 'package:professional_connections_platform/core/widgets/step_hero.dart';
-import 'package:professional_connections_platform/features/meetups/widgets/selected_place_banner.dart';
 
 /// Android's half of [MapLocationStep]'s platform switch (ADR-013 §4's
 /// third correction): a MapLibre map with a crosshair, a type-ahead place
@@ -58,13 +57,13 @@ class AndroidMapLocationStep extends StatefulWidget {
 
 /// Colombo Fort — a sane default center for the invite-only Colombo pilot
 /// (ADR-005) before the map has a real signal (search, current location).
-const _defaultCenter = LatLng(6.9271, 79.8612);
+const _defaultCenter = MapPoint(6.9271, 79.8612);
 
 class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   late final http.Client _httpClient = widget._httpClient ?? http.Client();
   late final PlaceSearch _search =
       widget.placeSearch ?? placeSearchFor(_httpClient);
-  MapLibreMapController? _controller;
+  MapCanvasController? _canvas;
   // The submitted location — set directly (synchronously) by every path
   // that picks a location (suggestion select, direct search, current
   // location) rather than read lazily off `_controller.cameraPosition` at
@@ -75,7 +74,7 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   // `flutter_test`, so `cameraPosition` never updates there), and it's
   // not dependent on `animateCamera`'s async settle timing on a real
   // device either.
-  LatLng _pickedLocation = _defaultCenter;
+  MapPoint _pickedLocation = _defaultCenter;
   final _searchController = TextEditingController();
   List<PlaceResult> _results = [];
   bool _searching = false;
@@ -160,8 +159,8 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
       final focus = _pickedLocation;
       final results = await _search.suggest(
         text,
-        focusLat: focus.latitude,
-        focusLng: focus.longitude,
+        focusLat: focus.lat,
+        focusLng: focus.lng,
       );
       if (generation != _requestGeneration || !mounted) return;
       setState(() => _results = results);
@@ -189,14 +188,14 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
     // explicitly instead.
     ++_requestGeneration;
     _suppressNextSearch = true;
-    final target = LatLng(result.latitude, result.longitude);
+    final target = MapPoint(result.latitude, result.longitude);
     _lastChosenLabel = result.label;
     setState(() {
       _searchController.text = result.label;
       _results = [];
       _pickedLocation = target;
     });
-    await _controller?.animateCamera(CameraUpdate.newLatLngZoom(target, 15));
+    await _canvas?.moveTo(target, zoom: 15);
   }
 
   /// The "type a complete query and press search/return" path — a direct
@@ -216,22 +215,22 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
       final focus = _pickedLocation;
       final result = await _search.search(
         text,
-        focusLat: focus.latitude,
-        focusLng: focus.longitude,
+        focusLat: focus.lat,
+        focusLng: focus.lng,
       );
       if (generation != _requestGeneration || !mounted) return;
       if (result == null) {
         _showError('No results for "$text".');
         return;
       }
-      final target = LatLng(result.latitude, result.longitude);
+      final target = MapPoint(result.latitude, result.longitude);
       _lastChosenLabel = result.label;
       _suppressNextSearch = true;
       setState(() {
         _searchController.text = result.label;
         _pickedLocation = target;
       });
-      await _controller?.animateCamera(CameraUpdate.newLatLngZoom(target, 15));
+      await _canvas?.moveTo(target, zoom: 15);
     } catch (_) {
       if (generation == _requestGeneration && mounted) {
         _showError('No results for "$text".');
@@ -252,9 +251,9 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
       // iOS step.
       final position = await resolveCurrentLocationForMap(context);
       if (!mounted || position == null) return;
-      final here = LatLng(position.latitude, position.longitude);
+      final here = MapPoint(position.latitude, position.longitude);
       setState(() => _pickedLocation = here);
-      await _controller?.animateCamera(CameraUpdate.newLatLngZoom(here, 15));
+      await _canvas?.moveTo(here, zoom: 15);
       // Leave the search field as-is (ADR-029) — no placeholder text is
       // submitted; the server resolves a real label from the coordinates
       // if the field stays empty. _locationPicked is what unlocks CONTINUE
@@ -267,9 +266,7 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showSnack(context, message, type: ToastType.warning);
   }
 
   bool get _canContinue =>
@@ -277,8 +274,8 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
 
   void _submit() {
     widget.onSubmit(
-      _pickedLocation.latitude,
-      _pickedLocation.longitude,
+      _pickedLocation.lat,
+      _pickedLocation.lng,
       _searchController.text.trim(),
     );
   }
@@ -286,213 +283,53 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   @override
   Widget build(BuildContext context) {
     if (!MapConfig.isConfigured) {
-      return _NotConfiguredNotice(stepTitle: _stepTitle());
+      return const _NotConfiguredNotice();
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _stepTitle(),
-        // Slimmer than the other steps' banners: the map below is the
-        // real picture on this page and needs the height more.
-        const StepHero(
-          asset: 'assets/images/schedule/location_card.jpg',
-          height: 96,
-        ),
-        const SizedBox(height: 14),
-        // Choose a public place — never a stranger's home address
-        // (Safety UX Flows.md's pre-meetup safety copy, ADR-013 § 4).
-        Text(
-          'Choose a public place: A cafe, restaurant, or well-known '
-          'venue, not a private residence.',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-        ),
-        const SizedBox(height: 16),
-        Stack(
-          // clipBehavior: Clip.none (not the Stack default, Clip.hardEdge)
-          // is only half of the actual fix — see the file-level doc
-          // comment on the bug. The other half: the search field *and*
-          // the map live in the same outer Stack (as one Column, painted
-          // first) so the suggestions dropdown — a later Stack child,
-          // Positioned below the search field — reliably paints *above*
-          // the map too, not just above the search field. When the
-          // dropdown had its own separate, smaller Stack (scoped to just
-          // the search field), unclipping it fixed visibility but left it
-          // paint-ordered *underneath* the map for any pixels where an
-          // overflowing dropdown happened to overlap the map's bounds —
-          // confirmed via a real hit-test failure in this file's own
-          // widget tests (a tap on a dropdown item landed on the map's
-          // render object instead).
-          clipBehavior: Clip.none,
-          children: [
-            Column(
-              children: [
-                PlaceSearchBar(
-                  controller: _searchController,
-                  hint: 'Search for a cafe, restaurant, or venue',
-                  busy: _searching,
-                  onSubmitted: _directSearch,
-                  onCleared: () => setState(() => _results = []),
-                ),
-                const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(18),
-                  child: SizedBox(
-                    height: 240,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        MapLibreMap(
-                          styleString: MapConfig.styleUrl(),
-                          initialCameraPosition: const CameraPosition(
-                            target: _defaultCenter,
-                            zoom: 13,
-                          ),
-                          onMapCreated: (controller) =>
-                              _controller = controller,
-                          trackCameraPosition: true,
-                          // Keeps _pickedLocation in sync if the user
-                          // drags the map (manually adjusting the pin)
-                          // after a search — search/current-location
-                          // already set it directly and synchronously
-                          // (see their own comments), this only matters
-                          // for the "no search, just drag the crosshair"
-                          // path.
-                          onCameraIdle: () {
-                            final target = _controller?.cameraPosition?.target;
-                            if (target != null) _pickedLocation = target;
-                          },
-                        ),
-                        // Fixed center crosshair — the picked location is
-                        // always wherever the map is centered (simpler
-                        // and less error-prone than a tap-to-place
-                        // gesture, per the plan's own call).
-                        IgnorePointer(
-                          child: Icon(
-                            Icons.location_on,
-                            color: MapConfig.pinColor,
-                            size: 36,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withValues(alpha: 0.45),
-                                blurRadius: 6,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // What CONTINUE will actually submit, said out loud. Before
-                // this, "use my current location" lit CONTINUE with no
-                // visible change other than the map recentring — nothing
-                // told the user a place had been chosen, or which. The
-                // typed/picked name is shown when there is one; the
-                // current-location path submits an empty label on purpose
-                // (ADR-029, the server reverse-geocodes it), so that case
-                // says so instead of showing a blank.
-                if (_canContinue) ...[
-                  SelectedPlaceBanner(label: _searchController.text.trim()),
-                  const SizedBox(height: 12),
-                ],
-                UseCurrentLocationButton(
-                  onPressed: _useCurrentLocation,
-                  busy: _locating,
-                ),
-                const SizedBox(height: 20),
-                PrimaryButton(
-                  label: 'CONTINUE',
-                  onPressed: _canContinue ? _submit : null,
-                ),
-              ],
-            ),
-            // Dims and blocks everything behind the dropdown (map, USE MY
-            // CURRENT LOCATION, CONTINUE) so none of it shows or is
-            // tappable through the suggestions list — without this, those
-            // later Column siblings painted *after* this Stack in z-order,
-            // so an overflowing dropdown was rendering visually underneath
-            // CONTINUE instead of above it. Tapping the scrim dismisses
-            // the dropdown without picking a result, same as any standard
-            // search-then-pick overlay. Starts at the search bar's
-            // own height, not Positioned.fill — covering the
-            // field too blurred/darkened the text being typed, making it
-            // unreadable while the dropdown was open.
-            //
-            // The ClipRect here is load-bearing, not decorative:
-            // BackdropFilter is NOT clipped to its own widget bounds by
-            // default — its blur samples/paints across the whole layer
-            // behind it (worse still since this Stack is Clip.none), so
-            // without this it bled upward into the search field, the step
-            // title, and the header above this widget entirely, which is
-            // exactly why the field stayed unreadable even after adding
-            // the top offset above.
-            if (_results.isNotEmpty)
-              Positioned(
-                top: PlaceSearchBar.height,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: ClipRect(
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => setState(() => _results = []),
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                      child: Container(
-                        color: AppPalette.onyx.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            if (_results.isNotEmpty)
-              Positioned(
-                top: PlaceSearchBar.height + 6,
-                left: 0,
-                right: 0,
-                child: PlaceSuggestionsDropdown(
-                  suggestions: [
-                    for (final r in _results)
-                      PlaceSuggestion.fromLabel(r.label),
-                  ],
-                  onSelect: (index) => _selectResult(_results[index]),
-                ),
-              ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _stepTitle() {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: 20),
-      child: Text(
-        'Where?',
-        style: TextStyle(
-          fontSize: 24,
-          fontWeight: FontWeight.w800,
-          color: AppPalette.textPrimary,
-          height: 1.2,
-        ),
+    return LocationPickerLayout(
+      // MapLibre against whichever tiles MapConfig selected — the only
+      // thing this file still says about rendering.
+      map: MapCanvas(
+        initialCentre: _defaultCenter,
+        initialZoom: 13,
+        onReady: (canvas) => _canvas = canvas,
+        // Keeps the picked point in step with a map the user dragged by
+        // hand. Search and current-location set it directly and
+        // synchronously (see their own comments), so this matters for the
+        // "no search, just move the map" path.
+        onCameraMove: (point) => _pickedLocation = point,
       ),
+      searchController: _searchController,
+      searching: _searching,
+      suggestions: [
+        for (final r in _results) PlaceSuggestion.fromLabel(r.label),
+      ],
+      selectedLabel: _searchController.text.trim(),
+      canContinue: _canContinue,
+      locating: _locating,
+      onSubmitted: _directSearch,
+      onCleared: () => setState(() => _results = []),
+      // The layout speaks in list positions (it never sees a PlaceResult);
+      // this side owns the objects behind them.
+      onSelectSuggestion: (index) => _selectResult(_results[index]),
+      onDismissSuggestions: () => setState(() => _results = []),
+      onUseCurrentLocation: _useCurrentLocation,
+      onContinue: _submit,
     );
   }
 }
 
+/// Shown in place of the map when the build selected Stadia without a
+/// key. No step title of its own any more: the flow's header carries it,
+/// and this branch is not a map screen.
 class _NotConfiguredNotice extends StatelessWidget {
-  const _NotConfiguredNotice({required this.stepTitle});
-
-  final Widget stepTitle;
+  const _NotConfiguredNotice();
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        stepTitle,
         FlatCard(
           radius: 12,
           padding: const EdgeInsets.all(16),

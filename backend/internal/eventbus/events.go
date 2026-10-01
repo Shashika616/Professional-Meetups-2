@@ -22,7 +22,16 @@ import "time"
 
 // Topic names — kebab-case, this project's existing Pub/Sub convention.
 const (
-	TopicUserOnboarded      = "user-onboarded"
+	TopicUserOnboarded = "user-onboarded"
+
+	// TopicUserDeleted — published by the auth module after an account is
+	// deleted, via its own transactional outbox (auth.user_deleted_outbox)
+	// rather than the plain Publish its other events use: a lost event
+	// here would leave a deleted person's name, photo and location in
+	// another module forever. Every module holding its own copy of user
+	// data subscribes and deletes that copy. Handlers MUST be idempotent —
+	// the outbox delivers at least once.
+	TopicUserDeleted        = "user-deleted"
 	TopicUserProfileUpdated = "user-profile-updated"
 	TopicRatingUpdated      = "rating-updated"
 
@@ -88,6 +97,13 @@ type UserProfileUpdatedPayload struct {
 	ProfilePhotoURL string    `json:"profile_photo_url"`
 	TrustLevel      int       `json:"trust_level"`
 	OccurredAt      time.Time `json:"occurred_at"`
+}
+
+// UserDeletedPayload carries only the id. It deliberately says nothing about
+// the account: there is nothing left to describe, and a subscriber needs
+// only the key to find and delete its own rows.
+type UserDeletedPayload struct {
+	UserID string `json:"user_id"`
 }
 
 // RatingUpdatedPayload is published by the meetup module whenever

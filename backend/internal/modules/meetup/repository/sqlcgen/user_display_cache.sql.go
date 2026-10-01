@@ -12,6 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteUserDisplayCache = `-- name: DeleteUserDisplayCache :exec
+DELETE FROM meetup.user_display_cache WHERE user_id = $1
+`
+
+// Cached copy of auth-owned data; must not outlive the account.
+func (q *Queries) DeleteUserDisplayCache(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserDisplayCache, userID)
+	return err
+}
+
 const upsertUserDisplayCache = `-- name: UpsertUserDisplayCache :execrows
 INSERT INTO meetup.user_display_cache (user_id, full_name, profile_photo_url, trust_level, updated_at)
 VALUES ($1, $2, $3, $4, $5)

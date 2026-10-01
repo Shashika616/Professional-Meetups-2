@@ -34,11 +34,11 @@ func (h *Handler) registerUnbuiltModuleRoutes(mux *http.ServeMux) {
 		"GET /v1/billing/subscription",
 	}
 	for _, pattern := range billingRoutes {
-		mux.Handle(pattern, h.requireAuth(unavailable("billing is not configured")))
+		mux.Handle(pattern, h.requireAuth(unavailable("Subscriptions are not available yet.")))
 	}
 
-	mux.Handle("POST /v1/billing/webhooks/apple", unavailable("billing is not configured"))
-	mux.Handle("POST /v1/billing/webhooks/google", unavailable("billing is not configured"))
+	mux.Handle("POST /v1/billing/webhooks/apple", unavailable("Subscriptions are not available yet."))
+	mux.Handle("POST /v1/billing/webhooks/google", unavailable("Subscriptions are not available yet."))
 }
 
 func unavailable(message string) http.Handler {

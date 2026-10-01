@@ -20,7 +20,7 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 					logging.FromContext(r.Context(), logger).Error("panic recovered", "panic", rec)
 					w.Header().Set("Content-Type", "application/json")
 					w.WriteHeader(http.StatusInternalServerError)
-					_, _ = w.Write([]byte(`{"error":"internal server error"}`))
+					_, _ = w.Write([]byte(`{"error":"Something went wrong on our side. Please try again in a moment."}`))
 				}
 			}()
 			next.ServeHTTP(w, r)

@@ -294,6 +294,18 @@ type AuthRefreshToken struct {
 	ReplacedBy pgtype.UUID        `json:"replaced_by"`
 }
 
+type AuthSafetyHold struct {
+	ID            uuid.UUID          `json:"id"`
+	DeletedUserID uuid.UUID          `json:"deleted_user_id"`
+	FullName      string             `json:"full_name"`
+	LegalName     pgtype.Text        `json:"legal_name"`
+	PhoneNumber   pgtype.Text        `json:"phone_number"`
+	PersonalEmail pgtype.Text        `json:"personal_email"`
+	SosEvents     []byte             `json:"sos_events"`
+	HeldAt        pgtype.Timestamptz `json:"held_at"`
+	PurgeAfter    pgtype.Timestamptz `json:"purge_after"`
+}
+
 type AuthSosEvent struct {
 	ID               uuid.UUID          `json:"id"`
 	UserID           uuid.UUID          `json:"user_id"`
@@ -352,6 +364,17 @@ type AuthUser struct {
 	CompanyName               pgtype.Text        `json:"company_name"`
 	MeetupsCompleted          int32              `json:"meetups_completed"`
 	MeetupsCompletedUpdatedAt pgtype.Timestamptz `json:"meetups_completed_updated_at"`
+}
+
+type AuthUserDeletedOutbox struct {
+	ID             uuid.UUID          `json:"id"`
+	UserID         uuid.UUID          `json:"user_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	Attempts       int32              `json:"attempts"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
+	LastError      pgtype.Text        `json:"last_error"`
 }
 
 type AuthUserIdentity struct {

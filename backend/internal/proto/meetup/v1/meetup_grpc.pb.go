@@ -47,6 +47,7 @@ const (
 	MeetupService_GetMeetupReview_FullMethodName            = "/meetup.v1.MeetupService/GetMeetupReview"
 	MeetupService_CloseMeetup_FullMethodName                = "/meetup.v1.MeetupService/CloseMeetup"
 	MeetupService_CancelMeetup_FullMethodName               = "/meetup.v1.MeetupService/CancelMeetup"
+	MeetupService_CheckAccountDeletable_FullMethodName      = "/meetup.v1.MeetupService/CheckAccountDeletable"
 )
 
 // MeetupServiceClient is the client API for MeetupService service.
@@ -221,6 +222,12 @@ type MeetupServiceClient interface {
 	// unlocks a new rating-eligibility path letting each of them rate the
 	// host once.
 	CancelMeetup(ctx context.Context, in *CancelMeetupRequest, opts ...grpc.CallOption) (*CancelMeetupResponse, error)
+	// CheckAccountDeletable answers the gateway before it deletes an account:
+	// OK when the caller owes nobody their presence, ALREADY_EXISTS (HTTP 409)
+	// otherwise, with a message naming what is outstanding and how to clear
+	// it. Asked of this service because only it knows who has a live meetup;
+	// the auth service never calls here, the gateway composes the two.
+	CheckAccountDeletable(ctx context.Context, in *CheckAccountDeletableRequest, opts ...grpc.CallOption) (*CheckAccountDeletableResponse, error)
 }
 
 type meetupServiceClient struct {
@@ -511,6 +518,16 @@ func (c *meetupServiceClient) CancelMeetup(ctx context.Context, in *CancelMeetup
 	return out, nil
 }
 
+func (c *meetupServiceClient) CheckAccountDeletable(ctx context.Context, in *CheckAccountDeletableRequest, opts ...grpc.CallOption) (*CheckAccountDeletableResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckAccountDeletableResponse)
+	err := c.cc.Invoke(ctx, MeetupService_CheckAccountDeletable_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MeetupServiceServer is the server API for MeetupService service.
 // All implementations must embed UnimplementedMeetupServiceServer
 // for forward compatibility.
@@ -683,6 +700,12 @@ type MeetupServiceServer interface {
 	// unlocks a new rating-eligibility path letting each of them rate the
 	// host once.
 	CancelMeetup(context.Context, *CancelMeetupRequest) (*CancelMeetupResponse, error)
+	// CheckAccountDeletable answers the gateway before it deletes an account:
+	// OK when the caller owes nobody their presence, ALREADY_EXISTS (HTTP 409)
+	// otherwise, with a message naming what is outstanding and how to clear
+	// it. Asked of this service because only it knows who has a live meetup;
+	// the auth service never calls here, the gateway composes the two.
+	CheckAccountDeletable(context.Context, *CheckAccountDeletableRequest) (*CheckAccountDeletableResponse, error)
 	mustEmbedUnimplementedMeetupServiceServer()
 }
 
@@ -776,6 +799,9 @@ func (UnimplementedMeetupServiceServer) CloseMeetup(context.Context, *CloseMeetu
 }
 func (UnimplementedMeetupServiceServer) CancelMeetup(context.Context, *CancelMeetupRequest) (*CancelMeetupResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CancelMeetup not implemented")
+}
+func (UnimplementedMeetupServiceServer) CheckAccountDeletable(context.Context, *CheckAccountDeletableRequest) (*CheckAccountDeletableResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckAccountDeletable not implemented")
 }
 func (UnimplementedMeetupServiceServer) mustEmbedUnimplementedMeetupServiceServer() {}
 func (UnimplementedMeetupServiceServer) testEmbeddedByValue()                       {}
@@ -1302,6 +1328,24 @@ func _MeetupService_CancelMeetup_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MeetupService_CheckAccountDeletable_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckAccountDeletableRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeetupServiceServer).CheckAccountDeletable(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeetupService_CheckAccountDeletable_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeetupServiceServer).CheckAccountDeletable(ctx, req.(*CheckAccountDeletableRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MeetupService_ServiceDesc is the grpc.ServiceDesc for MeetupService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1420,6 +1464,10 @@ var MeetupService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CancelMeetup",
 			Handler:    _MeetupService_CancelMeetup_Handler,
+		},
+		{
+			MethodName: "CheckAccountDeletable",
+			Handler:    _MeetupService_CheckAccountDeletable_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

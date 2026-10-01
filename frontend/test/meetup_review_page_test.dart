@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
+
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -39,6 +41,35 @@ Future<void> _pickOverall(WidgetTester tester, ExperienceLevel level) async {
   await tester.tapAt(
     Offset(slider.left + step * (level.index + 0.5), slider.center.dy),
   );
+  await tester.pumpAndSettle();
+}
+
+/// Rating happens in a sheet, one person at a time, so a test has to open
+/// that person's sheet before it can answer anything about them. Tapping
+/// their row is how (see _PersonRow).
+Future<void> _openSheetFor(WidgetTester tester, String name) async {
+  await tester.tap(find.text(name));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _closeSheet(WidgetTester tester) async {
+  await tester.tap(find.text('DONE'));
+  await tester.pumpAndSettle();
+}
+
+/// The sheet's own stars. Scoped, because a row for someone already rated
+/// shows their score as small stars too — an unscoped finder would mix the
+/// two the moment a second person is opened.
+Finder _sheetStars() => find.descendant(
+  of: find.byType(AppSheet),
+  matching: find.byIcon(Icons.star_outline_rounded),
+);
+
+/// Opens [name], gives them [score] stars, and leaves the sheet open so
+/// traits can be picked.
+Future<void> _scoreInSheet(WidgetTester tester, String name, int score) async {
+  await _openSheetFor(tester, name);
+  await tester.tap(_sheetStars().at(score - 1));
   await tester.pumpAndSettle();
 }
 
@@ -116,10 +147,9 @@ void main() {
       reason: 'nobody has been rated yet',
     );
 
-    // Rate only the first of the two. The cards render in order, five stars
-    // each, so index 4 is the first person's fifth star.
-    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(4));
-    await tester.pumpAndSettle();
+    // Rate only one of the two, in their own sheet.
+    await _scoreInSheet(tester, 'Grace Hopper', 5);
+    await _closeSheet(tester);
     await tester.tap(find.text('CONFIRM'));
     await tester.pumpAndSettle();
     expect(
@@ -144,14 +174,13 @@ void main() {
     await tester.tap(find.text('NEXT'));
     await tester.pumpAndSettle();
 
-    // Fourth star.
-    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(3));
-    await tester.pumpAndSettle();
+    await _scoreInSheet(tester, 'Grace Hopper', 4);
 
     // The trait picker only appears once a score is given.
     expect(find.text('Cheerful'), findsOneWidget);
     await tester.tap(find.text('Cheerful'));
     await tester.pumpAndSettle();
+    await _closeSheet(tester);
 
     await tester.tap(find.text('CONFIRM'));
     await tester.pumpAndSettle();
@@ -180,8 +209,11 @@ void main() {
     await tester.tap(find.text('NEXT'));
     await tester.pumpAndSettle();
 
-    // Twelve chips per person opening by default would bury the thing
-    // actually being asked for.
+    // Twelve chips opening by default would bury the thing actually being
+    // asked for — true on the list, and still true inside the sheet until
+    // a score exists.
+    expect(find.text('Cheerful'), findsNothing);
+    await _openSheetFor(tester, 'Grace Hopper');
     expect(find.text('Cheerful'), findsNothing);
   });
 
@@ -198,8 +230,7 @@ void main() {
     await _pickOverall(tester, ExperienceLevel.good);
     await tester.tap(find.text('NEXT'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(1));
-    await tester.pumpAndSettle();
+    await _scoreInSheet(tester, 'Grace Hopper', 2);
 
     expect(find.text('What were they like? (up to 4)'), findsOneWidget);
     // Positive tab first; nothing critical is on screen until asked for.
@@ -223,6 +254,7 @@ void main() {
     // Fourth pick reached the cap: a fifth is refused across tabs.
     await tester.tap(find.text('Distracted'));
     await tester.pumpAndSettle();
+    await _closeSheet(tester);
 
     await tester.tap(find.text('CONFIRM'));
     await tester.pumpAndSettle();
@@ -255,8 +287,7 @@ void main() {
     await _pickOverall(tester, ExperienceLevel.good);
     await tester.tap(find.text('NEXT'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(1));
-    await tester.pumpAndSettle();
+    await _scoreInSheet(tester, 'Grace Hopper', 2);
 
     expect(find.text('Cheerful'), findsOneWidget);
     expect(find.byKey(const Key('traitTabPositive')), findsNothing);
@@ -277,10 +308,10 @@ void main() {
     await _pickOverall(tester, ExperienceLevel.good);
     await tester.tap(find.text('NEXT'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(4));
-    await tester.pumpAndSettle();
+    await _scoreInSheet(tester, 'Grace Hopper', 5);
 
     expect(find.textContaining('What were they like?'), findsNothing);
+    await _closeSheet(tester);
     // And the rating itself still works, so a missing vocabulary degrades
     // rather than blocking.
     await tester.tap(find.text('CONFIRM'));

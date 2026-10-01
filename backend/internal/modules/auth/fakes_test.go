@@ -53,7 +53,20 @@ type fakeUserRepository struct {
 	byID          map[string]repository.User
 	createErr     error
 	createCalls   []repository.NewUser
-	nextID        int
+	// photoUpdates records every profile-photo write, so a test can assert
+	// that an UNCHANGED LinkedIn photo produces no write at all rather than
+	// a redundant one (which would publish a pointless
+	// user-profile-updated event to the meetup module's cache).
+	photoUpdates []string
+	// deleted records ids passed to Delete, so a test can assert the auth
+	// row was removed — and that it was NOT removed when the meetup purge
+	// refused or failed first.
+	deleted []string
+	// deleteErr, when set, is returned by Delete instead of deleting.
+	deleteErr error
+	// expiredHolds is what DeleteExpiredSafetyHolds reports removing.
+	expiredHolds int
+	nextID       int
 	// ratingCacheUpdatedAt tracks the last-applied event timestamp per
 	// user, mirroring the real rating_updated_at column — UpsertRatingCache
 	// uses this to reproduce the ordering guard in tests.
@@ -122,6 +135,33 @@ func (f *fakeUserRepository) UpdateFullName(_ context.Context, userID, fullName 
 		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	u.FullName = fullName
+	f.save(u)
+	return u, nil
+}
+
+func (f *fakeUserRepository) Delete(_ context.Context, userID string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	if _, ok := f.byID[userID]; !ok {
+		return fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	delete(f.byID, userID)
+	f.deleted = append(f.deleted, userID)
+	return nil
+}
+
+func (f *fakeUserRepository) DeleteExpiredSafetyHolds(_ context.Context, _ int) (int, error) {
+	return f.expiredHolds, nil
+}
+
+func (f *fakeUserRepository) UpdateProfilePhoto(_ context.Context, userID, photoURL string) (repository.User, error) {
+	u, ok := f.byID[userID]
+	if !ok {
+		return repository.User{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	u.ProfilePhotoURL = photoURL
+	f.photoUpdates = append(f.photoUpdates, photoURL)
 	f.save(u)
 	return u, nil
 }

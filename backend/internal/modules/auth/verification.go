@@ -183,7 +183,7 @@ var (
 	errReputationalRisk = fmt.Errorf(
 		"this work email has already been used to verify a different account, which harms this company's standing on the platform: %w", apperror.ErrConflict)
 	errCompanyDomainMismatch = fmt.Errorf(
-		"the email domain does not match the company name entered — please check both and try again: %w", apperror.ErrInvalidInput)
+		"the email domain does not match the company name entered. Please check both and try again: %w", apperror.ErrInvalidInput)
 )
 
 // VerifyCorporateEmailCode verifies a corporate-email OTP and, on success,

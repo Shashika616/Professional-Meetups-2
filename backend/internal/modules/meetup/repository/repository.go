@@ -164,6 +164,21 @@ type ScheduleTx interface {
 	FindScheduleConflict(ctx context.Context, userID string, windowStart, windowEnd time.Time, excludeID string) (Meetup, bool, error)
 }
 
+// ActiveCommitments is what stands between a user and deleting their
+// account: anything live they host or have asked to join. Counted by kind so
+// the refusal can say which, since "you are hosting one" and "you asked to
+// join one" need different advice (cancel it vs withdraw the request).
+type ActiveCommitments struct {
+	Hosting  int
+	Accepted int
+	Pending  int
+}
+
+// Any reports whether the user has anything outstanding at all.
+func (a ActiveCommitments) Any() bool {
+	return a.Hosting+a.Accepted+a.Pending > 0
+}
+
 type MeetupRepository interface {
 	// Create inserts the meetup. guard, when non-nil, runs under the host's
 	// schedule lock inside the same transaction (see ScheduleGuard).
@@ -172,6 +187,21 @@ type MeetupRepository interface {
 	// the advisory answer the scheduling flow shows at its time step. Not
 	// the enforcement, which happens under the lock at create time.
 	FindScheduleConflict(ctx context.Context, userID string, windowStart, windowEnd time.Time, excludeID string) (Meetup, bool, error)
+	// ActiveCommitments counts what this user still owes other people:
+	// meetups they host, and meetups they asked to join or were accepted to,
+	// all restricted to live ones. Account deletion's precondition — see
+	// CountActiveCommitments in meetups.sql for why "active" is defined the
+	// same way the schedule-conflict rule defines it.
+	ActiveCommitments(ctx context.Context, userID string) (ActiveCommitments, error)
+	// PurgeUser removes everything this schema holds ABOUT a user whose
+	// account is being deleted, and deliberately nothing that belongs to
+	// anyone else. See its implementation for the full list and for the two
+	// things it does NOT delete (ratings they gave, and meetups they hosted)
+	// with the reasoning for each. Idempotent: safe to re-run.
+	PurgeUser(ctx context.Context, userID string) error
+	// ListLiveHostedMeetupIDs returns the meetups this user still hosts
+	// that have not ended. Used only by the user-deleted handler.
+	ListLiveHostedMeetupIDs(ctx context.Context, userID string) ([]string, error)
 	// GetByID returns apperror.ErrNotFound (wrapped) if id doesn't exist.
 	// viewerID populates MyRequestStatus relative to that specific caller.
 	GetByID(ctx context.Context, id, viewerID string) (Meetup, error)

@@ -12,6 +12,16 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteUserSubscriptionCache = `-- name: DeleteUserSubscriptionCache :exec
+DELETE FROM meetup.subscription_cache WHERE user_id = $1
+`
+
+// Cached copy of auth-owned data; must not outlive the account.
+func (q *Queries) DeleteUserSubscriptionCache(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUserSubscriptionCache, userID)
+	return err
+}
+
 const isSubscriptionEntitled = `-- name: IsSubscriptionEntitled :one
 SELECT entitled FROM meetup.subscription_cache WHERE user_id = $1
 `

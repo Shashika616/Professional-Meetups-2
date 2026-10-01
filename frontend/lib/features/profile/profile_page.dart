@@ -7,6 +7,7 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -270,6 +271,36 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               ],
             ),
             const SizedBox(height: 24),
+            // Deleting comes first, in a card of its own, and signing out
+            // keeps the slab below it. The two are not the same kind of
+            // action, so they do not get the same shape: this one is a row
+            // that states what it does and opens a sheet that explains the
+            // rest, which is what keeps a permanent action from reading as
+            // casually as the reversible one under it. Both stores require
+            // it be reachable from the account screen without hunting.
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: FlatCard(
+                radius: 12,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
+                child: _Row(
+                  icon: Icons.person_remove_outlined,
+                  iconColor: AppPalette.danger,
+                  title: 'Delete account',
+                  subtitle: 'Permanently remove your account and data',
+                  trailing: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 18,
+                    color: AppPalette.textSecondary,
+                  ),
+                  onTap: () => _confirmDeleteAccount(context),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: GestureDetector(
@@ -320,6 +351,32 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
       MaterialPageRoute(builder: (context) => const LandingPage()),
       (route) => false,
     );
+  }
+
+  /// Account deletion (App Store 5.1.1(v), Google Play's account deletion
+  /// policy). The sheet does the deleting itself, like [_SignOutDialog],
+  /// so it can show the work and any refusal in place; this only leaves
+  /// the signed-in app once it reports the account gone.
+  Future<void> _confirmDeleteAccount(BuildContext context) async {
+    final outcome = await showAppSheet<_DeleteOutcome>(
+      context,
+      builder: (_) => const _DeleteAccountSheet(),
+    );
+    if (!context.mounted) return;
+    switch (outcome) {
+      case _DeleteOutcome.deleted:
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (context) => const LandingPage(accountDeleted: true),
+          ),
+          (route) => false,
+        );
+      case _DeleteOutcome.sessionExpired:
+        // AppShell's safety net takes it from here, with its own notice.
+        ref.read(authSessionProvider.notifier).forceSignOut();
+      case null:
+        break;
+    }
   }
 
   /// Everything that happens after "Connect LinkedIn" succeeds, owned by the
@@ -770,6 +827,10 @@ class _StatChip extends StatelessWidget {
 class _Row extends StatelessWidget {
   const _Row({
     required this.icon,
+    // Overrides the candyBlue every other row's glyph uses. Only the
+    // destructive row passes it: a row that ends an account should not
+    // wear the same colour as the one that opens Privacy Controls.
+    this.iconColor,
     required this.title,
     required this.subtitle,
     // Renders in place of [subtitle] when given. Exists for the one row
@@ -785,6 +846,7 @@ class _Row extends StatelessWidget {
   });
 
   final IconData icon;
+  final Color? iconColor;
   final String title;
   final String subtitle;
   final Widget? subtitleOverride;
@@ -809,7 +871,11 @@ class _Row extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, size: 18, color: AppPalette.candyBlue),
+            child: Icon(
+              icon,
+              size: 18,
+              color: iconColor ?? AppPalette.candyBlue,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1061,6 +1127,200 @@ class _SignOutDialogState extends ConsumerState<_SignOutDialog> {
                     ),
                   ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+enum _DeleteOutcome { deleted, sessionExpired }
+
+enum _DeletePhase { confirming, deleting, blocked }
+
+/// Says plainly what deleting removes and what it keeps, then deletes.
+///
+/// A refusal from the server (meetups or requests that have not happened
+/// yet) is not an error toast: it turns the sheet into the answer, with the
+/// server's own sentence about what to do first. Anything else is a toast
+/// and the sheet stays, so trying again is one tap. It cannot be dismissed
+/// while the request is in flight: the outcome has to be seen.
+class _DeleteAccountSheet extends ConsumerStatefulWidget {
+  const _DeleteAccountSheet();
+
+  @override
+  ConsumerState<_DeleteAccountSheet> createState() =>
+      _DeleteAccountSheetState();
+}
+
+class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
+  _DeletePhase _phase = _DeletePhase.confirming;
+  String _blockedMessage = '';
+
+  Future<void> _delete() async {
+    if (_phase == _DeletePhase.deleting) return;
+    setState(() => _phase = _DeletePhase.deleting);
+    try {
+      await ref.read(authSessionProvider.notifier).deleteAccount();
+      if (mounted) Navigator.pop(context, _DeleteOutcome.deleted);
+    } on AccountDeletionBlockedException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _phase = _DeletePhase.blocked;
+        _blockedMessage = error.message;
+      });
+    } on SessionExpiredException {
+      if (mounted) Navigator.pop(context, _DeleteOutcome.sessionExpired);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _phase = _DeletePhase.confirming);
+      showSnack(
+        context,
+        error is AuthException
+            ? error.message
+            : 'We couldn’t delete your account just now. Please try again in a moment.',
+        type: ToastType.error,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final blocked = _phase == _DeletePhase.blocked;
+    return PopScope(
+      canPop: _phase != _DeletePhase.deleting,
+      child: AppSheet(
+        title: blocked ? 'NOT JUST YET' : 'DELETE ACCOUNT',
+        titleColor: blocked ? AppPalette.textPrimary : AppPalette.danger,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: blocked ? _blocked(context) : _confirming(context),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _blocked(BuildContext context) {
+    return [
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.event_busy_outlined, color: AppPalette.danger, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _blockedMessage,
+              style: TextStyle(
+                color: AppPalette.textPrimary,
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      Text(
+        'People are counting on you to be there. Once nothing is left '
+        'waiting, you can delete your account from here.',
+        style: TextStyle(
+          color: AppPalette.textSecondary,
+          fontSize: 13,
+          height: 1.4,
+        ),
+      ),
+      const SizedBox(height: 18),
+      PrimaryButton(
+        label: 'GOT IT',
+        height: 50,
+        onPressed: () => Navigator.pop(context),
+      ),
+    ];
+  }
+
+  List<Widget> _confirming(BuildContext context) {
+    final deleting = _phase == _DeletePhase.deleting;
+    final body = TextStyle(
+      color: AppPalette.textSecondary,
+      fontSize: 13,
+      height: 1.4,
+    );
+    return [
+      Text(
+        'This permanently deletes your TieHere account and cannot be undone.',
+        style: TextStyle(
+          color: AppPalette.textPrimary,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          height: 1.4,
+        ),
+      ),
+      const SizedBox(height: 12),
+      _Point(
+        icon: Icons.delete_outline,
+        text:
+            'Your profile, verifications, trusted contacts, meetup history '
+            'and notifications are deleted.',
+        style: body,
+      ),
+      _Point(
+        icon: Icons.star_outline_rounded,
+        text:
+            'Ratings stay so other members’ records stay accurate, but '
+            'nothing links them to you.',
+        style: body,
+      ),
+      _Point(
+        icon: Icons.shield_outlined,
+        text:
+            'If you ever sent an SOS, a private record of those alerts is '
+            'kept for 90 days for safety reasons, then deleted.',
+        style: body,
+      ),
+      _Point(
+        icon: Icons.workspace_premium_outlined,
+        text:
+            'A Premium subscription is billed by the App Store or Google '
+            'Play. Cancel it there to stop future charges.',
+        style: body,
+      ),
+      const SizedBox(height: 18),
+      PrimaryButton(
+        label: 'DELETE MY ACCOUNT',
+        height: 50,
+        fillColor: AppPalette.danger,
+        foregroundColor: Colors.white,
+        isLoading: deleting,
+        onPressed: deleting ? null : _delete,
+      ),
+      const SizedBox(height: 8),
+      TextButton(
+        onPressed: deleting ? null : () => Navigator.pop(context),
+        child: Text(
+          'CANCEL',
+          style: TextStyle(color: AppPalette.textSecondary),
+        ),
+      ),
+    ];
+  }
+}
+
+class _Point extends StatelessWidget {
+  const _Point({required this.icon, required this.text, required this.style});
+
+  final IconData icon;
+  final String text;
+  final TextStyle style;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: AppPalette.textSecondary),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: style)),
         ],
       ),
     );

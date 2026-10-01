@@ -25,3 +25,7 @@ WHERE excluded.updated_at > meetup.subscription_cache.updated_at;
 -- pgx.ErrNoRows to false (free/not-entitled), which is the safe default,
 -- not an error.
 SELECT entitled FROM meetup.subscription_cache WHERE user_id = $1;
+
+-- name: DeleteUserSubscriptionCache :exec
+-- Cached copy of auth-owned data; must not outlive the account.
+DELETE FROM meetup.subscription_cache WHERE user_id = $1;

@@ -62,6 +62,11 @@ type fakeMonolith struct {
 	gotContextMessage   string
 	gotContactID        string
 	gotLat, gotLng      float64
+
+	// account deletion: what each step returns, and the order they ran in
+	deletableErr error
+	deleteErr    error
+	deleteCalls  []string
 }
 
 func (f *fakeMonolith) CompleteFederatedSignup(_ context.Context, provider, idToken, nonce string, _ bool, fullNameHint string) (monolithclient.Session, error) {
@@ -133,6 +138,16 @@ func (f *fakeMonolith) TriggerSOS(_ context.Context, userID, contextMessage stri
 	f.gotUserID, f.gotContextMessage, f.gotLat, f.gotLng = userID, contextMessage, lat, lng
 	f.gotCallerTrustLevel = callerTrustLevel
 	return 2, f.err
+}
+
+func (f *fakeMonolith) CheckAccountDeletable(_ context.Context, userID string) error {
+	f.deleteCalls = append(f.deleteCalls, "check:"+userID)
+	return f.deletableErr
+}
+
+func (f *fakeMonolith) DeleteAccount(_ context.Context, userID string) error {
+	f.deleteCalls = append(f.deleteCalls, "delete:"+userID)
+	return f.deleteErr
 }
 
 func (f *fakeMonolith) UpdateLastKnownLocation(_ context.Context, userID string, lat, lng float64) error {
@@ -673,8 +688,8 @@ func TestUnbuiltModuleRoutes_Return503(t *testing.T) {
 			if rec.Code != http.StatusServiceUnavailable {
 				t.Errorf("status = %d, want 503", rec.Code)
 			}
-			if got, ok := decodeBody(t, rec)["error"].(string); !ok || !strings.Contains(got, "not configured") {
-				t.Errorf("error body = %v, want a \"not configured\" message", got)
+			if got, ok := decodeBody(t, rec)["error"].(string); !ok || !strings.Contains(got, "not available") {
+				t.Errorf("error body = %v, want a \"not available\" message", got)
 			}
 		})
 

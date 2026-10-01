@@ -42,14 +42,14 @@ type EmailSender interface {
 // internally too) and keeps SendAlert's signature identical across both
 // sender interfaces (ADR-026 §2: "adding one new method... alongside the
 // existing SendVerificationCode").
-const sosAlertSubject = "Emergency alert — Professional Connections"
+const sosAlertSubject = "TieHere emergency alert"
 
 func subjectAndBodyFor(code string, purpose Purpose) (subject, body string) {
 	switch purpose {
 	case PurposeCorporateEmail:
-		subject = "Verify your work email — Professional Connections"
+		subject = "Verify your work email for TieHere"
 	default:
-		subject = "Verify your email — Professional Connections"
+		subject = "Verify your email for TieHere"
 	}
 	body = "Your verification code is " + code + ". It expires in 10 minutes. " +
 		"If you didn't request this, you can ignore this email."

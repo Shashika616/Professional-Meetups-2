@@ -126,8 +126,10 @@ func TestListMeetupParticipants_OutsidersSeeOnlyTheHost_Integration(t *testing.T
 	}
 }
 
-// Who may open whose profile. Hosts are public; otherwise you need a shared
-// meetup as host/accepted. Pending is not enough.
+// Who may open whose profile. Hosts are public; a host may also open anyone
+// who asked to join a meetup they host, pending included, because that is
+// the decision the host is being asked to make. Otherwise you need a shared
+// meetup as host/accepted, and a pending requester still sees nobody.
 func TestGetMemberActivity_Gate_Integration(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -143,10 +145,19 @@ func TestGetMemberActivity_Gate_Integration(t *testing.T) {
 		{"accepted → host", f.accepted, f.host, true},
 		{"host → accepted", f.host, f.accepted, true},
 		{"accepted → self", f.accepted, f.accepted, true},
+		// The host is deciding whether to let this person in, so the host
+		// can read them before accepting. The app's request card opens
+		// exactly this profile.
+		{"host → pending", f.host, f.pending, true},
+
 		{"outsider → accepted", f.outsider, f.accepted, false},
-		{"pending → accepted", f.pending, f.accepted, false},
-		{"host → pending", f.host, f.pending, false},
 		{"accepted → outsider", f.accepted, f.outsider, false},
+		// The clause above runs in the host's direction ONLY. A pending
+		// requester gains nothing from having asked: not the other people
+		// on the meetup, and not each other.
+		{"pending → accepted", f.pending, f.accepted, false},
+		{"accepted → pending", f.accepted, f.pending, false},
+		{"outsider → pending", f.outsider, f.pending, false},
 	}
 	for _, c := range cases {
 		_, err := h.svc.GetMemberActivity(ctx, c.viewer, c.target)

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"professional-meetups-monolith/backend/internal/eventbus"
 	"professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 	"professional-meetups-monolith/backend/internal/platform/geo"
@@ -82,6 +83,18 @@ type Service interface {
 	GetMeetup(ctx context.Context, req GetMeetupRequest) (Meetup, error)
 	ListMyMeetups(ctx context.Context, req ListMyMeetupsRequest) (ListMyMeetupsResult, error)
 	ListActiveMeetups(ctx context.Context, userID string) ([]Meetup, error)
+
+	// CheckAccountDeletable is asked by the gateway before it deletes an
+	// account. It returns nil when the user owes nobody their presence, and
+	// apperror.ErrConflict otherwise, with a message that names what is
+	// outstanding and how to clear it. Whether someone still has a live
+	// meetup is this module's knowledge alone, so this module answers it.
+	CheckAccountDeletable(ctx context.Context, userID string) error
+	// HandleUserDeleted is this module's subscriber for
+	// eventbus.TopicUserDeleted: it cancels any meetup the user still hosts
+	// and deletes everything this schema holds about them. Idempotent, as
+	// every outbox consumer must be (delivery is at least once).
+	HandleUserDeleted(ctx context.Context, p eventbus.UserDeletedPayload) error
 	// CheckSchedule answers the one-meetup-at-a-time rule ahead of time:
 	// the meetup userID is already committed to in [windowStart,
 	// windowEnd), and false when the window is free. Advisory; CreateMeetup
@@ -860,4 +873,72 @@ func validIntent(i Intent) bool {
 	default:
 		return false
 	}
+}
+
+func (s *service) CheckAccountDeletable(ctx context.Context, userID string) error {
+	c, err := s.meetups.ActiveCommitments(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !c.Any() {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", describeCommitments(c), apperror.ErrConflict)
+}
+
+// describeCommitments is the sentence the app shows when deletion is refused.
+// It names what is outstanding and what to do about it, because "you cannot
+// delete your account" with neither is a dead end, and App Store 5.1.1(v)
+// does not allow deletion to be a dead end. Every branch ends in the step
+// that unblocks it.
+func describeCommitments(c repository.ActiveCommitments) string {
+	switch {
+	case c.Hosting > 0 && c.Accepted+c.Pending > 0:
+		return "You have meetups coming up. Attend them, or cancel the ones you are hosting and withdraw your requests, then delete your account"
+	case c.Hosting > 1:
+		return "You are hosting meetups that have not happened yet. Attend them, or cancel them, then delete your account"
+	case c.Hosting == 1:
+		return "You are hosting a meetup that has not happened yet. Attend it, or cancel it, then delete your account"
+	case c.Accepted > 0 && c.Pending > 0:
+		return "You are joining meetups and have requests waiting. Attend or cancel them, and withdraw your requests, then delete your account"
+	case c.Accepted > 1:
+		return "You are joining meetups that have not happened yet. Attend them, or cancel them, then delete your account"
+	case c.Accepted == 1:
+		return "You are joining a meetup that has not happened yet. Attend it, or cancel it, then delete your account"
+	case c.Pending > 1:
+		return "You have requests to join meetups that are still open. Withdraw them, then delete your account"
+	default:
+		return "You have a request to join a meetup that is still open. Withdraw it, then delete your account"
+	}
+}
+
+// deletedHostCancelReason is what attendees see, in the push and in the
+// cancellation banner, when a meetup is cancelled because its host deleted
+// their account. It has to read naturally after "The host cancelled your X
+// meetup: ", which is how the ordinary cancel push frames any reason.
+const deletedHostCancelReason = "Their account has been closed."
+
+func (s *service) HandleUserDeleted(ctx context.Context, p eventbus.UserDeletedPayload) error {
+	// Meetups they still host come first, and go through the ordinary cancel
+	// path, so the people attending are told. The gateway refuses deletion
+	// while any exist, so this is normally empty: it is for the one created
+	// in the gap between that check and the delete.
+	ids, err := s.meetups.ListLiveHostedMeetupIDs(ctx, p.UserID)
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		err := s.CancelMeetup(ctx, CancelMeetupRequest{
+			MeetupID:   id,
+			HostUserID: p.UserID,
+			Reason:     deletedHostCancelReason,
+		})
+		// Already cancelled, ended or gone between the list and here, which
+		// on a retried delivery is the expected case. Anything else is a real
+		// failure and goes back to the outbox to retry.
+		if err != nil && !errors.Is(err, apperror.ErrConflict) && !errors.Is(err, apperror.ErrNotFound) {
+			return err
+		}
+	}
+	return s.meetups.PurgeUser(ctx, p.UserID)
 }
