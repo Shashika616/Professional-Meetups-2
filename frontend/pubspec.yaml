@@ -38,7 +38,7 @@ dependencies:
   riverpod: ^3.4.2
 
   # LinkedIn OAuth (PKCE) session flow — ADR-011 frontend slice.
-  flutter_secure_storage: ^9.2.4 # Keychain/Keystore-backed token storage (ADR-009)
+  flutter_secure_storage: ^10.3.4 # Keychain/Keystore-backed token storage (ADR-009)
   http: ^1.5.0 # REST calls to the gateway
   app_links: ^6.4.1 # receives the professionalconnections:// redirect
   url_launcher: ^6.3.2 # opens LinkedIn's auth URL in the system browser
@@ -105,7 +105,7 @@ dev_dependencies:
   # Lets tests fake flutter_secure_storage's platform channel in-memory
   # instead of touching a real Keychain/Keystore (unavailable under `flutter
   # test`) — see test/session_storage_test.dart.
-  flutter_secure_storage_platform_interface: ^1.1.2
+  flutter_secure_storage_platform_interface: ^2.1.1
 
   # Lets tests fake geolocator's platform channel (settable
   # GeolocatorPlatform.instance) instead of touching real device location
