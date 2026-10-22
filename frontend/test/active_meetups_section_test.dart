@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
@@ -77,7 +78,7 @@ void main() {
       // Still listed in the plain "Active Meetups" list...
       expect(find.text('Far Off Host'), findsOneWidget);
       // ...but not promoted to the "HAPPENING NOW" persistent card.
-      expect(find.text('HAPPENING NOW'), findsNothing);
+      expect(find.text('Happening now'), findsNothing);
     },
   );
 
@@ -95,7 +96,7 @@ void main() {
     await tester.pumpWidget(_appWith(service));
     await tester.pumpAndSettle();
 
-    expect(find.text('HAPPENING NOW'), findsOneWidget);
+    expect(find.text('Happening now'), findsOneWidget);
     expect(find.text('Starting Soon Host'), findsWidgets);
   });
 
@@ -195,7 +196,7 @@ void main() {
     // with no context does not say which meetup it is about or what
     // pressing it commits you to — the review is its own screen now.
     expect(
-      find.text('RATE WHO YOU MET'),
+      find.text('Rate who you met'),
       findsNothing,
       reason: 'the ratings step lives inside the review flow',
     );
@@ -228,8 +229,8 @@ void main() {
     final slider = tester.getRect(find.byType(ExperienceSlider));
     await tester.tapAt(Offset(slider.center.dx, slider.center.dy));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('SUBMIT'));
-    await tester.tap(find.text('SUBMIT'));
+    await tester.ensureVisible(find.text('Submit'));
+    await tester.tap(find.text('Submit'));
     await tester.pumpAndSettle();
 
     expect(service.submitReviewCallCount, 1);
@@ -272,7 +273,7 @@ void main() {
     expect(onCard('Grace Hopper'), findsOneWidget);
     expect(onCard('Colombo Fort Cafe'), findsOneWidget);
     expect(onCard(justEnded.formattedWindow), findsOneWidget);
-    expect(onCard('REVIEW'), findsOneWidget);
+    expect(onCard('Review'), findsOneWidget);
   });
 
   testWidgets('two finished meetups are told apart by their own details', (
@@ -347,12 +348,12 @@ void main() {
     await tester.pumpWidget(_appWith(service));
     await tester.pumpAndSettle();
 
-    expect(find.text('WAITING FOR YOUR REVIEW'), findsOneWidget);
+    expect(find.text('Waiting for your review'), findsOneWidget);
     expect(find.text('Share your thoughts about this meetup'), findsOneWidget);
-    expect(find.text('HAPPENING NOW'), findsNothing);
+    expect(find.text('Happening now'), findsNothing);
     // Nothing is live, so there is no Active Meetups list at all; the
     // finished meetup is named exactly once, on its review card.
-    expect(find.text('ACTIVE MEETUPS'), findsNothing);
+    expect(find.text('Active meetups'), findsNothing);
     expect(find.text('Another Ended Host'), findsOneWidget);
     // No row edge is painted live.
     final edges = tester
@@ -366,8 +367,8 @@ void main() {
         .map((c) => c.color)
         .toList();
     expect(edges, isNot(contains(AppPalette.verified)));
-    expect(find.text('COMPLETED'), findsNothing);
-    expect(find.text('OPEN'), findsNothing);
+    expect(find.text('Completed'), findsNothing);
+    expect(find.text('Open'), findsNothing);
   });
 
   testWidgets('every card says who hosts and where the viewer stands: a '
@@ -394,9 +395,9 @@ void main() {
 
     // The joined one is in the Happening Now deck AND the list: HOST +
     // YOU'RE IN on both. The hosted one is only in the list (3h out).
-    expect(find.text('YOU\'RE IN'), findsNWidgets(2));
-    expect(find.text('HOST'), findsNWidgets(2));
-    expect(find.text('YOU\'RE HOSTING'), findsOneWidget);
+    expect(find.text('You\'re in'), findsNWidgets(2));
+    expect(find.text('Host'), findsNWidgets(2));
+    expect(find.text('You\'re hosting'), findsOneWidget);
   });
 
   testWidgets(
@@ -571,7 +572,7 @@ void main() {
       await tester.pumpWidget(_appWith(service));
       await tester.pumpAndSettle();
 
-      expect(find.text('CANCELLED'), findsWidgets);
+      expect(find.text('Cancelled'), findsWidgets);
       expect(
         find.text('\u201CCame down with something, so sorry.\u201D'),
         findsOneWidget,
@@ -581,15 +582,15 @@ void main() {
         findsOneWidget,
       );
       // The section order: CANCELLED before HAPPENING NOW.
-      final cancelledY = tester.getTopLeft(find.text('CANCELLED').first).dy;
-      final nowY = tester.getTopLeft(find.text('HAPPENING NOW')).dy;
+      final cancelledY = tester.getTopLeft(find.text('Cancelled').first).dy;
+      final nowY = tester.getTopLeft(find.text('Happening now')).dy;
       expect(cancelledY, lessThan(nowY));
       // The live deck holds only the live meetup.
       expect(find.byType(PageView), findsNothing);
       // And it is NOT repeated as a row in Active Meetups: that list is
       // only for meetups still going ahead.
       expect(find.text('CANCELLED \u00B7 COFFEE'), findsNothing);
-      expect(find.text('ACTIVE MEETUPS'), findsOneWidget);
+      expect(find.text('Active meetups'), findsOneWidget);
     });
 
     testWidgets('tapping the prompt opens the review flow framed as a '
@@ -611,7 +612,7 @@ void main() {
       );
       expect(page.cancellationReason, 'Came down with something, so sorry.');
       expect(
-        find.text('THIS MEETUP WAS CANCELLED BY THE HOST'),
+        find.text('This meetup was cancelled by the host'),
         findsOneWidget,
       );
     });
@@ -654,9 +655,17 @@ void main() {
     await tester.pumpWidget(_appWith(service));
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(IntentType.coffee.icon), findsWidgets);
-    expect(find.text('COFFEE'), findsWidgets);
-    expect(find.byIcon(IntentType.networking.icon), findsWidgets);
-    expect(find.byIcon(IntentType.lunch.icon), findsWidgets);
+    // The intent glyph is an authored stroke icon now, not a Material
+    // font glyph, so the finder matches on the drawn path. Same assertion:
+    // each of the three cards carries its own intent in its corner.
+    Finder intentGlyph(String path) => find.byWidgetPredicate(
+      (w) => w is AppIcon && w.path == path,
+      description: 'AppIcon drawing the intent glyph',
+    );
+
+    expect(intentGlyph(IntentType.coffee.iconPath), findsWidgets);
+    expect(find.text('Coffee'), findsWidgets);
+    expect(intentGlyph(IntentType.networking.iconPath), findsWidgets);
+    expect(intentGlyph(IntentType.lunch.iconPath), findsWidgets);
   });
 }

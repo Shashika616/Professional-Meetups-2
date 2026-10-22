@@ -190,6 +190,21 @@ type CompleteEmailSignupRequest struct {
 	AgeConfirmedOver18 bool
 }
 
+// CompleteAccountClaimRequest finishes the ceremony a federated signup
+// started when it found the address already taken (accountclaim.go).
+//
+// There is deliberately no email field and no provider field: both are
+// inside the ticket, signed, so a caller cannot point a code earned for one
+// address at a different account. Carrying them separately would mean
+// deciding what to do when they disagreed with the ticket, and the only
+// safe answer to that question is not to ask it.
+type CompleteAccountClaimRequest struct {
+	// Ticket is the opaque value the conflict response handed back.
+	Ticket string
+	// Code is the six digits mailed to the address in that ticket.
+	Code string
+}
+
 // GuestSignupRequest carries only the 18+ attestation (ADR-002 §3). There is
 // deliberately nothing else in it: a guest supplies no email, no phone, no
 // name — the display handle is generated server-side, never client-supplied,

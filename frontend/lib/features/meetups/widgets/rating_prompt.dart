@@ -7,6 +7,8 @@ import 'package:professional_connections_platform/core/services/meetup_service.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_dialog.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
@@ -100,45 +102,15 @@ class _RatingPromptState extends ConsumerState<RatingPrompt> {
     RatableParticipant participant,
     int score,
   ) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppPalette.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'CONFIRM RATING',
-          style: TextStyle(
-            color: AppPalette.textPrimary,
-            letterSpacing: 1.6,
-            fontSize: 15,
-          ),
-        ),
-        content: Text(
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Confirm rating',
+      message:
           'Rate ${participant.fullName} $score '
-          '${score == 1 ? 'star' : 'stars'}? You won\'t be able to change '
+          '${score == 1 ? 'star' : 'stars'}? You will not be able to change '
           'this later.',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'CANCEL',
-              style: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              'CONFIRM',
-              style: TextStyle(
-                color: AppPalette.gold,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
+      confirmLabel: 'Confirm rating',
+      cancelLabel: 'Back',
     );
     if (confirmed != true) return;
     if (!mounted) return;
@@ -201,13 +173,13 @@ class _RatingPromptState extends ConsumerState<RatingPrompt> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionLabel('RATE WHO YOU MET'),
+        const SectionLabel('Rate who you met'),
         const SizedBox(height: 12),
         ...participants.map(
           (p) => Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: FlatCard(
-              radius: 12,
+              radius: 18,
               padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -235,7 +207,7 @@ class _RatingPromptState extends ConsumerState<RatingPrompt> {
                       ),
                       if (p.alreadyRated)
                         Text(
-                          'RATED',
+                          'Rated',
                           style: TextStyle(
                             color: AppPalette.verified,
                             fontWeight: FontWeight.w800,
@@ -288,11 +260,7 @@ class _StarPicker extends StatelessWidget {
           onTap: () => onRate(i + 1),
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 1),
-            child: Icon(
-              Icons.star_outline_rounded,
-              size: 22,
-              color: AppPalette.gold,
-            ),
+            child: AppIcon(AppIcons.star, size: 22, color: AppPalette.gold),
           ),
         ),
       ),

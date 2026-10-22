@@ -8,9 +8,11 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_dialog.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_tag.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
-import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/other_meetups_nearby.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/schedule_conflict_sheet.dart';
@@ -180,15 +182,15 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   }) async {
     final String? note;
     if (pending) {
-      final confirmed = await showDialog<bool>(
-        context: context,
+      final confirmed = await showAppDialog<bool>(
+        context,
         builder: (context) => const _CancelRequestDialog(),
       );
       if (confirmed != true) return;
       note = '';
     } else {
-      note = await showDialog<String>(
-        context: context,
+      note = await showAppDialog<String>(
+        context,
         // Returns null on BACK/dismiss, or the (possibly empty) note text
         // on WITHDRAW — a plain bool wouldn't carry the note back out, so
         // the dialog itself resolves the confirm/note-capture into one
@@ -249,11 +251,12 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   /// that's actually enforced; this is UX only, same discipline as
   /// ADR-013.
   Widget _buildJoinAction(BuildContext context, Meetup meetup) {
-    final trustLevel =
-        ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    final trustLevel = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.trustLevel ?? 0),
+    );
     if (!meetup.lockedForViewer && meetup.intent.canJoin(trustLevel)) {
       return PrimaryButton(
-        label: 'I\'M INTERESTED',
+        label: 'I\'m interested',
         onPressed: () async {
           // Who is hosting, before anything is sent.
           if (!await showJoinConfirmationSheet(context, meetup: meetup)) {
@@ -264,7 +267,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       );
     }
     return PrimaryButton(
-      label: 'I\'M INTERESTED',
+      label: 'I\'m interested',
       onPressed: () {
         showSnack(
           context,
@@ -421,7 +424,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     return AppBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('MEETUP')),
+        appBar: AppBar(title: const Text('Meetup')),
         body: SafeArea(
           child: _loading
               ? const _MeetupDetailSkeleton()
@@ -443,171 +446,93 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     );
   }
 
-  /// Green while the meetup is still ahead, gold once its window has passed,
-  /// muted if cancelled. Identical rule to `_MyMeetupTile` on Events and
-  /// `_ActiveMeetupRow` on Home, so one meetup keeps one colour wherever it
-  /// is shown.
-  Color _stateEdgeColor(Meetup meetup) {
-    final end = meetup.windowEnd;
-    final over = end != null && DateTime.now().isAfter(end);
-    return switch (meetup.status) {
-      MeetupStatus.cancelled => AppPalette.cancelled,
-      _ when over => AppPalette.gold,
-      _ => AppPalette.verified,
-    };
-  }
-
   Widget _buildContent(BuildContext context, Meetup meetup) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       children: [
-        // The same shell as the Home and Events cards: a state bar down the
-        // left edge instead of a status chip on the right. This page is where
-        // a user lands FROM those cards, so it arriving with different
-        // vocabulary was the most jarring inconsistency of the three.
-        ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: FlatCard(
-            radius: 14,
-            padding: EdgeInsets.zero,
-            child: Stack(
-              children: [
-                IntentBackdrop(intent: meetup.intent),
-                IntrinsicHeight(
+        // THE HERO IS THE PHOTO NOW (screen set: "Meetup detail")
+        //
+        // This was one card with [IntentBackdrop] behind it — the intent's
+        // photo at low opacity under the text, which at that strength read
+        // as a smudge rather than as a picture of the kind of thing this
+        // is. The screen set puts the photo up front: a 112px band with a
+        // scrim, the intent tag, the time and the place over it, and the
+        // host moved out into its own card underneath.
+        //
+        // Nothing below the hero changed: same host row, same confirmed
+        // count, same ParticipantsStrip, same locked handling.
+        _DetailHero(meetup: meetup),
+        const SizedBox(height: 14),
+        FlatCard(
+          radius: 22,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // lockedForViewer (ADR-028, round-5 hardening) — GetMeetup
+              // now redacts the same way ListOpenMeetups does, so
+              // hostFullName/locationLabel/the window can genuinely be
+              // absent here. Reuses the shared LockedCardHeader
+              // rather than a second lock-treatment widget. Currently
+              // unreachable through any in-app navigation path (a locked
+              // card's tap redirects at the card level, never opening this
+              // page) — handled anyway so this doesn't force-unwrap into a
+              // crash the moment that stops being true (e.g. a
+              // notification deep link).
+              if (meetup.lockedForViewer)
+                LockedCardHeader(locationLabel: meetup.locationLabel)
+              else ...[
+                // The window and the address are on the hero now;
+                // repeating them here was the first thing that
+                // looked wrong once the photo moved up.
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => PublicProfilePage.open(
+                    context,
+                    userId: meetup.hostUserId,
+                    initialName: meetup.hostFullName,
+                  ),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(width: 4, color: _stateEdgeColor(meetup)),
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.all(18),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 32,
-                                    height: 32,
-                                    decoration: BoxDecoration(
-                                      color: _stateEdgeColor(
-                                        meetup,
-                                      ).withValues(alpha: 0.12),
-                                      borderRadius: BorderRadius.circular(9),
-                                    ),
-                                    child: Icon(
-                                      meetup.intent.icon,
-                                      size: 16,
-                                      color: _stateEdgeColor(meetup),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      meetup.intentLabel,
-                                      style: TextStyle(
-                                        color: AppPalette.textSecondary,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 1.3,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              // lockedForViewer (ADR-028, round-5 hardening) — GetMeetup
-                              // now redacts the same way ListOpenMeetups does, so
-                              // hostFullName/locationLabel/the window can genuinely be
-                              // absent here. Reuses the shared LockedCardHeader
-                              // rather than a second lock-treatment widget. Currently
-                              // unreachable through any in-app navigation path (a locked
-                              // card's tap redirects at the card level, never opening this
-                              // page) — handled anyway so this doesn't force-unwrap into a
-                              // crash the moment that stops being true (e.g. a
-                              // notification deep link).
-                              if (meetup.lockedForViewer)
-                                LockedCardHeader(
-                                  locationLabel: meetup.locationLabel,
-                                )
-                              else ...[
-                                Text(
-                                  meetup.formattedWindow,
-                                  style: TextStyle(
-                                    color: AppPalette.textPrimary,
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  meetup.locationLabel!,
-                                  style: TextStyle(
-                                    color: AppPalette.textSecondary,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                const SizedBox(height: 12),
-                                GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () => PublicProfilePage.open(
-                                    context,
-                                    userId: meetup.hostUserId,
-                                    initialName: meetup.hostFullName,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Flexible(
-                                        child: Text(
-                                          'Hosted by ${meetup.hostFullName!} • L${meetup.hostTrustLevel} Trust',
-                                          style: TextStyle(
-                                            color: AppPalette.textSecondary,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ),
-                                      Icon(
-                                        Icons.chevron_right_rounded,
-                                        size: 16,
-                                        color: AppPalette.textSecondary,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 4),
-                              // accepted_count/capacity are never redacted (ADR-028 § 1).
-                              Text(
-                                '${meetup.acceptedCount}/${meetup.capacity} confirmed',
-                                style: TextStyle(
-                                  color: AppPalette.textSecondary,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              // Who is actually coming, on the card itself. Self-hides when
-                              // there is nobody but the host and nothing to show. Identities
-                              // are withheld server-side below trust level 2 — see
-                              // ParticipantsStrip.
-                              const SizedBox(height: 12),
-                              Divider(height: 1, color: AppPalette.hairline),
-                              const SizedBox(height: 12),
-                              ParticipantsStrip(
-                                meetupId: widget.meetupId,
-                                meetup: meetup,
-                                finished:
-                                    meetup.status == MeetupStatus.completed ||
-                                    _isPastMeetup,
-                              ),
-                            ],
+                      Flexible(
+                        child: Text(
+                          'Hosted by ${meetup.hostFullName!} • L${meetup.hostTrustLevel} Trust',
+                          style: TextStyle(
+                            color: AppPalette.textSecondary,
+                            fontSize: 12,
                           ),
                         ),
+                      ),
+                      AppIcon(
+                        AppIcons.forward,
+                        size: 16,
+                        color: AppPalette.textSecondary,
                       ),
                     ],
                   ),
                 ),
               ],
-            ),
+              const SizedBox(height: 4),
+              // accepted_count/capacity are never redacted (ADR-028 § 1).
+              Text(
+                '${meetup.acceptedCount}/${meetup.capacity} confirmed',
+                style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+              ),
+              // Who is actually coming, on the card itself. Self-hides when
+              // there is nobody but the host and nothing to show. Identities
+              // are withheld server-side below trust level 2 — see
+              // ParticipantsStrip.
+              const SizedBox(height: 12),
+              Divider(height: 1, color: AppPalette.hairline),
+              const SizedBox(height: 12),
+              ParticipantsStrip(
+                meetupId: widget.meetupId,
+                meetup: meetup,
+                finished:
+                    meetup.status == MeetupStatus.completed || _isPastMeetup,
+              ),
+            ],
           ),
         ),
         if (meetup.status == MeetupStatus.cancelled) ...[
@@ -632,14 +557,17 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
         // The participants strip on the card above is the way into the
         // guest list — a second PARTICIPANTS tile here did the same thing.
         _ActionTile(
-          icon: Icons.map_outlined,
-          label: 'LOCATION',
+          icon: AppIcons.map,
+          label: 'Location',
           detail: 'Map, address and directions',
           onTap: () => LocationViewPage.open(
             context,
             meetup,
-            viewerTrustLevel:
-                ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0,
+            viewerTrustLevel: ref.watch(
+              authSessionProvider.select(
+                (s) => s.value?.profile?.trustLevel ?? 0,
+              ),
+            ),
           ),
         ),
         // The host's way into their request list from here. Hosts reach this
@@ -649,8 +577,8 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
         if (meetup.isHostedByMe && !_isPastMeetup) ...[
           const SizedBox(height: 12),
           _ActionTile(
-            icon: Icons.people_outline_rounded,
-            label: 'VIEW REQUESTS',
+            icon: AppIcons.people,
+            label: 'View requests',
             detail: 'See who asked to join, accept or pass',
             onTap: () async {
               await Navigator.of(context).push(
@@ -711,7 +639,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
               // shout the way the withdrawal does.
               if (meetup.myRequestStatus == MeetupRequestStatus.pending)
                 SecondaryButton(
-                  label: 'CANCEL REQUEST',
+                  label: 'Cancel request',
                   height: 40,
                   color: AppPalette.cancelled,
                   borderColor: AppPalette.cancelled.withValues(alpha: 0.55),
@@ -720,7 +648,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
                 )
               else
                 SecondaryButton(
-                  label: 'WITHDRAW REQUEST',
+                  label: 'Withdraw request',
                   height: 40,
                   color: AppPalette.danger,
                   borderColor: AppPalette.danger,
@@ -797,7 +725,7 @@ class _MeetupDetailSkeleton extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       children: [
         FlatCard(
-          radius: 12,
+          radius: 18,
           padding: const EdgeInsets.all(18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -838,31 +766,31 @@ class _RequestStatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final (label, detail, icon, color) = switch (status) {
       MeetupRequestStatus.pending => (
-        'REQUEST PENDING',
+        'Request pending',
         'Waiting for the host to respond. We will notify you.',
-        Icons.hourglass_top_rounded,
+        AppIcons.hourglass,
         AppPalette.gold,
       ),
       MeetupRequestStatus.accepted => (
-        'YOU\'RE IN',
+        'You\'re in',
         'The host accepted your request. See you there.',
-        Icons.check_circle_rounded,
+        AppIcons.checkCircle,
         AppPalette.verified,
       ),
       // Not red and not "declined": hosts keep groups small, so a no is
       // about fit, and the section under this banner points at what is
       // next.
       MeetupRequestStatus.rejected => (
-        'NOT THIS TIME',
+        'Not this time',
         'Hosts keep their groups small, so not every request can fit. '
             'There are more meetups near you.',
-        Icons.explore_outlined,
+        AppIcons.explore,
         AppPalette.candyBlue,
       ),
       MeetupRequestStatus.withdrawn => (
-        'WITHDRAWN',
+        'Withdrawn',
         'You left this meetup.',
-        Icons.undo_rounded,
+        AppIcons.undo,
         AppPalette.textSecondary,
       ),
     };
@@ -871,7 +799,7 @@ class _RequestStatusBanner extends StatelessWidget {
       liveRegion: true,
       label: '$label. $detail',
       child: FlatCard(
-        radius: 12,
+        radius: 18,
         padding: EdgeInsets.zero,
         tint: color.withValues(alpha: 0.08),
         border: color.withValues(alpha: 0.30),
@@ -881,12 +809,13 @@ class _RequestStatusBanner extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Edge stripe in the state colour, the same device the
-                // cancelled banner and history rows use for outcome.
-                Container(width: 4, color: color),
+                // The stripe went with the rest of them. This banner is
+                // already tinted AND bordered in the state colour and
+                // leads with a state icon in it; a fourth copy of the
+                // same signal down the edge added nothing.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(14, 12, 0, 12),
-                  child: Icon(icon, size: 22, color: color),
+                  child: AppIcon(icon, size: 22, color: color),
                 ),
                 Expanded(
                   child: Padding(
@@ -900,7 +829,7 @@ class _RequestStatusBanner extends StatelessWidget {
                           style: TextStyle(
                             color: color,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: 1.3,
+                            letterSpacing: 0.3,
                             fontSize: 11.5,
                           ),
                         ),
@@ -958,17 +887,17 @@ class _SafetyGateSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'SAFETY GATE',
+          'Safety gate',
           style: TextStyle(
             color: AppPalette.textSecondary,
             fontSize: 11,
             fontWeight: FontWeight.w800,
-            letterSpacing: 1.6,
+            letterSpacing: 0.3,
           ),
         ),
         const SizedBox(height: 12),
         FlatCard(
-          radius: 12,
+          radius: 18,
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -991,7 +920,7 @@ class _SafetyGateSection extends StatelessWidget {
               const SizedBox(height: 12),
               if (!acknowledged)
                 PrimaryButton(
-                  label: 'I UNDERSTAND',
+                  label: 'I understand',
                   height: 44,
                   onPressed: onAcknowledgeChecklist,
                 )
@@ -1006,7 +935,7 @@ class _SafetyGateSection extends StatelessWidget {
         // it with nobody. Now a real action, and the copy says exactly what
         // the recipient gets rather than implying tracking.
         FlatCard(
-          radius: 12,
+          radius: 18,
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1043,8 +972,8 @@ class _SafetyGateSection extends StatelessWidget {
               // Accent on the label and the border so it reads as the
               // action it is, not as a caption under the card's copy.
               SecondaryButton(
-                label: sharedCount > 0 ? 'TELL SOMEONE ELSE' : 'TELL SOMEONE',
-                icon: Icons.ios_share_rounded,
+                label: sharedCount > 0 ? 'Tell someone else' : 'Tell someone',
+                icon: AppIcons.share,
                 height: 44,
                 color: AppPalette.candyBlue,
                 borderColor: AppPalette.candyBlue.withValues(alpha: 0.6),
@@ -1078,6 +1007,112 @@ class _SafetyGateSection extends StatelessWidget {
 /// The cancellation, on the meetup's own page: the state and the host's
 /// words. Same soft red as the card edge; the reason quoted because it is
 /// the host's, not the app's.
+/// The meetup's photo and its headline, as a cover card: the picture on
+/// top, the intent tag, the time and the place on the card surface under
+/// it.
+///
+/// # THE TEXT CAME OUT FROM ON TOP OF THE PICTURE
+///
+/// The screen set lays the title over the photo with a scrim. That works
+/// against the art it was drawn with; against these assets it does not.
+/// They are bright, busy illustrations with faces and whiteboards in the
+/// lower third, and no scrim that still lets the picture read is dark
+/// enough to carry 17px white text over all of them. Deepening the scrim
+/// until the text was safe turned the photo into a grey band, which is
+/// the thing the hero existed to stop being.
+///
+/// So the text sits under the picture instead. It is always legible, in
+/// both themes, whatever the image happens to contain — and the tag can
+/// use the accent colours the rest of the app's tags use, rather than the
+/// white-on-dark exception a photo overlay forced.
+class _DetailHero extends StatelessWidget {
+  const _DetailHero({required this.meetup});
+
+  final Meetup meetup;
+
+  @override
+  Widget build(BuildContext context) {
+    final locked = meetup.lockedForViewer;
+    final width = MediaQuery.sizeOf(context).width;
+
+    return FlatCard(
+      radius: 22,
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            // 124, not the screen set's 112. That number was drawn for a
+            // band with the title ON it, where the photo is backing
+            // texture. Here the label sits under the picture, so the
+            // picture needs enough height to still lead.
+            height: 124,
+            width: double.infinity,
+            child: Image.asset(
+              meetup.intent.imageAsset,
+              fit: BoxFit.cover,
+              // Decoded at the band's real width, not the source's.
+              cacheWidth: (width * MediaQuery.devicePixelRatioOf(context))
+                  .round(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppTag(
+                  meetup.intentLabel,
+                  icon: meetup.intent.iconPath,
+                  compact: true,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  locked ? 'Location hidden' : meetup.formattedWindow,
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (!locked && meetup.locationLabel != null) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(top: 1),
+                        child: AppIcon(
+                          AppIcons.pin,
+                          size: 14,
+                          color: AppPalette.textTertiary,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Expanded(
+                        child: Text(
+                          meetup.locationLabel!,
+                          style: TextStyle(
+                            color: AppPalette.textSecondary,
+                            fontSize: 13,
+                            height: 1.35,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CancelledBanner extends StatelessWidget {
   const _CancelledBanner({required this.reason});
 
@@ -1100,11 +1135,11 @@ class _CancelledBanner extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.event_busy_rounded, size: 16, color: tone),
+              AppIcon(AppIcons.calendarX, size: 16, color: tone),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'CANCELLED BY THE HOST',
+                  'Cancelled by the host',
                   style: TextStyle(
                     color: tone,
                     fontSize: 10.5,
@@ -1143,7 +1178,7 @@ class _ActionTile extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData icon;
+  final String icon;
   final String label;
   final String detail;
   final VoidCallback onTap;
@@ -1177,7 +1212,7 @@ class _ActionTile extends StatelessWidget {
                     color: accent.withValues(alpha: 0.14),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(icon, size: 20, color: accent),
+                  child: AppIcon(icon, size: 20, color: accent),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1190,7 +1225,7 @@ class _ActionTile extends StatelessWidget {
                           color: AppPalette.textPrimary,
                           fontSize: 11.5,
                           fontWeight: FontWeight.w800,
-                          letterSpacing: 1.3,
+                          letterSpacing: 0.3,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -1205,7 +1240,7 @@ class _ActionTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(Icons.chevron_right_rounded, size: 22, color: accent),
+                AppIcon(AppIcons.forward, size: 22, color: accent),
               ],
             ),
           ),
@@ -1226,8 +1261,8 @@ class _ChecklistItem extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(
-            Icons.check_circle_outline,
+          AppIcon(
+            AppIcons.checkCircle,
             size: 14,
             color: AppPalette.textSecondary,
           ),
@@ -1253,7 +1288,7 @@ class _DoneRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(Icons.check_circle, size: 16, color: AppPalette.verified),
+        AppIcon(AppIcons.checkCircle, size: 16, color: AppPalette.verified),
         const SizedBox(width: 8),
         Text(
           text,
@@ -1290,49 +1325,16 @@ class _CancelRequestDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'CANCEL REQUEST',
-        style: TextStyle(
-          color: AppPalette.textPrimary,
-          fontSize: 13,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1.6,
-        ),
-      ),
-      content: Text(
-        'Take back your request to join? The host hasn\'t answered yet, so '
-        'nothing is sent to them. You can request again any time.',
-        style: TextStyle(color: AppPalette.textSecondary, fontSize: 13.5),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(
-            'KEEP IT',
-            style: TextStyle(
-              color: AppPalette.textSecondary,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-              fontSize: 11,
-            ),
-          ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(
-            'CANCEL REQUEST',
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-              fontSize: 11,
-            ),
-          ),
-        ),
-      ],
+    return AppConfirmDialog(
+      title: 'Cancel request',
+      message:
+          'Take back your request to join? The host has not answered yet, '
+          'so nothing is sent to them. You can request again any time.',
+      confirmLabel: 'Cancel request',
+      cancelLabel: 'Keep it',
+      danger: true,
+      onConfirm: () => Navigator.pop(context, true),
+      onCancel: () => Navigator.pop(context, false),
     );
   }
 }
@@ -1355,56 +1357,17 @@ class _WithdrawNoteDialogState extends State<_WithdrawNoteDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'WITHDRAW REQUEST',
-        style: TextStyle(
-          color: AppPalette.textPrimary,
-          letterSpacing: 1.6,
-          fontSize: 15,
-        ),
+    return AppConfirmDialog(
+      title: 'Withdraw request',
+      message: 'Withdraw your request to join this meetup?',
+      confirmLabel: 'Withdraw request',
+      cancelLabel: 'Back',
+      danger: true,
+      onConfirm: () => Navigator.pop(context, _controller.text.trim()),
+      child: DialogTextArea(
+        controller: _controller,
+        hint: 'Note for the host (optional)',
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Withdraw your request to join this meetup?',
-            style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _controller,
-            maxLines: 3,
-            style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Note for the host (optional)',
-              hintStyle: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(
-            'BACK',
-            style: TextStyle(color: AppPalette.textSecondary),
-          ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, _controller.text.trim()),
-          child: Text(
-            'WITHDRAW',
-            style: TextStyle(
-              color: AppPalette.danger,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1439,67 +1402,22 @@ class _DeclineReasonDialogState extends State<_DeclineReasonDialog> {
   @override
   Widget build(BuildContext context) {
     final trimmed = _controller.text.trim();
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'DECLINE',
-        style: TextStyle(
-          color: AppPalette.danger,
-          letterSpacing: 1.6,
-          fontSize: 15,
-        ),
+    return AppConfirmDialog(
+      title: 'Decline',
+      message:
+          'Decline this meetup\'s safety checklist? The host will be '
+          'notified with your reason.',
+      confirmLabel: 'Decline',
+      cancelLabel: 'Back',
+      danger: true,
+      // Null while the reason is empty, which leaves the confirm button
+      // dimmed and inert rather than looking live and doing nothing.
+      onConfirm: trimmed.isEmpty ? null : () => Navigator.pop(context, trimmed),
+      child: DialogTextArea(
+        controller: _controller,
+        hint: 'Reason for declining (required)',
+        onChanged: (_) => setState(() {}),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Decline this meetup\'s safety checklist? The host will be '
-            'notified with your reason.',
-            style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _controller,
-            onChanged: (_) => setState(() {}),
-            maxLines: 3,
-            style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Reason for declining (required)',
-              hintStyle: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(
-            'BACK',
-            style: TextStyle(color: AppPalette.textSecondary),
-          ),
-        ),
-        TextButton(
-          onPressed: trimmed.isEmpty
-              ? null
-              : () => Navigator.pop(context, trimmed),
-          child: Text(
-            'DECLINE',
-            // Greyed while disabled. `onPressed: null` already blocks the
-            // tap, but an explicit `style:` overrides TextButton's own
-            // disabled colour, so the control looked fully active while
-            // doing nothing — the user reads that as a broken button, not
-            // as "fill the field in".
-            style: TextStyle(
-              color: trimmed.isEmpty
-                  ? AppPalette.textSecondary.withValues(alpha: 0.45)
-                  : AppPalette.danger,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

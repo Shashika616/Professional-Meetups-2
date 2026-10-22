@@ -6,6 +6,7 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_body.dart';
 
 /// Another member, as a host or fellow participant is allowed to see them:
@@ -57,7 +58,7 @@ class _PublicProfilePageState extends ConsumerState<PublicProfilePage> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('MEMBER')),
+      appBar: AppBar(title: const Text('Member')),
       body: AppBackground(
         child: SafeArea(
           child: FutureBuilder<PublicProfile>(
@@ -67,8 +68,8 @@ class _PublicProfilePageState extends ConsumerState<PublicProfilePage> {
                 final error = snapshot.error;
                 return _State(
                   icon: error is ForbiddenActionException
-                      ? Icons.lock_outline_rounded
-                      : Icons.cloud_off_rounded,
+                      ? AppIcons.lock
+                      : AppIcons.cloudOff,
                   message: switch (error) {
                     ForbiddenActionException e => e.message,
                     SessionExpiredException _ =>
@@ -97,7 +98,7 @@ class _PublicProfilePageState extends ConsumerState<PublicProfilePage> {
 class _State extends StatelessWidget {
   const _State({required this.icon, required this.message});
 
-  final IconData icon;
+  final String icon;
   final String message;
 
   @override
@@ -108,7 +109,7 @@ class _State extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 36, color: AppPalette.textSecondary),
+            AppIcon(icon, size: 36, color: AppPalette.textSecondary),
             const SizedBox(height: 12),
             Text(
               message,

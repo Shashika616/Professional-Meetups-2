@@ -281,11 +281,9 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
   @override
   Future<AuthSessionState> build() async {
     // getValidSession() refreshes-and-persists first if the stored access
-    // token is expired or about to be — a secure-storage read failure, an
-    // already-dead refresh token, or a transient network error during that
-    // refresh are all treated alike as "no session," same as before this
-    // addendum: forcing a fresh LinkedIn login is the safe fallback, not a
-    // hang. This is also why an idle-but-not-force-quit session (backgrounded
+    // token is expired or about to be. A secure-storage read failure or an
+    // already-dead refresh token mean "no session". A network failure during
+    // that refresh does NOT (V-17a) — see the AuthNetworkException branch. This is also why an idle-but-not-force-quit session (backgrounded
     // past the 15-minute access-token TTL but well within the 30-day
     // refresh-token life) now correctly comes back logged in on relaunch
     // instead of being forced to sign in again.
@@ -298,6 +296,20 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
       );
       unawaited(_registerPushTokenIfAvailable());
       return state;
+    } on AuthNetworkException {
+      // Offline, or the backend too slow to answer, while the access token
+      // had expired (V-17a). The refresh token was never rejected, so this
+      // is still a valid session, and TokenRefresher has left it in
+      // storage: open the app signed in with it rather than on the sign-in
+      // screen. The first call made once the network is back refreshes it.
+      // The profile is the one the session itself carries — fetching a
+      // fresh one would only wait out the same network failure again.
+      final stored = await ref.read(sessionStorageProvider).loadSession();
+      if (stored == null) return const AuthSessionState();
+      return AuthSessionState(
+        session: stored,
+        profile: _profileFromSession(stored),
+      );
     } catch (_) {
       return const AuthSessionState();
     }
@@ -401,6 +413,28 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
             .read(authServiceProvider)
             .loginWithEmail(email: email, code: code),
       );
+
+  /// Claiming an account that already holds this person's verified address
+  /// (see [AccountClaimRequiredException]). Routed through the same
+  /// [_completeSignIn] tail as every other way in, because that is exactly
+  /// what this is: the session it produces has to be stored, the profile
+  /// fetched and the push token registered identically. A successful claim
+  /// is a sign-in, not a special case.
+  Future<void> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => _completeSignIn(
+    () => ref
+        .read(authServiceProvider)
+        .completeAccountClaim(ticket: ticket, code: code),
+  );
+
+  /// Sends another claim code. Not a sign-in, so deliberately not wrapped in
+  /// [_completeSignIn]: putting the provider into AsyncLoading for a resend
+  /// would make every widget watching the session flicker while the user is
+  /// mid-typing.
+  Future<int> resendAccountClaimCode(String ticket) =>
+      ref.read(authServiceProvider).resendAccountClaimCode(ticket);
 
   /// Shared tail for every account-creation/sign-in path (ADR-014) — sets
   /// [AsyncLoading], calls [signIn], saves the resulting session, fetches
@@ -652,14 +686,18 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     try {
       return await ref.read(authServiceProvider).getProfile();
     } catch (_) {
-      return UserProfile(
-        id: session.userId,
-        fullName: session.fullName,
-        profilePhotoUrl: session.profilePhotoUrl,
-        trustLevel: session.trustLevel,
-      );
+      return _profileFromSession(session);
     }
   }
+
+  /// The minimal profile derivable from a session alone, for when the
+  /// network cannot supply the real one.
+  UserProfile _profileFromSession(AuthSession session) => UserProfile(
+    id: session.userId,
+    fullName: session.fullName,
+    profilePhotoUrl: session.profilePhotoUrl,
+    trustLevel: session.trustLevel,
+  );
 }
 
 final authSessionProvider =

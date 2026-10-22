@@ -11,6 +11,57 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 /// (e.g. MatchesPage's fire-and-forget updateLastKnownLocation, ADR-021
 /// §3) isn't what the test is actually about.
 class ImmediateAuthService implements AuthService {
+  // --- the claim-an-existing-account ceremony, scriptable ---
+
+  /// Set to make [signInWithGoogle] report that the address is already on
+  /// an account, which is what opens the claim sheet.
+  AccountClaimRequiredException? googleClaimRequired;
+
+  /// The code [completeAccountClaim] accepts. Anything else is rejected the
+  /// way the server rejects a wrong one.
+  String acceptedClaimCode = '123456';
+
+  /// Recorded so a test can prove the sheet does NOT send a code on mount
+  /// (the 409 already sent one) and does send one on Resend.
+  int resendClaimCalls = 0;
+
+  /// Recorded so a test can prove the ticket travels unchanged.
+  String? claimedWithTicket;
+
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) async {
+    claimedWithTicket = ticket;
+    if (code != acceptedClaimCode) {
+      throw const InvalidVerificationCodeException(
+        'That code is not right. Please check and try again.',
+      );
+    }
+    return _claimedSession;
+  }
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) async {
+    resendClaimCalls++;
+    claimedWithTicket = ticket;
+    return 60;
+  }
+
+  /// The session a successful claim yields: the EXISTING account, so
+  /// isNewUser is false and the trust level is whatever that account had.
+  static final AuthSession _claimedSession = AuthSession(
+    userId: 'existing-user-1',
+    accessToken: 'claimed-access-token',
+    refreshToken: 'claimed-refresh-token',
+    trustLevel: 2,
+    isNewUser: false,
+    accessTokenExpiresAt: DateTime.now().add(const Duration(minutes: 15)),
+    fullName: 'Ada Lovelace',
+    profilePhotoUrl: '',
+  );
+
   /// Settable so a widget test can script what another member's profile
   /// looks like; defaults to a plain Level-2 member with a phone badge.
   PublicProfile Function(String userId) publicProfileFor = (id) =>
@@ -43,8 +94,11 @@ class ImmediateAuthService implements AuthService {
       throw UnimplementedError();
 
   @override
-  Future<AuthSession> signInWithGoogle({required bool ageConfirmedOver18}) =>
-      throw UnimplementedError();
+  Future<AuthSession> signInWithGoogle({required bool ageConfirmedOver18}) {
+    final claim = googleClaimRequired;
+    if (claim != null) throw claim;
+    throw UnimplementedError();
+  }
 
   @override
   Future<AuthSession> signUpWithEmail({
@@ -138,8 +192,8 @@ class ImmediateAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) => throw UnimplementedError();
 
   @override

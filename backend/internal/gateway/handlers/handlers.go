@@ -94,10 +94,21 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/auth/guest/signup", h.guestSignup)
 	mux.HandleFunc("POST /v1/auth/email/login/start", h.startEmailLogin)
 	mux.HandleFunc("POST /v1/auth/email/login", h.completeEmailLogin)
+	// Claiming an account that already holds the caller's verified address.
+	// Unauthenticated like every other signup route: the signed ticket from
+	// the 409 plus the code mailed to that address are the credential.
+	mux.HandleFunc("POST /v1/auth/account-claim", h.completeAccountClaim)
+	mux.HandleFunc("POST /v1/auth/account-claim/resend", h.resendAccountClaimCode)
 	mux.HandleFunc("POST /v1/auth/refresh", h.refresh)
 	// Logout is unauthenticated (a dead access token must not stop
 	// sign-out) but reads the bearer when it is valid — see logout.
 	mux.Handle("POST /v1/auth/logout", h.optionalAuth(http.HandlerFunc(h.logout)))
+
+	// A trusted contact agreeing, from the link texted to them (#80).
+	// Unauthenticated by nature: the person confirming has no account. The
+	// token in the path is the credential. See contact_confirm.go.
+	mux.HandleFunc("GET /c/{token}", h.showContactConfirm)
+	mux.HandleFunc("POST /c/{token}", h.confirmContact)
 
 	// Authenticated — Profile-initiated linking only.
 	mux.Handle("POST /v1/auth/identities/link", h.requireAuth(http.HandlerFunc(h.linkIdentity)))
@@ -237,6 +248,57 @@ func (h *Handler) federatedSignup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeSession(w, session)
+}
+
+type completeAccountClaimRequest struct {
+	Ticket string `json:"ticket"`
+	Code   string `json:"code"`
+}
+
+// completeAccountClaim spends the code the 409 mailed and returns a session
+// for the account that already held the address, with the provider the
+// caller just signed in with attached to it. Unauthenticated.
+//
+// There is deliberately no email field: the address is inside the ticket,
+// signed, so a code earned for one mailbox cannot be aimed at another
+// account.
+func (h *Handler) completeAccountClaim(w http.ResponseWriter, r *http.Request) {
+	var req completeAccountClaimRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, msgBadRequest)
+		return
+	}
+
+	session, err := h.monolith.CompleteAccountClaim(r.Context(), req.Ticket, req.Code)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+
+	h.writeSession(w, session)
+}
+
+type resendAccountClaimCodeRequest struct {
+	Ticket string `json:"ticket"`
+}
+
+// resendAccountClaimCode sends another code for a claim in progress. The
+// ticket is what authorises it — without one this would be an endpoint that
+// mails anybody.
+func (h *Handler) resendAccountClaimCode(w http.ResponseWriter, r *http.Request) {
+	var req resendAccountClaimCodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, msgBadRequest)
+		return
+	}
+
+	resendAfter, err := h.monolith.ResendAccountClaimCode(r.Context(), req.Ticket)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, startVerificationResponse{ResendAfterSeconds: resendAfter})
 }
 
 type linkedInCallbackRequest struct {
@@ -614,6 +676,28 @@ type scheduleConflictResponse struct {
 // change than one rule warrants.
 const scheduleConflictCode = "schedule_conflict"
 
+// accountClaimRequiredResponse is the 409 body for a federated signup whose
+// provider-verified address is already on an account: the sentence, a code
+// the app switches on, and what the claim popup needs to work.
+//
+// WHAT IS NOT IN HERE, AND MUST NOT BE ADDED: anything describing the
+// existing account. The caller has proved to their identity provider that
+// they control this mailbox and nothing more. `email` is their own address,
+// echoed back out of their own token so the popup can say where to look.
+type accountClaimRequiredResponse struct {
+	Error              string `json:"error"`
+	Code               string `json:"code"`
+	Ticket             string `json:"ticket"`
+	Email              string `json:"email"`
+	ResendAfterSeconds int32  `json:"resend_after_seconds"`
+}
+
+// accountClaimRequiredCode is the second (and only other) `code` the app
+// switches on. It has to be a code rather than a matched sentence: the app
+// opens a different screen on this one, and matching on prose would break
+// the first time the wording improved.
+const accountClaimRequiredCode = "account_claim_required"
+
 // writeGRPCError maps a gRPC status error from monolithclient to the
 // corresponding HTTP status via apperror's single mapping table — the one
 // place this translation happens, not a switch statement per handler.
@@ -627,6 +711,17 @@ func writeGRPCError(w http.ResponseWriter, err error) {
 		slog.Default().Error("upstream error", "grpc_code", st.Code().String(), "error", err)
 	}
 	message := apperror.UserMessage(st.Code(), st.Message())
+	var claim *monolithclient.AccountClaimRequiredError
+	if errors.As(err, &claim) {
+		writeJSON(w, code, accountClaimRequiredResponse{
+			Error:              message,
+			Code:               accountClaimRequiredCode,
+			Ticket:             claim.Ticket,
+			Email:              claim.Email,
+			ResendAfterSeconds: claim.ResendAfterSeconds,
+		})
+		return
+	}
 	var conflict *monolithclient.ScheduleConflictError
 	if errors.As(err, &conflict) {
 		writeJSON(w, code, scheduleConflictResponse{

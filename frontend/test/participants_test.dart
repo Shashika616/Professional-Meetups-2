@@ -156,8 +156,8 @@ void main() {
       expect(find.text('2 people'), findsOneWidget);
       expect(find.text('Grace Hopper'), findsOneWidget);
       expect(find.text('Ada Lovelace'), findsOneWidget);
-      expect(find.text('HOST'), findsOneWidget);
-      expect(find.text('GET VERIFIED'), findsNothing);
+      expect(find.text('Host'), findsOneWidget);
+      expect(find.text('Get verified'), findsNothing);
     });
 
     testWidgets('a redacted list shows no names, no fake names, and the '
@@ -174,7 +174,7 @@ void main() {
       expect(find.text('Member'), findsNothing);
       expect(find.byType(RedactedFace), findsNWidgets(2));
       // Knowing a meetup HAS a host is not the same as knowing who they are.
-      expect(find.text('HOST'), findsOneWidget);
+      expect(find.text('Host'), findsOneWidget);
       expect(find.text('Verify to see who’s coming'), findsOneWidget);
     });
 
@@ -185,7 +185,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('GET VERIFIED'));
+      await tester.tap(find.text('Get verified'));
       await tester.pumpAndSettle();
 
       expect(find.byType(VerificationChecklistPage), findsOneWidget);
@@ -252,7 +252,7 @@ void main() {
       await tester.pumpWidget(pageAt(1, _redacted));
       await tester.pumpAndSettle();
       expect(find.text('Verify to see who’s coming'), findsOneWidget);
-      expect(find.text('GET VERIFIED'), findsOneWidget);
+      expect(find.text('Get verified'), findsOneWidget);
       expect(find.text('Join to see who\'s coming'), findsNothing);
     });
 
@@ -262,7 +262,7 @@ void main() {
       await tester.pumpWidget(pageAt(2, _redactedHostNamed));
       await tester.pumpAndSettle();
       expect(find.text('Join to see who\'s coming'), findsOneWidget);
-      expect(find.text('GET VERIFIED'), findsNothing);
+      expect(find.text('Get verified'), findsNothing);
     });
 
     testWidgets('a named host row in a redacted list is shown and opens the '
@@ -300,8 +300,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('HOST'), findsOneWidget);
-      expect(find.text('YOU'), findsOneWidget);
+      expect(find.text('Host'), findsOneWidget);
+      expect(find.text('You'), findsOneWidget);
       expect(find.text('Open spot'), findsNothing);
     });
   });

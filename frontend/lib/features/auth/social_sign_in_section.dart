@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/utils/debug_log.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/features/onboarding/account_claim_sheet.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
@@ -97,11 +99,43 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
       final isNewUser =
           ref.read(authSessionProvider).value?.session?.isNewUser ?? false;
       await widget.onSignedIn(isNewUser);
+    } on AccountClaimRequiredException catch (claim) {
+      // NOT AN ERROR, AND THIS IS THE ONE PLACE THAT KNOWS IT.
+      //
+      // The provider verified an address that already belongs to an
+      // account, so no session was issued. Showing the message in a toast
+      // would strand the person: it tells them the address is taken and
+      // gives them nothing to do about it. Instead the sheet opens with the
+      // code already sent, and a success there IS a sign-in, so it
+      // continues down the same onSignedIn path the happy case takes.
+      //
+      // Lives here rather than in each caller because all three providers
+      // and both screens (onboarding and the sign-in page) come through
+      // this one method.
+      await _offerAccountClaim(claim);
     } catch (error) {
       _handleError(source, error);
     } finally {
       _setBusy(null);
     }
+  }
+
+  /// Opens the claim sheet and continues the sign-in if it succeeded.
+  ///
+  /// A cancel resolves to null and simply returns: the person is left on
+  /// the screen they started from, which is where someone who did not
+  /// recognise the address wants to be. No toast, because they did not
+  /// fail at anything.
+  Future<void> _offerAccountClaim(AccountClaimRequiredException claim) async {
+    // The overlay has to come down first. It covers the screen, and the
+    // sheet would rise behind a "Signing you in" spinner that is no longer
+    // telling the truth.
+    _setBusy(null);
+    final claimed = await showAccountClaimSheet(context, claim: claim);
+    if (claimed != true || !mounted) return;
+    final isNewUser =
+        ref.read(authSessionProvider).value?.session?.isNewUser ?? false;
+    await widget.onSignedIn(isNewUser);
   }
 
   /// TYPE PLUS A SANITIZED MESSAGE, never the raw error object: debugPrint
@@ -111,7 +145,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
   /// out of the provider's picker) gets a soft toast, not the red one.
   void _handleError(String source, Object error) {
     final safeMessage = error is AuthException ? error.message : '';
-    debugPrint('$source failed: ${error.runtimeType} $safeMessage');
+    debugLog('$source failed: ${error.runtimeType} $safeMessage');
     if (!mounted) return;
     showSnack(
       context,
@@ -180,7 +214,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
           provider(
             key: const Key('continueWithApple'),
             source: 'signInWithApple',
-            label: 'CONTINUE WITH APPLE',
+            label: 'Continue with Apple',
             mark: AppleMark(size: 20, color: AppPalette.textPrimary),
             onPressed: () => _run(
               'signInWithApple',
@@ -192,7 +226,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
         provider(
           key: const Key('continueWithGoogle'),
           source: 'signInWithGoogle',
-          label: 'CONTINUE WITH GOOGLE',
+          label: 'Continue with Google',
           mark: const GoogleMark(size: 20),
           onPressed: () => _run(
             'signInWithGoogle',
@@ -205,7 +239,7 @@ class _SocialSignInSectionState extends ConsumerState<SocialSignInSection> {
         provider(
           key: const Key('continueWithLinkedIn'),
           source: 'signInWithLinkedIn',
-          label: 'CONTINUE WITH LINKEDIN',
+          label: 'Continue with LinkedIn',
           mark: const LinkedInMark(size: 20),
           onPressed: () => _run(
             'signInWithLinkedIn',

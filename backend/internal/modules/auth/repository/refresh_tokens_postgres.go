@@ -60,6 +60,18 @@ func (r *postgresRefreshTokenRepository) FindByHash(ctx context.Context, tokenHa
 // non-transactional calls") — a crash between the two writes must never
 // leave a rotated-out token looking still-valid, or a new token issued
 // without the old one being invalidated.
+// ErrRefreshTokenAlreadyRotated is returned by Rotate when the token it
+// was asked to rotate is no longer the live tip of its chain — already
+// rotated, revoked, or expired (tracker #83).
+//
+// A sentinel rather than a generic conflict because the caller does
+// something specific and severe with it: a token presented twice is the
+// signature of a stolen one, and the response is to revoke the user's
+// whole session family. That decision should be keyed on an unambiguous
+// value, not on string matching or on a shared error class that some
+// other failure might also produce.
+var ErrRefreshTokenAlreadyRotated = errors.New("repository: refresh token already rotated")
+
 func (r *postgresRefreshTokenRepository) Rotate(ctx context.Context, oldID, newTokenHash string, newExpiresAt time.Time) (string, error) {
 	parsedOldID, err := uuid.Parse(oldID)
 	if err != nil {
@@ -95,10 +107,22 @@ func (r *postgresRefreshTokenRepository) Rotate(ctx context.Context, oldID, newT
 		return "", fmt.Errorf("repository: create replacement refresh token: %w", err)
 	}
 
-	if err := qtx.MarkRefreshTokenReplaced(ctx, sqlcgen.MarkRefreshTokenReplacedParams{
+	// The child is inserted first and the parent CLAIMED second, both in
+	// this transaction, so a concurrent rotation of the same token blocks
+	// on the parent's row lock here and then matches nothing (#83).
+	// Its child insert rolls back with it, which is why inserting first
+	// is safe: an unclaimed child never reaches the database.
+	if _, err := qtx.MarkRefreshTokenReplaced(ctx, sqlcgen.MarkRefreshTokenReplacedParams{
 		ID:         parsedOldID,
 		ReplacedBy: pgtypeUUID(created.ID),
 	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Someone else already rotated, revoked or outlived this
+			// token. Not an error in the plumbing sense — it is the
+			// single-use rule doing its job — so it gets its own sentinel
+			// and the caller treats it as reuse.
+			return "", ErrRefreshTokenAlreadyRotated
+		}
 		return "", fmt.Errorf("repository: mark refresh token replaced: %w", err)
 	}
 

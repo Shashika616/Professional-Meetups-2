@@ -1747,6 +1747,54 @@ func TestNearbyNotify_ExcludesHostAndFarAwayAndStale(t *testing.T) {
 	}
 }
 
+// #89. Every fan-out can reach 500 people; a host who could trigger one per
+// meetup, ten meetups an hour, could push well over 100,000 notifications a
+// day at a neighbourhood. Only a host's first few meetups a day notify.
+func TestNearbyNotify_CapsFanOutsPerHostPerDay(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	neighbour := newUserID(t, h)
+	otherHost := newUserID(t, h)
+
+	for _, u := range []string{neighbour} {
+		if err := h.deviceTokens.Upsert(ctx, u, "token-"+u); err != nil {
+			t.Fatalf("register device token: %v", err)
+		}
+		if _, err := h.userLocationCache.Upsert(ctx, u, colomboLat, colomboLng, time.Now()); err != nil {
+			t.Fatalf("seed location: %v", err)
+		}
+	}
+
+	fanOut := func(hostID string) int {
+		t.Helper()
+		m := h.createMeetup(t, hostID, meetup.IntentCoffee, colomboLat, colomboLng)
+		before := h.countOutboxRows(t)
+		if err := h.svc.HandleMeetupCreated(ctx, meetup.NearbyNotifyPayload{
+			MeetupID: m.ID, HostUserID: hostID, Intent: "coffee",
+			LocationLat: colomboLat, LocationLng: colomboLng,
+		}); err != nil {
+			t.Fatalf("HandleMeetupCreated: %v", err)
+		}
+		return h.countOutboxRows(t) - before
+	}
+
+	for i := 1; i <= 3; i++ {
+		if got := fanOut(host); got != 1 {
+			t.Fatalf("meetup %d queued %d notifications, want 1", i, got)
+		}
+	}
+	if got := fanOut(host); got != 0 {
+		t.Errorf("the host's 4th meetup today queued %d notifications, want 0 "+
+			"(one account could otherwise push without limit)", got)
+	}
+
+	// The cap is per host: someone else's first meetup still notifies.
+	if got := fanOut(otherHost); got != 1 {
+		t.Errorf("another host's first meetup queued %d notifications, want 1", got)
+	}
+}
+
 // countOutboxRows counts queued notifications. Used by the tests that assert
 // on WHO gets notified — the delivery side is covered separately in
 // outbox_integration_test.go.
@@ -2682,5 +2730,45 @@ func TestEndedMeetup_LeavesBrowseButStaysOnParticipantSurfaces(t *testing.T) {
 	}
 	if !found {
 		t.Error("an ended meetup vanished from its own host's list — Events would lose it, and with it the review")
+	}
+}
+
+// D4. Browse shows only meetups within 50 km, but RequestToJoin used to take
+// any id, so someone in another city who had a meetup's id could ask to join
+// it — a ride share included.
+func TestRequestToJoin_RefusesAMeetupBeyondTheBrowseRadius(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+
+	join := func(user string) error {
+		_, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{
+			MeetupID: m.ID, RequesterID: user, RequesterTrustLevel: 4,
+		})
+		return err
+	}
+
+	far := newUserID(t, h)
+	if _, err := h.userLocationCache.Upsert(ctx, far, farAwayLat, farAwayLng, time.Now()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := join(far); !isSentinel(err, apperror.ErrForbidden) {
+		t.Errorf("a requester far away: err = %v, want ErrForbidden", err)
+	}
+
+	near := newUserID(t, h)
+	if _, err := h.userLocationCache.Upsert(ctx, near, colomboLat, colomboLng, time.Now()); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := join(near); err != nil {
+		t.Errorf("a requester nearby was refused: %v", err)
+	}
+
+	// Never reported a location: the rule cannot apply, and refusing would
+	// only add friction (the location is self-reported anyway).
+	unknown := newUserID(t, h)
+	if err := join(unknown); err != nil {
+		t.Errorf("a requester with no known location was refused: %v", err)
 	}
 }

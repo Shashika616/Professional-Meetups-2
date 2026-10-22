@@ -1,10 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  The adaptive icon's background plate. White, matching the brand sheet's own
-  app-icon treatment: the mark is a blue/green figure pair that needs a light
-  ground to stay legible, and every launcher composites this behind it at full
-  bleed.
+  The adaptive icon's background plate. Onyx (#070D15, AppPalette.onyx -
+  the dark theme's ground), matching the black-background colourway chosen
+  as the default app icon on 2026-10-22.
+
+  Was #FFFFFF, for a blue/green mark that needed a light ground. The mark no
+  longer uses blue: it is green and WHITE now, which needs a dark one.
+  Changing only one of the two would make the icon illegible, so this file
+  and drawable/ic_launcher_foreground.xml must stay in step.
 -->
 <resources>
-    <color name="ic_launcher_background">#FFFFFFFF</color>
+    <color name="ic_launcher_background">#FF070D15</color>
 </resources>

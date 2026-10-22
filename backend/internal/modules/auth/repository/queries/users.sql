@@ -21,7 +21,13 @@ SELECT * FROM auth.users WHERE id = $1 FOR UPDATE;
 -- Used by SignUpOrRecoverWithEmail (ADR-014 decision #3, passwordless as
 -- of ADR-019 §1) to detect the recovery case: an email-OTP signup against
 -- an address that's already someone's verified personal_email.
-SELECT * FROM auth.users WHERE personal_email = $1;
+-- lower() on both sides, matching idx_users_personal_email_lower (0017):
+-- the index is on lower(personal_email), so a bare equality here would not
+-- use it AND would miss a stored "Ada@Gmail.com" for a lookup of
+-- "ada@gmail.com" — which is the duplicate-account bug the index exists to
+-- prevent, reintroduced at the read side. Callers normalize too; this is
+-- the backstop that makes the guarantee structural rather than remembered.
+SELECT * FROM auth.users WHERE lower(personal_email) = lower(sqlc.arg(personal_email));
 
 -- name: CreateUser :one
 -- age_confirmed_at is set to now() only when age_confirmed_over_18 is true
@@ -33,8 +39,17 @@ SELECT * FROM auth.users WHERE personal_email = $1;
 -- guest path is the only caller that sets it true, and making every caller
 -- state which kind of account it is creating keeps a future fifth signup path
 -- from silently inheriting "not a guest" without anyone deciding it.
-INSERT INTO auth.users (linkedin_sub, full_name, profile_photo_url, headline, trust_level, age_confirmed_over_18, age_confirmed_at, is_guest)
-VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN now() ELSE NULL END, $7)
+--
+-- personal_email arrives from the provider on a federated signup (Apple,
+-- Google and now LinkedIn all return one, and identity.Verify only hands it
+-- over when the provider marked it verified). NULLIF is load-bearing rather
+-- than tidy: 0017's unique index is partial, ON lower(personal_email) WHERE
+-- personal_email IS NOT NULL, so NULL rows are exempt from it but empty
+-- strings are not — two accounts created without an address would both store
+-- '' and the second would fail on a uniqueness rule neither of them meant to
+-- be part of.
+INSERT INTO auth.users (linkedin_sub, full_name, profile_photo_url, headline, trust_level, age_confirmed_over_18, age_confirmed_at, is_guest, personal_email)
+VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN now() ELSE NULL END, $7, NULLIF(sqlc.arg(personal_email)::text, ''))
 RETURNING *;
 
 -- name: UpdateUserLinkedInSub :one

@@ -19,8 +19,13 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 /// white background rather than threshold-keying it - a threshold leaves the
 /// JPEG's edge ringing behind as a pale halo, which is invisible on white and
 /// glaringly obvious on near-black.
-class AppIcon extends StatelessWidget {
-  const AppIcon({super.key, this.size = 48, this.radius, this.glow = false});
+class BrandMarkTile extends StatelessWidget {
+  const BrandMarkTile({
+    super.key,
+    this.size = 48,
+    this.radius,
+    this.glow = false,
+  });
 
   final double size;
   final double? radius;
@@ -68,7 +73,7 @@ class AppIcon extends StatelessWidget {
           // place it appears, including the splash, for no visible gain.
           cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
           errorBuilder: (context, error, stackTrace) => Icon(
-            Icons.people_alt_rounded,
+            Icons.people_outline_rounded,
             size: size * 0.42,
             color: AppPalette.brandBlue,
           ),

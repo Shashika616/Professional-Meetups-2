@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// Who is hosting, and where the viewer stands, on every meetup card.
 ///
@@ -45,8 +46,8 @@ class MeetupRoleChips extends StatelessWidget {
     if (meetup.isHostedByMe) {
       chips.add(
         _RoleChip(
-          icon: Icons.star_rounded,
-          label: concluded ? 'YOU HOSTED' : 'YOU\'RE HOSTING',
+          icon: AppIcons.star,
+          label: concluded ? 'You hosted' : 'You\'re hosting',
           tone: AppPalette.brandGreen,
           compact: compact,
         ),
@@ -56,12 +57,12 @@ class MeetupRoleChips extends StatelessWidget {
       final named = showHostName && host != null && host.isNotEmpty;
       chips.add(
         _RoleChip(
-          icon: Icons.person_rounded,
+          icon: AppIcons.person,
           label: switch ((concluded, named)) {
-            (true, true) => 'HOSTED BY ${host!.toUpperCase()}',
-            (true, false) => 'HOSTED',
-            (false, true) => 'HOST · ${host!.toUpperCase()}',
-            (false, false) => 'HOST',
+            (true, true) => 'Hosted by ${host!}',
+            (true, false) => 'Hosted',
+            (false, true) => 'Host · ${host!}',
+            (false, false) => 'Host',
           },
           tone: AppPalette.textSecondary,
           compact: compact,
@@ -71,27 +72,27 @@ class MeetupRoleChips extends StatelessWidget {
       if (status != null) {
         final (label, icon, tone) = switch (status) {
           MeetupRequestStatus.accepted => (
-            concluded ? 'YOU JOINED' : 'YOU\'RE IN',
-            Icons.check_circle_rounded,
+            concluded ? 'You joined' : 'You\'re in',
+            AppIcons.checkCircle,
             AppPalette.verified,
           ),
           // A request nobody answered before the meetup ended or was
           // called off is no longer pending anything.
           MeetupRequestStatus.pending => (
-            concluded ? 'NOT ANSWERED' : 'REQUEST PENDING',
-            Icons.hourglass_top_rounded,
+            concluded ? 'Not answered' : 'Request pending',
+            AppIcons.hourglass,
             AppPalette.gold,
           ),
           // Never "rejected" or "declined" where the requester reads it.
           // A muted tone: it is a fact about fit, not a fault to flag.
           MeetupRequestStatus.rejected => (
-            'NOT THIS TIME',
-            Icons.explore_outlined,
+            'Not this time',
+            AppIcons.explore,
             AppPalette.textSecondary,
           ),
           MeetupRequestStatus.withdrawn => (
-            'WITHDRAWN',
-            Icons.undo_rounded,
+            'Withdrawn',
+            AppIcons.undo,
             AppPalette.textSecondary,
           ),
         };
@@ -117,7 +118,7 @@ class _RoleChip extends StatelessWidget {
     required this.compact,
   });
 
-  final IconData icon;
+  final String icon;
   final String label;
   final Color tone;
   final bool compact;
@@ -136,7 +137,7 @@ class _RoleChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: compact ? 11 : 12, color: tone),
+          AppIcon(icon, size: compact ? 11 : 12, color: tone),
           SizedBox(width: compact ? 3 : 4),
           Text(
             label,

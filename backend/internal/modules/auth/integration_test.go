@@ -99,7 +99,7 @@ func truncateAuthTables(t *testing.T, pool *pgxpool.Pool) {
 		TRUNCATE auth.users, auth.refresh_tokens, auth.verification_codes,
 		         auth.user_identities, auth.unverified_company_claims,
 		         auth.trusted_contacts, auth.sos_events, auth.user_deleted_outbox,
-		         auth.safety_holds
+		         auth.safety_holds, auth.contact_invites_sent
 		RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
@@ -748,6 +748,33 @@ func TestRefreshTokenRotation_Integration(t *testing.T) {
 	}
 }
 
+// confirmAllInvites plays every invited contact: it reads each confirmation
+// link out of the texts captured so far and confirms through it, as the real
+// people would on the confirmation page (#80). Returns how many it confirmed.
+func (h *harness) confirmAllInvites(t *testing.T) int {
+	t.Helper()
+	h.smser.mu.Lock()
+	alerts := append([]string(nil), h.smser.alerts...)
+	h.smser.mu.Unlock()
+
+	confirmed := 0
+	for _, msg := range alerts {
+		i := strings.Index(msg, "/c/")
+		if i < 0 {
+			continue
+		}
+		token := msg[i+3:]
+		if j := strings.IndexAny(token, " )"); j >= 0 {
+			token = token[:j]
+		}
+		if _, err := h.svc.ConfirmTrustedContact(context.Background(), token); err != nil {
+			t.Fatalf("ConfirmTrustedContact: %v", err)
+		}
+		confirmed++
+	}
+	return confirmed
+}
+
 // TestTrustedContactsAndSOS_Integration covers the cap, the ownership-scoped
 // delete (the IDOR case), and the audit row.
 func TestTrustedContactsAndSOS_Integration(t *testing.T) {
@@ -805,9 +832,20 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 		t.Errorf("another user's list returned %d contacts, want 0", len(attackerContacts))
 	}
 
+	// Pending contacts are not alerted (#80): each of the three must agree
+	// through the link they were texted before SOS can reach them.
+	for _, c := range stillThere {
+		if c.Status != "pending" {
+			t.Errorf("a just-added contact has status %q, want pending", c.Status)
+		}
+	}
+	if n := h.confirmAllInvites(t); n != 3 {
+		t.Fatalf("confirmed %d invitations, want 3", n)
+	}
+
 	result, err := h.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
 		CallerTrustLevel: 2,
-		UserID:           owner.UserID, ContextMessage: "Coffee at 3pm", Latitude: 6.9271, Longitude: 79.8612,
+		UserID:           owner.UserID, ContextMessage: "Coffee at 3pm", Latitude: sosCoord(6.9271), Longitude: sosCoord(79.8612),
 	})
 	if err != nil {
 		t.Fatalf("TriggerSOS: %v", err)
@@ -828,7 +866,7 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	// Oversized context message is rejected server-side.
 	if _, err := h.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
 		CallerTrustLevel: 2,
-		UserID:           owner.UserID, ContextMessage: strings.Repeat("a", 501), Latitude: 1, Longitude: 1,
+		UserID:           owner.UserID, ContextMessage: strings.Repeat("a", 501), Latitude: sosCoord(1), Longitude: sosCoord(1),
 	}); err == nil {
 		t.Error("a 501-character context message was accepted, want the 500 cap enforced")
 	}
@@ -836,7 +874,7 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	// Out-of-range coordinates never reach a real maps link.
 	if _, err := h.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
 		CallerTrustLevel: 2,
-		UserID:           owner.UserID, Latitude: 91, Longitude: 0,
+		UserID:           owner.UserID, Latitude: sosCoord(91), Longitude: sosCoord(0),
 	}); err == nil {
 		t.Error("latitude 91 was accepted, want rejection")
 	}
@@ -1032,3 +1070,8 @@ func isSentinel(err, sentinel error) bool {
 	}
 	return false
 }
+
+// sosCoord is the address of a coordinate literal. TriggerSOSRequest's
+// latitude and longitude became *float64 in #78 so an SOS with no fix is
+// representable; tests that do supply one say so explicitly.
+func sosCoord(v float64) *float64 { return &v }

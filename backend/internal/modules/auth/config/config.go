@@ -63,7 +63,15 @@ type Config struct {
 	GmailAppPassword string
 	ResendAPIKey     string
 	ResendFromEmail  string
+
+	// PublicBaseURL is the gateway's public origin, which the link texted
+	// to a new trusted contact points at (#80). Optional: it defaults to the
+	// local gateway, so a local stack's links work against compose.
+	PublicBaseURL string
 }
+
+// defaultPublicBaseURL is the gateway as docker compose publishes it.
+const defaultPublicBaseURL = "http://localhost:8080"
 
 // Load reads Config from the environment, failing fast if any required
 // variable is missing or empty.
@@ -85,6 +93,7 @@ func Load() (Config, error) {
 		GmailAppPassword: os.Getenv("GMAIL_APP_PASSWORD"),
 		ResendAPIKey:     os.Getenv("RESEND_API_KEY"),
 		ResendFromEmail:  os.Getenv("RESEND_FROM_EMAIL"),
+		PublicBaseURL:    os.Getenv("PUBLIC_BASE_URL"),
 	}
 
 	required := []struct {
@@ -102,5 +111,8 @@ func Load() (Config, error) {
 		}
 	}
 
+	if cfg.PublicBaseURL == "" {
+		cfg.PublicBaseURL = defaultPublicBaseURL
+	}
 	return cfg, nil
 }

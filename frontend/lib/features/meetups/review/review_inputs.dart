@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// The inputs a review is made of: a score, and a vocabulary of traits.
 ///
@@ -50,8 +51,8 @@ class StarRow extends StatelessWidget {
                   // Filled stars pop very slightly, so tapping a score
                   // registers as an action rather than a repaint.
                   scale: 1 + (t * 0.12),
-                  child: Icon(
-                    t > 0.5 ? Icons.star_rounded : Icons.star_outline_rounded,
+                  child: AppIcon(
+                    t > 0.5 ? AppIcons.star : AppIcons.star,
                     size: size,
                     color: Color.lerp(
                       AppPalette.textSecondary.withValues(alpha: 0.55),
@@ -81,7 +82,7 @@ class HostTag extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        'HOST',
+        'Host',
         style: TextStyle(
           color: AppPalette.candyBlue,
           fontSize: 10,
@@ -204,8 +205,8 @@ class _TraitTabs extends StatelessWidget {
       children: [
         _TraitSegment(
           key: const Key('traitTabPositive'),
-          label: 'POSITIVE',
-          icon: Icons.thumb_up_alt_rounded,
+          label: 'Positive',
+          icon: AppIcons.thumbUp,
           count: positiveCount,
           active: !showNegative,
           tone: AppPalette.candyBlue,
@@ -214,8 +215,8 @@ class _TraitTabs extends StatelessWidget {
         const SizedBox(width: 10),
         _TraitSegment(
           key: const Key('traitTabNegative'),
-          label: 'NEGATIVE',
-          icon: Icons.thumb_down_alt_rounded,
+          label: 'Negative',
+          icon: AppIcons.thumbDown,
           count: negativeCount,
           active: showNegative,
           tone: AppPalette.danger,
@@ -238,7 +239,7 @@ class _TraitSegment extends StatelessWidget {
   });
 
   final String label;
-  final IconData icon;
+  final String icon;
   final int count;
   final bool active;
   final Color tone;
@@ -277,7 +278,7 @@ class _TraitSegment extends StatelessWidget {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(icon, size: 15, color: foreground),
+                  AppIcon(icon, size: 15, color: foreground),
                   const SizedBox(width: 7),
                   Text(
                     label,
@@ -395,7 +396,7 @@ class ReviewNotesField extends StatefulWidget {
     required this.controller,
     this.maxLength = 500,
     this.hint = 'Describe in detail (optional)',
-    this.label = 'ANYTHING TO ADD?',
+    this.label = 'Anything to add?',
   });
 
   final TextEditingController controller;
@@ -456,7 +457,7 @@ class _ReviewNotesFieldState extends State<ReviewNotesField> {
                   color: AppPalette.textSecondary,
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: 1.3,
+                  letterSpacing: 0.3,
                 ),
               ),
             ),

@@ -68,6 +68,7 @@ type refreshTokenSweeperService interface {
 	SweepExpiredRefreshTokens(ctx context.Context) (int, error)
 	SweepAbandonedGuests(ctx context.Context) (int, error)
 	SweepExpiredSafetyHolds(ctx context.Context) (int, error)
+	SweepContactInvites(ctx context.Context) (int, error)
 }
 
 // NewRefreshTokenSweeper constructs a sweeper over svc.
@@ -129,10 +130,16 @@ func (s *RefreshTokenSweeper) Tick(ctx context.Context) {
 	holds, err := s.svc.SweepExpiredSafetyHolds(ctx)
 	if err != nil {
 		s.logger.Error("safety hold purge", "error", err)
-		return
-	}
-	if holds > 0 {
+	} else if holds > 0 {
 		s.logger.Info("safety hold purge", "purged", holds)
+	}
+
+	// Independent too: the invitation log only bounds future invitations.
+	invites, err := s.svc.SweepContactInvites(ctx)
+	if err != nil {
+		s.logger.Error("contact invitation log trim", "error", err)
+	} else if invites > 0 {
+		s.logger.Info("contact invitation log trim", "deleted", invites)
 	}
 }
 
@@ -206,7 +213,38 @@ func (s *service) SweepExpiredRefreshTokens(ctx context.Context) (int, error) {
 		}
 		total += deleted
 
-		if deleted < refreshTokenSweepBatchSize {
+		// Stop on an EMPTY pass, not on a short one.
+		//
+		// The query deletes only rows nothing still points at, so it peels
+		// one layer off each `replaced_by` chain per pass (see
+		// queries/refresh_tokens.sql). A layer is usually far smaller than
+		// the batch size, and the old `deleted < batchSize` test read that
+		// as "nothing left" and returned with the rest of every chain still
+		// in the table — one layer per sweep instead of one chain.
+		//
+		// The cost is one extra query that returns 0 at the end of a sweep
+		// that did work. refreshTokenSweepMaxBatches still bounds the loop.
+		if deleted == 0 {
+			return total, nil
+		}
+	}
+	return total, nil
+}
+
+// SweepContactInvites trims the trusted-contact invitation log (#80). Same
+// batching as every other sweep in this file.
+func (s *service) SweepContactInvites(ctx context.Context) (int, error) {
+	total := 0
+	for batch := 0; batch < refreshTokenSweepMaxBatches; batch++ {
+		if err := ctx.Err(); err != nil {
+			return total, nil
+		}
+		deleted, err := s.sos.SweepContactInvites(ctx, refreshTokenSweepBatchSize)
+		if err != nil {
+			return total, err
+		}
+		total += deleted
+		if deleted == 0 {
 			return total, nil
 		}
 	}

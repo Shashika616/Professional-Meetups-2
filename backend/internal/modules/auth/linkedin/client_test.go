@@ -107,9 +107,38 @@ func TestFetchUserInfo(t *testing.T) {
 		wantInfo   UserInfo
 	}{
 		{
-			name:       "success",
+			// email_verified absent: LinkedIn has not said it checked the
+			// address, so it does not become an identity anchor. This used
+			// to be the only case, because the email was dropped outright.
+			name:       "success, email not marked verified",
 			statusCode: http.StatusOK,
 			body:       `{"sub":"abc123","name":"Ada Lovelace","picture":"https://example.com/p.jpg","email":"ada@example.com"}`,
+			wantInfo:   UserInfo{Sub: "abc123", Name: "Ada Lovelace", Picture: "https://example.com/p.jpg"},
+		},
+		{
+			name:       "verified email is captured and normalized",
+			statusCode: http.StatusOK,
+			body:       `{"sub":"abc123","name":"Ada Lovelace","picture":"https://example.com/p.jpg","email":"  Ada@Example.COM ","email_verified":true}`,
+			wantInfo: UserInfo{
+				Sub: "abc123", Name: "Ada Lovelace", Picture: "https://example.com/p.jpg",
+				Email: "ada@example.com",
+			},
+		},
+		{
+			// The Apple-shaped quirk, tolerated here too: a provider that
+			// switches to a string must not silently stop yielding emails.
+			name:       "verified sent as a string",
+			statusCode: http.StatusOK,
+			body:       `{"sub":"abc123","name":"Ada Lovelace","picture":"https://example.com/p.jpg","email":"ada@example.com","email_verified":"true"}`,
+			wantInfo: UserInfo{
+				Sub: "abc123", Name: "Ada Lovelace", Picture: "https://example.com/p.jpg",
+				Email: "ada@example.com",
+			},
+		},
+		{
+			name:       "explicitly unverified is dropped",
+			statusCode: http.StatusOK,
+			body:       `{"sub":"abc123","name":"Ada Lovelace","picture":"https://example.com/p.jpg","email":"ada@example.com","email_verified":false}`,
 			wantInfo:   UserInfo{Sub: "abc123", Name: "Ada Lovelace", Picture: "https://example.com/p.jpg"},
 		},
 		{

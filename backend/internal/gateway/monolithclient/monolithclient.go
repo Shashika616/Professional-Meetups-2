@@ -22,6 +22,7 @@ import (
 	"professional-meetups-monolith/backend/internal/platform/internalauth"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
 	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
+	opsv1 "professional-meetups-monolith/backend/internal/proto/ops/v1"
 )
 
 // connectTimeout bounds how long New waits for the initial connection before
@@ -84,6 +85,8 @@ type TrustedContact struct {
 	PhoneNumber          string
 	Email                string
 	CreatedAtUnixSeconds int64
+	// Status is "confirmed", "pending" or "expired" (#80).
+	Status string
 }
 
 // Client is the gateway's view of the monolith. Every method that takes a
@@ -111,6 +114,13 @@ type Client interface {
 	GuestSignup(ctx context.Context, ageConfirmedOver18 bool) (Session, error)
 	StartEmailLogin(ctx context.Context, email string) (resendAfterSeconds int32, err error)
 	CompleteEmailLogin(ctx context.Context, email, code string) (Session, error)
+
+	// CompleteAccountClaim and ResendAccountClaimCode finish what the two
+	// federated signup calls above start when they return an
+	// *AccountClaimRequiredError (accountclaim.go). ResendAccountClaimCode
+	// returns the new cooldown in seconds.
+	CompleteAccountClaim(ctx context.Context, ticket, code string) (Session, error)
+	ResendAccountClaimCode(ctx context.Context, ticket string) (int32, error)
 	RefreshSession(ctx context.Context, refreshToken string) (Session, error)
 	// RevokeSession is idempotent — revoking an already-revoked or unknown
 	// token is not an error.
@@ -139,7 +149,14 @@ type Client interface {
 	ListTrustedContacts(ctx context.Context, userID string) ([]TrustedContact, error)
 	RemoveTrustedContact(ctx context.Context, userID, contactID string) error
 	// TriggerSOS returns how many trusted contacts were actually alerted.
-	TriggerSOS(ctx context.Context, userID, contextMessage string, lat, lng float64, callerTrustLevel int32) (contactsNotified int32, err error)
+	// lat/lng are nil when the device had no usable fix (#78): the
+	// alert still goes out and says the location is unavailable.
+	// clientRequestID is shared by an attempt and its automatic retry, so
+	// the retry cannot alert everyone twice. Empty from older app builds.
+	TriggerSOS(ctx context.Context, userID, contextMessage, clientRequestID string, lat, lng *float64, callerTrustLevel int32) (contactsNotified int32, err error)
+	// ConfirmTrustedContact records a contact's consent from their link
+	// (#80). No user: the token is the proof.
+	ConfirmTrustedContact(ctx context.Context, token string) (requesterName string, err error)
 
 	// --- meetup module (Phase 2) — same connection, same interceptor ---
 	CreateMeetup(ctx context.Context, hostUserID string, hostTrustLevel int32, intent string, windowStart, windowEnd int64, lat, lng float64, label string, capacity int32) (Meetup, error)
@@ -182,7 +199,31 @@ type Client interface {
 	// context at all.
 	CheckHealth(ctx context.Context) error
 
+	// RunScheduledWork runs every periodic sweep once and reports how many
+	// of them failed. Driven by Cloud Scheduler through
+	// POST /internal/cron/tick, which is what keeps the lifecycle sweeps,
+	// the outbox pollers and the retention passes running while the service
+	// scales to zero (service.yaml, runbook §10).
+	//
+	// Like CheckHealth, it carries no user context: it is operator work, not
+	// anybody's request.
+	RunScheduledWork(ctx context.Context) (ScheduledWorkReport, error)
+
 	Close() error
+}
+
+// ScheduledWorkReport is one tick's outcome, for the response body and the
+// gateway's log line.
+type ScheduledWorkReport struct {
+	Results []SweepOutcome `json:"results"`
+	Failed  int            `json:"failed"`
+}
+
+// SweepOutcome is one sweep's result within a tick.
+type SweepOutcome struct {
+	Name     string `json:"name"`
+	Affected int64  `json:"affected"`
+	Error    string `json:"error,omitempty"`
 }
 
 type grpcClient struct {
@@ -190,6 +231,7 @@ type grpcClient struct {
 	auth   authv1.AuthServiceClient
 	meetup meetupv1.MeetupServiceClient
 	health healthpb.HealthClient
+	ops    opsv1.OpsServiceClient
 }
 
 // New connects to the monolith at addr (e.g. "monolith:9090"), blocking
@@ -229,6 +271,7 @@ func New(addr, sharedSecret string) (Client, error) {
 		auth:   authv1.NewAuthServiceClient(conn),
 		meetup: meetupv1.NewMeetupServiceClient(conn),
 		health: healthpb.NewHealthClient(conn),
+		ops:    opsv1.NewOpsServiceClient(conn),
 	}, nil
 }
 
@@ -247,6 +290,32 @@ func (c *grpcClient) CheckHealth(ctx context.Context) error {
 		return fmt.Errorf("monolithclient: monolith reports %s", resp.GetStatus())
 	}
 	return nil
+}
+
+// RunScheduledWork drives one tick of the monolith's periodic sweeps.
+//
+// A sweep that fails comes back inside the report, not as an error: the
+// error return is for "the tick could not be run at all". The handler needs
+// to tell those apart, because only the second means retrying the whole tick
+// is the right response.
+func (c *grpcClient) RunScheduledWork(ctx context.Context) (ScheduledWorkReport, error) {
+	resp, err := c.ops.RunScheduledWork(ctx, &opsv1.RunScheduledWorkRequest{})
+	if err != nil {
+		return ScheduledWorkReport{}, fmt.Errorf("monolithclient: run scheduled work: %w", err)
+	}
+
+	report := ScheduledWorkReport{
+		Results: make([]SweepOutcome, 0, len(resp.GetResults())),
+		Failed:  int(resp.GetFailed()),
+	}
+	for _, r := range resp.GetResults() {
+		report.Results = append(report.Results, SweepOutcome{
+			Name:     r.GetName(),
+			Affected: r.GetAffected(),
+			Error:    r.GetError(),
+		})
+	}
+	return report, nil
 }
 
 func (c *grpcClient) Close() error {
@@ -284,7 +353,7 @@ func (c *grpcClient) CompleteFederatedSignup(
 		FullNameHint:        fullNameHint,
 	})
 	if err != nil {
-		return Session{}, err
+		return Session{}, withAccountClaim(err)
 	}
 	return sessionFromProto(resp), nil
 }
@@ -298,7 +367,7 @@ func (c *grpcClient) CompleteLinkedInOnboarding(
 		AgeConfirmedOver_18: ageConfirmedOver18,
 	})
 	if err != nil {
-		return Session{}, err
+		return Session{}, withAccountClaim(err)
 	}
 	return sessionFromProto(resp), nil
 }
@@ -552,15 +621,23 @@ func (c *grpcClient) RemoveTrustedContact(ctx context.Context, userID, contactID
 	return err
 }
 
-func (c *grpcClient) TriggerSOS(ctx context.Context, userID, contextMessage string, lat, lng float64, callerTrustLevel int32) (int32, error) {
+func (c *grpcClient) TriggerSOS(ctx context.Context, userID, contextMessage, clientRequestID string, lat, lng *float64, callerTrustLevel int32) (int32, error) {
 	resp, err := c.auth.TriggerSOS(ctx, &authv1.TriggerSOSRequest{
 		UserId: userID, ContextMessage: contextMessage, Latitude: lat, Longitude: lng,
-		CallerTrustLevel: callerTrustLevel,
+		CallerTrustLevel: callerTrustLevel, ClientRequestId: clientRequestID,
 	})
 	if err != nil {
 		return 0, err
 	}
 	return resp.GetContactsNotified(), nil
+}
+
+func (c *grpcClient) ConfirmTrustedContact(ctx context.Context, token string) (string, error) {
+	resp, err := c.auth.ConfirmTrustedContact(ctx, &authv1.ConfirmTrustedContactRequest{Token: token})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetRequesterName(), nil
 }
 
 func trustedContactFromProto(resp *authv1.TrustedContactResponse) TrustedContact {
@@ -570,6 +647,7 @@ func trustedContactFromProto(resp *authv1.TrustedContactResponse) TrustedContact
 		PhoneNumber:          resp.GetPhoneNumber(),
 		Email:                resp.GetEmail(),
 		CreatedAtUnixSeconds: resp.GetCreatedAtUnixSeconds(),
+		Status:               resp.GetStatus(),
 	}
 }
 

@@ -88,7 +88,7 @@ func (v *Verifier) add(path string, key *rsa.PublicKey) error {
 }
 
 func loadPublicKey(path string) (*rsa.PublicKey, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- operator-configured key path (JWT_PUBLIC_KEY_PATH), never request input
 	if err != nil {
 		return nil, fmt.Errorf("jwt: read public key %q: %w", path, err)
 	}
@@ -109,15 +109,19 @@ func (v *Verifier) KeyIDs() []string {
 	return ids
 }
 
-// Verify parses token and returns its claims if the signature, expiry, and
-// issuer all check out. Only RS256-signed tokens are accepted — an
+// Verify parses token and returns its claims if the signature, expiry,
+// issuer and audience all check out. Only RS256-signed tokens are accepted — an
 // algorithm mismatch (e.g. a forged "none" or HS256 token) is rejected
 // before the signature is even checked.
 func (v *Verifier) Verify(token string) (Claims, error) {
 	var claims Claims
 	parsed, err := jwtlib.ParseWithClaims(token, &claims, v.keyfunc,
 		jwtlib.WithValidMethods([]string{jwtlib.SigningMethodRS256.Alg()}),
-		jwtlib.WithIssuer(issuer))
+		jwtlib.WithIssuer(issuer),
+		// #93: a token minted for some other purpose by this same issuer
+		// is not an access token for this API, and saying so is what
+		// stops the two being interchangeable later.
+		jwtlib.WithAudience(audience))
 	if err != nil {
 		return Claims{}, fmt.Errorf("jwt: verify: %w", err)
 	}

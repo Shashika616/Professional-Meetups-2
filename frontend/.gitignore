@@ -86,3 +86,6 @@ app.*.map.json
 **/linux/flutter/generated_plugin_registrant.cc
 **/linux/flutter/generated_plugin_registrant.h
 **/linux/flutter/generated_plugins.cmake
+
+# Gradle writes reports here (problems-report.html); build output, never source.
+/android/build/

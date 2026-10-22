@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/rating_prompt.dart';
+
+import 'support/app_icon_finder.dart';
 
 import 'support/scripted_meetup_service.dart';
 
@@ -41,8 +45,8 @@ void main() {
 
     expect(find.text('Grace Hopper'), findsOneWidget);
     expect(find.text('Ada Lovelace'), findsOneWidget);
-    expect(find.text('RATED'), findsOneWidget);
-    expect(find.byIcon(Icons.star_outline_rounded), findsNWidgets(5));
+    expect(find.text('Rated'), findsOneWidget);
+    expect(findAppIcon(AppIcons.star), findsNWidgets(5));
   });
 
   testWidgets('tapping a star shows a confirmation dialog first — ratings are '
@@ -68,10 +72,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.star_outline_rounded).at(3));
+    await tester.tap(findAppIcon(AppIcons.star).at(3));
     await tester.pumpAndSettle();
 
-    expect(find.text('CONFIRM RATING'), findsOneWidget);
+    // Twice over: the dialog's title and its confirm button carry the
+    // same words now that the button is full-width and labelled.
+    expect(find.text('Confirm rating'), findsNWidgets(2));
     expect(find.textContaining('Rate Grace Hopper 4 stars'), findsOneWidget);
     // Not submitted yet — still just showing the dialog.
     expect(service.lastSubmitRatingMeetupId, isNull);
@@ -101,15 +107,15 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.star_outline_rounded).at(3));
+      await tester.tap(findAppIcon(AppIcons.star).at(3));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('CANCEL'));
+      await tester.tap(find.text('Back'));
       await tester.pumpAndSettle();
 
       expect(service.lastSubmitRatingMeetupId, isNull);
-      expect(find.text('RATED'), findsNothing);
-      expect(find.byIcon(Icons.star_outline_rounded), findsNWidgets(5));
+      expect(find.text('Rated'), findsNothing);
+      expect(findAppIcon(AppIcons.star), findsNWidgets(5));
     },
   );
 
@@ -137,18 +143,18 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final stars = find.byIcon(Icons.star_outline_rounded);
+      final stars = findAppIcon(AppIcons.star);
       await tester.tap(stars.at(3)); // 4th star, 1-indexed score = 4
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('CONFIRM'));
+      await tester.tap(find.text('Confirm rating').last);
       await tester.pumpAndSettle();
 
       expect(service.lastSubmitRatingMeetupId, 'meetup-1');
       expect(service.lastSubmitRatingRatedUserId, 'user-2');
       expect(service.lastSubmitRatingScore, 4);
-      expect(find.text('RATED'), findsOneWidget);
-      expect(find.byIcon(Icons.star_outline_rounded), findsNothing);
+      expect(find.text('Rated'), findsOneWidget);
+      expect(findAppIcon(AppIcons.star), findsNothing);
     },
   );
 
@@ -178,7 +184,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Grace Hopper'), findsOneWidget);
-      expect(find.byIcon(Icons.star_outline_rounded), findsNWidgets(5));
+      expect(findAppIcon(AppIcons.star), findsNWidgets(5));
     },
   );
 
@@ -226,6 +232,6 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('RATE WHO YOU MET'), findsNothing);
+    expect(find.text('Rate who you met'), findsNothing);
   });
 }

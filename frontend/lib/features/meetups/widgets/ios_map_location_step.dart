@@ -34,6 +34,24 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
 
   MapCanvasController? _canvas;
   MapPoint _cameraTarget = _defaultCenter;
+
+  // Built ONCE and reused, instead of constructed inside build(). Typing
+  // rebuilds this widget on every keystroke, and a MapCanvas created in
+  // build() is a new instance each time — which rebuilt the platform-view
+  // map per character. Holding one instance makes the child identical
+  // between builds, so Flutter skips that subtree entirely. Safe because
+  // none of these arguments ever change: the centre and zoom are
+  // compile-time constants and both callbacks only assign fields.
+  late final Widget _mapCanvas = MapCanvas(
+    initialCentre: _defaultCenter,
+    initialZoom: 13,
+    onReady: (canvas) => _canvas = canvas,
+    // Kept in a plain field, not state: this fires every camera frame
+    // and nothing on screen depends on the live value. It is read on
+    // submit, and by the search calls that bias results to what the
+    // user is looking at.
+    onCameraMove: (point) => _cameraTarget = point,
+  );
   final _searchController = TextEditingController();
   List<IosSearchCompletion> _completions = [];
   bool _searching = false;
@@ -52,6 +70,12 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   bool _locationPicked = false;
   // A fix is being fetched: the button shows it and ignores taps.
   bool _locating = false;
+  // There is a query on screen worth answering, so the suggestions panel
+  // stays open across the whole lookup rather than appearing only once
+  // results land. Set the moment the field holds two characters — before
+  // the debounce has even fired — and cleared when the query is answered,
+  // dismissed or emptied.
+  bool _suggestionsOpen = false;
 
   @override
   void initState() {
@@ -81,10 +105,23 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
 
   void _onSearchChanged(String text) {
     _debounce?.cancel();
-    if (text.trim().isEmpty) {
-      setState(() => _completions = []);
+    // Two characters, matching Android: one cannot rank anything useful,
+    // and MKLocalSearchCompleter answers a single letter with noise.
+    if (text.trim().length < 2) {
+      setState(() {
+        _completions = [];
+        _suggestionsOpen = false;
+        _searching = false;
+      });
       return;
     }
+    // Open and spinning immediately, including through the debounce
+    // window: the alternative is a panel that reads "No places found" for
+    // 300ms before it has asked anybody anything.
+    setState(() {
+      _suggestionsOpen = true;
+      _searching = true;
+    });
     // ~300ms is the usual floor for typeahead debouncing (frontend/
     // meetup-scheduling-PLAN.md's 2026-08-18 platform-split addendum,
     // Step 2) — enough to collapse a burst of keystrokes into one request.
@@ -135,9 +172,12 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
       setState(() {
         _searchController.text = result.label;
         _completions = [];
+        _suggestionsOpen = false;
+        _searching = false;
       });
       await _recenter(result.lat, result.lon);
     } catch (_) {
+      if (mounted) setState(() => _suggestionsOpen = false);
       _showError('Could not resolve that place. Try again.');
     }
   }
@@ -163,10 +203,14 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
       );
       if (generation != _requestGeneration || !mounted) return;
       _suppressNextSearch = true;
-      setState(() => _searchController.text = result.label);
+      setState(() {
+        _searchController.text = result.label;
+        _suggestionsOpen = false;
+      });
       await _recenter(result.lat, result.lon);
     } catch (_) {
       if (generation == _requestGeneration && mounted) {
+        setState(() => _suggestionsOpen = false);
         _showError('No results for "$text".');
       }
     } finally {
@@ -222,30 +266,30 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   Widget build(BuildContext context) {
     return LocationPickerLayout(
       // Apple Maps on iOS, chosen and settled (no key, no billing) — the
-      // only thing this file still says about rendering.
-      map: MapCanvas(
-        initialCentre: _defaultCenter,
-        initialZoom: 13,
-        onReady: (canvas) => _canvas = canvas,
-        // Kept in a plain field, not state: this fires every camera frame
-        // and nothing on screen depends on the live value. It is read on
-        // submit, and by the search calls that bias results to what the
-        // user is looking at.
-        onCameraMove: (point) => _cameraTarget = point,
-      ),
+      // only thing this file still says about rendering. Built once; see
+      // the field's comment for why it must not be constructed here.
+      map: _mapCanvas,
       searchController: _searchController,
       searching: _searching,
       suggestions: [
         for (final c in _completions)
           PlaceSuggestion(title: c.title, subtitle: c.subtitle),
       ],
+      searchPending: _suggestionsOpen,
       selectedLabel: _searchController.text.trim(),
       canContinue: _canContinue,
       locating: _locating,
       onSubmitted: _directSearch,
-      onCleared: () => setState(() => _completions = []),
+      onCleared: () => setState(() {
+        _completions = [];
+        _suggestionsOpen = false;
+        _searching = false;
+      }),
       onSelectSuggestion: _selectCompletion,
-      onDismissSuggestions: () => setState(() => _completions = []),
+      onDismissSuggestions: () => setState(() {
+        _completions = [];
+        _suggestionsOpen = false;
+      }),
       onUseCurrentLocation: _useCurrentLocation,
       onContinue: _submit,
     );

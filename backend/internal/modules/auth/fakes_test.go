@@ -3,6 +3,8 @@ package auth
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/email"
@@ -170,6 +172,21 @@ func (f *fakeUserRepository) Create(_ context.Context, u repository.NewUser) (re
 	if f.createErr != nil {
 		return repository.User{}, f.createErr
 	}
+	// Mirrors migration 0017's partial unique index on
+	// lower(personal_email): a second account cannot take an address the
+	// first one already holds, and the comparison is case-insensitive
+	// because that is what the index does. Without this the fake would
+	// happily create the duplicates the whole claim flow exists to prevent,
+	// and every test above it would be asserting against a database that
+	// does not behave like the real one. The empty address is exempt, the
+	// same way NULL is exempt from a partial index.
+	if u.PersonalEmail != "" {
+		for _, existing := range f.byID {
+			if strings.EqualFold(existing.PersonalEmail, u.PersonalEmail) {
+				return repository.User{}, fmt.Errorf("fake: an account already uses this email address: %w", apperror.ErrConflict)
+			}
+		}
+	}
 	f.createCalls = append(f.createCalls, u)
 	f.nextID++
 	created := repository.User{
@@ -181,6 +198,7 @@ func (f *fakeUserRepository) Create(_ context.Context, u repository.NewUser) (re
 		AccountStatus:      repository.AccountStatusActive,
 		AgeConfirmedOver18: u.AgeConfirmedOver18,
 		IsGuest:            u.IsGuest,
+		PersonalEmail:      u.PersonalEmail,
 	}
 	// Mirrors the real CreateUser query: age_confirmed_at is set only when
 	// age_confirmed_over_18 is true, never backdated, never set for false.
@@ -597,6 +615,13 @@ func (f *fakeRefreshTokenRepository) DeleteExpired(_ context.Context, retention 
 // migration 0002's UNIQUE(user_id, purpose) — an Upsert for an existing key
 // overwrites rather than adding a second row.
 type fakeVerificationCodeRepository struct {
+	// Guards both maps. The real repository's atomicity is Postgres's; a
+	// map has none, so without this a test driving ClaimAttempt
+	// concurrently would report a data race instead of the behaviour it is
+	// trying to assert. Holding it across the whole of ClaimAttempt is also
+	// what makes the attempt cap atomic here, which is the property the
+	// claim exists for (V-1).
+	mu         sync.Mutex
 	rows       map[string]repository.VerificationCode
 	targetRows map[string]repository.VerificationCode
 }
@@ -650,6 +675,70 @@ func (f *fakeVerificationCodeRepository) IncrementAttempts(_ context.Context, us
 
 func (f *fakeVerificationCodeRepository) Delete(_ context.Context, userID string, purpose repository.VerificationPurpose) error {
 	delete(f.rows, verificationCodeKey(userID, purpose))
+	return nil
+}
+
+// ClaimAttempt mirrors the real UPDATE: the cap and the expiry are checked
+// and the increment applied under one lock, so no two callers can both see
+// the same pre-increment value. A fake that incremented without the cap
+// would let the very race V-1 is about pass its own test.
+func (f *fakeVerificationCodeRepository) ClaimAttempt(
+	_ context.Context, userID string, purpose repository.VerificationPurpose, maxAttempts int,
+) (repository.VerificationCode, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := verificationCodeKey(userID, purpose)
+	row, ok := f.rows[key]
+	if !ok || row.Attempts >= maxAttempts || !time.Now().Before(row.ExpiresAt) {
+		return repository.VerificationCode{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	row.Attempts++
+	f.rows[key] = row
+	return row, nil
+}
+
+// Consume mirrors the real conditional DELETE: it removes the row only
+// while codeHash still matches, so a correct code cannot be spent twice.
+func (f *fakeVerificationCodeRepository) Consume(
+	_ context.Context, userID string, purpose repository.VerificationPurpose, codeHash string,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := verificationCodeKey(userID, purpose)
+	row, ok := f.rows[key]
+	if !ok || row.CodeHash != codeHash {
+		return fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	delete(f.rows, key)
+	return nil
+}
+
+func (f *fakeVerificationCodeRepository) ClaimAttemptByTarget(
+	_ context.Context, purpose repository.VerificationPurpose, target string, maxAttempts int,
+) (repository.VerificationCode, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := verificationCodeTargetKey(purpose, target)
+	row, ok := f.targetRows[key]
+	if !ok || row.Attempts >= maxAttempts || !time.Now().Before(row.ExpiresAt) {
+		return repository.VerificationCode{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	row.Attempts++
+	f.targetRows[key] = row
+	return row, nil
+}
+
+func (f *fakeVerificationCodeRepository) ConsumeByTarget(
+	_ context.Context, purpose repository.VerificationPurpose, target, codeHash string,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	key := verificationCodeTargetKey(purpose, target)
+	row, ok := f.targetRows[key]
+	if !ok || row.CodeHash != codeHash {
+		return fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	delete(f.targetRows, key)
 	return nil
 }
 
@@ -732,16 +821,33 @@ func (f *fakeUnverifiedCompanyClaimRepository) Insert(_ context.Context, claim r
 }
 
 // fakeTrustedContactRepository is an in-memory stand-in for
-// repository.TrustedContactRepository (ADR-026 §1).
+// repository.TrustedContactRepository, including the #80 consent state and
+// the invitation caps.
 type fakeTrustedContactRepository struct {
-	byID   map[string]repository.TrustedContact
-	nextID int
+	byID          map[string]repository.TrustedContact
+	nextID        int
+	pendingTokens map[string]string // token hash -> contact id
+	invites       []fakeInvite
+	// requesterNames is what Confirm reports, by user id.
+	requesterNames map[string]string
+}
+
+type fakeInvite struct {
+	userID, phoneHash string
+	sentAt            time.Time
 }
 
 func newFakeTrustedContactRepository() *fakeTrustedContactRepository {
-	return &fakeTrustedContactRepository{byID: map[string]repository.TrustedContact{}}
+	return &fakeTrustedContactRepository{
+		byID:           map[string]repository.TrustedContact{},
+		pendingTokens:  map[string]string{},
+		requesterNames: map[string]string{},
+	}
 }
 
+// Insert seeds an ALREADY-CONFIRMED contact — the state every contact added
+// before consent existed is in (migration 0024, D2). Test-only; it is not
+// part of the repository interface.
 func (f *fakeTrustedContactRepository) Insert(_ context.Context, userID, name, phoneNumber, email string) (repository.TrustedContact, error) {
 	f.nextID++
 	c := repository.TrustedContact{
@@ -750,6 +856,45 @@ func (f *fakeTrustedContactRepository) Insert(_ context.Context, userID, name, p
 	}
 	f.byID[c.ID] = c
 	return c, nil
+}
+
+func (f *fakeTrustedContactRepository) InsertPending(_ context.Context, c repository.NewPendingContact) (repository.TrustedContact, error) {
+	existing := 0
+	for _, tc := range f.byID {
+		if tc.UserID == c.UserID {
+			existing++
+		}
+	}
+	if existing >= c.MaxContacts {
+		return repository.TrustedContact{}, fmt.Errorf("fake: %w", repository.ErrTooManyTrustedContacts)
+	}
+	since := time.Now().Add(-c.CapWindow)
+	byUser, toPhone := 0, 0
+	for _, inv := range f.invites {
+		if inv.sentAt.Before(since) {
+			continue
+		}
+		if inv.userID == c.UserID {
+			byUser++
+		}
+		if inv.phoneHash == c.PhoneHash {
+			toPhone++
+		}
+	}
+	if byUser >= c.MaxInvitesPerUser || toPhone >= c.MaxInvitesPerPhone {
+		return repository.TrustedContact{}, fmt.Errorf("fake: %w", repository.ErrContactInviteLimit)
+	}
+
+	f.nextID++
+	tc := repository.TrustedContact{
+		ID: fmt.Sprintf("contact-%d", f.nextID), UserID: c.UserID, Name: c.Name,
+		PhoneNumber: c.PhoneNumber, Email: c.Email, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		PendingUntil: c.ExpiresAt,
+	}
+	f.byID[tc.ID] = tc
+	f.pendingTokens[c.TokenHash] = tc.ID
+	f.invites = append(f.invites, fakeInvite{userID: c.UserID, phoneHash: c.PhoneHash, sentAt: time.Now()})
+	return tc, nil
 }
 
 func (f *fakeTrustedContactRepository) ListForUser(_ context.Context, userID string) ([]repository.TrustedContact, error) {
@@ -762,12 +907,33 @@ func (f *fakeTrustedContactRepository) ListForUser(_ context.Context, userID str
 	return out, nil
 }
 
-func (f *fakeTrustedContactRepository) CountForUser(ctx context.Context, userID string) (int, error) {
-	contacts, err := f.ListForUser(ctx, userID)
-	if err != nil {
-		return 0, err
+func (f *fakeTrustedContactRepository) Confirm(_ context.Context, tokenHash string) (string, error) {
+	id, ok := f.pendingTokens[tokenHash]
+	if !ok {
+		return "", fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
-	return len(contacts), nil
+	c := f.byID[id]
+	if !time.Now().Before(c.PendingUntil) {
+		return "", fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	delete(f.pendingTokens, tokenHash)
+	c.PendingUntil = time.Time{}
+	f.byID[id] = c
+	return f.requesterNames[c.UserID], nil
+}
+
+func (f *fakeTrustedContactRepository) DeleteInvitesSentBefore(_ context.Context, before time.Time, _ int) (int, error) {
+	kept := f.invites[:0]
+	deleted := 0
+	for _, inv := range f.invites {
+		if inv.sentAt.Before(before) {
+			deleted++
+			continue
+		}
+		kept = append(kept, inv)
+	}
+	f.invites = kept
+	return deleted, nil
 }
 
 func (f *fakeTrustedContactRepository) Delete(_ context.Context, contactID, userID string) error {
@@ -776,22 +942,81 @@ func (f *fakeTrustedContactRepository) Delete(_ context.Context, contactID, user
 		return fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	delete(f.byID, contactID)
+	for hash, id := range f.pendingTokens { // ON DELETE CASCADE
+		if id == contactID {
+			delete(f.pendingTokens, hash)
+		}
+	}
 	return nil
 }
 
 // fakeSOSEventRepository is an in-memory stand-in for
-// repository.SOSEventRepository (ADR-026 §4).
+// repository.SOSEventRepository (ADR-026 §4, migration 0023 claims).
 type fakeSOSEventRepository struct {
-	events []repository.SOSEvent
-	err    error
+	events    []repository.SOSEvent
+	completed []bool
+	keys      map[string]int // userID + "|" + client request id -> index
+	triggered []time.Time
+	err       error
 }
 
-func (f *fakeSOSEventRepository) Insert(_ context.Context, event repository.SOSEvent) error {
+func (f *fakeSOSEventRepository) Claim(_ context.Context, c repository.SOSClaim) (repository.SOSOutcome, error) {
 	if f.err != nil {
-		return f.err
+		return repository.SOSOutcome{}, f.err
 	}
-	f.events = append(f.events, event)
+	if f.keys == nil {
+		f.keys = map[string]int{}
+	}
+	if c.ClientRequestID != "" {
+		if i, ok := f.keys[c.Event.UserID+"|"+c.ClientRequestID]; ok {
+			return f.outcome(i), nil
+		}
+	}
+	since := time.Now().Add(-c.Window)
+	count := 0
+	for i, e := range f.events {
+		if e.UserID == c.Event.UserID && f.triggered[i].After(since) {
+			count++
+		}
+	}
+	if count >= c.MaxPerWindow {
+		return repository.SOSOutcome{}, fmt.Errorf("fake: %w", repository.ErrSOSLimit)
+	}
+	f.events = append(f.events, c.Event)
+	f.completed = append(f.completed, false)
+	f.triggered = append(f.triggered, time.Now())
+	i := len(f.events) - 1
+	if c.ClientRequestID != "" {
+		f.keys[c.Event.UserID+"|"+c.ClientRequestID] = i
+	}
+	return repository.SOSOutcome{EventID: fmt.Sprintf("sos-%d", i)}, nil
+}
+
+func (f *fakeSOSEventRepository) Complete(_ context.Context, eventID string, contactsNotified int) error {
+	var i int
+	if _, err := fmt.Sscanf(eventID, "sos-%d", &i); err != nil || i >= len(f.events) {
+		return fmt.Errorf("fake: unknown sos event %q", eventID)
+	}
+	f.events[i].ContactsNotified = contactsNotified
+	f.completed[i] = true
 	return nil
+}
+
+func (f *fakeSOSEventRepository) Outcome(_ context.Context, userID, clientRequestID string) (repository.SOSOutcome, error) {
+	i, ok := f.keys[userID+"|"+clientRequestID]
+	if !ok {
+		return repository.SOSOutcome{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	return f.outcome(i), nil
+}
+
+func (f *fakeSOSEventRepository) outcome(i int) repository.SOSOutcome {
+	return repository.SOSOutcome{
+		EventID:          fmt.Sprintf("sos-%d", i),
+		Duplicate:        true,
+		Completed:        f.completed[i],
+		ContactsNotified: f.events[i].ContactsNotified,
+	}
 }
 
 // fakeEmailSender/fakeSmsSender capture what would have been sent, so tests

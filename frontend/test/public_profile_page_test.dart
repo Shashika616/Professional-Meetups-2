@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
-import 'package:professional_connections_platform/core/widgets/star_rating.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
+
+import 'support/app_icon_finder.dart';
 
 import 'support/fake_auth_service.dart';
 
@@ -50,17 +53,21 @@ void main() {
     expect(find.text('Grace Hopper'), findsOneWidget);
     expect(find.text('L3 Trust'), findsOneWidget);
     expect(find.text('9'), findsOneWidget);
-    expect(find.byType(StarRating), findsOneWidget);
+    // The rating is the stat tile's own number now, not a star row — the
+    // tile is the same one the member's own profile uses.
+    expect(find.text('4.5'), findsOneWidget);
 
     // All three rows are always listed — an unverified one is shown as
-    // not verified, not hidden, so the absence itself is information.
+    // not yet verified, not hidden, so the absence itself is information.
     expect(find.text('Professional'), findsOneWidget);
     expect(find.text('Official'), findsOneWidget);
     expect(find.text('Phone verified'), findsOneWidget);
-    expect(find.byIcon(Icons.check_circle_rounded), findsNWidgets(2));
+    expect(find.text('Verified'), findsNWidgets(3));
+    // One section label plus the two rows that hold it.
+    expect(findAppIcon(AppIcons.check), findsNWidgets(2));
     // The unverified row says so outright rather than greying out.
-    expect(find.byIcon(Icons.cancel_outlined), findsOneWidget);
-    expect(find.text('Not verified'), findsOneWidget);
+    expect(findAppIcon(AppIcons.minus), findsOneWidget);
+    expect(find.text('Not yet'), findsOneWidget);
   });
 
   testWidgets('a member with no ratings yet says so instead of showing an '
@@ -73,7 +80,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('No ratings yet'), findsOneWidget);
-    expect(find.byType(StarRating), findsNothing);
   });
 
   testWidgets('the caller\'s name shows immediately while the profile loads', (
@@ -166,9 +172,9 @@ void main() {
     await tester.pumpWidget(pageWith(auth));
     await tester.pumpAndSettle();
 
-    expect(find.text('RECENT MEETUPS'), findsOneWidget);
-    expect(find.text('HOSTED'), findsOneWidget);
-    expect(find.text('JOINED'), findsOneWidget);
+    expect(find.text('Recent meetups'), findsOneWidget);
+    expect(find.text('Hosted'), findsOneWidget);
+    expect(find.text('Joined'), findsOneWidget);
     expect(find.text('3 people'), findsOneWidget);
     expect(find.text('Not rated yet'), findsOneWidget);
     // Comments render as quotations with an attributed line under each.
@@ -187,13 +193,13 @@ void main() {
     await tester.pumpWidget(pageWith(auth, initialName: 'Someone'));
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.lock_outline_rounded), findsOneWidget);
+    expect(findAppIcon(AppIcons.lock), findsOneWidget);
     expect(
       find.text(
         'You can see a member\'s profile once you share a meetup with them.',
       ),
       findsOneWidget,
     );
-    expect(find.text('RECENT MEETUPS'), findsNothing);
+    expect(find.text('Recent meetups'), findsNothing);
   });
 }

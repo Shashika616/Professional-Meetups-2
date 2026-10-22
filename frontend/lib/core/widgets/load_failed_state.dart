@@ -7,6 +7,7 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/faded_picture.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 
@@ -78,8 +79,8 @@ class LoadFailedState extends StatelessWidget {
     super.key,
     required this.failure,
     this.onRetry,
-    this.retryLabel = 'TRY AGAIN',
-    this.retryIcon = Icons.refresh_rounded,
+    this.retryLabel = 'Try again',
+    this.retryIcon = AppIcons.refresh,
     this.compact = false,
     this.extraAction,
   });
@@ -91,7 +92,7 @@ class LoadFailedState extends StatelessWidget {
 
   /// The glyph on the primary button; a retry arrow unless the action is
   /// something else (opening settings, say).
-  final IconData retryIcon;
+  final String retryIcon;
   final bool compact;
 
   /// An optional second control under RETRY (open settings, say).

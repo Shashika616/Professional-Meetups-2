@@ -23,6 +23,17 @@ import 'support/fake_secure_storage_platform.dart';
 /// entered, and a domain-mismatch rejection renders the backend's exact
 /// message, not a generic fallback.
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -162,8 +173,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -218,7 +229,7 @@ void main() {
       await tester.pumpWidget(_appWith(container));
       await tester.pumpAndSettle();
 
-      final continueButton = find.widgetWithText(PrimaryButton, 'CONTINUE');
+      final continueButton = find.widgetWithText(PrimaryButton, 'Continue');
       expect(tester.widget<PrimaryButton>(continueButton).onPressed, isNull);
 
       await tester.enterText(find.byType(TextField).first, 'Ada Lovelace');
@@ -281,12 +292,12 @@ void main() {
 
       // The SecondaryButton "VERIFY" next to the company-email field —
       // the only "VERIFY" text on screen before OtpEntry appears.
-      await tester.tap(find.text('VERIFY').first);
+      await tester.tap(find.text('Verify').first);
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField).last, '123456');
       await tester.pump();
-      await tester.tap(find.widgetWithText(PrimaryButton, 'VERIFY'));
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Verify'));
       await tester.pumpAndSettle();
 
       expect(

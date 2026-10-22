@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -42,7 +43,7 @@ class VerificationChecklistPage extends ConsumerWidget {
   /// The copy this page has always shown. Kept as the defaults so every
   /// existing call site behaves identically — the parameters exist only so
   /// a second entry point can say what IT unlocks.
-  static const defaultTitle = 'UNLOCK JOINING MEETUPS';
+  static const defaultTitle = 'Unlock joining meetups';
   static const defaultDescription =
       'Complete these to reach Level 2 trust and unlock joining meetups.';
 
@@ -90,10 +91,10 @@ class VerificationChecklistPage extends ConsumerWidget {
                 const ConnectLinkedInBanner(),
                 const SizedBox(height: 20),
               ],
-              const SectionLabel('REMAINING STEPS'),
+              const SectionLabel('Remaining steps'),
               const SizedBox(height: 12),
               FlatCard(
-                radius: 12,
+                radius: 18,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 6,
@@ -101,7 +102,7 @@ class VerificationChecklistPage extends ConsumerWidget {
                 child: Column(
                   children: [
                     _ChecklistRow(
-                      icon: Icons.phone_android,
+                      icon: AppIcons.phone,
                       title: 'Phone',
                       done: phoneDone,
                       locked: !linkedInConnected,
@@ -111,8 +112,8 @@ class VerificationChecklistPage extends ConsumerWidget {
                     ),
                     const _ChecklistDivider(),
                     _ChecklistRow(
-                      icon: Icons.alternate_email_rounded,
-                      title: 'Personal Email',
+                      icon: AppIcons.atSign,
+                      title: 'Personal email',
                       done: emailDone,
                       locked: !linkedInConnected,
                       buildScreen: (context) => PersonalEmailVerificationPage(
@@ -121,8 +122,8 @@ class VerificationChecklistPage extends ConsumerWidget {
                     ),
                     const _ChecklistDivider(),
                     _ChecklistRow(
-                      icon: Icons.badge_outlined,
-                      title: 'Personal Details',
+                      icon: AppIcons.idCard,
+                      title: 'Personal details',
                       done: detailsDone,
                       locked: !linkedInConnected,
                       buildScreen: (context) =>
@@ -137,7 +138,7 @@ class VerificationChecklistPage extends ConsumerWidget {
               // work now that the meetup is no longer locked for this
               // viewer.
               PrimaryButton(
-                label: 'COMPLETE',
+                label: 'Complete',
                 height: 48,
                 onPressed: allDone ? () => Navigator.of(context).pop() : null,
               ),
@@ -158,7 +159,7 @@ class _ChecklistRow extends StatelessWidget {
     required this.buildScreen,
   });
 
-  final IconData icon;
+  final String icon;
   final String title;
   final bool done;
   final bool locked;
@@ -167,13 +168,9 @@ class _ChecklistRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final trailing = done
-        ? Icon(Icons.check_circle_rounded, size: 18, color: AppPalette.verified)
+        ? AppIcon(AppIcons.checkCircle, size: 18, color: AppPalette.verified)
         : locked
-        ? Icon(
-            Icons.lock_outline_rounded,
-            size: 16,
-            color: AppPalette.textSecondary,
-          )
+        ? AppIcon(AppIcons.lock, size: 16, color: AppPalette.textSecondary)
         : Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
@@ -183,10 +180,10 @@ class _ChecklistRow extends StatelessWidget {
               ),
             ),
             child: Text(
-              'VERIFY',
+              'Verify',
               style: TextStyle(
                 fontSize: 8,
-                letterSpacing: 1.4,
+                letterSpacing: 0.3,
                 fontWeight: FontWeight.w800,
                 color: AppPalette.candyBlue,
               ),
@@ -205,7 +202,7 @@ class _ChecklistRow extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, size: 18, color: AppPalette.candyBlue),
+            child: AppIcon(icon, size: 18, color: AppPalette.candyBlue),
           ),
           const SizedBox(width: 12),
           Expanded(

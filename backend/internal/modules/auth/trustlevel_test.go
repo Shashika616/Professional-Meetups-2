@@ -228,3 +228,52 @@ func TestComputeTrustLevel_GuestCannotClimbWithoutLosingTheFlag(t *testing.T) {
 		t.Errorf("a still-flagged guest with partial progress computed to %d, want 0 — only clearing is_guest reaches level 1", got)
 	}
 }
+
+// A PROVIDER-VERIFIED EMAIL COUNTS AS THE PERSONAL EMAIL FOR LEVEL 2.
+//
+// Decided 2026-10-08 (ADR-009, tracker #72). No behaviour change — this
+// pins what computeTrustLevel already does, because it is now reachable by
+// a route it was not before and the consequence is easy to lose.
+//
+// The route: federated signup writes the provider's address straight into
+// users.personal_email (migration 0017 made it the account's identity
+// anchor, so it has to be there at creation). computeTrustLevel's Level 2
+// condition reads `PersonalEmail != ""`, and `PersonalEmailVerified` is
+// derived the same way — there is no separate verified column. So a person
+// who signs up with Google or LinkedIn arrives with the email rung already
+// climbed, and reaches Level 2 on phone and legal name alone.
+//
+// That is intended. identity.Verify withholds the address unless the
+// provider set email_verified, so the only addresses that can land here are
+// ones a provider cryptographically attested to — stronger evidence than
+// our own six-digit code, not weaker. The invariant "personal_email is
+// present only if it was verified" is unchanged; what changed is who
+// verified it.
+func TestComputeTrustLevel_ProviderVerifiedEmailCountsTowardLevel2(t *testing.T) {
+	// Exactly the four Level 2 conditions, with the email arriving from the
+	// provider rather than from an in-app OTP.
+	fromProvider := repository.User{
+		LinkedInSub:   "linkedin-sub-1",
+		PhoneNumber:   "+94771234567",
+		LegalName:     "Augusta Ada King",
+		PersonalEmail: "ada@example.com",
+	}
+	if got := computeTrustLevel(fromProvider); got != 2 {
+		t.Errorf("trust level = %d, want 2 — a provider-verified email must count as the personal email", got)
+	}
+
+	// And the rung is genuinely load-bearing: without the address the same
+	// user is Level 1, so this is not passing by accident.
+	withoutEmail := fromProvider
+	withoutEmail.PersonalEmail = ""
+	if got := computeTrustLevel(withoutEmail); got != 1 {
+		t.Errorf("trust level without an email = %d, want 1", got)
+	}
+
+	// The profile reports it as verified, because that flag is derived from
+	// presence. If a separate personal_email_verified column is ever added,
+	// this is where the two definitions would stop agreeing.
+	if !(fromProvider.PersonalEmail != "") {
+		t.Error("PersonalEmailVerified is derived as PersonalEmail != \"\"; that is no longer true")
+	}
+}

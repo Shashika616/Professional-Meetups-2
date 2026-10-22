@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// "There is nothing here yet", said properly.
 ///
@@ -29,7 +30,7 @@ class EmptySection extends StatelessWidget {
     this.compact = false,
   });
 
-  final IconData icon;
+  final String icon;
 
   /// What is missing, as a statement: "No meetups yet".
   final String title;
@@ -70,7 +71,7 @@ class EmptySection extends StatelessWidget {
                 ),
                 shape: BoxShape.circle,
               ),
-              child: Icon(icon, size: 21, color: AppPalette.textSecondary),
+              child: AppIcon(icon, size: 21, color: AppPalette.textSecondary),
             ),
             const SizedBox(height: 12),
             Text(

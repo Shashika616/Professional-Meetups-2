@@ -4,6 +4,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
@@ -23,7 +27,20 @@ import 'support/fake_secure_storage_platform.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
 import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
 
+import 'support/app_icon_finder.dart';
+
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -231,8 +248,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   // What DELETE /v1/users/me does in this test: null deletes, anything
@@ -285,20 +302,20 @@ Future<void> _pumpUntilSignedOut(WidgetTester tester) async {
 /// before the dialog exists — so this must only ever run pre-dialog.
 Future<void> _tapSignOutTrigger(WidgetTester tester) async {
   await tester.scrollUntilVisible(
-    find.text('SIGN OUT'),
+    find.text('Sign out'),
     500.0,
     scrollable: find.byType(Scrollable),
   );
-  await tester.tap(find.text('SIGN OUT'));
+  await tester.tap(find.text('Sign out'));
   await tester.pumpAndSettle();
 }
 
-/// Taps the dialog's destructive "SIGN OUT" action. Scoped to `TextButton`
-/// specifically — after the dialog opens, plain `find.text('SIGN OUT')`
-/// matches both the (now-obscured) trigger tile and the dialog's own
-/// title/button, but only the button is a `TextButton`.
+/// Taps the dialog's destructive "Sign out" action. Scoped to
+/// [PrimaryButton] specifically — after the dialog opens, plain
+/// `find.text('Sign out')` matches both the (now-obscured) trigger tile
+/// and the dialog's own button, but only the button is a [PrimaryButton].
 Future<void> _confirmSignOutInDialog(WidgetTester tester) async {
-  await tester.tap(find.widgetWithText(TextButton, 'SIGN OUT'));
+  await tester.tap(find.widgetWithText(PrimaryButton, 'Sign out'));
   await _pumpUntilSignedOut(tester);
 }
 
@@ -407,7 +424,10 @@ void main() {
 
         await _tapSignOutTrigger(tester);
 
-        expect(find.text('Sign out of TieHere?'), findsOneWidget);
+        expect(
+          find.text('You can sign back in with a one-time code.'),
+          findsOneWidget,
+        );
         expect(auth.logoutCallCount, 0);
         expect(find.byType(ProfilePage), findsOneWidget);
 
@@ -426,14 +446,17 @@ void main() {
       await tester.pumpAndSettle();
 
       await _tapSignOutTrigger(tester);
-      await tester.tap(find.widgetWithText(TextButton, 'CANCEL'));
+      await tester.tap(find.widgetWithText(SecondaryButton, 'Cancel'));
       await tester.pumpAndSettle();
 
       expect(auth.logoutCallCount, 0);
       expect(find.byType(ProfilePage), findsOneWidget);
       expect(find.byType(LandingPage), findsNothing);
       // The dialog itself is gone, not just invisible.
-      expect(find.text('Sign out of TieHere?'), findsNothing);
+      expect(
+        find.text('You can sign back in with a one-time code.'),
+        findsNothing,
+      );
 
       final storage = SecureSessionStorage(
         storage: const FlutterSecureStorage(),
@@ -463,7 +486,7 @@ void main() {
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('SIGN OUT'),
+        find.text('Sign out'),
         500.0,
         scrollable: find.byType(Scrollable).first,
       );
@@ -479,7 +502,7 @@ void main() {
       );
       expect(
         tester.getCenter(find.text('Delete account')).dy,
-        lessThan(tester.getCenter(find.text('SIGN OUT')).dy),
+        lessThan(tester.getCenter(find.text('Sign out')).dy),
       );
     });
 
@@ -492,14 +515,19 @@ void main() {
 
       await openDeleteSheet(tester);
 
-      expect(find.text('DELETE ACCOUNT'), findsOneWidget);
+      // The SHEET's title, not the settings row's. They used to differ only
+      // by case ('DELETE ACCOUNT' / 'Delete account'), so this assertion
+      // was silently checking whichever one it happened to match; the sheet
+      // now asks a question, which is both better copy and unambiguous
+      // here.
+      expect(find.text('Delete your account?'), findsOneWidget);
       expect(find.textContaining('cannot be undone'), findsOneWidget);
       expect(find.textContaining('kept for 90 days'), findsOneWidget);
       expect(auth.deleteAccountCallCount, 0);
 
-      await tester.tap(find.widgetWithText(TextButton, 'CANCEL'));
+      await tester.tap(find.widgetWithText(SecondaryButton, 'Cancel'));
       await tester.pumpAndSettle();
-      expect(find.text('DELETE ACCOUNT'), findsNothing);
+      expect(find.text('Delete your account?'), findsNothing);
       expect(auth.deleteAccountCallCount, 0);
       expect(await hasStoredSession(), isTrue);
     });
@@ -511,7 +539,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await openDeleteSheet(tester);
-      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await tester.tap(find.text('Delete my account'));
       await _pumpUntilSignedOut(tester);
       await tester.pump(const Duration(milliseconds: 100));
 
@@ -538,14 +566,14 @@ void main() {
       await tester.pumpAndSettle();
 
       await openDeleteSheet(tester);
-      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await tester.tap(find.text('Delete my account'));
       await tester.pumpAndSettle();
 
-      expect(find.text('NOT JUST YET'), findsOneWidget);
+      expect(find.text('Not just yet'), findsOneWidget);
       expect(find.text(reason), findsOneWidget);
-      expect(find.text('DELETE MY ACCOUNT'), findsNothing);
+      expect(find.text('Delete my account'), findsNothing);
 
-      await tester.tap(find.text('GOT IT'));
+      await tester.tap(find.text('Got it'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ProfilePage), findsOneWidget);
@@ -561,7 +589,7 @@ void main() {
       await tester.pumpAndSettle();
 
       await openDeleteSheet(tester);
-      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await tester.tap(find.text('Delete my account'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 
@@ -577,11 +605,11 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('DELETE MY ACCOUNT'), findsOneWidget);
+      expect(find.text('Delete my account'), findsOneWidget);
       expect(await hasStoredSession(), isTrue);
 
       auth.deleteAccountError = null;
-      await tester.tap(find.text('DELETE MY ACCOUNT'));
+      await tester.tap(find.text('Delete my account'));
       await _pumpUntilSignedOut(tester);
       expect(auth.deleteAccountCallCount, 2);
       expect(find.byType(LandingPage), findsOneWidget);
@@ -598,14 +626,14 @@ void main() {
         await tester.pumpWidget(_appWith(_FakeAuthService()));
         await tester.pumpAndSettle();
 
-        expect(find.text('LinkedIn Verified'), findsOneWidget);
+        expect(find.text('LinkedIn verified'), findsOneWidget);
         expect(find.text('Not connected'), findsNothing);
 
         // Only LinkedIn's check icon — Phone/Personal Email/Personal
         // Details/Work Email are all unverified on this fake's default
         // profile, so they show VERIFY chips instead.
-        expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
-        expect(find.text('VERIFY'), findsNWidgets(4));
+        expect(findAppIcon(AppIcons.checkCircle), findsOneWidget);
+        expect(find.text('Verify'), findsNWidgets(4));
         expect(find.text('Not verified'), findsNWidgets(4));
       },
     );
@@ -631,17 +659,33 @@ void main() {
         await tester.pumpWidget(_appWith(auth));
         await tester.pumpAndSettle();
 
+        // One, not two. The banner's heading and its button used to say
+        // the same three words; it is a single tappable banner now.
         expect(find.text('Connect LinkedIn'), findsOneWidget);
-        expect(find.text('CONNECT LINKEDIN'), findsOneWidget);
         expect(find.text('Not connected'), findsOneWidget);
-        expect(find.text('LinkedIn Verified'), findsNothing);
+        expect(find.text('LinkedIn verified'), findsNothing);
 
         // The four Level 2/3 rows are locked, not offered as VERIFY —
         // tapping VERIFY at Level 0 would just 403 server-side
         // (requireLinkedIn).
-        expect(find.text('VERIFY'), findsNothing);
+        expect(find.text('Verify'), findsNothing);
         expect(find.text('Connect LinkedIn first'), findsNWidgets(4));
-        expect(find.byIcon(Icons.lock_outline_rounded), findsNWidgets(4));
+        // Scoped to the verification section: an unrelated padlock
+        // elsewhere on the page should not be able to satisfy this count,
+        // which is exactly what happened when Privacy Controls also used
+        // one.
+        expect(
+          find.descendant(
+            of: find
+                .ancestor(
+                  of: find.text('Connect LinkedIn first').first,
+                  matching: find.byType(Column),
+                )
+                .last,
+            matching: findAppIcon(AppIcons.lock),
+          ),
+          findsNWidgets(4),
+        );
       },
     );
 
@@ -686,7 +730,7 @@ void main() {
       );
       await tester.pumpWidget(_appWith(auth));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('CONNECT LINKEDIN'));
+      await tester.tap(find.text('Connect LinkedIn'));
       await tester.pumpAndSettle();
       return auth;
     }
@@ -704,7 +748,7 @@ void main() {
       // Nothing has changed yet — the dialog is a question, not a report.
       expect(auth.completeProfileSetupCallCount, 0);
 
-      await tester.tap(find.widgetWithText(TextButton, 'UPDATE'));
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Update'));
       await tester.pumpAndSettle();
 
       expect(auth.completeProfileSetupCallCount, 1);
@@ -722,7 +766,7 @@ void main() {
       final auth = await tapConnect(tester, suggestedName: 'Grace Hopper');
       expect(find.text('Update your name?'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(TextButton, 'KEEP MINE'));
+      await tester.tap(find.widgetWithText(SecondaryButton, 'Keep mine'));
       await tester.pumpAndSettle();
 
       expect(find.text('Update your name?'), findsNothing);
@@ -764,7 +808,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Connect LinkedIn'), findsNothing);
-      expect(find.text('CONNECT LINKEDIN'), findsNothing);
     });
   });
 
@@ -789,15 +832,15 @@ void main() {
         await tester.pumpAndSettle();
 
         // LinkedIn's own check icon plus the four now-verified rows.
-        expect(find.byIcon(Icons.check_circle_rounded), findsNWidgets(5));
+        expect(findAppIcon(AppIcons.checkCircle), findsNWidgets(5));
         expect(find.text('Verified'), findsNWidgets(4));
-        expect(find.text('VERIFY'), findsNothing);
+        expect(find.text('Verify'), findsNothing);
         expect(find.text('Not verified'), findsNothing);
 
         // Every tick shares one right edge, whether or not a pencil sits
         // beside it: the status column must read as a straight line.
         final rightEdges = tester
-            .widgetList(find.byIcon(Icons.check_circle_rounded))
+            .widgetList(findAppIcon(AppIcons.checkCircle))
             .map((w) => tester.getTopRight(find.byWidget(w)).dx)
             .toSet();
         expect(rightEdges, hasLength(1));
@@ -810,9 +853,9 @@ void main() {
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('VERIFY').first);
+      await tester.ensureVisible(find.text('Verify').first);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('VERIFY').first);
+      await tester.tap(find.text('Verify').first);
       await tester.pumpAndSettle();
 
       expect(find.byType(PhoneVerificationPage), findsOneWidget);
@@ -823,9 +866,9 @@ void main() {
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('VERIFY').at(1));
+      await tester.ensureVisible(find.text('Verify').at(1));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('VERIFY').at(1));
+      await tester.tap(find.text('Verify').at(1));
       await tester.pumpAndSettle();
 
       expect(find.byType(PersonalEmailVerificationPage), findsOneWidget);
@@ -837,9 +880,9 @@ void main() {
         await tester.pumpWidget(_appWith(_FakeAuthService()));
         await tester.pumpAndSettle();
 
-        await tester.ensureVisible(find.text('VERIFY').at(2));
+        await tester.ensureVisible(find.text('Verify').at(2));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('VERIFY').at(2));
+        await tester.tap(find.text('Verify').at(2));
         await tester.pumpAndSettle();
 
         expect(find.byType(PersonalDetailsPage), findsOneWidget);
@@ -851,7 +894,7 @@ void main() {
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
 
-      final workEmailVerify = find.text('VERIFY').at(3);
+      final workEmailVerify = find.text('Verify').at(3);
       await tester.ensureVisible(workEmailVerify);
       await tester.pumpAndSettle();
       await tester.tap(workEmailVerify);
@@ -880,8 +923,8 @@ void main() {
 
       // One pencil next to the display name plus one per verified row
       // (Phone/Personal Email/Personal Details/Work Email) — 5 total.
-      expect(find.byIcon(Icons.edit_outlined), findsNWidgets(5));
-      expect(find.text('VERIFY'), findsNothing);
+      expect(findAppIcon(AppIcons.edit), findsNWidgets(5));
+      expect(find.text('Verify'), findsNothing);
     });
 
     testWidgets(
@@ -891,7 +934,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // Only the display-name pencil — none of the four rows are done.
-        expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
+        expect(findAppIcon(AppIcons.edit), findsOneWidget);
       },
     );
   });
@@ -902,10 +945,10 @@ void main() {
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.tap(findAppIcon(AppIcons.edit));
       await tester.pumpAndSettle();
 
-      expect(find.text('Edit Name'), findsOneWidget);
+      expect(find.text('Edit name'), findsOneWidget);
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         'Ada Lovelace',
@@ -923,11 +966,11 @@ void main() {
         await tester.pumpWidget(_appWith(auth));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.byIcon(Icons.edit_outlined));
+        await tester.tap(findAppIcon(AppIcons.edit));
         await tester.pumpAndSettle();
 
         await tester.enterText(find.byType(TextField), 'Augusta Ada King');
-        await tester.tap(find.widgetWithText(TextButton, 'SAVE'));
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Save'));
         // pumpAndSettle drives the dialog's exit transition all the way to
         // completion — if the controller were disposed synchronously
         // instead of via the dialog's own State.dispose(), this is exactly
@@ -948,11 +991,11 @@ void main() {
       await tester.pumpWidget(_appWith(auth));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.tap(findAppIcon(AppIcons.edit));
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), 'Someone Else');
-      await tester.tap(find.widgetWithText(TextButton, 'CANCEL'));
+      await tester.tap(find.widgetWithText(SecondaryButton, 'Cancel'));
       await tester.pumpAndSettle();
 
       expect(auth.completeProfileSetupCallCount, 0);
@@ -967,9 +1010,9 @@ void main() {
         await tester.pumpWidget(_appWith(auth));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.byIcon(Icons.edit_outlined));
+        await tester.tap(findAppIcon(AppIcons.edit));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(TextButton, 'SAVE'));
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Save'));
         await tester.pumpAndSettle();
 
         expect(auth.completeProfileSetupCallCount, 0);
@@ -987,10 +1030,10 @@ void main() {
         await tester.pumpWidget(_appWith(auth));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.byIcon(Icons.edit_outlined));
+        await tester.tap(findAppIcon(AppIcons.edit));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(TextField), 'New Name');
-        await tester.tap(find.widgetWithText(TextButton, 'SAVE'));
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Save'));
         await tester.pumpAndSettle();
 
         expect(find.text('Something went wrong.'), findsOneWidget);
@@ -1026,7 +1069,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('MEETUPS'), findsOneWidget);
+      expect(find.text('Meetups'), findsOneWidget);
       expect(find.text('0'), findsOneWidget);
       expect(
         find.text('12'),
@@ -1036,7 +1079,7 @@ void main() {
 
       // No ratings yet is a dash, not a score of 0 — an average over zero
       // ratings is not a rating.
-      expect(find.text('RATING'), findsOneWidget);
+      expect(find.text('Rating'), findsOneWidget);
       expect(find.text('-'), findsOneWidget);
     });
 
@@ -1060,8 +1103,13 @@ void main() {
       expect(find.text('7'), findsOneWidget);
       // One decimal place, from the real average rather than a placeholder.
       expect(find.text('4.8'), findsOneWidget);
-      // The stat tile prints the level over its own TRUST label.
-      expect(find.text('L2'), findsOneWidget);
+      // CHANGED BY UI REVIEW #26. This used to expect 'L2'. At 18px a
+      // capital L beside a digit reads as the word "LO", and the chip never
+      // said what it was a level of, so the value is now the digit alone
+      // and the label carries the meaning.
+      expect(find.text('2'), findsOneWidget);
+      expect(find.text('L2'), findsNothing);
+      expect(find.text('Trust level'), findsOneWidget);
     });
   });
 
@@ -1090,10 +1138,10 @@ void main() {
 
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Privacy Controls'));
+      await tester.ensureVisible(find.text('Privacy controls'));
       await tester.pumpAndSettle();
 
-      await tapRowGap(tester, 'Privacy Controls');
+      await tapRowGap(tester, 'Privacy controls');
       expect(find.byType(PrivacyControlsPage), findsOneWidget);
     });
 
@@ -1113,5 +1161,87 @@ void main() {
       await tapRowGap(tester, 'Notifications');
       expect(find.byType(NotificationsPage), findsOneWidget);
     });
+  });
+  // UI review #31: the floating pencil had no label at all, so a screen
+  // reader announced it as "button" and nothing else, and a sighted user
+  // had to guess whether a pencil over a profile edits the name, the photo
+  // or everything.
+  testWidgets('the edit control names what it does, for a screen reader and '
+      'for a long press', (tester) async {
+    await tester.pumpWidget(_appWith(_FakeAuthService()));
+    await tester.pumpAndSettle();
+
+    final pencil = findAppIcon(AppIcons.edit);
+    expect(pencil, findsOneWidget);
+
+    // A Tooltip covers the long press; Semantics covers TalkBack and
+    // VoiceOver. Both, because neither substitutes for the other.
+    expect(
+      find.ancestor(of: pencil, matching: find.byType(Tooltip)),
+      findsOneWidget,
+      reason: 'no tooltip: a long press explains nothing',
+    );
+    final semantics = tester.getSemantics(pencil);
+    expect(
+      semantics.label,
+      contains('Edit'),
+      reason: 'the control is announced without saying what it edits',
+    );
+  });
+  // UI review #28: the sentence that explains why the whole app is locked
+  // rendered as "...connect LinkedIn...unlock matching", because two
+  // adjacent literals were concatenated with no space or punctuation.
+  testWidgets('the restricted-account copy reads as a sentence', (
+    tester,
+  ) async {
+    // A Level 0 account with no LinkedIn: that is who sees this banner.
+    await tester.pumpWidget(
+      _appWith(
+        _FakeAuthService(
+          profile: const UserProfile(
+            id: 'user-1',
+            fullName: 'Ada Lovelace',
+            trustLevel: 1,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final banner = find.byType(ConnectLinkedInBanner);
+    expect(banner, findsOneWidget);
+
+    final texts = tester
+        .widgetList<Text>(
+          find.descendant(of: banner, matching: find.byType(Text)),
+        )
+        .map((t) => t.data ?? '')
+        .join(' ');
+
+    // The original bug was two adjacent string literals concatenating
+    // without a separator ("...connect LinkedIn...unlock matching"). The
+    // copy is one literal now and reads differently, so this checks the
+    // same property against the current sentence: a complete clause, and
+    // no word-boundary collision anywhere in the banner.
+    expect(
+      texts,
+      contains('view only until you connect it'),
+      reason:
+          'the explanation sentence is incomplete or was re-worded '
+          'without updating this guard',
+    );
+    expect(
+      texts,
+      isNot(contains('LinkedIn...unlock')),
+      reason: 'the two literals are still glued together into a typo',
+    );
+    // Catches the SHAPE of the bug rather than the one instance of it: a
+    // lowercase letter immediately followed by an uppercase one is what a
+    // missing space between two concatenated literals looks like.
+    expect(
+      RegExp(r'[a-z][A-Z]').hasMatch(texts.replaceAll('LinkedIn', '')),
+      isFalse,
+      reason: 'two string literals look glued together without a space',
+    );
   });
 }

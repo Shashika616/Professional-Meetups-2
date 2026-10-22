@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:convert';
 
 import 'package:app_links/app_links.dart';
@@ -8,14 +9,21 @@ import 'package:http/http.dart' as http;
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:professional_connections_platform/core/utils/debug_log.dart';
 import 'package:professional_connections_platform/core/config/app_config.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
+import 'package:professional_connections_platform/core/services/deadline_http_client.dart';
 import 'package:professional_connections_platform/core/services/oauth_state.dart';
 import 'package:professional_connections_platform/core/services/sign_in_nonce.dart';
+
+part 'http_auth/sign_in.dart';
+part 'http_auth/verification.dart';
+part 'http_auth/account.dart';
+part 'http_auth/safety.dart';
 
 /// Backstop only — how long to wait for the LinkedIn redirect before giving
 /// up, on the rare chance the app-resume-based detection below
@@ -42,217 +50,23 @@ const Duration _resumeGracePeriod = Duration(seconds: 2);
 /// contract) and LinkedIn's OAuth authorization endpoint directly
 /// (`client_id` is public — no backend round trip needed just to start the
 /// flow, per `backend/PLAN.md` Step 4).
-class HttpAuthService implements AuthService {
+class HttpAuthService extends _HttpAuthBase
+    with _SignInMethods, _VerificationMethods, _AccountMethods, _SafetyMethods {
   HttpAuthService({
     http.Client? httpClient,
     AppLinks? appLinks,
     String? baseUrl,
     Future<String?> Function()? getAccessToken,
-  }) : _httpClient = httpClient ?? http.Client(),
-       _appLinks = appLinks ?? AppLinks(),
-       _baseUrl = baseUrl ?? AppConfig.gatewayBaseUrl,
-       _getAccessToken = getAccessToken ?? (() async => null);
-
-  final http.Client _httpClient;
-  final AppLinks _appLinks;
-  final String _baseUrl;
-
-  /// Supplies the current access token for the `/v1/verification/*` and
-  /// `/v1/users/me` calls below, which the gateway's new auth middleware
-  /// requires (backend/PLAN.md's Level 2/3 addendum, Step F). Reads from
-  /// wherever the caller's session state actually lives (wired in
-  /// `app_providers.dart` to secure storage) rather than this service
-  /// holding its own copy — [HttpAuthService] otherwise has no session
-  /// state of its own, and this keeps it that way.
-  final Future<String?> Function() _getAccessToken;
-
-  @override
-  Future<AuthSession> signInWithLinkedIn({
-    required bool ageConfirmedOver18,
-  }) async {
-    final code = await _runLinkedInOAuthFlow();
-    return completeLinkedInOnboarding(
-      authorizationCode: code,
-      redirectUri: AppConfig.linkedInRedirectUri,
-      ageConfirmedOver18: ageConfirmedOver18,
-    );
-  }
-
-  /// Links LinkedIn to the CALLER's already-authenticated account
-  /// (Profile's "Connect LinkedIn," ADR-014) — runs the identical OAuth
-  /// browser/deep-link round trip as [signInWithLinkedIn], but POSTs to the
-  /// authenticated `/v1/auth/identities/link` route instead of
-  /// `/v1/auth/linkedin/callback`, so linking never creates a second
-  /// account.
-  @override
-  Future<AuthSession> linkLinkedIn() async {
-    final code = await _runLinkedInOAuthFlow();
-    final headers = await _authHeaders();
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/identities/link'),
-      headers: headers,
-      body: jsonEncode({
-        'provider': 'linkedin',
-        'authorization_code': code,
-        'redirect_uri': AppConfig.linkedInRedirectUri,
-      }),
-    );
-    return _parseSessionResponse(response);
-  }
-
-  /// Drives the out-of-app LinkedIn OAuth browser flow through to a
-  /// verified authorization code — shared by [signInWithLinkedIn] (which
-  /// posts it to the account-creating callback route) and [linkLinkedIn]
-  /// (which posts the identical code shape to the authenticated linking
-  /// route instead). Extracting this avoids the two flows' CSRF/redirect-
-  /// handling logic drifting apart from each other over time.
-  Future<String> _runLinkedInOAuthFlow() async {
-    final state = OAuthState.generate();
-
-    // Deliberately no code_challenge/code_challenge_method (PKCE) here —
-    // LinkedIn's Sign In with LinkedIn / OpenID Connect product rejects the
-    // token exchange outright when they're present (confirmed via direct
-    // testing against LinkedIn's real endpoint: identical requests succeed
-    // with PKCE omitted, fail with 401 invalid_client when included).
-    // Security is still sound without it: this is a confidential client —
-    // the LinkedIn client_secret lives only in the backend, never in this
-    // app — which is what PKCE exists to substitute for on a public client
-    // that can't hold a secret.
-    final authorizationUrl =
-        Uri.https('www.linkedin.com', '/oauth/v2/authorization', {
-          'response_type': 'code',
-          'client_id': AppConfig.linkedInClientId,
-          'redirect_uri': AppConfig.linkedInRedirectUri,
-          'state': state,
-          'scope': 'openid profile email',
-        });
-
-    // Opens the system browser, not an in-app WebView — a WebView can't be
-    // trusted the same way for OAuth (backend/PLAN.md's frontend plan,
-    // Step 1).
-    final launched = await launchUrl(
-      authorizationUrl,
-      mode: LaunchMode.externalApplication,
-    );
-    if (!launched) {
-      throw const AuthNetworkException(
-        'Could not open the browser to sign in.',
-      );
-    }
-
-    final redirect = await _awaitRedirect(state);
-
-    if (redirect.queryParameters.containsKey('error')) {
-      throw InvalidGrantException(
-        redirect.queryParameters['error_description'] ??
-            redirect.queryParameters['error']!,
-      );
-    }
-
-    final returnedState = redirect.queryParameters['state'];
-    // CSRF protection: verify state before the authorization code is used
-    // for anything else. Belt-and-suspenders — _awaitRedirect already only
-    // ever returns a URI whose state matches, but the code below is about
-    // to spend an authorization code, so this stays as the explicit final
-    // check regardless of how the URI got here.
-    if (returnedState == null || returnedState != state) {
-      throw const InvalidGrantException(
-        'Sign-in response did not match the request that started it.',
-      );
-    }
-
-    final code = redirect.queryParameters['code'];
-    if (code == null || code.isEmpty) {
-      throw const InvalidGrantException(
-        'LinkedIn did not return an authorization code.',
-      );
-    }
-    return code;
-  }
-
-  /// The POST-and-parse half of [signInWithLinkedIn], split out so it's
-  /// unit-testable (Step 8) without driving the actual out-of-app browser
-  /// and deep-link round trip, which isn't automatable in `flutter test`.
-  @visibleForTesting
-  Future<AuthSession> completeLinkedInOnboarding({
-    required String authorizationCode,
-    required String redirectUri,
-    required bool ageConfirmedOver18,
-  }) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/linkedin/callback'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'authorization_code': authorizationCode,
-        'redirect_uri': redirectUri,
-        'age_confirmed_over_18': ageConfirmedOver18,
-      }),
-    );
-    return _parseSessionResponse(response);
-  }
-
-  /// Sign in with Apple (ADR-014) — Apple's native SDK hands this app an
-  /// `identityToken` (JWT) directly; unlike LinkedIn, there's no browser
-  /// round trip or backend code-exchange step, just a straight POST of the
-  /// already-signed token.
-  ///
-  /// Apple only ever includes [AuthorizationCredentialAppleID.givenName]/
-  /// `familyName` out-of-band on the native credential object, never inside
-  /// the JWT itself — the backend's id_token verification
-  /// (`internal/identity`) has no way to see it. So this reads the name off
-  /// the credential here and sends it as the request's `full_name_hint`
-  /// (Plan 22), which the server uses ONLY to name a brand-new account when
-  /// the token itself carried no name. It was previously read and discarded,
-  /// which is why every Apple signup came back nameless.
-  ///
-  /// Apple supplies that name on a user's VERY FIRST authorization with this
-  /// app and never again — so a reinstall, or any later sign-in, still sends
-  /// an empty hint. That is expected, not a failure: `full_name` then comes
-  /// back empty exactly as before and the app renders its existing "Member"
-  /// fallback (`ProfilePage`/`HomePage`). The hint never overwrites a name an
-  /// account already has; the server only ever applies it at creation.
-  @override
-  Future<AuthSession> signInWithApple({
-    required bool ageConfirmedOver18,
-  }) async {
-    // A fresh nonce for THIS attempt. Apple gets the hash (which it embeds
-    // in the id_token's `nonce` claim); the backend gets the raw pre-image
-    // and hashes it to compare. See [SignInNonce] for why it has to be that
-    // way round.
-    final nonce = SignInNonce.generate();
-
-    final AuthorizationCredentialAppleID credential;
-    try {
-      credential = await SignInWithApple.getAppleIDCredential(
-        scopes: const [
-          AppleIDAuthorizationScopes.email,
-          AppleIDAuthorizationScopes.fullName,
-        ],
-        nonce: nonce.hashed,
-      );
-    } on SignInWithAppleException catch (error) {
-      // Catches every subtype (SignInWithAppleAuthorizationException,
-      // SignInWithAppleNotSupportedException,
-      // SignInWithAppleCredentialsException, ...) in one place — dispatch
-      // on the concrete type happens inside mapAppleSignInError.
-      throw mapAppleSignInError(error);
-    }
-
-    final idToken = credential.identityToken;
-    if (idToken == null || idToken.isEmpty) {
-      throw const AuthNetworkException(
-        'Apple did not return an identity token.',
-      );
-    }
-
-    return _completeFederatedSignup(
-      provider: 'apple',
-      idToken: idToken,
-      nonce: nonce.raw,
-      ageConfirmedOver18: ageConfirmedOver18,
-      fullNameHint: appleFullNameHint(credential),
-    );
-  }
+    // EVERY request this service makes goes through the deadline
+    // wrapper (#78), including one injected by a test — a test client
+    // with no timeout would prove the production path works when it
+    // does not.
+  }) : super._(
+         DeadlineHttpClient(httpClient ?? http.Client()),
+         appLinks ?? AppLinks(),
+         baseUrl ?? AppConfig.gatewayBaseUrl,
+         getAccessToken ?? (() async => null),
+       );
 
   /// Apple's one-time out-of-band name, as a single string — the two parts
   /// joined with a space, with either missing or blank part simply left out,
@@ -267,454 +81,34 @@ class HttpAuthService implements AuthService {
         .where((part) => part.isNotEmpty)
         .join(' ');
   }
+}
 
-  /// Google Sign-In (ADR-014) — same "native SDK hands us an id_token,
-  /// straight POST, no code exchange" shape as [signInWithApple]. Requires
-  /// [AppConfig.googleServerClientId] to be set (the separate Web OAuth
-  /// client, not the Android app's own client) — see that field's doc
-  /// comment for why.
-  @override
-  Future<AuthSession> signInWithGoogle({
-    required bool ageConfirmedOver18,
-  }) async {
-    if (AppConfig.googleServerClientId.isEmpty) {
-      throw const AuthNetworkException('Google Sign-In is not configured yet.');
-    }
-
-    try {
-      final nonce = await _ensureGoogleSignInInitialized();
-      final account = await GoogleSignIn.instance.authenticate();
-      final idToken = account.authentication.idToken;
-      if (idToken == null || idToken.isEmpty) {
-        throw const AuthNetworkException(
-          'Google did not return an identity token.',
-        );
-      }
-      return await _completeFederatedSignup(
-        provider: 'google',
-        idToken: idToken,
-        nonce: nonce.raw,
-        ageConfirmedOver18: ageConfirmedOver18,
-        // Google's id_token carries a standard OIDC `name` claim, which the
-        // server verifies and prefers over any hint — there is nothing for
-        // this path to add, and Plan 22 changes its behavior in no way.
-        fullNameHint: '',
-      );
-    } on GoogleSignInException catch (error) {
-      // Dispatch on error.code happens inside mapGoogleSignInError.
-      throw mapGoogleSignInError(error);
-    }
-  }
-
-  /// `GoogleSignIn.instance.initialize` "must be called on this instance
-  /// exactly once" per its own doc comment — memoized so repeated
-  /// [signInWithGoogle] calls (a user backing out and retrying) don't
-  /// re-initialize the singleton.
-  ///
-  /// This memoization is also why the Google nonce is per-APP-RUN rather
-  /// than per-attempt, unlike Apple's: `google_sign_in` 7.x takes the nonce
-  /// on `initialize`, not on `authenticate`, and its own docs say calling
-  /// `initialize` more than once "will result in undefined behavior" — so
-  /// there is no supported way to rotate it per sign-in. The nonce is
-  /// generated once here, alongside that single call, and reused for every
-  /// Google attempt in this process.
-  ///
-  /// That is weaker than Apple's per-attempt nonce, and worth being precise
-  /// about: it still means a submitted `id_token` must be accompanied by a
-  /// pre-image that only this app instance knows and that never appears in
-  /// the token, which is the property the backend check is for. What it does
-  /// not do is scope that proof to one individual attempt. Revisit if
-  /// `google_sign_in` ever moves the parameter to `authenticate`.
-  static Future<SignInNonce>? _googleSignInInit;
-
-  Future<SignInNonce> _ensureGoogleSignInInitialized() {
-    return _googleSignInInit ??= () async {
-      final nonce = SignInNonce.generate();
-      await GoogleSignIn.instance.initialize(
-        serverClientId: AppConfig.googleServerClientId,
-        nonce: nonce.hashed,
-      );
-      return nonce;
-    }();
-  }
-
-  /// [nonce] is the RAW pre-image, never the value handed to the provider —
-  /// see [SignInNonce]. The backend rejects the call outright if it is empty.
-  /// [fullNameHint] is the provider's out-of-band name, or `''` when there
-  /// is none — always sent rather than conditionally omitted, so the body
-  /// shape is the same on every call and the server has one case to handle.
-  Future<AuthSession> _completeFederatedSignup({
-    required String provider,
-    required String idToken,
-    required String nonce,
-    required bool ageConfirmedOver18,
-    required String fullNameHint,
-  }) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/federated/signup'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'provider': provider,
-        'id_token': idToken,
-        'nonce': nonce,
-        'age_confirmed_over_18': ageConfirmedOver18,
-        'full_name_hint': fullNameHint,
-      }),
-    );
-    return _parseSessionResponse(response);
-  }
-
-  @override
-  Future<int> startEmailSignupOtp(String email) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/email/signup/start'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email}),
-    );
-    if (response.statusCode == 200) {
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      return decoded['resend_after_seconds'] as int? ?? 0;
-    }
-    throw _mapVerificationError(
-      response,
-      on400: AuthNetworkException.new,
-      isResend: true,
-    );
-  }
-
-  @override
-  Future<AuthSession> signUpWithEmail({
-    required String email,
-    required String code,
-    required bool ageConfirmedOver18,
-  }) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/email/signup'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'email': email,
-        'code': code,
-        'age_confirmed_over_18': ageConfirmedOver18,
-      }),
-    );
-    return _parseSessionResponse(
-      response,
-      on400: InvalidVerificationCodeException.new,
-    );
-  }
-
-  @override
-  Future<AuthSession> guestSignup({required bool ageConfirmedOver18}) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/guest/signup'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'age_confirmed_over_18': ageConfirmedOver18}),
-    );
-    // No on400 override: the only 400 this endpoint produces is the age
-    // attestation being false, which the UI cannot reach (the age step is
-    // completed before the button is shown) and which is not a bad-code
-    // case, so the generic mapping is the honest one.
-    return _parseSessionResponse(response);
-  }
-
-  @override
-  Future<int> startEmailLoginOtp(String email) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/email/login/start'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email}),
-    );
-    if (response.statusCode == 200) {
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      return decoded['resend_after_seconds'] as int? ?? 0;
-    }
-    throw _mapVerificationError(
-      response,
-      on400: AuthNetworkException.new,
-      isResend: true,
-    );
-  }
-
-  @override
-  Future<AuthSession> loginWithEmail({
-    required String email,
-    required String code,
-  }) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/email/login'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'email': email, 'code': code}),
-    );
-    // 401 here means invalid email/code (CompleteEmailLogin's own
-    // deliberately-identical message for "email unknown" vs "wrong code,"
-    // an account-enumeration-safe design, ADR-019 §1) — distinct from a
-    // refresh token's 401 (a live session having gone bad), so this must
-    // NOT map to SessionExpiredException: there is no session yet to force
-    // out of, this is a fresh sign-in attempt that simply failed.
-    return _parseSessionResponse(
-      response,
-      on401: InvalidCredentialsException.new,
-    );
-  }
-
-  @override
-  Future<AuthSession> refreshSession(String refreshToken) async {
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/refresh'),
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'refresh_token': refreshToken}),
-    );
-    return _parseSessionResponse(response, isRefresh: true);
-  }
-
-  @override
-  Future<void> logout(
-    String refreshToken, {
-    String? accessToken,
-    String? fcmToken,
-  }) async {
-    // The bearer is optional on this route: the server revokes the refresh
-    // token either way and only uses the access token to prove whose push
-    // registration fcm_token is. Sent only when there is something for it
-    // to prove.
-    final response = await _httpClient.post(
-      Uri.parse('$_baseUrl/v1/auth/logout'),
-      headers: {
-        'Content-Type': 'application/json',
-        if (accessToken != null && fcmToken != null)
-          'Authorization': 'Bearer $accessToken',
-      },
-      body: jsonEncode({'refresh_token': refreshToken, 'fcm_token': ?fcmToken}),
-    );
-    if (response.statusCode != 200) {
-      throw AuthNetworkException(_errorMessage(response.body));
-    }
-  }
-
-  @override
-  Future<int> startPhoneVerification(String phoneNumber) => _startVerification(
-    '/v1/verification/phone/start',
-    {'phone_number': phoneNumber},
+/// The state and the HTTP plumbing every group of [HttpAuthService]
+/// methods shares. The methods themselves live in one mixin per concern,
+/// in `http_auth/`: split by file so each reads on its own, without
+/// changing the class, its constructor, or a single call site. Part files
+/// rather than separate libraries because the mixins need these private
+/// helpers, and Dart privacy is per library.
+abstract class _HttpAuthBase implements AuthService {
+  _HttpAuthBase._(
+    this._httpClient,
+    this._appLinks,
+    this._baseUrl,
+    this._getAccessToken,
   );
 
-  @override
-  Future<AuthSession> verifyPhoneCode(String phoneNumber, String code) =>
-      _verifyCode('/v1/verification/phone/verify', {
-        'phone_number': phoneNumber,
-        'code': code,
-      });
+  final http.Client _httpClient;
+  final AppLinks _appLinks;
+  final String _baseUrl;
 
-  @override
-  Future<int> startPersonalEmailVerification(String email) =>
-      _startVerification('/v1/verification/personal-email/start', {
-        'email': email,
-      });
-
-  @override
-  Future<AuthSession> verifyPersonalEmailCode(String email, String code) =>
-      _verifyCode('/v1/verification/personal-email/verify', {
-        'email': email,
-        'code': code,
-      });
-
-  @override
-  Future<AuthSession> submitPersonalDetails(
-    String legalName,
-    String address,
-  ) async {
-    final response = await _authenticatedPost(
-      '/v1/verification/personal-details',
-      {'legal_name': legalName, 'address': address},
-    );
-    return _parseVerificationSession(response);
-  }
-
-  @override
-  Future<int> startCorporateEmailVerification(String email) =>
-      _startVerification('/v1/verification/corporate-email/start', {
-        'email': email,
-      }, on400: (message) => WorkEmailDomainRejectedException(message));
-
-  @override
-  Future<AuthSession> verifyCorporateEmailCode(
-    String email,
-    String code,
-    String companyName,
-  ) => _verifyCode('/v1/verification/corporate-email/verify', {
-    'email': email,
-    'code': code,
-    'company_name': companyName,
-  });
-
-  @override
-  Future<UserProfile> getProfile() async {
-    final headers = await _authHeaders();
-    final response = await _httpClient.get(
-      Uri.parse('$_baseUrl/v1/users/me'),
-      headers: headers,
-    );
-    if (response.statusCode == 200) {
-      return UserProfile.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>,
-      );
-    }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<PublicProfile> getPublicProfile(String userId) async {
-    final headers = await _authHeaders();
-    final response = await _httpClient.get(
-      Uri.parse('$_baseUrl/v1/users/${Uri.encodeComponent(userId)}'),
-      headers: headers,
-    );
-    if (response.statusCode == 200) {
-      return PublicProfile.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>,
-      );
-    }
-    // 403 is the relationship gate: the server's sentence says why, and the
-    // page shows it as a state rather than an error. Handled here rather
-    // than in the shared mapper so the verification endpoints' own 403
-    // behaviour is untouched.
-    if (response.statusCode == 403) {
-      throw ForbiddenActionException(_errorMessage(response.body));
-    }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<UserProfile> completeProfileSetup({
-    required String fullName,
-    String? companyName,
-    String? companyEmail,
-  }) async {
-    final response = await _authenticatedPost('/v1/auth/profile-setup', {
-      'full_name': fullName,
-      'company_name': ?companyName,
-      'company_email': ?companyEmail,
-    });
-    if (response.statusCode == 200) {
-      return UserProfile.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>,
-      );
-    }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<TrustedContact> addTrustedContact({
-    required String name,
-    String phoneNumber = '',
-    String email = '',
-  }) async {
-    final response = await _authenticatedPost('/v1/sos/contacts', {
-      'name': name,
-      'phone_number': phoneNumber,
-      'email': email,
-    });
-    if (response.statusCode == 200) {
-      return TrustedContact.fromJson(
-        jsonDecode(response.body) as Map<String, dynamic>,
-      );
-    }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<List<TrustedContact>> listTrustedContacts() async {
-    final headers = await _authHeaders();
-    final response = await _httpClient.get(
-      Uri.parse('$_baseUrl/v1/sos/contacts'),
-      headers: headers,
-    );
-    if (response.statusCode == 200) {
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final contacts = decoded['contacts'] as List<dynamic>? ?? [];
-      return contacts
-          .map((c) => TrustedContact.fromJson(c as Map<String, dynamic>))
-          .toList();
-    }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<void> removeTrustedContact(String contactId) async {
-    final headers = await _authHeaders();
-    final response = await _httpClient.delete(
-      Uri.parse('$_baseUrl/v1/sos/contacts/$contactId'),
-      headers: headers,
-    );
-    if (response.statusCode == 204) return;
-    if (response.statusCode == 403) {
-      throw ForbiddenActionException(_errorMessage(response.body));
-    }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<int> triggerSos({
-    required String contextMessage,
-    required double latitude,
-    required double longitude,
-  }) async {
-    final response = await _authenticatedPost('/v1/sos/trigger', {
-      'context_message': contextMessage,
-      'latitude': latitude,
-      'longitude': longitude,
-    });
-    if (response.statusCode == 200) {
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      return decoded['contacts_notified'] as int? ?? 0;
-    }
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<void> updateLastKnownLocation({
-    required double latitude,
-    required double longitude,
-  }) async {
-    final response = await _authenticatedPost('/v1/users/me/location', {
-      'latitude': latitude,
-      'longitude': longitude,
-    });
-    if (response.statusCode == 204) return;
-    throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  @override
-  Future<void> deleteAccount() async {
-    final headers = await _authHeaders();
-    final http.Response response;
-    try {
-      response = await _httpClient
-          .delete(Uri.parse('$_baseUrl/v1/users/me'), headers: headers)
-          .timeout(const Duration(seconds: 30));
-    } catch (_) {
-      // Offline, or the request never came back. Nothing was confirmed, so
-      // the account is still there and the person can simply try again.
-      throw const AuthNetworkException(
-        'We couldn’t reach TieHere. Check your connection and try again.',
-      );
-    }
-    switch (response.statusCode) {
-      case 204:
-        return;
-      case 409:
-        throw AccountDeletionBlockedException(_errorMessage(response.body));
-      case 401:
-        throw const SessionExpiredException(
-          'Your session has expired. Please sign in again.',
-        );
-      case 429:
-        throw const RateLimitedException();
-      default:
-        throw const AuthNetworkException(
-          'We couldn’t delete your account just now. Please try again in a moment.',
-        );
-    }
-  }
+  /// Supplies the current access token for the `/v1/verification/*` and
+  /// `/v1/users/me` calls below, which the gateway's new auth middleware
+  /// requires (backend/PLAN.md's Level 2/3 addendum, Step F). Reads from
+  /// wherever the caller's session state actually lives (wired in
+  /// `app_providers.dart` to secure storage) rather than this service
+  /// holding its own copy — [HttpAuthService] otherwise has no session
+  /// state of its own, and this keeps it that way.
+  final Future<String?> Function() _getAccessToken;
 
   Future<int> _startVerification(
     String path,
@@ -870,6 +264,20 @@ class HttpAuthService implements AuthService {
     }
 
     final message = _errorMessage(response.body);
+    // THE ONE 409 THESE ROUTES CAN PRODUCE, and the reason this check lives
+    // here rather than at the three signup call sites: Apple, Google and
+    // LinkedIn all funnel through this method, and a rule kept in three
+    // places is a rule that is wrong in at least one of them.
+    //
+    // Matched on `code`, never on the sentence: the app opens a whole
+    // screen on this, and matching prose would break the first time the
+    // wording improved. A 409 without the code, or without a ticket, falls
+    // through to the generic path below with the server's own sentence,
+    // which is the right outcome for a client that cannot act on it.
+    if (response.statusCode == 409) {
+      final claim = _accountClaimRequired(response.body, message);
+      if (claim != null) throw claim;
+    }
     switch (response.statusCode) {
       case 400:
         throw on400(message);
@@ -879,6 +287,33 @@ class HttpAuthService implements AuthService {
         throw on401(message);
       default:
         throw AuthNetworkException(message);
+    }
+  }
+
+  /// Reads the claim detail out of a 409 body, or null when it is not one.
+  ///
+  /// Tolerant by construction: a body that is not JSON, is missing the code
+  /// or has no ticket returns null rather than throwing, because a parse
+  /// failure here would replace a usable error message with a crash during
+  /// sign-in.
+  AccountClaimRequiredException? _accountClaimRequired(
+    String body,
+    String message,
+  ) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) return null;
+      if (decoded['code'] != 'account_claim_required') return null;
+      final ticket = decoded['ticket'] as String? ?? '';
+      if (ticket.isEmpty) return null;
+      return AccountClaimRequiredException(
+        ticket: ticket,
+        email: decoded['email'] as String? ?? '',
+        resendAfterSeconds: decoded['resend_after_seconds'] as int? ?? 0,
+        message: message,
+      );
+    } catch (_) {
+      return null;
     }
   }
 
@@ -914,10 +349,10 @@ AuthException mapAppleSignInError(SignInWithAppleException error) {
       error.code == AuthorizationErrorCode.canceled) {
     return const SignInCancelledException();
   }
-  // Type and code only, never the object: debugPrint survives release
-  // builds, and a platform exception's toString() can carry more than a
-  // log should (same rule as every other catch in this codebase).
-  debugPrint(
+  // Type and code only, never the object, AND only in debug builds
+  // (#94): a platform exception's toString() can carry more than a log
+  // should (same rule as every other catch in this codebase).
+  debugLog(
     'Sign in with Apple failed: ${error.runtimeType}'
     '${error is SignInWithAppleAuthorizationException ? ' ${error.code}' : ''}',
   );
@@ -935,7 +370,7 @@ AuthException mapGoogleSignInError(GoogleSignInException error) {
   if (error.code == GoogleSignInExceptionCode.canceled) {
     return const SignInCancelledException();
   }
-  debugPrint('Google Sign-In failed: ${error.code} ${error.description}');
+  debugLog('Google Sign-In failed: ${error.code} ${error.description}');
   return const AuthNetworkException(
     'Google Sign-In isn’t available right now. Please try again or '
     'use another option.',

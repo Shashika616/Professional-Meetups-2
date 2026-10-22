@@ -45,74 +45,99 @@ class _TimeField24hState extends State<TimeField24h> {
         : formatTime24h(widget.initialValue!),
   );
 
+  /// The box takes a green edge while it has focus, which is the only
+  /// thing left of the old underline's job.
+  final FocusNode _focus = FocusNode();
+
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    _focus.addListener(_onFocusChanged);
   }
 
   @override
   void dispose() {
     _controller.removeListener(_onTextChanged);
     _controller.dispose();
+    _focus.removeListener(_onFocusChanged);
+    _focus.dispose();
     super.dispose();
+  }
+
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   void _onTextChanged() => widget.onChanged(parseTime24h(_controller.text));
 
   @override
   Widget build(BuildContext context) {
-    // Bare label + input: the Schedule flow composes FROM and TO into one
-    // card of its own, so this draws no surface, icon or border itself.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          widget.label,
-          style: TextStyle(
-            color: AppPalette.textSecondary,
-            fontSize: 10.5,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.3,
-          ),
+    // A FIELD BOX, NOT AN UNDERLINE.
+    //
+    // This drew a label over a Material underlined TextField, which is
+    // the framework's own chrome and the one thing on the timing step
+    // that belonged to no part of this app: a thin grey rule that turns
+    // green, on a card, under a photograph. The screen set draws every
+    // value the person types into as a raised box with its label inside
+    // it, which is also what the confirmation dialogs now use.
+    return Container(
+      decoration: BoxDecoration(
+        color: AppPalette.raised,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _focus.hasFocus ? AppPalette.brandGreen : Colors.transparent,
+          width: 1.5,
         ),
-        TextField(
-          key: ValueKey('time24h-${widget.label}'),
-          controller: _controller,
-          keyboardType: TextInputType.number,
-          inputFormatters: const [_HhMmInputFormatter()],
-          autocorrect: false,
-          enableSuggestions: false,
-          cursorColor: AppPalette.brandGreen,
-          style: TextStyle(
-            color: AppPalette.textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.2,
-            height: 1.15,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
-          decoration: InputDecoration(
-            isDense: true,
-            contentPadding: const EdgeInsets.only(top: 2, bottom: 6),
-            // The shape of the value, so an empty field already says what
-            // it wants; the card beneath names the 24-hour clock outright.
-            hintText: 'HH:MM',
-            hintStyle: TextStyle(
-              color: AppPalette.textSecondary.withValues(alpha: 0.45),
+      ),
+      padding: const EdgeInsets.fromLTRB(14, 9, 14, 11),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            widget.label,
+            style: TextStyle(
+              color: AppPalette.textSecondary,
+              fontSize: 11,
               fontWeight: FontWeight.w700,
-              letterSpacing: 1.5,
-            ),
-            enabledBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: AppPalette.hairline),
-            ),
-            focusedBorder: UnderlineInputBorder(
-              borderSide: BorderSide(color: AppPalette.brandGreen, width: 2),
+              letterSpacing: 0.3,
             ),
           ),
-        ),
-      ],
+          const SizedBox(height: 2),
+          TextField(
+            key: ValueKey('time24h-${widget.label}'),
+            controller: _controller,
+            focusNode: _focus,
+            keyboardType: TextInputType.number,
+            inputFormatters: const [_HhMmInputFormatter()],
+            autocorrect: false,
+            enableSuggestions: false,
+            cursorColor: AppPalette.brandGreen,
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1,
+              height: 1.15,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+            decoration: InputDecoration(
+              isCollapsed: true,
+              border: InputBorder.none,
+              // The shape of the value, so an empty field already says
+              // what it wants; the line under the card names the
+              // 24-hour clock outright.
+              hintText: 'HH:MM',
+              hintStyle: TextStyle(
+                color: AppPalette.textSecondary.withValues(alpha: 0.45),
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

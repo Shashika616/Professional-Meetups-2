@@ -22,6 +22,17 @@ import 'support/fake_secure_storage_platform.dart';
 /// Level 2 is satisfied by default because that is this page's normal
 /// precondition — it is reached by a user who can already join meetups.
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -139,8 +150,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) => throw UnimplementedError();
   @override
   Future<void> deleteAccount() async {}
@@ -197,7 +208,7 @@ void main() {
     await tester.pumpWidget(_appWith(_FakeAuthService()));
     await tester.pumpAndSettle();
 
-    expect(find.text('UNLOCK HOSTING MEETUPS'), findsOneWidget);
+    expect(find.text('Unlock hosting meetups'), findsOneWidget);
     expect(
       find.byKey(const Key('hostingUnlockCompanyNameRow')),
       findsOneWidget,

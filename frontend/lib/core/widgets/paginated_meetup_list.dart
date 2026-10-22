@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/empty_section.dart';
 
 /// Fetches one more page after [items], starting from [cursor].
@@ -324,7 +325,7 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 24),
                   child: EmptySection(
-                    icon: Icons.event_busy_outlined,
+                    icon: AppIcons.calendarX,
                     title: 'Nothing to show yet',
                     message: widget.emptyMessage.isEmpty
                         ? null

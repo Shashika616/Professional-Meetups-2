@@ -1,0 +1,55 @@
+# Consumer mailbox providers: an address at one of these says nothing about
+# where someone works, so it cannot verify a work email (#91).
+#
+# One lowercase domain per line. Lines starting with # are comments. Kept as
+# a plain file, embedded at build time, so adding a provider is a one-line
+# change a reviewer can read — free_email_domains_test.go keeps it tidy.
+
+# Google
+gmail.com
+googlemail.com
+
+# Microsoft
+outlook.com
+hotmail.com
+hotmail.co.uk
+live.com
+msn.com
+outlook.co.uk
+
+# Yahoo / AOL
+yahoo.com
+yahoo.co.uk
+yahoo.co.in
+yahoo.in
+ymail.com
+rocketmail.com
+aol.com
+
+# Apple
+icloud.com
+me.com
+mac.com
+
+# Privacy and independent providers
+protonmail.com
+proton.me
+pm.me
+tutanota.com
+tuta.io
+fastmail.com
+hey.com
+zoho.com
+zohomail.com
+mail.com
+gmx.com
+gmx.net
+yandex.com
+yandex.ru
+
+# Regional, including the ISPs that hand out consumer mailboxes in Sri Lanka
+# and India, where most users are
+rediffmail.com
+sltnet.lk
+qq.com
+163.com

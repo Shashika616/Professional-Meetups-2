@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/onboarding/age_confirmation_checkbox.dart';
 
@@ -53,8 +54,8 @@ class _AgeConfirmationStepState extends State<AgeConfirmationStep> {
                           width: 2,
                         ),
                       ),
-                      child: Icon(
-                        Icons.shield_outlined,
+                      child: AppIcon(
+                        AppIcons.shield,
                         size: 48,
                         color: AppPalette.candyBlue,
                       ),
@@ -76,12 +77,14 @@ class _AgeConfirmationStepState extends State<AgeConfirmationStep> {
                       onChanged: (v) => setState(() => _confirmed = v),
                     ),
                     const SizedBox(height: 20),
+                    // Kept, but down from five lines to one. This is a
+                    // safety statement on an age gate, not marketing, so
+                    // it is not mine to delete outright — but the long
+                    // version buried the one actionable sentence in
+                    // reassurance about what the platform does.
                     Text(
-                      'We verify professional identity and give you tools '
-                      'to plan safer in-person meetups... But only you can '
-                      'judge a situation in the moment. Please use your own '
-                      'judgment, meet in public places, and let someone '
-                      'know where you’re going.',
+                      'Meet in public places, and tell someone where '
+                      'you’re going.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,
@@ -95,7 +98,7 @@ class _AgeConfirmationStepState extends State<AgeConfirmationStep> {
             ),
             const SizedBox(height: 20),
             PrimaryButton(
-              label: 'CONTINUE',
+              label: 'Continue',
               onPressed: _confirmed ? widget.onContinue : null,
             ),
           ],

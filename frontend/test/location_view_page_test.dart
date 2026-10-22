@@ -74,7 +74,7 @@ Widget _opener({required int viewerTrustLevel, required Meetup meetup}) {
                 meetup,
                 viewerTrustLevel: viewerTrustLevel,
               ),
-              child: const Text('OPEN'),
+              child: const Text('Open'),
             ),
           ),
         ),
@@ -99,7 +99,7 @@ void main() {
       await tester.pumpWidget(
         _opener(viewerTrustLevel: 0, meetup: _meetup(lockedForViewer: true)),
       );
-      await tester.tap(find.text('OPEN'));
+      await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
 
       expect(find.byType(LocationViewPage), findsNothing);
@@ -116,7 +116,7 @@ void main() {
         await tester.pumpWidget(
           _opener(viewerTrustLevel: 1, meetup: _meetup()),
         );
-        await tester.tap(find.text('OPEN'));
+        await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
 
         expect(find.byType(LocationViewPage), findsOneWidget);
@@ -138,7 +138,7 @@ void main() {
         await tester.pumpWidget(
           _opener(viewerTrustLevel: 1, meetup: _meetup(lockedForViewer: true)),
         );
-        await tester.tap(find.text('OPEN'));
+        await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
 
         expect(find.byType(LocationViewPage), findsOneWidget);
@@ -153,7 +153,7 @@ void main() {
         await tester.pumpWidget(
           _opener(viewerTrustLevel: 0, meetup: _meetup()),
         );
-        await tester.tap(find.text('OPEN'));
+        await tester.tap(find.text('Open'));
         await tester.pumpAndSettle();
 
         expect(find.byType(LocationViewPage), findsNothing);
@@ -183,7 +183,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('GET DIRECTIONS'));
+        await tester.tap(find.text('Get directions'));
         await tester.pumpAndSettle();
 
         expect(launchedMode, LaunchMode.externalApplication);
@@ -216,7 +216,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('GET DIRECTIONS'));
+        await tester.tap(find.text('Get directions'));
         await tester.pumpAndSettle();
 
         // Reset before the test body returns — the framework asserts every

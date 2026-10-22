@@ -2,8 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -63,4 +66,21 @@ func (r *postgresUserLocationCacheRepository) ListWithinRadius(
 		})
 	}
 	return locations, nil
+}
+
+func (r *postgresUserLocationCacheRepository) WithinBrowseRadius(ctx context.Context, userID string, centerLat, centerLng float64) (bool, bool, error) {
+	user, err := parseUUID(userID)
+	if err != nil {
+		return false, false, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+	within, err := r.q.IsUserLocationWithinRadius(ctx, sqlcgen.IsUserLocationWithinRadiusParams{
+		CenterLng: centerLng, CenterLat: centerLat, UserID: user,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("repository: check user distance: %w", err)
+	}
+	return within, true, nil
 }

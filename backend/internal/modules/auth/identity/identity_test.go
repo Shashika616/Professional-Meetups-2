@@ -80,8 +80,11 @@ func TestJWKSProvider_Verify(t *testing.T) {
 	validClaims := func() idTokenClaims {
 		return idTokenClaims{
 			Email: "ada@example.com",
-			Name:  "Ada Lovelace",
-			Nonce: hashedNonce,
+			// Verified, so Verify is allowed to surface the address. The
+			// unverified and Apple-string shapes get their own test below.
+			EmailVerified: true,
+			Name:          "Ada Lovelace",
+			Nonce:         hashedNonce,
 			RegisteredClaims: jwtlib.RegisteredClaims{
 				Issuer:    wantIssuer,
 				Subject:   "subject-123",
@@ -361,5 +364,103 @@ func TestHashNonce_IsLowercaseHex(t *testing.T) {
 	}
 	if got != strings.ToLower(got) {
 		t.Errorf("HashNonce produced %q, want lowercase", got)
+	}
+}
+
+// email_verified decides whether an address is allowed to become an
+// account's identity anchor, so what each shape of that claim means is
+// worth pinning exactly.
+//
+// Apple is the reason this is not a one-line bool test: it has shipped the
+// claim as the STRING "true", which a plain `bool` field decodes to false.
+// That would not fail loudly — it would quietly drop every Apple email and
+// hand every Apple user a second account, which is the precise bug this
+// whole feature exists to prevent.
+func TestVerify_EmailVerifiedDecidesWhetherTheAddressIsSurfaced(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		claim string // raw JSON for the email_verified member
+		want  string
+	}{
+		{"google sends a real boolean", `true`, "ada@example.com"},
+		{"apple sends the string", `"true"`, "ada@example.com"},
+		{"explicitly not verified", `false`, ""},
+		{"not verified, as a string", `"false"`, ""},
+		{"claim absent entirely", ``, ""},
+		{"null", `null`, ""},
+		{"a shape neither provider documents", `123`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var claims idTokenClaims
+			body := `{"email":"ada@example.com"`
+			if tc.claim != "" {
+				body += `,"email_verified":` + tc.claim
+			}
+			body += `}`
+			if err := json.Unmarshal([]byte(body), &claims); err != nil {
+				t.Fatalf("decode %s: %v", body, err)
+			}
+
+			got := ""
+			if bool(claims.EmailVerified) {
+				got = NormalizeEmail(claims.Email)
+			}
+			if got != tc.want {
+				t.Errorf("surfaced email = %q, want %q (claim was %s)", got, tc.want, tc.claim)
+			}
+		})
+	}
+}
+
+// Two addresses are "the same address" here if they differ only by case or
+// surrounding space. Everything that writes personal_email and everything
+// that looks it up goes through this, so a disagreement between them would
+// hand somebody a second account.
+func TestNormalizeEmail(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"ada@example.com", "ada@example.com"},
+		{"Ada@Example.com", "ada@example.com"},
+		{"  ADA@EXAMPLE.COM  ", "ada@example.com"},
+		{"", ""},
+		// Gmail's dot and plus aliasing is deliberately NOT collapsed: that
+		// rule is Gmail's own and does not hold elsewhere, so applying it
+		// would merge addresses another host treats as different people.
+		{"a.d.a+tag@gmail.com", "a.d.a+tag@gmail.com"},
+	} {
+		if got := NormalizeEmail(tc.in); got != tc.want {
+			t.Errorf("NormalizeEmail(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestNormalizePhone is tracker #82: the same number typed three ways is
+// one budget, one cooldown and one limiter bucket.
+func TestNormalizePhone(t *testing.T) {
+	same := []string{
+		"+94771234567",
+		"+94 77 123 4567",
+		"+94-77-123-4567",
+		"+94 (77) 123.4567",
+		"  +94771234567  ",
+		"+94 77 123 4567", // non-breaking spaces, which IMEs produce
+	}
+	want := "+94771234567"
+	for _, in := range same {
+		if got := NormalizePhone(in); got != want {
+			t.Errorf("NormalizePhone(%q) = %q, want %q", in, got, want)
+		}
+	}
+
+	// It must not invent or destroy information: no country-code
+	// guessing, no leading-zero stripping, no rejection.
+	for _, tc := range []struct{ in, want string }{
+		{"0771234567", "0771234567"},
+		{"771234567", "771234567"},
+		{"", ""},
+		{"not a phone", "notaphone"},
+	} {
+		if got := NormalizePhone(tc.in); got != tc.want {
+			t.Errorf("NormalizePhone(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

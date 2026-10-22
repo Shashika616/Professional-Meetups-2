@@ -7,10 +7,16 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_dialog.dart';
 import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/app_banner.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_tag.dart';
+import 'package:professional_connections_platform/core/widgets/stat_tile.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_heading.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
@@ -128,11 +134,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             ],
             const SizedBox(height: 28),
             _section(
-              'VERIFICATION',
+              'Verification',
               children: [
                 _verificationRow(
                   context,
-                  icon: Icons.phone_android,
+                  icon: AppIcons.phone,
                   title: 'Phone',
                   done: profile?.phoneVerified ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
@@ -141,7 +147,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 ),
                 const _Divider(),
                 _Row(
-                  icon: Icons.work_outline,
+                  icon: AppIcons.work,
                   title: 'LinkedIn',
                   // Genuinely conditional on profile.linkedInConnected
                   // (trustLevel >= 1) — LinkedIn is the sole path to Level
@@ -151,11 +157,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   // either way — the banner above is the actual entry
                   // point for connecting it.
                   subtitle: (profile?.linkedInConnected ?? false)
-                      ? 'LinkedIn Verified'
+                      ? 'LinkedIn verified'
                       : 'Not connected',
                   trailing: (profile?.linkedInConnected ?? false)
-                      ? Icon(
-                          Icons.check_circle_rounded,
+                      ? AppIcon(
+                          AppIcons.checkCircle,
                           size: 18,
                           color: AppPalette.verified,
                         )
@@ -164,8 +170,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 const _Divider(),
                 _verificationRow(
                   context,
-                  icon: Icons.alternate_email_rounded,
-                  title: 'Personal Email',
+                  icon: AppIcons.atSign,
+                  title: 'Personal email',
                   done: profile?.personalEmailVerified ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
                   buildScreen: (context) => PersonalEmailVerificationPage(
@@ -175,8 +181,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 const _Divider(),
                 _verificationRow(
                   context,
-                  icon: Icons.badge_outlined,
-                  title: 'Personal Details',
+                  icon: AppIcons.idCard,
+                  title: 'Personal details',
                   done: profile?.personalDetailsComplete ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
                   buildScreen: (context) =>
@@ -185,8 +191,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 const _Divider(),
                 _verificationRow(
                   context,
-                  icon: Icons.email_outlined,
-                  title: 'Work Email',
+                  icon: AppIcons.mail,
+                  title: 'Work email',
                   done: profile?.workEmailVerified ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
                   buildScreen: (context) => CorporateEmailVerificationPage(
@@ -197,16 +203,21 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             ),
             const SizedBox(height: 24),
             _section(
-              'PREFERENCES',
+              'Preferences',
               children: [
                 _premiumRow(context, ref),
                 const _Divider(),
                 _Row(
-                  icon: Icons.lock_outline,
-                  title: 'Privacy Controls',
-                  subtitle: 'Visibility and location',
-                  trailing: Icon(
-                    Icons.chevron_right_rounded,
+                  // An eye, not a padlock. The four verification rows
+                  // further down use a padlock to mean "you cannot do
+                  // this yet"; a padlock here, on a row you CAN always
+                  // open, made the two readings collide. This page is
+                  // about what other members can see, which is what the
+                  // subtitle says.
+                  icon: AppIcons.eye,
+                  title: 'Privacy controls',
+                  trailing: AppIcon(
+                    AppIcons.forward,
                     size: 18,
                     color: AppPalette.textSecondary,
                   ),
@@ -224,11 +235,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 // of this pass; this now honestly reads as disabled rather
                 // than implying it does something it doesn't.
                 _Row(
-                  icon: Icons.notifications_none_rounded,
+                  icon: AppIcons.bell,
                   title: 'Notifications',
-                  subtitle: 'Last 7 days',
-                  trailing: Icon(
-                    Icons.chevron_right_rounded,
+                  trailing: AppIcon(
+                    AppIcons.forward,
                     size: 18,
                     color: AppPalette.textSecondary,
                   ),
@@ -241,11 +251,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 ),
                 _Divider(),
                 _Row(
-                  icon: Icons.shield_outlined,
-                  title: 'Safety Center',
-                  subtitle: 'Trusted contacts and SOS',
-                  trailing: Icon(
-                    Icons.chevron_right_rounded,
+                  icon: AppIcons.shield,
+                  title: 'Safety center',
+                  trailing: AppIcon(
+                    AppIcons.forward,
                     size: 18,
                     color: AppPalette.textSecondary,
                   ),
@@ -258,9 +267,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 ),
                 const _Divider(),
                 _Row(
-                  icon: Icons.dark_mode_outlined,
+                  icon: AppIcons.appearance,
                   title: 'Appearance',
-                  subtitle: isLight ? 'Light' : 'Dark',
                   trailing: Switch(
                     value: !isLight,
                     onChanged: (_) =>
@@ -281,18 +289,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: FlatCard(
-                radius: 12,
+                radius: 18,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 6,
                 ),
                 child: _Row(
-                  icon: Icons.person_remove_outlined,
+                  icon: AppIcons.personRemove,
                   iconColor: AppPalette.danger,
                   title: 'Delete account',
                   subtitle: 'Permanently remove your account and data',
-                  trailing: Icon(
-                    Icons.chevron_right_rounded,
+                  trailing: AppIcon(
+                    AppIcons.forward,
                     size: 18,
                     color: AppPalette.textSecondary,
                   ),
@@ -306,20 +314,35 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => _confirmSignOut(context, ref),
+                // Red, by the product owner's call. The screen set draws
+                // this one neutral and reserves red for Delete account; the
+                // decision here is that signing out should read as the hard
+                // stop on the screen. Keeping the glyph and the sentence
+                // case from the redesign, in the danger tone.
                 child: FlatCard(
-                  radius: 12,
+                  radius: 18,
                   tint: AppPalette.danger.withValues(alpha: 0.08),
                   border: AppPalette.danger.withValues(alpha: 0.3),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   child: Center(
-                    child: Text(
-                      'SIGN OUT',
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 1.8,
-                        fontWeight: FontWeight.w800,
-                        color: AppPalette.danger,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AppIcon(
+                          AppIcons.signOut,
+                          size: 17,
+                          color: AppPalette.danger,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Sign out',
+                          style: TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppPalette.danger,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -341,8 +364,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
   /// the signing out itself (see [_SignOutDialog]) so its button can show
   /// the work happening; this only navigates once it reports done.
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
-    final signedOut = await showDialog<bool>(
-      context: context,
+    final signedOut = await showAppDialog<bool>(
+      context,
       builder: (_) => const _SignOutDialog(),
     );
     if (signedOut != true || !context.mounted) return;
@@ -409,8 +432,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     WidgetRef ref,
     String suggestedName,
   ) async {
-    final accepted = await showDialog<bool>(
-      context: context,
+    final accepted = await showAppDialog<bool>(
+      context,
       builder: (_) => _SuggestedNameDialog(suggestedName: suggestedName),
     );
     if (accepted != true || !context.mounted) return;
@@ -454,8 +477,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     WidgetRef ref,
     UserProfile profile,
   ) async {
-    final newName = await showDialog<String>(
-      context: context,
+    final newName = await showAppDialog<String>(
+      context,
       builder: (context) => _EditNameDialog(initialName: profile.fullName),
     );
     if (newName == null || newName.isEmpty || newName == profile.fullName) {
@@ -483,6 +506,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     }
   }
 
+  /// The three-up strip under the profile header.
+  ///
+  /// The cells were a private `_StatChip` in this file, duplicating what
+  /// the public profile and the member sheet each also hand-rolled. They
+  /// are [StatTile] now — same API, one implementation, and a 10.5px
+  /// caption instead of the 7px letter-spaced one this had, which was
+  /// below the size at which tracking helps rather than hurts.
   Widget _statsRow(UserProfile? profile) {
     final trustLevel = profile?.trustLevel;
     return Padding(
@@ -500,25 +530,34 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             // "you have completed no meetups yet" is a true, meaningful
             // statement about a new account, whereas an average of zero
             // ratings is not a rating of 0.
-            child: _StatChip(
+            child: StatTile(
               value: '${profile?.meetupsCompleted ?? 0}',
-              label: 'MEETUPS',
+              label: 'Meetups',
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: _StatChip(
+            child: StatTile(
               value: (profile?.ratingCount ?? 0) == 0
                   ? '-'
                   : profile!.ratingAverage.toStringAsFixed(1),
-              label: 'RATING',
+              label: 'Rating',
             ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: _StatChip(
-              value: trustLevel == null ? '-' : 'L$trustLevel',
-              label: 'TRUST',
+            // UI review #26. The value was "L$trustLevel", which renders as
+            // "L0" — and at 18px in this typeface a capital L next to a
+            // zero reads as the word "LO". It also never said what it was
+            // a level OF.
+            //
+            // The digit alone cannot be misread, and the label now carries
+            // the meaning. The label is FittedBox'd below so the longer
+            // string cannot overflow a third-of-the-screen chip on a narrow
+            // device.
+            child: StatTile(
+              value: trustLevel == null ? '-' : '$trustLevel',
+              label: 'Trust level',
             ),
           ),
         ],
@@ -540,22 +579,23 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     // delay-then-shimmer every other placeholder now has — so a status that
     // resolves quickly shows no placeholder at all.
     final loading = statusAsync.isLoading && !statusAsync.hasValue;
-    final subtitle = statusAsync.when(
-      data: (status) => entitled ? 'Premium active' : 'Upgrade for more',
-      loading: () => '',
-      error: (_, _) => 'Upgrade for more',
-    );
+    // Only when there is a state to report. "Upgrade for more" is a pitch,
+    // not a status, and this row is a settings row next to four others that
+    // carry no second line; the gold tick and the row's own page do the
+    // selling. "Premium active" stays, because that one is a fact the user
+    // opened this screen to check.
+    final subtitle = entitled ? 'Premium active' : null;
     return _Row(
-      icon: Icons.workspace_premium_rounded,
+      icon: AppIcons.premium,
       title: 'Premium',
       subtitle: subtitle,
       subtitleOverride: loading
           ? const SkeletonLoader(child: SkeletonBox(width: 90, height: 9))
           : null,
       trailing: entitled
-          ? Icon(Icons.check_circle_rounded, size: 18, color: AppPalette.gold)
-          : Icon(
-              Icons.chevron_right_rounded,
+          ? AppIcon(AppIcons.checkCircle, size: 18, color: AppPalette.gold)
+          : AppIcon(
+              AppIcons.forward,
               size: 18,
               color: AppPalette.textSecondary,
             ),
@@ -575,7 +615,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
           SectionHeading(title),
           const SizedBox(height: 12),
           FlatCard(
-            radius: 12,
+            radius: 18,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Column(children: children),
           ),
@@ -606,7 +646,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
   /// with no pencil.
   Widget _verificationRow(
     BuildContext context, {
-    required IconData icon,
+    required String icon,
     required String title,
     required bool done,
     required bool locked,
@@ -621,25 +661,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
         ? Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.edit_outlined,
-                size: 15,
-                color: AppPalette.textSecondary,
-              ),
+              AppIcon(AppIcons.edit, size: 15, color: AppPalette.textSecondary),
               const SizedBox(width: 8),
-              Icon(
-                Icons.check_circle_rounded,
+              AppIcon(
+                AppIcons.checkCircle,
                 size: 18,
                 color: AppPalette.verified,
               ),
             ],
           )
         : locked
-        ? Icon(
-            Icons.lock_outline_rounded,
-            size: 16,
-            color: AppPalette.textSecondary,
-          )
+        ? AppIcon(AppIcons.lock, size: 16, color: AppPalette.textSecondary)
         : _verifyChip();
     final row = _Row(
       icon: icon,
@@ -673,10 +705,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
         border: Border.all(color: AppPalette.candyBlue.withValues(alpha: 0.5)),
       ),
       child: Text(
-        'VERIFY',
+        'Verify',
         style: TextStyle(
           fontSize: 8,
-          letterSpacing: 1.4,
+          letterSpacing: 0.3,
           fontWeight: FontWeight.w800,
           color: AppPalette.candyBlue,
         ),
@@ -746,79 +778,44 @@ class ConnectLinkedInBannerState extends ConsumerState<ConnectLinkedInBanner> {
 
   @override
   Widget build(BuildContext context) {
-    return FlatCard(
-      radius: 12,
-      tint: AppPalette.candyBlue.withValues(alpha: 0.08),
-      border: AppPalette.candyBlue.withValues(alpha: 0.3),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.work_outline, size: 18, color: AppPalette.candyBlue),
-              const SizedBox(width: 8),
-              Text(
-                'Connect LinkedIn',
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
+    // # WHY THIS IS ONE TAPPABLE BANNER AND NOT A CARD WITH A BUTTON
+    //
+    // It used to be a bordered card containing a heading that read
+    // "Connect LinkedIn", a paragraph, and a button that ALSO read
+    // "Connect LinkedIn" — the same three words twice, 90px apart, as the
+    // two loudest things in the card. (The 2026-10 copy pass is what made
+    // that undeniable: before it, the heading was uppercase and the button
+    // was not, which disguised the repetition as hierarchy.)
+    //
+    // The screen set makes this a banner: title, one line of why, and the
+    // whole surface is the target. There is now exactly one "Connect
+    // LinkedIn" on the screen, and it is the thing you press.
+    return Semantics(
+      button: true,
+      enabled: !_busy,
+      child: GestureDetector(
+        onTap: _busy ? null : _connect,
+        behavior: HitTestBehavior.opaque,
+        child: AppBanner(
+          icon: AppIcons.work,
+          tone: AppTone.accent,
+          title: 'Connect LinkedIn',
+          message: 'Your account is view only until you connect it.',
+          trailing: _busy
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppPalette.candyBlue,
+                  ),
+                )
+              : AppIcon(
+                  AppIcons.forward,
+                  size: 20,
+                  color: AppPalette.candyBlue,
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Your account is restricted to view only until you connect LinkedIn...'
-            'unlock matching, messaging, and meetups.',
-            style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-          ),
-          const SizedBox(height: 14),
-          PrimaryButton(
-            label: 'CONNECT LINKEDIN',
-            height: 44,
-            isLoading: _busy,
-            onPressed: _connect,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatChip extends StatelessWidget {
-  const _StatChip({required this.value, required this.label});
-
-  final String value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return FlatCard(
-      radius: 16,
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontWeight: FontWeight.w800,
-              fontSize: 18,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 7,
-              letterSpacing: 1.4,
-              color: AppPalette.textSecondary,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -832,7 +829,13 @@ class _Row extends StatelessWidget {
     // wear the same colour as the one that opens Privacy Controls.
     this.iconColor,
     required this.title,
-    required this.subtitle,
+    // Optional. The screen set's preference rows are an icon, a label and
+    // a chevron — no second line. Most of the subtitles here restated the
+    // destination ("Trusted contacts and SOS" under "Safety center") or
+    // named something the row does not actually show ("Last 7 days" under
+    // "Notifications"). The verification rows still pass one, because
+    // there the second line carries the state.
+    this.subtitle,
     // Renders in place of [subtitle] when given. Exists for the one row
     // whose subtitle is genuinely still loading — a placeholder bar reads
     // as "a value is coming here" where the literal word "Loading…" reads
@@ -845,10 +848,10 @@ class _Row extends StatelessWidget {
     this.onTap,
   });
 
-  final IconData icon;
+  final String icon;
   final Color? iconColor;
   final String title;
-  final String subtitle;
+  final String? subtitle;
   final Widget? subtitleOverride;
   final Widget trailing;
   final VoidCallback? onTap;
@@ -871,7 +874,7 @@ class _Row extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(
+            child: AppIcon(
               icon,
               size: 18,
               color: iconColor ?? AppPalette.candyBlue,
@@ -890,15 +893,19 @@ class _Row extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 2),
-                subtitleOverride ??
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        color: AppPalette.textSecondary,
-                        fontSize: 11,
-                      ),
+                if (subtitleOverride != null) ...[
+                  const SizedBox(height: 2),
+                  subtitleOverride!,
+                ] else if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle!,
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      fontSize: 11,
                     ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -947,37 +954,15 @@ class _SuggestedNameDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'Update your name?',
-        style: TextStyle(color: AppPalette.textPrimary, fontSize: 15),
-      ),
-      content: Text(
-        'LinkedIn shows your name as $suggestedName. '
-        'Update your profile to match?',
-        style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(
-            'KEEP MINE',
-            style: TextStyle(color: AppPalette.textSecondary),
-          ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(
-            'UPDATE',
-            style: TextStyle(
-              color: AppPalette.candyBlue,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
+    return AppConfirmDialog(
+      title: 'Update your name?',
+      message:
+          'LinkedIn shows your name as $suggestedName. '
+          'Update your profile to match?',
+      confirmLabel: 'Update',
+      cancelLabel: 'Keep mine',
+      onConfirm: () => Navigator.pop(context, true),
+      onCancel: () => Navigator.pop(context),
     );
   }
 }
@@ -1008,44 +993,22 @@ class _EditNameDialogState extends State<_EditNameDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'Edit Name',
-        style: TextStyle(color: AppPalette.textPrimary, fontSize: 15),
-      ),
-      content: TextField(
+    return AppConfirmDialog(
+      title: 'Edit name',
+      confirmLabel: 'Save',
+      cancelLabel: 'Cancel',
+      onConfirm: () => Navigator.pop(context, _controller.text.trim()),
+      child: DialogTextArea(
         controller: _controller,
-        autofocus: true,
+        hint: 'Full name',
+        maxLines: 1,
         // A display name with no practical bound could otherwise overflow
         // this row's single-line Text elsewhere in the app — 100
         // characters, generous for any real human name, matches the same
         // defensive-length-limit spirit as other free-text fields in this
         // codebase (e.g. ProfileSetupScreen's full-name field).
         maxLength: 100,
-        style: TextStyle(color: AppPalette.textPrimary),
-        decoration: const InputDecoration(hintText: 'Full name'),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(
-            'CANCEL',
-            style: TextStyle(color: AppPalette.textSecondary),
-          ),
-        ),
-        TextButton(
-          onPressed: () => Navigator.pop(context, _controller.text.trim()),
-          child: Text(
-            'SAVE',
-            style: TextStyle(
-              color: AppPalette.candyBlue,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1085,49 +1048,15 @@ class _SignOutDialogState extends ConsumerState<_SignOutDialog> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: !_busy,
-      child: AlertDialog(
-        backgroundColor: AppPalette.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'SIGN OUT',
-          style: TextStyle(
-            color: AppPalette.danger,
-            letterSpacing: 1.6,
-            fontSize: 15,
-          ),
-        ),
-        content: Text(
-          'Sign out of TieHere?',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _busy ? null : () => Navigator.pop(context, false),
-            child: Text(
-              'CANCEL',
-              style: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: _busy ? null : _signOut,
-            child: _busy
-                ? SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppPalette.danger,
-                    ),
-                  )
-                : Text(
-                    'SIGN OUT',
-                    style: TextStyle(
-                      color: AppPalette.danger,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-          ),
-        ],
+      child: AppConfirmDialog(
+        title: 'Sign out?',
+        message: 'You can sign back in with a one-time code.',
+        confirmLabel: 'Sign out',
+        cancelLabel: 'Cancel',
+        danger: true,
+        isLoading: _busy,
+        onConfirm: _busy ? null : _signOut,
+        onCancel: _busy ? null : () => Navigator.pop(context, false),
       ),
     );
   }
@@ -1189,7 +1118,12 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
     return PopScope(
       canPop: _phase != _DeletePhase.deleting,
       child: AppSheet(
-        title: blocked ? 'NOT JUST YET' : 'DELETE ACCOUNT',
+        // A question, not a restatement of the row that opened it. It
+        // was 'Delete account', identical to the settings row — so with
+        // the sheet open the screen said 'Delete account' twice and
+        // neither one was obviously the confirmation. A confirmation
+        // sheet should ask something.
+        title: blocked ? 'Not just yet' : 'Delete your account?',
         titleColor: blocked ? AppPalette.textPrimary : AppPalette.danger,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1204,7 +1138,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.event_busy_outlined, color: AppPalette.danger, size: 20),
+          AppIcon(AppIcons.calendarX, color: AppPalette.danger, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1230,7 +1164,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       ),
       const SizedBox(height: 18),
       PrimaryButton(
-        label: 'GOT IT',
+        label: 'Got it',
         height: 50,
         onPressed: () => Navigator.pop(context),
       ),
@@ -1256,28 +1190,28 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       ),
       const SizedBox(height: 12),
       _Point(
-        icon: Icons.delete_outline,
+        icon: AppIcons.trash,
         text:
             'Your profile, verifications, trusted contacts, meetup history '
             'and notifications are deleted.',
         style: body,
       ),
       _Point(
-        icon: Icons.star_outline_rounded,
+        icon: AppIcons.star,
         text:
             'Ratings stay so other members’ records stay accurate, but '
             'nothing links them to you.',
         style: body,
       ),
       _Point(
-        icon: Icons.shield_outlined,
+        icon: AppIcons.shield,
         text:
             'If you ever sent an SOS, a private record of those alerts is '
             'kept for 90 days for safety reasons, then deleted.',
         style: body,
       ),
       _Point(
-        icon: Icons.workspace_premium_outlined,
+        icon: AppIcons.premium,
         text:
             'A Premium subscription is billed by the App Store or Google '
             'Play. Cancel it there to stop future charges.',
@@ -1285,20 +1219,21 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       ),
       const SizedBox(height: 18),
       PrimaryButton(
-        label: 'DELETE MY ACCOUNT',
+        label: 'Delete my account',
         height: 50,
         fillColor: AppPalette.danger,
         foregroundColor: Colors.white,
         isLoading: deleting,
         onPressed: deleting ? null : _delete,
       ),
-      const SizedBox(height: 8),
-      TextButton(
+      const SizedBox(height: 10),
+      // An outline button under the red one, the pair the screen set
+      // draws on every confirmation. A bare TextButton here read as a
+      // caption rather than as the way out.
+      SecondaryButton(
+        label: 'Cancel',
+        height: 50,
         onPressed: deleting ? null : () => Navigator.pop(context),
-        child: Text(
-          'CANCEL',
-          style: TextStyle(color: AppPalette.textSecondary),
-        ),
       ),
     ];
   }
@@ -1307,7 +1242,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
 class _Point extends StatelessWidget {
   const _Point({required this.icon, required this.text, required this.style});
 
-  final IconData icon;
+  final String icon;
   final String text;
   final TextStyle style;
 
@@ -1318,7 +1253,7 @@ class _Point extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, size: 16, color: AppPalette.textSecondary),
+          AppIcon(icon, size: 16, color: AppPalette.textSecondary),
           const SizedBox(width: 10),
           Expanded(child: Text(text, style: style)),
         ],
@@ -1378,52 +1313,27 @@ class _ProfileHero extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               if (onEditName != null)
-                _RoundControl(icon: Icons.edit_outlined, onTap: onEditName!)
+                _RoundControl(
+                  icon: AppIcons.edit,
+                  onTap: onEditName!,
+                  label: 'Edit your name',
+                )
               else
                 const SizedBox(height: 44),
             ],
           ),
           const SizedBox(height: 2),
-          // A brand-gradient ring around the picture, and the status dot
-          // the reference puts at its edge.
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(3),
-                decoration: const BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    colors: [AppPalette.brandBlue, AppPalette.brandGreen],
-                  ),
-                ),
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppPalette.card,
-                  ),
-                  child: ProfessionalAvatar(
-                    size: 104,
-                    name: fullName,
-                    imageUrl: photo,
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 6,
-                bottom: 6,
-                child: Container(
-                  width: 18,
-                  height: 18,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppPalette.brandGreen,
-                    border: Border.all(color: AppPalette.card, width: 3),
-                  ),
-                ),
-              ),
-            ],
+          // The ring and the presence dot are ProfessionalAvatar's job.
+          // This screen used to hand-roll both in a Stack, which is why
+          // the Home header's avatar and this one stopped matching the
+          // moment one of them changed: Home went to a flat blue band and
+          // this kept the old blue-to-green gradient.
+          ProfessionalAvatar(
+            size: 104,
+            name: fullName,
+            imageUrl: photo,
+            ring: true,
+            showPresenceDot: true,
           ),
           const SizedBox(height: 16),
           Text(
@@ -1461,13 +1371,36 @@ class _ProfileHero extends StatelessWidget {
 /// A round, raised control on the hero card: the reference's corner
 /// buttons.
 class _RoundControl extends StatelessWidget {
-  const _RoundControl({required this.icon, required this.onTap});
+  const _RoundControl({
+    required this.icon,
+    required this.onTap,
+    required this.label,
+  });
 
-  final IconData icon;
+  final String icon;
   final VoidCallback onTap;
+
+  /// What this control does, for a screen reader and for a long press.
+  ///
+  /// REQUIRED, NOT OPTIONAL (UI review #31). An unlabelled icon button is
+  /// announced as "button" and nothing else, so a floating pencil over a
+  /// profile is unreadable to anyone using TalkBack or VoiceOver — and
+  /// ambiguous to everyone else, since a pencil on this screen could
+  /// plausibly edit the name, the photo or the whole profile. Making it a
+  /// required parameter means a second control cannot be added without
+  /// one.
+  final String label;
 
   @override
   Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: label,
+      child: Tooltip(message: label, child: _buildControl()),
+    );
+  }
+
+  Widget _buildControl() {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -1487,7 +1420,7 @@ class _RoundControl extends StatelessWidget {
             ),
           ],
         ),
-        child: Icon(icon, size: 19, color: AppPalette.textPrimary),
+        child: AppIcon(icon, size: 19, color: AppPalette.textPrimary),
       ),
     );
   }
@@ -1548,7 +1481,7 @@ class _ProfileSkeleton extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: FlatCard(
-              radius: 12,
+              radius: 18,
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [

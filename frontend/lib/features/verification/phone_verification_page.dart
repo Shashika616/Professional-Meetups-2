@@ -4,9 +4,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/validation/validators.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/models/country.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/verification/widgets/otp_entry.dart';
+import 'package:professional_connections_platform/features/verification/widgets/phone_number_field.dart';
 import 'package:professional_connections_platform/features/verification/widgets/verification_scaffold.dart';
 
 /// Phone number entry → shared OTP widget. Reachable both from the
@@ -14,10 +16,15 @@ import 'package:professional_connections_platform/features/verification/widgets/
 /// `ProfilePage` for a user who skipped and wants to finish later — same
 /// screen either way (`frontend/PLAN.md`'s Level 2/3 addendum, Step 6).
 ///
-/// No country-code picker UI: the launch market is Sri Lanka only (see
-/// `docs/00-project/vision.md`), so the `+94` prefix is simply fixed —
-/// building a full multi-country picker isn't justified by a single-market
-/// launch scope. The user types only their local number.
+/// # THE COUNTRY CODE IS A PICKER NOW
+///
+/// It used to be a hard-coded `+94` drawn into the placeholder, on the
+/// reasoning that the launch market is Sri Lanka only. The number stayed
+/// unverifiable for anyone outside it — a Sri Lankan member living abroad,
+/// a visiting professional — and worse, a `+94` printed in the hint looked
+/// like a control that simply did not respond. [PhoneNumberField] opens a
+/// searchable country sheet ([kCountries]); Sri Lanka is still the default,
+/// so the common case is still: open, type, send.
 ///
 /// [currentValue] (ADR-023 §5) is the real, already-verified number —
 /// passed when this screen is opened to *edit* an already-verified row
@@ -36,20 +43,26 @@ class PhoneVerificationPage extends ConsumerStatefulWidget {
 }
 
 class _PhoneVerificationPageState extends ConsumerState<PhoneVerificationPage> {
-  static const _countryCode = '+94';
-
   final _numberController = TextEditingController();
+  Country _country = kDefaultCountry;
   bool _showOtpEntry = false;
+
+  /// Only after a failed send — see [PhoneNumberField.errorText].
+  bool _submitted = false;
 
   @override
   void initState() {
     super.initState();
-    final current = widget.currentValue;
-    if (current != null && current.startsWith(_countryCode)) {
-      _numberController.text = current.substring(_countryCode.length);
+    // An already-verified number being edited comes back as E.164, so the
+    // picker opens on ITS country rather than on the default — editing a
+    // +971 number used to silently re-prefix it with +94.
+    final split = splitPhoneNumber(widget.currentValue);
+    if (widget.currentValue != null) {
+      _country = split.country;
+      _numberController.text = split.localNumber;
     }
-    // GlassTextField doesn't expose onChanged — listening on the
-    // controller directly is what makes SEND CODE react as the user types.
+    // Listening on the controller directly is what makes Send code react
+    // as the user types.
     _numberController.addListener(_onFieldChanged);
   }
 
@@ -62,7 +75,12 @@ class _PhoneVerificationPageState extends ConsumerState<PhoneVerificationPage> {
     super.dispose();
   }
 
-  String get _fullNumber => '$_countryCode${_numberController.text.trim()}';
+  /// E.164: the dial code, then the local part with the separators people
+  /// type stripped out. `+94 77 123 4567` and `+94771234567` must reach
+  /// the backend as the same string, or a resend looks like a new number.
+  String get _fullNumber =>
+      '${_country.dialCode}'
+      '${_numberController.text.replaceAll(RegExp(r'[^0-9]'), '')}';
 
   // Optimistic transition (UX improvement) — flips to the OTP entry screen
   // immediately, instead of waiting on the network call first; OtpEntry
@@ -71,7 +89,11 @@ class _PhoneVerificationPageState extends ConsumerState<PhoneVerificationPage> {
   // OtpEntry's own doc comment for why a slow or failing backend no longer
   // stalls this screen.
   void _showOtp() {
-    if (_showOtpEntry || Validators.phone(_fullNumber) != null) return;
+    if (_showOtpEntry) return;
+    if (Validators.phone(_fullNumber) != null) {
+      setState(() => _submitted = true);
+      return;
+    }
     setState(() => _showOtpEntry = true);
   }
 
@@ -113,26 +135,23 @@ class _PhoneVerificationPageState extends ConsumerState<PhoneVerificationPage> {
   @override
   Widget build(BuildContext context) {
     return VerificationScaffold(
-      icon: Icons.phone_iphone_rounded,
-      headline: 'Verify Your Phone',
-      trustBenefit:
-          'Verifying your number unlocks messaging other members and '
-          'helps keep the community scam-resistant.',
+      icon: AppIcons.phone,
+      headline: 'Verify your phone',
       onSkip: () => Navigator.pop(context),
       child: !_showOtpEntry
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                GlassTextField(
+                PhoneNumberField(
                   controller: _numberController,
-                  icon: Icons.phone_iphone_rounded,
-                  hint: '$_countryCode 7X XXX XXXX',
-                  keyboardType: TextInputType.phone,
-                  validator: (_) => Validators.phone(_fullNumber),
+                  country: _country,
+                  onCountryChanged: (c) => setState(() => _country = c),
+                  onSubmitted: _showOtp,
+                  errorText: _submitted ? Validators.phone(_fullNumber) : null,
                 ),
                 const SizedBox(height: 16),
                 PrimaryButton(
-                  label: 'SEND CODE',
+                  label: 'Send code',
                   onPressed: Validators.phone(_fullNumber) == null
                       ? _showOtp
                       : null,

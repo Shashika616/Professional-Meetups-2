@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' show LocationAccuracy, Position;
 
+import 'package:professional_connections_platform/core/utils/debug_log.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
 
@@ -109,6 +110,17 @@ class ViewerLocationNotifier extends Notifier<ViewerLocation> {
   Timer? _slowTimer;
   int _generation = 0;
 
+  /// The last position reported to the server, rounded, and when. A pull to
+  /// refresh re-reads the location, but re-sending an unchanged one costs a
+  /// request and a radio wake-up for nothing.
+  ({double lat, double lng})? _lastReported;
+  DateTime? _lastReportedAt;
+
+  /// How long an unchanged position is trusted before it is sent again.
+  /// The server ignores cached locations older than a day, so an hour keeps
+  /// it comfortably fresh.
+  static const reportAgainAfter = Duration(hours: 1);
+
   @override
   ViewerLocation build() {
     ref.onDispose(() => _slowTimer?.cancel());
@@ -150,7 +162,14 @@ class ViewerLocationNotifier extends Notifier<ViewerLocation> {
       );
       // The app's one trigger for the server-side last-known location
       // (nearby-meetup notifications). Fire-and-forget: a slow call here
-      // must never hold up the list.
+      // must never hold up the list. Skipped when nothing has changed.
+      final rounded = (lat: state.lat!, lng: state.lng!);
+      final now = DateTime.now();
+      if (rounded == _lastReported &&
+          _lastReportedAt != null &&
+          now.difference(_lastReportedAt!) < reportAgainAfter) {
+        return;
+      }
       unawaited(
         ref
             .read(authServiceProvider)
@@ -158,11 +177,17 @@ class ViewerLocationNotifier extends Notifier<ViewerLocation> {
               latitude: position.latitude,
               longitude: position.longitude,
             )
+            // Recorded only once the server has it, so a failed send is
+            // retried on the next refresh rather than an hour later.
+            .then((_) {
+              _lastReported = rounded;
+              _lastReportedAt = now;
+            })
             .catchError(
-              // TYPE AND A FIXED MESSAGE, never the raw error object:
-              // debugPrint survives release builds and a PlatformException's
+              // TYPE AND A FIXED MESSAGE, never the raw error object,
+              // and debug builds only (#94): a PlatformException's
               // toString() can carry more than intended.
-              (Object error) => debugPrint(
+              (Object error) => debugLog(
                 'updateLastKnownLocation failed: ${error.runtimeType}',
               ),
             ),

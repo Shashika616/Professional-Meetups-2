@@ -29,7 +29,7 @@ class FlatCard extends StatelessWidget {
   const FlatCard({
     super.key,
     required this.child,
-    this.radius = 20,
+    this.radius = 22,
     this.padding,
     this.tint,
     this.border,
@@ -70,29 +70,51 @@ class FlatCard extends StatelessWidget {
     );
   }
 
-  /// Dark mode's depth cue. A drop shadow does not read against a
-  /// near-black ground, so a card is lifted the way a lit surface is: a
-  /// touch lighter along its top edge than at its bottom. Faint on
-  /// purpose; it is felt more than seen. Light mode keeps a flat fill and
-  /// lets the shadow do the work.
+  /// Dark mode's edge light — the screen set's
+  /// `inset 0 1px 0 rgba(255,255,255,.05)`, which Flutter has no inset
+  /// shadow for.
+  ///
+  /// A card is lifted the way a lit surface is: a touch brighter along its
+  /// top edge than at its bottom. This is what replaced the 1px outline
+  /// every dark card used to draw (see [AppPalette.hairline] for why that
+  /// went). The highlight is concentrated in the top few percent rather
+  /// than spread over the whole card, so it reads as an edge catching
+  /// light instead of as a gradient fill.
+  ///
+  /// Light mode keeps a flat fill and lets the shadow do the work.
   Gradient? get _lift {
     if (AppPalette.isLight) return null;
     final surface = _surface;
     return LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
+      stops: const [0.0, 0.06, 1.0],
       colors: [
-        Color.alphaBlend(Colors.white.withValues(alpha: 0.035), surface),
+        Color.alphaBlend(Colors.white.withValues(alpha: 0.055), surface),
+        surface,
         surface,
       ],
     );
   }
 
   List<BoxShadow>? get _shadow {
-    // Dark mode: no shadow at any elevation. A drop shadow against a
-    // near-black background is invisible, and faking it with a darker halo
-    // reads as a smudge — the lighter surface above does the work instead.
-    if (!AppPalette.isLight) return null;
+    // Dark mode DOES get a shadow now (the screen set's
+    // `0 8px 24px rgba(0,0,0,.28)`). The old comment here said a drop
+    // shadow "against a near-black background is invisible", which was
+    // true of the near-black ground this used to sit on. The redesign's
+    // ground is #070D15 and the card on it is #0F1824 — the card is
+    // LIGHTER than the page, so a soft dark cast underneath reads
+    // perfectly well and is what stops a column of cards looking pasted
+    // on. It stays soft and offset downward; no halo.
+    if (!AppPalette.isLight) {
+      return [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: elevated ? 0.38 : 0.28),
+          blurRadius: elevated ? 30 : 24,
+          offset: Offset(0, elevated ? 12 : 8),
+        ),
+      ];
+    }
     if (elevated) {
       // Two layers: a tight one for the contact edge and a wide, soft one
       // for the cast. One blurred shadow alone reads as a grey glow rather
@@ -141,13 +163,13 @@ class FlatCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(radius),
           color: _lift == null ? _surface : null,
           gradient: _lift,
-          border: Border.all(color: border ?? AppPalette.hairline, width: 1),
-          // Light mode only — a solid near-white card has nothing but the
-          // hairline border to separate it from AppBackground's equally
-          // light fade without a touch of real elevation; dark mode skips
-          // this entirely, since a drop shadow doesn't read against a
-          // near-black background and the hairline border alone already
-          // carries the separation there (ADR-032 Step 1).
+          // No outline unless a call site explicitly asks for one. Dark
+          // cards separate by fill + the top edge light above; light cards
+          // separate by fill + shadow. The hairline-on-everything look was
+          // the single biggest reason a list of cards read as a stack of
+          // grey rectangles. Call sites that pass `border:` (a cancelled
+          // meetup's red edge, a selected tile) still get exactly that.
+          border: border == null ? null : Border.all(color: border!, width: 1),
           boxShadow: _shadow,
         ),
         child: child,

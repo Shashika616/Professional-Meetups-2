@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/widgets/scroll_more_hint.dart';
+
+import 'support/app_icon_finder.dart';
 
 /// The "more below" chevron. What matters is that it tells the truth: it
 /// appears only when there is something below, and goes away at the end —
@@ -82,7 +86,7 @@ void main() {
     await tester.pumpWidget(harness(rows: 20, controller: controller));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.keyboard_arrow_down_rounded));
+    await tester.tap(findAppIcon(AppIcons.chevronDown));
     await tester.pumpAndSettle();
 
     expect(controller.offset, greaterThan(0));

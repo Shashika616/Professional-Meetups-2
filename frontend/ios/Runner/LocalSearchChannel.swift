@@ -16,6 +16,13 @@ final class LocalSearchChannel: NSObject, MKLocalSearchCompleterDelegate {
   private let completer = MKLocalSearchCompleter()
   private var pendingAutocompleteResult: FlutterResult?
   private var lastResults: [MKLocalSearchCompletion] = []
+  /// Bumped per autocomplete call so a watchdog fired for one query does
+  /// not settle a later one.
+  private var autocompleteGeneration = 0
+  /// The completer is a delegate, not a promise: nothing guarantees it
+  /// ever calls back. Past this, Dart is answered with what there is so
+  /// the spinner stops.
+  private static let autocompleteTimeout: TimeInterval = 6
 
   override init() {
     super.init()
@@ -60,12 +67,51 @@ final class LocalSearchChannel: NSObject, MKLocalSearchCompleterDelegate {
         span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)
       )
     }
-    // A fresh call replaces whatever the previous one was waiting for —
-    // Dart's own debounce already ensures only the latest query matters,
-    // so an in-flight completer callback for a superseded query is simply
-    // dropped rather than replied to twice.
+
+    // EVERY PENDING RESULT GETS ANSWERED.
+    //
+    // A fresh call used to overwrite `pendingAutocompleteResult`, and a
+    // FlutterResult that is never invoked leaves the Dart side awaiting a
+    // future that can never complete: the step's `_searching` flag stayed
+    // true and its suggestion list never updated again for the rest of
+    // the screen's life. The superseded call is now settled with what the
+    // completer has, which the Dart side discards by request generation
+    // anyway.
+    finishAutocomplete(with: payload(for: lastResults))
+
+    autocompleteGeneration += 1
+    let generation = autocompleteGeneration
     pendingAutocompleteResult = result
+
+    // Assigning the fragment it already holds produces NO delegate
+    // callback, so this would otherwise hang forever. It happens more
+    // than it sounds: an IME re-delivering the same text, or the user
+    // deleting a character and typing it back.
+    if completer.queryFragment == text {
+      finishAutocomplete(with: payload(for: lastResults))
+      return
+    }
+
     completer.queryFragment = text
+
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.autocompleteTimeout) {
+      [weak self] in
+      guard let self, self.autocompleteGeneration == generation else { return }
+      self.finishAutocomplete(with: self.payload(for: self.lastResults))
+    }
+  }
+
+  /// Hands `payload` to whichever autocomplete call is still waiting, and
+  /// does nothing when none is — so every path here is safe to call more
+  /// than once.
+  private func finishAutocomplete(with payload: Any) {
+    guard let pending = pendingAutocompleteResult else { return }
+    pendingAutocompleteResult = nil
+    pending(payload)
+  }
+
+  private func payload(for results: [MKLocalSearchCompletion]) -> [[String: String]] {
+    results.map { ["title": $0.title, "subtitle": $0.subtitle] }
   }
 
   private func handleResolveCompletion(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -124,14 +170,15 @@ final class LocalSearchChannel: NSObject, MKLocalSearchCompleterDelegate {
 
   func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
     lastResults = completer.results
-    let payload = lastResults.map { ["title": $0.title, "subtitle": $0.subtitle] }
-    pendingAutocompleteResult?(payload)
-    pendingAutocompleteResult = nil
+    finishAutocomplete(with: payload(for: lastResults))
   }
 
   func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
-    pendingAutocompleteResult?(
-      FlutterError(code: "completer_failed", message: error.localizedDescription, details: nil))
-    pendingAutocompleteResult = nil
+    // Empty, not an error. A completer failure is routine — no network
+    // for a moment, a fragment it cannot parse — and the Dart side turns
+    // an error into the same empty list anyway, after an exception it has
+    // to catch on the main search path.
+    lastResults = []
+    finishAutocomplete(with: [[String: String]]())
   }
 }

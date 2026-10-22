@@ -8,7 +8,10 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+
+	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 
 	"professional-meetups-monolith/backend/internal/platform/ratelimit"
 )
@@ -96,7 +99,13 @@ const (
 // Deliberately the simplest correct algorithm (fixed window), not a token
 // bucket or sliding window — upgrade later only if the fixed-window edge
 // effect (bursts at window boundaries) actually becomes a measured problem.
-func RateLimit(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
+func RateLimit(limiter ratelimit.Limiter, opts ...RateLimitOption) func(http.Handler) http.Handler {
+	var cfg rateLimitConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	clientIP := func(r *http.Request) string { return clientIPFor(r, cfg.trustedProxyHops) }
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ipKey := fmt.Sprintf("ratelimit:%s:%s", clientIP(r), r.URL.Path)
@@ -118,7 +127,8 @@ func RateLimit(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
 
 			if emailKeyedPaths[r.URL.Path] {
 				if email, ok := peekRequestField(r, "email"); ok && email != "" {
-					emailKey := fmt.Sprintf("ratelimit:email:%s:%s", r.URL.Path, email)
+					// Normalised, or the bucket is per-spelling (#82).
+					emailKey := fmt.Sprintf("ratelimit:email:%s:%s", r.URL.Path, identity.NormalizeEmail(email))
 					if !limiter.Allow(emailKey, requestsPerMinute, time.Minute) {
 						writeRateLimited(w, time.Minute)
 						return
@@ -128,7 +138,8 @@ func RateLimit(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
 
 			if field, ok := targetKeyedPaths[r.URL.Path]; ok {
 				if target, ok := peekRequestField(r, field); ok && target != "" {
-					targetKey := fmt.Sprintf("ratelimit:target:%s:%s", r.URL.Path, target)
+					targetKey := fmt.Sprintf("ratelimit:target:%s:%s", r.URL.Path,
+						normalizeLimiterTarget(field, target))
 					if !limiter.Allow(targetKey, targetKeyedLimit, targetKeyedWindow) {
 						writeRateLimited(w, targetKeyedWindow)
 						return
@@ -139,6 +150,29 @@ func RateLimit(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// normalizeLimiterTarget keys the per-target limiter on the canonical form
+// of the address or number, not on how it happened to be typed (tracker
+// #82, review finding N-A1).
+//
+// Five sends per hour per target is only a limit if the two spellings of
+// one target share a bucket. `Victim@x.com` and `victim@x.com` reach the
+// same inbox; `+94 77 123 4567` and `+94771234567` reach the same handset.
+// Without this, each spelling bought another five.
+//
+// Keyed off the FIELD NAME the route reads rather than a purpose enum,
+// because that is all this layer knows — it has peeked at one JSON field
+// and has not parsed the request. phone_number is the only phone-shaped
+// field in targetKeyedPaths, and a new route adding another has to be
+// added here too; the service layer normalises again regardless, so the
+// worst case of forgetting is a limiter that is too generous, never a
+// mismatch with what gets stored.
+func normalizeLimiterTarget(field, target string) string {
+	if field == "phone_number" {
+		return identity.NormalizePhone(target)
+	}
+	return identity.NormalizeEmail(target)
 }
 
 // UserKeyedRateLimit limits by the authenticated caller's own user_id rather
@@ -223,7 +257,60 @@ func peekRequestField(r *http.Request, field string) (string, bool) {
 	return value, ok
 }
 
-func clientIP(r *http.Request) string {
+// RateLimitOption configures RateLimit.
+type RateLimitOption func(*rateLimitConfig)
+
+type rateLimitConfig struct {
+	trustedProxyHops int
+}
+
+// WithTrustedProxyHops says how many proxies in front of this process append
+// to X-Forwarded-For, and so which entry is the real client (#81).
+//
+// Zero, the default, ignores the header and uses the TCP peer — right for
+// local and test stacks, where nothing sits in front and the header is
+// whatever the caller chose to send.
+//
+// On Cloud Run it must be 1. The container is reached through Google's own
+// proxy, so RemoteAddr is that proxy and the same for every user: keyed on
+// it, the 20/min per-IP limit was one bucket shared by the entire user base
+// per route. Cloud Run appends the real client address to X-Forwarded-For,
+// so with one trusted hop the client is the LAST entry.
+func WithTrustedProxyHops(n int) RateLimitOption {
+	return func(c *rateLimitConfig) {
+		if n > 0 {
+			c.trustedProxyHops = n
+		}
+	}
+}
+
+// clientIPFor picks the address to key the limiter on.
+//
+// It counts from the RIGHT, and that is the whole defence against spoofing.
+// A caller can put anything at the left of X-Forwarded-For, and every proxy
+// in the chain only appends, so the entries a client cannot forge are the
+// last `hops` of them. Taking the first entry — the common mistake — would
+// let anyone pick their own rate-limit bucket by sending the header.
+//
+// If the header has fewer entries than there are trusted hops, or the entry
+// is not an IP, the request did not come through the expected proxy chain
+// and the header is not evidence of anything; the TCP peer is used instead.
+func clientIPFor(r *http.Request, hops int) string {
+	if hops > 0 {
+		var entries []string
+		for _, header := range r.Header.Values("X-Forwarded-For") {
+			for _, part := range strings.Split(header, ",") {
+				if part = strings.TrimSpace(part); part != "" {
+					entries = append(entries, part)
+				}
+			}
+		}
+		if len(entries) >= hops {
+			if ip := net.ParseIP(entries[len(entries)-hops]); ip != nil {
+				return ip.String()
+			}
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

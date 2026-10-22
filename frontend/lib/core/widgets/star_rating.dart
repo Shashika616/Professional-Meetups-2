@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// Compact read-only display of a user's post-meetup star rating aggregate
 /// (ADR-015, docs/02-domain/domain-model.md § Rating) — a single filled
@@ -24,7 +25,7 @@ class StarRating extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.star_rounded, size: size, color: AppPalette.gold),
+        AppIcon(AppIcons.star, size: size, color: AppPalette.gold),
         const SizedBox(width: 3),
         Text(
           count == 0 ? 'New' : average.toStringAsFixed(1),

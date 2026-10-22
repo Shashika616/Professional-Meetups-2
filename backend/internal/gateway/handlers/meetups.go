@@ -208,7 +208,10 @@ func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 	// is a 400 rather than a silently unfiltered list.
 	withinDays := int32(0)
 	if raw := r.URL.Query().Get("within_days"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
+		// Parsed AS 32-bit, so an out-of-range value is a 400. Atoi into
+		// int and then int32(...) silently wrapped: page_size=4294967306
+		// arrived as 10 (gosec G109).
+		parsed, err := strconv.ParseInt(raw, 10, 32)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, msgCouldNotLoad)
 			return
@@ -217,7 +220,10 @@ func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 	}
 	pageSize := int32(0)
 	if raw := r.URL.Query().Get("page_size"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
+		// Parsed AS 32-bit, so an out-of-range value is a 400. Atoi into
+		// int and then int32(...) silently wrapped: page_size=4294967306
+		// arrived as 10 (gosec G109).
+		parsed, err := strconv.ParseInt(raw, 10, 32)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, msgCouldNotLoad)
 			return

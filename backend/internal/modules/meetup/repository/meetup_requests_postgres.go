@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -86,6 +87,16 @@ func (r *postgresMeetupRequestRepository) Create(ctx context.Context, meetupID, 
 
 	row, err := q.CreateMeetupRequest(ctx, sqlcgen.CreateMeetupRequestParams{MeetupID: meetup, RequesterID: requester})
 	if err != nil {
+		// Zero rows is the conditional INSERT's own answer: this person
+		// was rejected on this meetup before (#79, decision D1). It is
+		// not the same as the 23505 below and does not deserve the same
+		// sentence — "the host already said no" versus "you have already
+		// asked".
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MeetupRequest{}, fmt.Errorf(
+				"repository: this meetup's host already declined a request from %s: %w",
+				requesterID, apperror.ErrConflict)
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			return MeetupRequest{}, fmt.Errorf("repository: already requested to join this meetup: %w", apperror.ErrConflict)
@@ -202,6 +213,30 @@ func meetupRequestForMeetupFromRow(row sqlcgen.ListRequestsForMeetupRow) MeetupR
 // Withdraw runs in a transaction now — not because the UPDATE needs one on
 // its own (it is a single statement), but because the notification it
 // triggers has to commit with it (§F3).
+// conflictIfUniqueViolation turns a 23505 into ErrConflict rather than an
+// opaque 500 (tracker #79).
+//
+// Before migration 0019 these paths genuinely collided: the old
+// UNIQUE (meetup_id, requester_id, status) made the STATUS part of the
+// key, so rejecting a re-requested row hit the requester's earlier
+// 'rejected' row, auto-reject on the final-seat accept hit it too, and a
+// second withdrawal hit the earlier 'withdrawn' row. Each surfaced as a
+// 500 on an action the host had every right to take.
+//
+// 0019 removes the collision, so this should now be unreachable. It stays
+// because "should be unreachable" is a belief about the schema, and the
+// cost of being wrong is a 500 on the host's reject button; a conflict at
+// least tells the client to re-read and retry. If one of these ever
+// fires, the schema and the code have diverged.
+func conflictIfUniqueViolation(err error, action, id string) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+		return fmt.Errorf("repository: %s %s: request state changed under us: %w",
+			action, id, apperror.ErrConflict)
+	}
+	return fmt.Errorf("repository: %s: %w", action, err)
+}
+
 func (r *postgresMeetupRequestRepository) Withdraw(ctx context.Context, id, note, requesterID string, notify NotifyRequest) (MeetupRequest, error) {
 	parsed, err := parseUUID(id)
 	if err != nil {
@@ -219,18 +254,83 @@ func (r *postgresMeetupRequestRepository) Withdraw(ctx context.Context, id, note
 	defer func() { _ = tx.Rollback(ctx) }()
 	q := r.q.WithTx(tx)
 
+	// # LOCK THE MEETUP FIRST, IN THE SAME ORDER ACCEPT DOES (tracker #85)
+	//
+	// Withdrawing can now change the MEETUP as well as the request: a
+	// freed seat reopens a full meetup. That makes this a second writer
+	// of meetup.status racing AcceptRequest, which reads the accepted
+	// count and decides whether the meetup is full.
+	//
+	// This first read is for one value — which meetup to lock. Its status
+	// is deliberately not trusted, exactly as in Accept: it is an
+	// unlocked read. Taking the meetup lock BEFORE touching the request
+	// also matches Accept's order, so the two paths queue behind each
+	// other rather than deadlocking by grabbing the pair in opposite
+	// orders.
+	locateRow, err := q.GetMeetupRequestByID(ctx, parsed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MeetupRequest{}, fmt.Errorf("repository: meetup request %s: %w", id, apperror.ErrNotFound)
+		}
+		return MeetupRequest{}, fmt.Errorf("repository: get request for withdraw: %w", err)
+	}
+	if _, err := q.GetMeetupByIDForUpdate(ctx, locateRow.MeetupID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MeetupRequest{}, fmt.Errorf("repository: meetup %s: %w", locateRow.MeetupID, apperror.ErrNotFound)
+		}
+		return MeetupRequest{}, fmt.Errorf("repository: lock meetup for withdraw: %w", err)
+	}
+
+	// Re-read the request under the meetup lock, exactly as Accept does,
+	// for the status it held BEFORE this withdrawal. The update below
+	// cannot supply it: RETURNING hands back the row as written, so its
+	// status is always 'withdrawn' and "was this seat occupied?" is not a
+	// question it can answer. The unlocked locate read above cannot
+	// supply it either — a concurrent accept may have resolved the row in
+	// the window before the lock.
+	current, err := q.GetMeetupRequestByIDForUpdate(ctx, parsed)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MeetupRequest{}, fmt.Errorf("repository: meetup request %s: %w", id, apperror.ErrNotFound)
+		}
+		return MeetupRequest{}, fmt.Errorf("repository: re-read request for withdraw: %w", err)
+	}
+	heldASeat := MeetupRequestStatus(current.Status) == RequestStatusAccepted
+
 	// requester_id scoping (Round 11) is defense-in-depth alongside the
 	// existing Go-level check in service.go's WithdrawRequest — a
 	// mismatched requesterID hits the same zero-rows-affected path as an
-	// already-resolved request, mapped to the same ErrConflict below.
+	// already-resolved request, mapped to the same ErrConflict below. The
+	// query also refuses a meetup that is over or cancelled (#84).
 	row, err := q.WithdrawMeetupRequest(ctx, sqlcgen.WithdrawMeetupRequestParams{ID: parsed, WithdrawalNote: textOrNull(note), RequesterID: requester})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return MeetupRequest{}, fmt.Errorf("repository: request %s is neither pending nor accepted: %w", id, apperror.ErrConflict)
+			return MeetupRequest{}, fmt.Errorf("repository: request %s is not withdrawable on a live meetup: %w", id, apperror.ErrConflict)
 		}
-		return MeetupRequest{}, fmt.Errorf("repository: withdraw meetup request: %w", err)
+		return MeetupRequest{}, conflictIfUniqueViolation(err, "withdraw meetup request", id)
 	}
 	withdrawn := meetupRequestFromRow(row)
+
+	// Only an accepted request was holding a seat, so only that can free
+	// one (#85). The query re-checks 'full' itself, so this is a cheap
+	// guard rather than the decision.
+	if heldASeat {
+		if _, err := q.ReopenMeetupIfSeatFreed(ctx, locateRow.MeetupID); err != nil {
+			return MeetupRequest{}, fmt.Errorf("repository: reopen meetup after withdrawal: %w", err)
+		}
+
+		// meetups_completed counts accepted requests on completed meetups
+		// (tracker #84). Leaving 'accepted' invalidates that total for
+		// this person, so the recompute is scheduled in the SAME
+		// transaction — the same co-location EnqueueNotification relies
+		// on, so there is no window where the withdrawal committed and
+		// nobody was asked to recount. The poller computes an absolute
+		// count, so an enqueue that turns out to change nothing is
+		// harmless.
+		if err := q.EnqueueMeetupsCompleted(ctx, []uuid.UUID{locateRow.MeetupID}); err != nil {
+			return MeetupRequest{}, fmt.Errorf("repository: enqueue meetups-completed recompute: %w", err)
+		}
+	}
 
 	if notify != nil {
 		if err := notify(ctx, notifyTx{q: q}, withdrawn); err != nil {
@@ -270,7 +370,7 @@ func (r *postgresMeetupRequestRepository) Reject(ctx context.Context, id, hostUs
 		if errors.Is(err, pgx.ErrNoRows) {
 			return MeetupRequest{}, fmt.Errorf("repository: request %s is not pending: %w", id, apperror.ErrConflict)
 		}
-		return MeetupRequest{}, fmt.Errorf("repository: reject meetup request: %w", err)
+		return MeetupRequest{}, conflictIfUniqueViolation(err, "reject meetup request", id)
 	}
 	rejected := meetupRequestFromRow(row)
 
@@ -329,15 +429,19 @@ func (r *postgresMeetupRequestRepository) Accept(
 
 	q := r.q.WithTx(tx)
 
-	reqRow, err := q.GetMeetupRequestByID(ctx, requestID)
+	// # LOCK FIRST, THEN DECIDE (V-2)
+	//
+	// This first read is for ONE value: which meetup to lock. Its status is
+	// deliberately not trusted — it is an unlocked read, and acting on it is
+	// the bug this ordering fixes. Two accepts of the same request both saw
+	// 'pending' here, both then waited on the meetup lock, and both went on
+	// to accept, counting one seat twice.
+	locateRow, err := q.GetMeetupRequestByID(ctx, requestID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup request %s: %w", id, apperror.ErrNotFound)
 		}
 		return MeetupRequest{}, false, nil, fmt.Errorf("repository: get request for accept: %w", err)
-	}
-	if reqRow.Status != sqlcgen.MeetupMeetupRequestStatusPending {
-		return MeetupRequest{}, false, nil, fmt.Errorf("repository: request %s is not pending: %w", id, apperror.ErrConflict)
 	}
 
 	// SELECT ... FOR UPDATE locks this meetup row until the transaction
@@ -346,15 +450,38 @@ func (r *postgresMeetupRequestRepository) Accept(
 	// now-current status/capacity rather than racing against a stale read
 	// (backend/meetup-scheduling-PLAN.md Step B, the capacity-race
 	// integration test exercises exactly this).
-	meetupRow, err := q.GetMeetupByIDForUpdate(ctx, reqRow.MeetupID)
+	meetupRow, err := q.GetMeetupByIDForUpdate(ctx, locateRow.MeetupID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup %s: %w", reqRow.MeetupID, apperror.ErrNotFound)
+			return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup %s: %w", locateRow.MeetupID, apperror.ErrNotFound)
 		}
 		return MeetupRequest{}, false, nil, fmt.Errorf("repository: lock meetup for accept: %w", err)
 	}
 	if meetupRow.Status != sqlcgen.MeetupMeetupStatusOpen {
-		return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup %s is not open: %w", reqRow.MeetupID, apperror.ErrConflict)
+		return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup %s is not open: %w", locateRow.MeetupID, apperror.ErrConflict)
+	}
+
+	// NOW the request's status means something: re-read it under its own
+	// lock, behind the meetup lock, so what we check is the committed state
+	// and cannot change under us before the UPDATE.
+	reqRow, err := q.GetMeetupRequestByIDForUpdate(ctx, requestID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup request %s: %w", id, apperror.ErrNotFound)
+		}
+		return MeetupRequest{}, false, nil, fmt.Errorf("repository: lock request for accept: %w", err)
+	}
+	if reqRow.Status != sqlcgen.MeetupMeetupRequestStatusPending {
+		// Conflict, not not-found: the request exists, it has simply already
+		// been decided — by the host's first tap, or by the requester
+		// withdrawing. Accepting it again must not resurrect it.
+		return MeetupRequest{}, false, nil, fmt.Errorf("repository: request %s is not pending: %w", id, apperror.ErrConflict)
+	}
+	if reqRow.MeetupID != meetupRow.ID {
+		// Cannot happen: meetup_id is immutable. Checked anyway, because the
+		// value that chose which row to lock came from the unlocked read
+		// above, and a lock on the wrong row protects nothing.
+		return MeetupRequest{}, false, nil, fmt.Errorf("repository: request %s changed meetup under the lock: %w", id, apperror.ErrConflict)
 	}
 
 	acceptedCount, err := q.CountAcceptedRequests(ctx, reqRow.MeetupID)
@@ -374,12 +501,23 @@ func (r *postgresMeetupRequestRepository) Accept(
 		if errors.Is(err, pgx.ErrNoRows) {
 			return MeetupRequest{}, false, nil, fmt.Errorf("repository: request %s is not pending or not owned by caller: %w", id, apperror.ErrConflict)
 		}
-		return MeetupRequest{}, false, nil, fmt.Errorf("repository: accept meetup request: %w", err)
+		return MeetupRequest{}, false, nil, conflictIfUniqueViolation(err, "accept meetup request", id)
 	}
 
 	hostUserID := meetupRow.HostUserID.String()
 	acceptedRequest := meetupRequestFromRow(acceptedRow)
 	now := time.Now().UTC()
+
+	// DERIVED, NOT ARITHMETIC (V-2). This was `acceptedCount + 1`, which is
+	// only right if this transaction's UPDATE changed exactly one row that
+	// was not already accepted — precisely what the old code could not
+	// guarantee. Counting again under the same lock asks the database what
+	// is true instead of inferring it, so a double accept can no longer
+	// manufacture a seat and close the meetup early.
+	newCount, err := q.CountAcceptedRequests(ctx, meetupRow.ID)
+	if err != nil {
+		return MeetupRequest{}, false, nil, fmt.Errorf("repository: recount accepted requests: %w", err)
+	}
 
 	events := []pendingEvent{{
 		topic: TopicRequestAccepted,
@@ -392,15 +530,20 @@ func (r *postgresMeetupRequestRepository) Accept(
 		},
 	}}
 
-	newCount := acceptedCount + 1
 	var autoRejectedRows []sqlcgen.MeetupMeetupRequest
 	if newCount >= int64(meetupRow.Capacity) {
 		if err := q.MarkMeetupFull(ctx, meetupRow.ID); err != nil {
 			return MeetupRequest{}, false, nil, fmt.Errorf("repository: mark meetup full: %w", err)
 		}
+		// The collision that made the final seat unfillable before 0019:
+		// auto-rejecting the remaining pending requests hit the earlier
+		// 'rejected' row of anyone who had been rejected and re-requested,
+		// and rolled the whole accept back. Mapped rather than wrapped so
+		// a recurrence reads as a conflict the client can retry, not a
+		// 500 on the host's accept button.
 		autoRejectedRows, err = q.AutoRejectPendingRequestsForMeetup(ctx, meetupRow.ID)
 		if err != nil {
-			return MeetupRequest{}, false, nil, fmt.Errorf("repository: auto-reject pending requests: %w", err)
+			return MeetupRequest{}, false, nil, conflictIfUniqueViolation(err, "auto-reject pending requests", id)
 		}
 		meetupNowFull = true
 

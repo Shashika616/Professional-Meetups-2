@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -62,20 +63,20 @@ void main() {
       await tester.pumpWidget(_wrap(_meetup(isHostedByMe: false)));
       await tester.pumpAndSettle();
 
-      expect(find.text('CLOSE MEETUP'), findsNothing);
-      expect(find.text('CANCEL MEETUP'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
+      expect(find.text('Cancel meetup'), findsNothing);
     });
 
     testWidgets('renders nothing once cancelled or completed', (tester) async {
       await tester.pumpWidget(_wrap(_meetup(status: MeetupStatus.cancelled)));
       await tester.pumpAndSettle();
-      expect(find.text('CLOSE MEETUP'), findsNothing);
-      expect(find.text('CANCEL MEETUP'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
+      expect(find.text('Cancel meetup'), findsNothing);
 
       await tester.pumpWidget(_wrap(_meetup(status: MeetupStatus.completed)));
       await tester.pumpAndSettle();
-      expect(find.text('CLOSE MEETUP'), findsNothing);
-      expect(find.text('CANCEL MEETUP'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
+      expect(find.text('Cancel meetup'), findsNothing);
     });
 
     testWidgets(
@@ -88,8 +89,8 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CANCEL MEETUP'), findsOneWidget);
-        expect(find.text('CLOSE MEETUP'), findsNothing);
+        expect(find.text('Cancel meetup'), findsOneWidget);
+        expect(find.text('Close meetup'), findsNothing);
       },
     );
 
@@ -99,8 +100,8 @@ void main() {
       await tester.pumpWidget(_wrap(_meetup(acceptedCount: 1)));
       await tester.pumpAndSettle();
 
-      expect(find.text('CLOSE MEETUP'), findsOneWidget);
-      expect(find.text('CANCEL MEETUP'), findsOneWidget);
+      expect(find.text('Close meetup'), findsOneWidget);
+      expect(find.text('Cancel meetup'), findsOneWidget);
     });
 
     testWidgets('shows both, side by side, once the window has started and '
@@ -108,8 +109,8 @@ void main() {
       await tester.pumpWidget(_wrap(_meetup()));
       await tester.pumpAndSettle();
 
-      expect(find.text('CLOSE MEETUP'), findsOneWidget);
-      expect(find.text('CANCEL MEETUP'), findsOneWidget);
+      expect(find.text('Close meetup'), findsOneWidget);
+      expect(find.text('Cancel meetup'), findsOneWidget);
     });
 
     testWidgets('round-6 hardening: a null windowStart (ADR-028 redaction can '
@@ -140,7 +141,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      expect(find.text('CLOSE MEETUP'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
     });
   });
 
@@ -160,8 +161,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(find.text('CLOSE MEETUP'), findsOneWidget);
-        expect(find.text('CANCEL MEETUP'), findsOneWidget);
+        expect(find.text('Close meetup'), findsOneWidget);
+        expect(find.text('Cancel meetup'), findsOneWidget);
       },
     );
 
@@ -209,11 +210,11 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('CLOSE MEETUP'));
+        await tester.tap(find.text('Close meetup'));
         await tester.pumpAndSettle();
         expect(service.lastCloseMeetupId, isNull); // dialog first
 
-        await tester.tap(find.text('CONFIRM'));
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Close meetup'));
         await tester.pumpAndSettle();
 
         expect(service.lastCloseMeetupId, 'meetup-1');
@@ -247,13 +248,13 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('CANCEL MEETUP'));
+        await tester.tap(find.text('Cancel meetup'));
         await tester.pumpAndSettle();
         expect(service.lastCancelMeetupId, isNull); // dialog first
 
         await tester.enterText(find.byType(TextField), 'Something came up');
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(TextButton, 'CANCEL MEETUP'));
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Cancel meetup'));
         await tester.pumpAndSettle();
 
         expect(service.lastCancelMeetupId, 'meetup-1');
@@ -285,15 +286,15 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('CANCEL MEETUP'));
+        await tester.tap(find.text('Cancel meetup'));
         await tester.pumpAndSettle();
 
-        final confirmButton = tester.widget<TextButton>(
-          find.widgetWithText(TextButton, 'CANCEL MEETUP'),
+        final confirmButton = tester.widget<PrimaryButton>(
+          find.widgetWithText(PrimaryButton, 'Cancel meetup'),
         );
         expect(confirmButton.onPressed, isNull);
 
-        await tester.tap(find.widgetWithText(TextButton, 'CANCEL MEETUP'));
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Cancel meetup'));
         await tester.pumpAndSettle();
 
         expect(service.lastCancelMeetupId, isNull);
@@ -326,11 +327,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('CANCEL MEETUP'));
+      await tester.tap(find.text('Cancel meetup'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Something came up');
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'CANCEL MEETUP'));
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Cancel meetup'));
       await tester.pumpAndSettle();
 
       expect(find.text('meetup: something went wrong'), findsOneWidget);
@@ -348,28 +349,32 @@ void main() {
       await tester.pumpWidget(_wrap(_meetup()));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('CANCEL MEETUP'));
+      await tester.tap(find.text('Cancel meetup'));
       await tester.pumpAndSettle();
 
-      Color confirmColour() {
-        final texts = tester
-            .widgetList<Text>(find.text('CANCEL MEETUP'))
-            .toList();
-        // The dialog's confirm is the last one in the tree.
-        return texts.last.style!.color!;
+      // The disabled look now comes from PrimaryButton itself, which
+      // swaps the whole fill for a neutral raised surface rather than
+      // only greying its label — so this reads the button's fill, not a
+      // Text colour.
+      Color confirmFill() {
+        final button = find.widgetWithText(PrimaryButton, 'Cancel meetup');
+        final ink = tester.widget<Ink>(
+          find.descendant(of: button, matching: find.byType(Ink)),
+        );
+        return (ink.decoration as BoxDecoration).color!;
       }
 
-      final disabled = confirmColour();
+      final disabled = confirmFill();
 
       await tester.enterText(find.byType(TextField), 'Something came up');
       await tester.pump();
 
-      final enabled = confirmColour();
+      final enabled = confirmFill();
 
       expect(
         disabled,
         isNot(enabled),
-        reason: 'the label must visibly change once the reason is filled in',
+        reason: 'the button must visibly change once the reason is filled in',
       );
       expect(
         enabled,

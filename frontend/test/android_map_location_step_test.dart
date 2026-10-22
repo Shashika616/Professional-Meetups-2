@@ -83,6 +83,61 @@ void main() {
     },
   );
 
+  testWidgets('the suggestions panel opens on the second character and says '
+      'it is looking, long before any result arrives', (tester) async {
+    // The geocoders behind this take seconds to answer. The panel used to
+    // exist only once results were in hand, so typing produced a silent,
+    // unchanged map and the search read as broken.
+    final held = Completer<http.Response>();
+    final client = MockClient((_) => held.future);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: AndroidMapLocationStep(
+              onSubmit: (_, _, _) {},
+              httpClient: client,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final field = find.widgetWithText(
+      TextField,
+      'Search for a cafe, restaurant, or venue',
+    );
+
+    // One character is not a query: nothing is sent and nothing opens.
+    await tester.enterText(field, 'c');
+    await tester.pump();
+    expect(find.text('Looking for places…'), findsNothing);
+
+    // Two is. The panel is up immediately — before the debounce has even
+    // fired, let alone the request.
+    await tester.enterText(field, 'co');
+    await tester.pump();
+    expect(find.text('Looking for places…'), findsOneWidget);
+
+    // Still looking while the request is in flight.
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Looking for places…'), findsOneWidget);
+
+    // A search that genuinely matched nothing says so, rather than
+    // closing and leaving the screen exactly as it was.
+    held.complete(http.Response('{"features":[]}', 200));
+    await tester.pumpAndSettle();
+    expect(find.text('No places found'), findsOneWidget);
+
+    // Clearing the field puts it away.
+    await tester.tap(find.byKey(const Key('placeSearchClear')));
+    await tester.pumpAndSettle();
+    expect(find.text('No places found'), findsNothing);
+    expect(find.text('Looking for places…'), findsNothing);
+  });
+
   testWidgets('selecting a suggestion fills the field, recenters, and CONTINUE '
       'submits those coordinates', (tester) async {
     double? submittedLat;
@@ -125,8 +180,8 @@ void main() {
     await tester.pump();
     await tester.pump();
 
-    await tester.ensureVisible(find.text('CONTINUE'));
-    await tester.tap(find.text('CONTINUE'));
+    await tester.ensureVisible(find.text('Continue'));
+    await tester.tap(find.text('Continue'));
     await tester.pump();
 
     expect(submittedLat, closeTo(6.9213, 0.0001));
@@ -300,8 +355,8 @@ void main() {
 
       expect(find.text('Department of Coffee'), findsWidgets);
 
-      await tester.ensureVisible(find.text('CONTINUE'));
-      await tester.tap(find.text('CONTINUE'));
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
       await tester.pump();
 
       expect(submittedLat, closeTo(6.9172, 0.0001));
@@ -350,9 +405,9 @@ void main() {
       // scrim while the dropdown is open — before the scrim, this tap
       // reached CONTINUE directly, which is exactly the bug being fixed
       // (submitting instead of picking a suggestion).
-      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.ensureVisible(find.text('Continue'));
       await tester.pump();
-      await tester.tap(find.text('CONTINUE'), warnIfMissed: false);
+      await tester.tap(find.text('Continue'), warnIfMissed: false);
       await tester.pump();
 
       expect(
@@ -429,7 +484,7 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.text('USE MY CURRENT LOCATION'));
+      await tester.tap(find.text('Use my current location'));
       await tester.pump();
       await tester.pump();
 
@@ -449,8 +504,8 @@ void main() {
       // CONTINUE must still be enabled even with an empty field — using
       // current location is itself enough to unlock it. The banner pushes
       // it below the test viewport, so scroll it in first.
-      await tester.ensureVisible(find.text('CONTINUE'));
-      await tester.tap(find.text('CONTINUE'));
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
       await tester.pump();
 
       expect(submittedLat, closeTo(6.9213, 0.0001));
@@ -487,12 +542,12 @@ void main() {
           await pumpStep(tester);
           await tester.pump();
 
-          await tester.tap(find.text('USE MY CURRENT LOCATION'));
+          await tester.tap(find.text('Use my current location'));
           await tester.pump();
           await tester.pump();
 
           expect(find.textContaining('permission was denied'), findsOneWidget);
-          expect(find.text('SETTINGS'), findsOneWidget);
+          expect(find.text('Settings'), findsOneWidget);
           expect(find.text('Your current location'), findsNothing);
         },
       );
@@ -506,7 +561,7 @@ void main() {
         await pumpStep(tester);
         await tester.pump();
 
-        await tester.tap(find.text('USE MY CURRENT LOCATION'));
+        await tester.tap(find.text('Use my current location'));
         await tester.pump();
         await tester.pump();
 
@@ -523,13 +578,13 @@ void main() {
         await pumpStep(tester);
         await tester.pump();
 
-        await tester.tap(find.text('USE MY CURRENT LOCATION'));
+        await tester.tap(find.text('Use my current location'));
         await tester.pump();
         // Not a label swap: the busy button is its own animating widget,
         // so the user can see the read is still running.
         final busy = find.byKey(const Key('findingYouButton'));
         expect(busy, findsOneWidget);
-        expect(find.text('FINDING YOU'), findsOneWidget);
+        expect(find.text('Finding you'), findsOneWidget);
         expect(
           find.descendant(
             of: busy,
@@ -553,7 +608,7 @@ void main() {
         await tester.pump(const Duration(seconds: 3));
 
         expect(fake.getCurrentPositionCalls, 1);
-        expect(find.text('USE MY CURRENT LOCATION'), findsOneWidget);
+        expect(find.text('Use my current location'), findsOneWidget);
         expect(find.text('Your current location'), findsOneWidget);
       });
     },

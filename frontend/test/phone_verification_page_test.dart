@@ -11,6 +11,7 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
+import 'package:professional_connections_platform/core/models/country.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/verification/phone_verification_page.dart';
 
@@ -20,6 +21,17 @@ import 'support/fake_secure_storage_platform.dart';
 /// Every other AuthService member is unreachable from this screen and
 /// throws if accidentally invoked.
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -166,8 +178,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -345,4 +357,98 @@ void main() {
       expect(stored!.accessToken, 'new.a.b');
     },
   );
+
+  group('the country code is a picker, not a fixed +94', () {
+    Widget appWith(AuthService auth, {String? currentValue}) => ProviderScope(
+      overrides: [
+        authServiceProvider.overrideWithValue(auth),
+        sessionStorageProvider.overrideWithValue(
+          SecureSessionStorage(storage: const FlutterSecureStorage()),
+        ),
+      ],
+      child: MaterialApp(
+        home: PhoneVerificationPage(currentValue: currentValue),
+      ),
+    );
+
+    testWidgets('the screen opens on the default country, shown as a '
+        'tappable code rather than drawn into the placeholder', (tester) async {
+      await tester.pumpWidget(appWith(_FakeAuthService(startResult: 60)));
+      expect(find.text(kDefaultCountry.dialCode), findsOneWidget);
+    });
+
+    testWidgets('picking another country changes the code that is sent', (
+      tester,
+    ) async {
+      final auth = _FakeAuthService(startResult: 60);
+      await tester.pumpWidget(appWith(auth));
+
+      await tester.tap(find.text('+94'));
+      await tester.pumpAndSettle();
+
+      // The sheet has a search field, so a 100-entry list is not a scroll
+      // hunt. Searching by dial code must work as well as by name.
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Search country or code'),
+        '971',
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('United Arab Emirates'), findsOneWidget);
+      expect(
+        find.text('Sri Lanka'),
+        findsNothing,
+        reason: 'the search must actually filter, not just scroll',
+      );
+
+      await tester.tap(find.text('United Arab Emirates'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('+971'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField).last, '501234567');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PrimaryButton));
+      await tester.pumpAndSettle();
+
+      expect(auth.lastPhoneNumber, '+971501234567');
+    });
+
+    testWidgets('separators the user types are stripped before sending, so '
+        'a resend hits the same rate-limited target', (tester) async {
+      final auth = _FakeAuthService(startResult: 60);
+      await tester.pumpWidget(appWith(auth));
+
+      await tester.enterText(find.byType(TextField).last, '77 123 4567');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(PrimaryButton));
+      await tester.pumpAndSettle();
+
+      expect(auth.lastPhoneNumber, '+94771234567');
+    });
+
+    testWidgets('letters cannot be entered at all', (tester) async {
+      await tester.pumpWidget(appWith(_FakeAuthService(startResult: 60)));
+
+      await tester.enterText(find.byType(TextField).last, '77abc1234');
+      await tester.pumpAndSettle();
+
+      expect(find.text('77abc1234'), findsNothing);
+      expect(find.text('771234'), findsOneWidget);
+    });
+
+    testWidgets('editing an already-verified foreign number opens on ITS '
+        'country, not on the default', (tester) async {
+      await tester.pumpWidget(
+        appWith(
+          _FakeAuthService(startResult: 60),
+          currentValue: '+971501234567',
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('+971'), findsOneWidget);
+      expect(find.text('501234567'), findsOneWidget);
+    });
+  });
 }

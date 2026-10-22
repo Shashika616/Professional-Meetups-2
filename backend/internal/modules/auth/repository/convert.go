@@ -95,3 +95,13 @@ func float8PtrOrNil(f pgtype.Float8) *float64 {
 	v := f.Float64
 	return &v
 }
+
+// float8OrNull maps an absent coordinate to SQL NULL (#78). An SOS
+// triggered without a fix records no location rather than 0,0, which is a
+// real place and would be a lie in a safety audit trail.
+func float8OrNull(v *float64) pgtype.Float8 {
+	if v == nil {
+		return pgtype.Float8{}
+	}
+	return pgtype.Float8{Float64: *v, Valid: true}
+}

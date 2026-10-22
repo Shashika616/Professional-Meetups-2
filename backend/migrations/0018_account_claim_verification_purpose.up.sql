@@ -1,0 +1,37 @@
+-- One new purpose for the claim-an-existing-account ceremony (2026-10-08).
+--
+-- # WHAT THIS IS FOR
+--
+-- 0017 made lower(personal_email) unique, so a federated signup whose
+-- provider-verified address already belongs to an account can no longer
+-- quietly create a second one. What it does instead is ask the person to
+-- prove they still hold that mailbox, with a code mailed to it, and then
+-- hands them the existing account with the new provider attached to it.
+--
+-- That code is an ordinary auth.verification_codes row, target-keyed by the
+-- address exactly like email_signup and email_login already are. It needs
+-- its own purpose for one reason: otpMatches and every lookup are keyed by
+-- (purpose, target), and a code minted for one ceremony must not be
+-- spendable on another. email_login would have been close enough to work
+-- and that is precisely the problem — it would have made two different
+-- ceremonies interchangeable by accident rather than by decision.
+--
+-- # WHY THERE IS NO TABLE HERE
+--
+-- Completing a claim needs to know WHICH federated identity to attach, and
+-- the obvious answer was a table holding (email, provider, subject) until
+-- the code comes back. It is not needed. That triple is handed to the
+-- client as an HMAC-signed, short-expiry ticket (auth/accountclaim.go):
+-- nothing in it is secret, the client's own id_token supplied every field,
+-- so only integrity matters and a signature gives that without storage.
+-- Single use comes from the code row below, which is deleted the moment it
+-- verifies, so a replayed ticket has nothing left to spend.
+--
+-- # TRANSACTION SAFETY
+--
+-- ALTER TYPE ... ADD VALUE inside a transaction is allowed from Postgres 12
+-- (golang-migrate runs every file in one), with the restriction that the
+-- new value cannot be USED in that same transaction. Nothing here uses it;
+-- the first use is at runtime, long after this commits. Local is 16 and
+-- Supabase is 15, both well past that line.
+ALTER TYPE auth.verification_purpose ADD VALUE IF NOT EXISTS 'account_claim';

@@ -24,6 +24,24 @@ const AccessTokenTTL = 15 * time.Minute
 // signature, not by issuer string.
 const issuer = "professional-connections-auth"
 
+// audience is the `aud` every access token carries and the verifier
+// requires (tracker #93, review finding N-A7).
+//
+// # WHY A TOKEN NEEDS TO SAY WHAT IT IS FOR
+//
+// Without `aud`, nothing in a token distinguishes "an access token for
+// this API" from any other RS256 token this issuer ever signs. Today that
+// set has one member, so the gap is latent rather than exploited — but it
+// is the gap that makes token confusion possible the moment a second
+// purpose appears (a push-registration token, a short-lived download
+// token, a token minted for a partner), because each would verify
+// anywhere the others do. Adding it now is a one-line check; adding it
+// after the second purpose exists is a migration.
+//
+// Verification is strict, not advisory: a token without this audience
+// does not authenticate a request.
+const audience = "professional-connections-api"
+
 // Signer issues signed access tokens. Per ADR-001 §6 the GATEWAY holds the
 // private key and constructs this — the monolith authenticates the request
 // and returns identity facts (user_id, trust_level), and the gateway turns
@@ -43,7 +61,7 @@ type Signer struct {
 // process at startup, not surface as an error on the first request that
 // needs to sign a token.
 func NewSigner(privateKeyPath string) (*Signer, error) {
-	raw, err := os.ReadFile(privateKeyPath)
+	raw, err := os.ReadFile(privateKeyPath) // #nosec G304 -- operator-configured key path (JWT_PRIVATE_KEY_PATH), never request input
 	if err != nil {
 		return nil, fmt.Errorf("jwt: read private key %q: %w", privateKeyPath, err)
 	}
@@ -66,14 +84,16 @@ func NewSigner(privateKeyPath string) (*Signer, error) {
 // is actually in use without decoding a token by hand.
 func (s *Signer) KeyID() string { return s.kid }
 
-// Sign issues a signed access token for claims. IssuedAt, ExpiresAt, and
-// Issuer are set here and override anything the caller supplied — callers
-// are only responsible for UserID, TrustLevel, and optionally Subject.
+// Sign issues a signed access token for claims. IssuedAt, ExpiresAt,
+// Issuer and Audience are set here and override anything the caller
+// supplied — callers are only responsible for UserID, TrustLevel, and
+// optionally Subject.
 func (s *Signer) Sign(claims Claims) (string, error) {
 	now := time.Now()
 	claims.IssuedAt = jwtlib.NewNumericDate(now)
 	claims.ExpiresAt = jwtlib.NewNumericDate(now.Add(AccessTokenTTL))
 	claims.Issuer = issuer
+	claims.Audience = jwtlib.ClaimStrings{audience}
 	if claims.Subject == "" {
 		claims.Subject = claims.UserID
 	}

@@ -30,15 +30,15 @@ void main() {
   });
 
   test('labelFor names the sitting for the meal intent only', () {
-    expect(IntentType.lunch.label, 'MEAL');
-    expect(IntentType.lunch.labelFor(at(8)), 'MEAL: BREAKFAST');
-    expect(IntentType.lunch.labelFor(at(12, 30)), 'MEAL: LUNCH');
-    expect(IntentType.lunch.labelFor(at(16)), 'MEAL: EVENING MEAL');
-    expect(IntentType.lunch.labelFor(at(19)), 'MEAL: DINNER');
-    expect(IntentType.lunch.labelFor(at(23)), 'MEAL: LATE NIGHT MEAL');
+    expect(IntentType.lunch.label, 'Meal');
+    expect(IntentType.lunch.labelFor(at(8)), 'Meal: Breakfast');
+    expect(IntentType.lunch.labelFor(at(12, 30)), 'Meal: Lunch');
+    expect(IntentType.lunch.labelFor(at(16)), 'Meal: Evening meal');
+    expect(IntentType.lunch.labelFor(at(19)), 'Meal: Dinner');
+    expect(IntentType.lunch.labelFor(at(23)), 'Meal: Late night meal');
     // A locked meetup hides its window: the plain name, never a guess.
-    expect(IntentType.lunch.labelFor(null), 'MEAL');
-    expect(IntentType.coffee.labelFor(at(8)), 'COFFEE');
+    expect(IntentType.lunch.labelFor(null), 'Meal');
+    expect(IntentType.coffee.labelFor(at(8)), 'Coffee');
   });
 
   test('the wire value is unchanged: the server enum is still lunch', () {

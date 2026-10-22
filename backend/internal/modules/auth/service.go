@@ -82,6 +82,14 @@ type Service interface {
 	GuestSignup(ctx context.Context, req GuestSignupRequest) (SessionResult, error)
 	StartEmailLogin(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error)
 	CompleteEmailLogin(ctx context.Context, req VerifyCodeRequest) (SessionResult, error)
+
+	// CompleteAccountClaim and ResendAccountClaimCode finish the ceremony a
+	// federated signup starts when the provider's verified address is
+	// already on an account (accountclaim.go). Both are unauthenticated,
+	// like every other signup-shaped call here: the signed ticket plus the
+	// mailed code ARE the credential.
+	CompleteAccountClaim(ctx context.Context, req CompleteAccountClaimRequest) (SessionResult, error)
+	ResendAccountClaimCode(ctx context.Context, ticket string) (StartVerificationResult, error)
 	RefreshSession(ctx context.Context, refreshToken string) (SessionResult, error)
 	RevokeSession(ctx context.Context, refreshToken string) error
 
@@ -125,6 +133,9 @@ type Service interface {
 	// SweepExpiredSafetyHolds purges safety holds whose purge_after has
 	// passed (0016_safety_holds). Called hourly by RefreshTokenSweeper.
 	SweepExpiredSafetyHolds(ctx context.Context) (purged int, err error)
+	// SweepContactInvites trims the invitation log the trusted-contact caps
+	// read (#80). Driven by the same sweeper.
+	SweepContactInvites(ctx context.Context) (deleted int, err error)
 
 	// --- trusted contacts + SOS (sos sub-package) ---
 	AddTrustedContact(ctx context.Context, req AddTrustedContactRequest) (TrustedContact, error)
@@ -136,6 +147,10 @@ type Service interface {
 	// through an adapter wired in cmd/monolith — see sos.NotifyMeetupShare
 	// for why none of the message content comes from the client.
 	NotifyMeetupShare(ctx context.Context, userID string, share MeetupShare) (int, error)
+	// ConfirmTrustedContact records a contact's own consent from the link
+	// they were texted (#80), and returns whose contact they now are. No
+	// signed-in user: the single-use token is the proof.
+	ConfirmTrustedContact(ctx context.Context, token string) (requesterName string, err error)
 
 	// DeleteAccount erases the caller's account for good (App Store
 	// 5.1.1(v), Play's data-deletion policy), and announces it to every
@@ -189,7 +204,10 @@ type Deps struct {
 	Email                   email.EmailSender
 	SMS                     sms.SmsSender
 	WorkEmailHMACKey        []byte
-	Logger                  *slog.Logger
+	// PublicBaseURL is the gateway's public origin, which trusted-contact
+	// invitation links point at (#80).
+	PublicBaseURL string
+	Logger        *slog.Logger
 }
 
 // New constructs the auth module's Service.
@@ -214,6 +232,7 @@ func New(deps Deps) Service {
 		sos: sos.New(
 			deps.Users, deps.TrustedContacts, deps.SOSEvents, deps.SMS, deps.Email,
 			sos.Validator{PhoneNumber: validatePhoneNumber, Email: validateEmailShape},
+			deps.PublicBaseURL,
 			logger,
 		),
 		logger: logger,
@@ -246,6 +265,10 @@ func (s *service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (Trigge
 		return TriggerSOSResult{}, err
 	}
 	return s.sos.TriggerSOS(ctx, req)
+}
+
+func (s *service) ConfirmTrustedContact(ctx context.Context, token string) (string, error) {
+	return s.sos.ConfirmTrustedContact(ctx, token)
 }
 
 func (s *service) NotifyMeetupShare(ctx context.Context, userID string, share MeetupShare) (int, error) {
@@ -345,7 +368,7 @@ func (s *service) CompleteLinkedInOnboarding(ctx context.Context, req CompleteLi
 	}
 
 	user, isNewUser, err := s.ResolveOrCreateIdentity(
-		ctx, FederatedProviderLinkedIn, info.Sub, "", info.Name, info.Picture, req.AgeConfirmedOver18,
+		ctx, FederatedProviderLinkedIn, info.Sub, info.Email, info.Name, info.Picture, req.AgeConfirmedOver18,
 	)
 	if err != nil {
 		return SessionResult{}, err
@@ -459,6 +482,7 @@ func (s *service) LinkIdentity(ctx context.Context, req LinkIdentityRequest) (Se
 // this cannot reuse startVerification's userID-keyed Upsert/Get; it uses the
 // target-keyed methods instead.
 func (s *service) StartEmailSignup(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposeEmailSignup, req.Target)
 	if req.Purpose != VerificationPurposeEmailSignup {
 		return StartVerificationResult{}, fmt.Errorf("purpose mismatch for StartEmailSignup: %w", apperror.ErrInvalidInput)
 	}
@@ -473,6 +497,7 @@ func (s *service) StartEmailSignup(ctx context.Context, req StartVerificationReq
 // existence, undercutting the same enumeration-safety CompleteEmailLogin's
 // generic error message below is for.
 func (s *service) StartEmailLogin(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposeEmailLogin, req.Target)
 	if req.Purpose != VerificationPurposeEmailLogin {
 		return StartVerificationResult{}, fmt.Errorf("purpose mismatch for StartEmailLogin: %w", apperror.ErrInvalidInput)
 	}
@@ -538,6 +563,7 @@ func (s *service) startTargetKeyedVerification(
 // an existing one. No password anywhere: proving inbox control via OTP is
 // the entire credential, at signup and on every later login.
 func (s *service) CompleteEmailSignup(ctx context.Context, req CompleteEmailSignupRequest) (SessionResult, error) {
+	req.Email = normalizeVerificationTarget(VerificationPurposeEmailSignup, req.Email)
 	if err := s.verifyAndConsumeTargetKeyedCode(ctx, repository.VerificationPurposeEmailSignup, req.Email, req.Code); err != nil {
 		return SessionResult{}, err
 	}
@@ -558,6 +584,7 @@ func (s *service) CompleteEmailSignup(ctx context.Context, req CompleteEmailSign
 // wrong-code attempt against a real account and any attempt against a
 // nonexistent one cost the same.
 func (s *service) CompleteEmailLogin(ctx context.Context, req VerifyCodeRequest) (SessionResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposeEmailLogin, req.Target)
 	if req.Purpose != VerificationPurposeEmailLogin {
 		return SessionResult{}, fmt.Errorf("purpose mismatch for CompleteEmailLogin: %w", apperror.ErrInvalidInput)
 	}
@@ -577,7 +604,50 @@ func (s *service) CompleteEmailLogin(ctx context.Context, req VerifyCodeRequest)
 // Unlike verifyAndConsumeCode there's no separate "target matches" check:
 // GetByTarget already looks the row up BY target, so a mismatch can't occur
 // here the way it can for the userID-keyed methods.
+// Spends the attempt atomically before comparing, for the same reason and in
+// the same order as verifyAndConsumeCode — see its comment for the full
+// reasoning on V-1.
+//
+// This is the half that mattered most. Every purpose routed through here is
+// UNAUTHENTICATED (email signup, email login, and account_claim as of
+// ADR-009), so the cap below is the only thing standing between a stranger
+// and a six-digit secret. Before this change a hundred parallel guesses got
+// a hundred turns.
+//
+// No separate "target matches" check, for the same reason as before: the
+// claim is keyed BY target, so a mismatch cannot occur here the way it can
+// for the user-keyed twin.
 func (s *service) verifyAndConsumeTargetKeyedCode(ctx context.Context, purpose repository.VerificationPurpose, target, code string) error {
+	claimed, err := s.verificationCodes.ClaimAttemptByTarget(ctx, purpose, target, otpMaxAttempts)
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return s.explainUnclaimableTargetKeyedAttempt(ctx, purpose, target)
+		}
+		return err
+	}
+
+	if !otpMatches(claimed.CodeHash, code, purpose, target) {
+		if claimed.Attempts >= otpMaxAttempts {
+			_ = s.verificationCodes.DeleteByTarget(ctx, purpose, target)
+		}
+		return fmt.Errorf("invalid code: %w", apperror.ErrInvalidInput)
+	}
+
+	if err := s.verificationCodes.ConsumeByTarget(ctx, purpose, target, claimed.CodeHash); err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return fmt.Errorf("invalid code: %w", apperror.ErrInvalidInput)
+		}
+		return err
+	}
+	return nil
+}
+
+// explainUnclaimableTargetKeyedAttempt is explainUnclaimableAttempt for the
+// target-keyed purposes; see that function for why the spent-cap case
+// deliberately does not delete the row.
+func (s *service) explainUnclaimableTargetKeyedAttempt(
+	ctx context.Context, purpose repository.VerificationPurpose, target string,
+) error {
 	pending, err := s.verificationCodes.GetByTarget(ctx, purpose, target)
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
@@ -585,25 +655,11 @@ func (s *service) verifyAndConsumeTargetKeyedCode(ctx context.Context, purpose r
 		}
 		return err
 	}
-
 	if time.Now().After(pending.ExpiresAt) {
 		_ = s.verificationCodes.DeleteByTarget(ctx, purpose, target)
 		return fmt.Errorf("code expired, please request a new one: %w", apperror.ErrInvalidInput)
 	}
-	if pending.Attempts >= otpMaxAttempts {
-		_ = s.verificationCodes.DeleteByTarget(ctx, purpose, target)
-		return fmt.Errorf("too many attempts, please request a new code: %w", apperror.ErrInvalidInput)
-	}
-
-	if !otpMatches(pending.CodeHash, code, purpose, target) {
-		updated, incErr := s.verificationCodes.IncrementAttemptsByTarget(ctx, purpose, target)
-		if incErr == nil && updated.Attempts >= otpMaxAttempts {
-			_ = s.verificationCodes.DeleteByTarget(ctx, purpose, target)
-		}
-		return fmt.Errorf("invalid code: %w", apperror.ErrInvalidInput)
-	}
-
-	return s.verificationCodes.DeleteByTarget(ctx, purpose, target)
+	return fmt.Errorf("too many attempts, please request a new code: %w", apperror.ErrInvalidInput)
 }
 
 // RefreshSession rotates a refresh token for a new pair. The presented token
@@ -613,6 +669,53 @@ func (s *service) verifyAndConsumeTargetKeyedCode(ctx context.Context, purpose r
 // rotating the auth.refresh_tokens row and still mints the new refresh
 // token, but the new ACCESS token is signed by the gateway from the UserID
 // and TrustLevel returned here.
+// handleRefreshTokenReuse ends every session the user has and returns the
+// rejection for the request that triggered it.
+//
+// A refresh token presented twice is the signature of a STOLEN one, not a
+// client bug: rotation is single-use and transactional, so a well-behaved
+// client physically cannot present the same token twice — it discarded
+// the old value the moment it received the replacement.
+//
+// Rejecting just this one request is not enough (§B1). If an attacker has
+// a copy of a token the legitimate client has since rotated, the attacker
+// plausibly has the rest of that session's chain, and the server has no
+// way to tell which side of this exchange is the thief. Ending the whole
+// family makes both parties re-authenticate — the legitimate user is
+// logged out too, which is the correct trade: a forced re-login is a
+// minor annoyance, a silently-shared session is an account takeover.
+//
+// Called from two places since #83, which is why it is a function: the
+// pre-check on the row as read, and the rotation's own claim failing
+// because another transaction won the race. Both are the same event and
+// must produce the same response, and a second copy of this block would
+// eventually drift from the first.
+func (s *service) handleRefreshTokenReuse(ctx context.Context, userID string) error {
+	revoked, revokeErr := s.refreshTokens.RevokeAllForUser(ctx, userID)
+	if revokeErr != nil {
+		// Logged, not propagated: the caller must still be rejected, and
+		// returning the revocation's error instead would turn a definite
+		// "no" into an ambiguous 500 that a client might retry.
+		s.logger.Error("refresh token reuse detected but revoking the session family failed",
+			"event", "refresh_token_reuse",
+			"user_id", userID,
+			"error", revokeErr,
+		)
+	} else {
+		// Deliberately loud, and deliberately without the token or its
+		// hash: this is the one log line that says an account may be
+		// compromised, and it is what an operator would alert on. There
+		// is no session-revoked event on the bus to publish alongside it
+		// — this log line is the signal.
+		s.logger.Warn("refresh token reuse detected — revoked the user's entire session family",
+			"event", "refresh_token_reuse",
+			"user_id", userID,
+			"sessions_revoked", revoked,
+		)
+	}
+	return fmt.Errorf("refresh token already used: %w", apperror.ErrUnauthorized)
+}
+
 func (s *service) RefreshSession(ctx context.Context, refreshToken string) (SessionResult, error) {
 	old, err := s.refreshTokens.FindByHash(ctx, hashToken(refreshToken))
 	if err != nil {
@@ -634,27 +737,7 @@ func (s *service) RefreshSession(ctx context.Context, refreshToken string) (Sess
 	// is the correct trade-off: a forced re-login is a minor annoyance, a
 	// silently-shared session is an account takeover.
 	if old.RevokedAt != nil || old.ReplacedBy != nil {
-		revoked, revokeErr := s.refreshTokens.RevokeAllForUser(ctx, old.UserID)
-		if revokeErr != nil {
-			// Logged, not propagated: the caller must still be rejected, and
-			// returning the revocation's error instead would turn a
-			// definite "no" into an ambiguous 500 that a client might retry.
-			s.logger.Error("refresh token reuse detected but revoking the session family failed",
-				"event", "refresh_token_reuse",
-				"user_id", old.UserID,
-				"error", revokeErr,
-			)
-		} else {
-			// Deliberately loud, and deliberately without the token or its
-			// hash: this is the one log line that says an account may be
-			// compromised, and it is what an operator would alert on.
-			s.logger.Warn("refresh token reuse detected — revoked the user's entire session family",
-				"event", "refresh_token_reuse",
-				"user_id", old.UserID,
-				"sessions_revoked", revoked,
-			)
-		}
-		return SessionResult{}, fmt.Errorf("refresh token already used: %w", apperror.ErrUnauthorized)
+		return SessionResult{}, s.handleRefreshTokenReuse(ctx, old.UserID)
 	}
 	if time.Now().After(old.ExpiresAt) {
 		return SessionResult{}, fmt.Errorf("refresh token expired: %w", apperror.ErrUnauthorized)
@@ -671,6 +754,14 @@ func (s *service) RefreshSession(ctx context.Context, refreshToken string) (Sess
 	}
 
 	if _, err := s.refreshTokens.Rotate(ctx, old.ID, newHash, time.Now().Add(RefreshTokenTTL)); err != nil {
+		// The check above read a snapshot; this is the row's own answer
+		// (#83). Two refreshes of one token race past that check
+		// together, and the loser lands here — same situation, same
+		// response, so the family is revoked exactly as if the reuse had
+		// been visible up front.
+		if errors.Is(err, repository.ErrRefreshTokenAlreadyRotated) {
+			return SessionResult{}, s.handleRefreshTokenReuse(ctx, old.UserID)
+		}
 		return SessionResult{}, err
 	}
 

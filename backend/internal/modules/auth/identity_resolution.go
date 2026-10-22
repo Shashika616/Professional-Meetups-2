@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 )
@@ -38,13 +39,13 @@ func (s *service) ResolveOrCreateIdentity(
 	ctx context.Context, provider FederatedProvider, subject, email, name, profilePhotoURL string, ageConfirmedOver18 bool,
 ) (user repository.User, isNewUser bool, err error) {
 	if provider == FederatedProviderLinkedIn {
-		return s.resolveOrCreateLinkedIn(ctx, subject, name, profilePhotoURL, ageConfirmedOver18)
+		return s.resolveOrCreateLinkedIn(ctx, subject, email, name, profilePhotoURL, ageConfirmedOver18)
 	}
 	return s.resolveOrCreateAppleGoogle(ctx, provider, subject, email, name, ageConfirmedOver18)
 }
 
 func (s *service) resolveOrCreateLinkedIn(
-	ctx context.Context, subject, name, profilePhotoURL string, ageConfirmedOver18 bool,
+	ctx context.Context, subject, email, name, profilePhotoURL string, ageConfirmedOver18 bool,
 ) (repository.User, bool, error) {
 	existing, err := s.users.GetByLinkedInSub(ctx, subject)
 	if err == nil {
@@ -60,6 +61,16 @@ func (s *service) resolveOrCreateLinkedIn(
 		return repository.User{}, false, errAgeConfirmationRequired
 	}
 
+	// Nobody has this LinkedIn sub, but somebody may already have this
+	// ADDRESS. LinkedIn is reached here with an email for the first time:
+	// the scope was always requested and the member always consented on
+	// LinkedIn's own screen, and the backend used to drop the value at
+	// decode. Dropping it is what made LinkedIn the one provider that could
+	// not recognise a returning member who first arrived another way.
+	if err := s.claimIfEmailTaken(ctx, email, FederatedProviderLinkedIn, subject); err != nil {
+		return repository.User{}, false, err
+	}
+
 	// LinkedIn direct signup still grants Level 1 immediately (ADR-014 §1,
 	// unchanged from ADR-011) — computed via computeTrustLevel rather than
 	// a literal 1 so this stays derived from the same single source of
@@ -70,6 +81,7 @@ func (s *service) resolveOrCreateLinkedIn(
 		ProfilePhotoURL:    profilePhotoURL,
 		TrustLevel:         computeTrustLevel(repository.User{LinkedInSub: subject}),
 		AgeConfirmedOver18: true,
+		PersonalEmail:      identity.NormalizeEmail(email),
 	})
 	if err != nil {
 		return repository.User{}, false, err
@@ -101,6 +113,13 @@ func (s *service) resolveOrCreateAppleGoogle(
 		return repository.User{}, false, errAgeConfirmationRequired
 	}
 
+	// This provider has never seen this person before. That does not mean
+	// this PERSON has never been here — the same address arriving through a
+	// different provider is the whole reason the claim flow exists.
+	if err := s.claimIfEmailTaken(ctx, email, provider, subject); err != nil {
+		return repository.User{}, false, err
+	}
+
 	// Level 0 (ADR-014 §1): Apple/Google alone never grant trust, no matter
 	// how many are linked — computeTrustLevel on a user with no
 	// linkedin_sub always returns 0.
@@ -108,6 +127,13 @@ func (s *service) resolveOrCreateAppleGoogle(
 		FullName:           name,
 		TrustLevel:         computeTrustLevel(repository.User{}),
 		AgeConfirmedOver18: true,
+		// The same address lands in two places on purpose, and they answer
+		// different questions. user_identities.email records what THIS
+		// provider said about this person, per provider. users.personal_email
+		// is the account's one identity anchor, the column 0017 made unique,
+		// and the thing the next signup through any other provider is
+		// matched against.
+		PersonalEmail: identity.NormalizeEmail(email),
 	})
 	if err != nil {
 		return repository.User{}, false, err

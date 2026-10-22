@@ -260,14 +260,29 @@ func (p *Poller) Run(ctx context.Context) {
 // batch should drain now, not one batch per tick, which for a 500-recipient
 // fan-out would otherwise take ten ticks to deliver the last recipient.
 func (p *Poller) DrainOnce(ctx context.Context) {
+	if _, err := p.Drain(ctx); err != nil {
+		p.logger.Error("outbox: claim batch", "error", err)
+	}
+}
+
+// Drain is DrainOnce with the count and the error returned rather than
+// logged. The scheduled-work RPC (grpcapi.OpsServer) reports both to Cloud
+// Scheduler, which decides whether to retry — a decision it cannot make from
+// a log line.
+//
+// Rows already delivered before a failure are still counted: the caller
+// should know the pass did partial work, and every row claimed was either
+// delivered or left for the retry ladder, never lost.
+func (p *Poller) Drain(ctx context.Context) (int, error) {
+	total := 0
 	for {
 		if ctx.Err() != nil {
-			return
+			return total, ctx.Err()
 		}
 		claimed, err := p.claimAndProcess(ctx)
+		total += claimed
 		if err != nil {
-			p.logger.Error("outbox: claim batch", "error", err)
-			return
+			return total, err
 		}
 		if claimed < p.batchSize {
 			// A short batch means the due set is exhausted.
@@ -280,6 +295,7 @@ func (p *Poller) DrainOnce(ctx context.Context) {
 			p.observer.Pending(pending)
 		}
 	}
+	return total, nil
 }
 
 // claimAndProcess handles exactly one batch and reports how many rows it

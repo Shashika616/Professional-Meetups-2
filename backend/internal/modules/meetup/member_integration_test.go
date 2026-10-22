@@ -253,3 +253,54 @@ func TestGetMemberActivity_RecentMeetupsAndComments_Integration(t *testing.T) {
 		t.Errorf("the guest's own feed should list the meetup as joined, got %+v", self.RecentMeetups)
 	}
 }
+
+// #90. The safety questionnaire and the public review shared one notes
+// column, so a private "did you feel safe?" note could be published on the
+// meetup for other people to read — directly, and again when its author
+// later finished the review without writing a note of their own.
+func TestGetMemberActivity_NeverPublishesASafetyNote_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	f := newMemberFixture(t, h)
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE meetup.meetups SET window_start = now() - interval '3 hours', window_end = now() - interval '1 hour' WHERE id = $1`,
+		f.meetupID,
+	); err != nil {
+		t.Fatalf("end meetup: %v", err)
+	}
+
+	private := "He made me uncomfortable; I left early."
+	no := false
+	if err := h.svc.SubmitMeetupFeedback(ctx, meetup.SubmitMeetupFeedbackRequest{
+		MeetupID: f.meetupID, UserID: f.accepted, Happened: true, FeltSafe: &no, Notes: &private,
+	}); err != nil {
+		t.Fatalf("safety feedback: %v", err)
+	}
+
+	assertNotPublished := func(stage string) {
+		t.Helper()
+		got, err := h.svc.GetMemberActivity(ctx, f.outsider, f.host)
+		if err != nil {
+			t.Fatalf("%s: GetMemberActivity: %v", stage, err)
+		}
+		for _, mm := range got.RecentMeetups {
+			for _, c := range mm.Comments {
+				if c.Note == private {
+					t.Errorf("%s: a private safety note was shown publicly", stage)
+				}
+			}
+		}
+	}
+
+	// 1. Before any review is completed.
+	assertNotPublished("before the review")
+
+	// 2. After the same person completes the review without a note.
+	if err := h.svc.SubmitMeetupReview(ctx, meetup.SubmitMeetupReviewRequest{
+		MeetupID: f.meetupID, RaterID: f.accepted, OverallScore: 2,
+		Participants: []meetup.ReviewParticipantInput{{UserID: f.host, Score: 2}},
+	}); err != nil {
+		t.Fatalf("review: %v", err)
+	}
+	assertNotPublished("after a review with no note")
+}

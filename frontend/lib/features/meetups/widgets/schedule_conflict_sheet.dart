@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_role_chips.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -85,12 +86,12 @@ class _ScheduleConflictSheet extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            'ONE MEETUP AT A TIME',
+            'One meetup at a time',
             style: TextStyle(
               color: AppPalette.gold,
               fontSize: 11,
               fontWeight: FontWeight.w800,
-              letterSpacing: 1.6,
+              letterSpacing: 0.3,
             ),
           ),
           const SizedBox(height: 6),
@@ -105,7 +106,7 @@ class _ScheduleConflictSheet extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           FlatCard(
-            radius: 14,
+            radius: 18,
             padding: const EdgeInsets.all(14),
             tint: AppPalette.gold.withValues(alpha: 0.08),
             border: AppPalette.gold.withValues(alpha: 0.35),
@@ -118,17 +119,17 @@ class _ScheduleConflictSheet extends StatelessWidget {
                     color: AppPalette.gold,
                     fontSize: 10.5,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 1.3,
+                    letterSpacing: 0.3,
                   ),
                 ),
                 const SizedBox(height: 6),
                 MeetupRoleChips(meetup: conflict),
                 const SizedBox(height: 8),
-                _Line(Icons.schedule_rounded, conflict.formattedWindow),
+                _Line(AppIcons.clock, conflict.formattedWindow),
                 if (conflict.locationLabel case final label?
                     when label.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  _Line(Icons.place_outlined, label),
+                  _Line(AppIcons.pin, label),
                 ],
               ],
             ),
@@ -144,7 +145,7 @@ class _ScheduleConflictSheet extends StatelessWidget {
           ),
           const SizedBox(height: 18),
           PrimaryButton(
-            label: 'OPEN THAT MEETUP',
+            label: 'Open that meetup',
             onPressed: () {
               Navigator.of(context).pop();
               Navigator.of(context).push(
@@ -158,7 +159,7 @@ class _ScheduleConflictSheet extends StatelessWidget {
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: Text(
-              'I\'LL WAIT',
+              'I\'ll wait',
               style: TextStyle(
                 color: AppPalette.textSecondary,
                 fontSize: 11,
@@ -176,7 +177,7 @@ class _ScheduleConflictSheet extends StatelessWidget {
 class _Line extends StatelessWidget {
   const _Line(this.icon, this.text);
 
-  final IconData icon;
+  final String icon;
   final String text;
 
   @override
@@ -186,7 +187,7 @@ class _Line extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 1),
-          child: Icon(icon, size: 14, color: AppPalette.textSecondary),
+          child: AppIcon(icon, size: 14, color: AppPalette.textSecondary),
         ),
         const SizedBox(width: 6),
         Expanded(

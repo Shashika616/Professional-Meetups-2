@@ -1,0 +1,21 @@
+# gitleaks configuration (#95). The default rules, plus an allowlist of the
+# findings reviewed on 2026-10-22 — each a false positive for the reason
+# given. Anything else gitleaks finds fails CI.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Firebase client config: public by design, shipped inside every app binary and restricted by Firebase rules and API-key restrictions, not by secrecy"
+paths = [
+  '''frontend/lib/firebase_options\.dart''',
+  '''frontend/android/app/google-services\.json''',
+  '''frontend/ios/Runner/GoogleService-Info\.plist''',
+  '''frontend/macos/Runner/GoogleService-Info\.plist''',
+]
+
+[[allowlists]]
+description = "CocoaPods lockfile checksums, which match the generic key pattern"
+paths = [
+  '''Podfile\.lock''',
+]

@@ -35,8 +35,8 @@ func TestSafetyFeatures_RequireTrustLevelTwo(t *testing.T) {
 		_, err = svc.TriggerSOS(ctx, TriggerSOSRequest{
 			CallerTrustLevel: level,
 			UserID:           "user-1",
-			Latitude:         6.9271,
-			Longitude:        79.8612,
+			Latitude:         coord(6.9271),
+			Longitude:        coord(79.8612),
 		})
 		if !errors.Is(err, apperror.ErrForbidden) {
 			t.Errorf("TriggerSOS at level %d: error = %v, want ErrForbidden", level, err)
@@ -55,7 +55,7 @@ func TestSafetyFeatures_AllowedAtTheFloorAndAbove(t *testing.T) {
 	ctx := context.Background()
 
 	for _, level := range []int{safetyFeatureTrustFloor, safetyFeatureTrustFloor + 1} {
-		svc, users, contacts, _, _, _ := newTestServiceForSOS(t)
+		svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
 		seedUser(t, users, "user-1")
 
 		if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
@@ -74,12 +74,14 @@ func TestSafetyFeatures_AllowedAtTheFloorAndAbove(t *testing.T) {
 		if len(stored) != 1 {
 			t.Errorf("level %d stored %d contact(s), want 1", level, len(stored))
 		}
+		// A new contact must agree before an alert can reach them (#80).
+		confirmFromInvite(t, svc, smsSender)
 
 		if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
 			CallerTrustLevel: level,
 			UserID:           "user-1",
-			Latitude:         6.9271,
-			Longitude:        79.8612,
+			Latitude:         coord(6.9271),
+			Longitude:        coord(79.8612),
 		}); err != nil {
 			t.Fatalf("TriggerSOS at level %d: %v", level, err)
 		}

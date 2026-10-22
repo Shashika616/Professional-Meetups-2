@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
-import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_role_chips.dart';
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
@@ -124,7 +124,7 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (cancelled.isNotEmpty) ...[
-            const SectionHeading('CANCELLED'),
+            const SectionHeading('Cancelled'),
             const SizedBox(height: 16),
             for (final m in cancelled) ...[
               _ReviewInvitationCard(meetup: m),
@@ -133,13 +133,13 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
             const SizedBox(height: 12),
           ],
           if (happeningNow.isNotEmpty) ...[
-            const SectionHeading('HAPPENING NOW'),
+            const SectionHeading('Happening now'),
             const SizedBox(height: 16),
             _PersistentMeetupCardSet(meetups: happeningNow),
             const SizedBox(height: 24),
           ],
           if (waitingReview.isNotEmpty) ...[
-            const SectionHeading('WAITING FOR YOUR REVIEW'),
+            const SectionHeading('Waiting for your review'),
             const SizedBox(height: 16),
             _PersistentMeetupCardSet(meetups: waitingReview),
             const SizedBox(height: 24),
@@ -148,7 +148,7 @@ class _ActiveMeetupsSectionState extends ConsumerState<ActiveMeetupsSection> {
           // meetup has its card above; repeating it here as a greyed row
           // made the list read as a history it is not.
           if (live.isNotEmpty) ...[
-            const SectionHeading('ACTIVE MEETUPS'),
+            const SectionHeading('Active meetups'),
             const SizedBox(height: 16),
             // Deliberately `Column`/`.map`, not `ListView.builder` (2026-08-31
             // round-3 hardening, Fix 2 — see frontend/round-3-performance-
@@ -352,137 +352,106 @@ class _PersistentMeetupCard extends StatelessWidget {
       // the surface clean — the same move a card gets in any modern app when
       // it needs to lead without shouting.
       child: FlatCard(
-        radius: 14,
+        radius: 22,
         elevated: true,
-        border: AppPalette.hairline,
-        padding: EdgeInsets.zero,
-        // IntrinsicHeight so the accent bar can stretch to the card's full
-        // height: `CrossAxisAlignment.stretch` needs a bounded height, and
-        // the single-card path renders inside an unbounded Column. Cheap
-        // here — one small, shallow subtree — and the alternative (painting
-        // the bar as a left border on FlatCard's own decoration) would push
-        // a one-card concern into the shared surface.
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // The accent, as a bar rather than a tint over the whole
-              // card. A plain rectangle: FlatCard clips it to the card's
-              // corners, and a radius of its own on a 4px bar rounded it
-              // into a pill that pulled away from the corner.
-              Container(width: 4, color: AppPalette.candyBlue),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    // Solid, not a wash — a live indicator that is
+                    // itself washed out defeats the purpose.
+                    color: AppPalette.candyBlue,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              // Solid, not a wash — a live indicator that is
-                              // itself washed out defeats the purpose.
-                              color: AppPalette.candyBlue,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Container(
-                                  width: 5,
-                                  height: 5,
-                                  decoration: BoxDecoration(
-                                    color: AppPalette.card,
-                                    shape: BoxShape.circle,
-                                  ),
-                                ),
-                                const SizedBox(width: 5),
-                                Text(
-                                  'NOW',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    letterSpacing: 1.0,
-                                    fontWeight: FontWeight.w800,
-                                    // Reads against the solid chip, in both
-                                    // themes: candyBlue is dark on light and
-                                    // pale on dark, so the label takes the
-                                    // card colour either way.
-                                    color: AppPalette.card,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          MeetupStatusBadge(status: meetup.status),
-                          const Spacer(),
-                          // Same corner mark as the review and cancelled
-                          // cards, so every card in the deck says what kind
-                          // of meetup it is in the same place.
-                          _IntentMark(
-                            meetup: meetup,
-                            tone: AppPalette.candyBlue,
-                          ),
-                        ],
+                      Container(
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: AppPalette.card,
+                          shape: BoxShape.circle,
+                        ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(width: 5),
                       Text(
-                        meetup.hostFullName!,
+                        'Now',
                         style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 16,
+                          fontSize: 10,
+                          letterSpacing: 0.2,
                           fontWeight: FontWeight.w700,
+                          // Reads against the solid chip, in both
+                          // themes: candyBlue is dark on light and
+                          // pale on dark, so the label takes the
+                          // card colour either way.
+                          color: AppPalette.card,
                         ),
-                      ),
-                      const SizedBox(height: 6),
-                      // Who is running it and where the viewer stands: the
-                      // title above is the host's name, so the chip only
-                      // says HOST, plus YOU'RE HOSTING / YOU'RE IN.
-                      MeetupRoleChips(meetup: meetup, showHostName: false),
-                      const SizedBox(height: 4),
-                      Text(
-                        meetup.formattedWindow,
-                        style: TextStyle(
-                          color: AppPalette.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: EdgeInsets.only(top: 2),
-                            child: Icon(
-                              Icons.place_outlined,
-                              size: 12,
-                              color: AppPalette.textSecondary,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              meetup.locationLabel!,
-                              style: TextStyle(
-                                color: AppPalette.textSecondary,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
                       ),
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
+                MeetupStatusBadge(status: meetup.status),
+                const Spacer(),
+                // Same corner mark as the review and cancelled
+                // cards, so every card in the deck says what kind
+                // of meetup it is in the same place.
+                _IntentMark(meetup: meetup, tone: AppPalette.candyBlue),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              meetup.hostFullName!,
+              style: TextStyle(
+                color: AppPalette.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 6),
+            // Who is running it and where the viewer stands: the
+            // title above is the host's name, so the chip only
+            // says HOST, plus YOU'RE HOSTING / YOU'RE IN.
+            MeetupRoleChips(meetup: meetup, showHostName: false),
+            const SizedBox(height: 4),
+            Text(
+              meetup.formattedWindow,
+              style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 1),
+                  child: AppIcon(
+                    AppIcons.pin,
+                    size: 13,
+                    color: AppPalette.textTertiary,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    meetup.locationLabel!,
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -550,112 +519,99 @@ class _ActiveMeetupRow extends StatelessWidget {
         ),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
         child: FlatCard(
-          radius: 12,
-          padding: EdgeInsets.zero,
-          child: IntrinsicHeight(
-            child: Row(
-              children: [
-                // The state bar. IntrinsicHeight above is what lets it run the
-                // full height of the row whatever the text wraps to, rather
-                // than being a fixed guess that leaves a gap on tall rows.
-                Container(width: 4, color: edge),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: edge.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            meetup.intent.icon,
-                            size: 18,
-                            color: edge,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                meetup.hostFullName!,
-                                style: TextStyle(
-                                  color: AppPalette.textPrimary,
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              // Intent as its own highlighted line, in the
-                              // row's state colour so it reads with the edge
-                              // bar and the date block; the address on the
-                              // line below with a pin, never run into it.
-                              Text(
-                                cancelled
-                                    ? 'CANCELLED \u00B7 ${meetup.intentLabel}'
-                                    : meetup.intentLabel,
-                                style: TextStyle(
-                                  color: edge,
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.3,
-                                ),
-                              ),
-                              const SizedBox(height: 5),
-                              MeetupRoleChips(
-                                meetup: meetup,
-                                compact: true,
-                                showHostName: false,
-                                concluded: awaitingReview || cancelled,
-                              ),
-                              if (meetup.locationLabel != null) ...[
-                                const SizedBox(height: 4),
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Padding(
-                                      padding: const EdgeInsets.only(top: 1),
-                                      child: Icon(
-                                        Icons.place_outlined,
-                                        size: 13,
-                                        color: AppPalette.textSecondary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(
-                                        meetup.locationLabel!,
-                                        style: TextStyle(
-                                          color: AppPalette.textSecondary,
-                                          fontSize: 11.5,
-                                          height: 1.3,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                        if (start != null) ...[
-                          const SizedBox(width: 10),
-                          _TimeBlock(start: start, tint: edge),
-                        ],
-                      ],
-                    ),
-                  ),
+          radius: 18,
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+          // The 4px state bar down the left edge is gone. A coloured rule
+          // that thick is the cheapest way to say "this row is special" and
+          // it was saying it on every row at once, so it said nothing. The
+          // state now lives where the eye already goes: the tinted intent
+          // tile, the intent line, and the date block all take `edge`.
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppPalette.tintedSurface(edge.withValues(alpha: 0.14)),
+                  borderRadius: BorderRadius.circular(14),
                 ),
+                child: AppIcon(meetup.intent.iconPath, size: 19, color: edge),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      meetup.hostFullName!,
+                      style: TextStyle(
+                        color: AppPalette.textPrimary,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    // Intent as its own highlighted line, in the
+                    // row's state colour so it reads with the edge
+                    // bar and the date block; the address on the
+                    // line below with a pin, never run into it.
+                    Text(
+                      cancelled
+                          ? 'Cancelled \u00B7 ${meetup.intentLabel}'
+                          : meetup.intentLabel,
+                      style: TextStyle(
+                        color: edge,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    MeetupRoleChips(
+                      meetup: meetup,
+                      compact: true,
+                      showHostName: false,
+                      concluded: awaitingReview || cancelled,
+                    ),
+                    if (meetup.locationLabel != null) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 1),
+                            child: AppIcon(
+                              AppIcons.pin,
+                              size: 13,
+                              color: AppPalette.textTertiary,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              meetup.locationLabel!,
+                              style: TextStyle(
+                                color: AppPalette.textSecondary,
+                                fontSize: 11.5,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (start != null) ...[
+                const SizedBox(width: 10),
+                _TimeBlock(start: start, tint: edge),
               ],
-            ),
+            ],
           ),
         ),
       ),
@@ -678,10 +634,10 @@ class _TimeBlock extends StatelessWidget {
 
     return Container(
       width: 58,
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppPalette.hairline),
+        color: AppPalette.raised,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -732,37 +688,7 @@ class _ReviewInvitationCard extends ConsumerStatefulWidget {
       _ReviewInvitationCardState();
 }
 
-class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _pulse = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1800),
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Started here rather than in initState because whether it should run at
-    // all depends on MediaQuery. Someone who asked the system for less
-    // motion gets a still icon, not a slower one — and the suite freezes it
-    // outright, since a forever-repeating controller never lets
-    // pumpAndSettle finish (see debugDisableAmbientAnimations).
-    final wanted =
-        !debugDisableAmbientAnimations &&
-        !MediaQuery.of(context).disableAnimations;
-    if (wanted && !_pulse.isAnimating) {
-      _pulse.repeat(reverse: true);
-    } else if (!wanted && _pulse.isAnimating) {
-      _pulse.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _pulse.dispose();
-    super.dispose();
-  }
-
+class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard> {
   Future<void> _openReview() async {
     final submitted = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
@@ -795,177 +721,134 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard>
     return Pressable(
       onTap: _openReview,
       child: FlatCard(
-        radius: 14,
+        radius: 22,
         elevated: true,
-        border: AppPalette.hairline,
-        tint: tone.withValues(alpha: 0.05),
-        padding: EdgeInsets.zero,
-        // Same skeleton as the live card next to it in the carousel — accent
-        // bar, chip row, then the meetup's own details — because it IS the
-        // same meetup, one state later. A card that dropped that structure
-        // would read as an unrelated notification that happened to be in the
-        // deck.
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // A plain rectangle, clipped by the card (see the live card).
-              Container(width: 4, color: tone),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Where the live card says NOW. Same shape, so the
-                          // two are comparable at a glance.
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            decoration: BoxDecoration(
-                              color: tone,
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              cancelled ? 'CANCELLED' : 'REVIEW',
-                              style: TextStyle(
-                                fontSize: 9,
-                                letterSpacing: 1.0,
-                                fontWeight: FontWeight.w800,
-                                color: AppPalette.card,
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          // What kind of meetup it was, as the glyph the
-                          // rest of the app uses for the intent, with the
-                          // name in small type under it: a card in a deck
-                          // is scanned, not read.
-                          _IntentMark(meetup: meetup, tone: tone),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      // WHICH meetup. Without these three lines the card
-                      // asked someone to rate an unnamed event: a user with
-                      // two finished meetups in the deck had no way to tell
-                      // the cards apart, and no way to know what they were
-                      // about to review.
-                      Text(
-                        meetup.hostFullName!,
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      // Past tense on purpose: this card only ever shows a
-                      // meetup that is over or was called off.
-                      MeetupRoleChips(
-                        meetup: meetup,
-                        showHostName: false,
-                        concluded: true,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        meetup.formattedWindow,
-                        style: TextStyle(
-                          color: AppPalette.textSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.place_outlined,
-                            size: 12,
-                            color: AppPalette.textSecondary,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              meetup.locationLabel!,
-                              style: TextStyle(
-                                color: AppPalette.textSecondary,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (cancelled) ...[
-                        const SizedBox(height: 10),
-                        _HostReason(reason: meetup.cancellationReason ?? ''),
-                      ],
-                      const Spacer(),
-                      Divider(height: 1, color: AppPalette.hairline),
-                      const SizedBox(height: 10),
-                      // The ask, now clearly ABOUT the meetup named above it
-                      // rather than instead of it.
-                      Row(
-                        children: [
-                          // The one moving thing on the card. A scale and an
-                          // opacity on a 22px icon — nothing under it
-                          // repaints, and it stops the moment the card is
-                          // disposed.
-                          FadeTransition(
-                            opacity: Tween<double>(begin: 0.55, end: 1.0)
-                                .animate(
-                                  CurvedAnimation(
-                                    parent: _pulse,
-                                    curve: Curves.easeInOut,
-                                  ),
-                                ),
-                            child: ScaleTransition(
-                              scale: Tween<double>(begin: 0.9, end: 1.1)
-                                  .animate(
-                                    CurvedAnimation(
-                                      parent: _pulse,
-                                      curve: Curves.easeInOut,
-                                    ),
-                                  ),
-                              child: Icon(
-                                cancelled
-                                    ? Icons.event_busy_rounded
-                                    : Icons.auto_awesome_rounded,
-                                size: 16,
-                                color: tone,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              cancelled
-                                  ? 'Share your thoughts on this cancellation'
-                                  : 'Share your thoughts about this meetup',
-                              style: TextStyle(
-                                color: AppPalette.textPrimary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            color: AppPalette.textSecondary,
-                            size: 20,
-                          ),
-                        ],
-                      ),
-                    ],
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        // Same skeleton as the live card next to it in the carousel — chip
+        // row, then the meetup's own details — because it IS the same
+        // meetup, one state later. A card that dropped that structure would
+        // read as an unrelated notification that happened to be in the deck.
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                // Where the live card says NOW. Same shape, so the
+                // two are comparable at a glance.
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: tone,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    cancelled ? 'Cancelled' : 'Review',
+                    style: TextStyle(
+                      fontSize: 10,
+                      letterSpacing: 0.2,
+                      fontWeight: FontWeight.w700,
+                      color: AppPalette.card,
+                    ),
                   ),
                 ),
+                const Spacer(),
+                // What kind of meetup it was, as the glyph the
+                // rest of the app uses for the intent, with the
+                // name in small type under it: a card in a deck
+                // is scanned, not read.
+                _IntentMark(meetup: meetup, tone: tone),
+              ],
+            ),
+            const SizedBox(height: 4),
+            // WHICH meetup. Without these three lines the card
+            // asked someone to rate an unnamed event: a user with
+            // two finished meetups in the deck had no way to tell
+            // the cards apart, and no way to know what they were
+            // about to review.
+            Text(
+              meetup.hostFullName!,
+              style: TextStyle(
+                color: AppPalette.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
               ),
+            ),
+            const SizedBox(height: 6),
+            // Past tense on purpose: this card only ever shows a
+            // meetup that is over or was called off.
+            MeetupRoleChips(
+              meetup: meetup,
+              showHostName: false,
+              concluded: true,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              meetup.formattedWindow,
+              style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                AppIcon(AppIcons.pin, size: 13, color: AppPalette.textTertiary),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    meetup.locationLabel!,
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (cancelled) ...[
+              const SizedBox(height: 10),
+              _HostReason(reason: meetup.cancellationReason ?? ''),
             ],
-          ),
+            const SizedBox(height: 12),
+            Divider(height: 1, color: AppPalette.hairline),
+            const SizedBox(height: 12),
+            // The ask, now clearly ABOUT the meetup named above it
+            // rather than instead of it.
+            Row(
+              children: [
+                // It used to pulse. A forever-looping scale on a
+                // card the user may never act on is a battery
+                // cost and a distraction, and it is the kind of
+                // scattered motion the rest of this redesign
+                // removed. The chevron and the tone carry the
+                // affordance on their own.
+                AppIcon(
+                  cancelled ? AppIcons.close : AppIcons.star,
+                  size: 16,
+                  color: tone,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    cancelled
+                        ? 'Share your thoughts on this cancellation'
+                        : 'Share your thoughts about this meetup',
+                    style: TextStyle(
+                      color: AppPalette.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                AppIcon(
+                  AppIcons.forward,
+                  color: AppPalette.textTertiary,
+                  size: 16,
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -982,31 +865,48 @@ class _HostReason extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = reason.trim();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(Icons.format_quote_rounded, size: 14, color: AppPalette.cancelled),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            text.isEmpty ? 'The host gave no reason.' : '\u201C$text\u201D',
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontSize: 12.5,
-              fontStyle: text.isEmpty ? FontStyle.normal : FontStyle.italic,
-              height: 1.35,
+    // A 1px rule, not a quotation glyph. The glyph was decoration standing
+    // in for an icon; the rule says "these are someone else's words" with
+    // less ink and no borrowed symbol.
+    // IntrinsicHeight because `stretch` needs a bounded height and this
+    // sits in an unbounded Column; it is one shallow subtree of two
+    // children, so the extra layout pass is cheap.
+    return IntrinsicHeight(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(width: 1, color: AppPalette.cancelled),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text.isEmpty ? 'The host gave no reason.' : '\u201C$text\u201D',
+              style: TextStyle(
+                color: AppPalette.textPrimary,
+                fontSize: 12.5,
+                fontStyle: text.isEmpty ? FontStyle.normal : FontStyle.italic,
+                height: 1.35,
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
-/// The intent's glyph in a tinted square with the intent's name in small
-/// type beneath, for the top-right corner of a card that is otherwise all
-/// text. Tinted with the card's own state colour so it belongs to the card
-/// rather than shouting over it.
+/// The intent's glyph and name, as one compact mark for the top-right
+/// corner of a card that is otherwise all text. Tinted with the card's own
+/// state colour so it belongs to the card rather than shouting over it.
+///
+/// # IT USED TO BE A STACK, AND IT LEFT A HOLE
+///
+/// The tile sat above the name in a Column, which made this mark about 55
+/// logical pixels tall while the state chip across from it was 24. The row
+/// took the taller of the two, so every card in the deck had a band of
+/// empty space between its chip and its title — visible on device, and
+/// invisible to every test, because nothing about the widget tree was
+/// wrong. Laid out as a row it is chip height, and the title sits where it
+/// belongs: directly under the chip.
 class _IntentMark extends StatelessWidget {
   const _IntentMark({required this.meetup, required this.tone});
 
@@ -1015,32 +915,28 @@ class _IntentMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 34,
-          height: 34,
-          decoration: BoxDecoration(
-            color: tone.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: tone.withValues(alpha: 0.35)),
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 5, 10, 5),
+      decoration: BoxDecoration(
+        color: AppPalette.tintedSurface(tone.withValues(alpha: 0.12)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppIcon(meetup.intent.iconPath, size: 14, color: tone),
+          const SizedBox(width: 6),
+          Text(
+            meetup.intentLabel,
+            style: TextStyle(
+              color: AppPalette.textSecondary,
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.2,
+            ),
           ),
-          child: Icon(meetup.intent.icon, size: 18, color: tone),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          meetup.intentLabel,
-          textAlign: TextAlign.right,
-          style: TextStyle(
-            color: AppPalette.textSecondary,
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.9,
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

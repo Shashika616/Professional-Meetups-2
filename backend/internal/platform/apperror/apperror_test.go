@@ -203,3 +203,87 @@ func TestUserMessage(t *testing.T) {
 		}
 	}
 }
+
+// Every message Plan 26 and ADR-009 added that can reach a person, checked
+// against the filter that is supposed to make it presentable.
+//
+// # WHY A CORPUS TEST AND NOT ONE ASSERTION PER STRING
+//
+// The failure this guards against is not a wrong sentence, it is a message
+// nobody thought about reaching a user at all. "request ... changed meetup
+// under the lock" was a can't-happen guard written for whoever reads the
+// logs; with the "repository: " prefix and the uuid stripped it came out of
+// this filter as "Request changed meetup under the lock." and went to a
+// phone. So the rule is checked mechanically for the whole set, and a new
+// message added to the list below is checked the moment it is listed.
+func TestUserMessage_NoDeveloperLanguageReachesTheUser(t *testing.T) {
+	// Raw service and repository messages, exactly as the layers below
+	// produce them: sentinel suffix, prefixes and interpolated ids included.
+	raws := []struct {
+		code codes.Code
+		raw  string
+	}{
+		{codes.AlreadyExists, "repository: an account already uses this email address: conflict"},
+		{codes.AlreadyExists, "repository: meetup 5cb774a6-8283-4f4e-9075-6cd06b64b86e is completed and can no longer be cancelled: conflict"},
+		{codes.AlreadyExists, "repository: meetup 5cb774a6-8283-4f4e-9075-6cd06b64b86e is cancelled and can no longer be cancelled: conflict"},
+		{codes.AlreadyExists, "repository: request 5cb774a6-8283-4f4e-9075-6cd06b64b86e is not pending: conflict"},
+		{codes.AlreadyExists, "repository: request 5cb774a6-8283-4f4e-9075-6cd06b64b86e changed meetup under the lock: conflict"},
+		{codes.AlreadyExists, "an account already exists for this email address"},
+		{codes.InvalidArgument, "this request has expired, please sign in again: invalid input"},
+		{codes.InvalidArgument, "that account is no longer available, please sign in again: invalid input"},
+		{codes.InvalidArgument, "too many attempts, please request a new code: invalid input"},
+		{codes.InvalidArgument, "no pending verification code, please request a new one: invalid input"},
+		{codes.InvalidArgument, "code expired, please request a new one: invalid input"},
+		{codes.InvalidArgument, "invalid code: invalid input"},
+	}
+
+	// Vocabulary that is always a sign the sentence was written for a
+	// developer. Separate from userMessageDeveloperMarkers on purpose: this
+	// is the assertion, that list is the implementation, and a test that
+	// read the same list could not catch a word missing from it.
+	forbidden := []string{
+		"lock", "transaction", "rollback", "constraint", "deadlock", "index",
+		"repository:", "service:", "sql", "pgx", "rpc", "goroutine", "nil",
+		"panic", "uuid", "_", "%!", "conflict:", "invalid input",
+	}
+
+	for _, c := range raws {
+		got := UserMessage(c.code, c.raw)
+		if got == "" {
+			t.Errorf("UserMessage(%v, %q) returned empty; every code has a default", c.code, c.raw)
+			continue
+		}
+		lower := strings.ToLower(got)
+		for _, word := range forbidden {
+			if strings.Contains(lower, word) {
+				t.Errorf("UserMessage(%v, %q)\n  = %q\n  contains developer language %q", c.code, c.raw, got, word)
+			}
+		}
+		// A sentence a person reads: starts capitalised, ends in a stop.
+		if r := []rune(got)[0]; r != []rune(strings.ToUpper(string(r)))[0] {
+			t.Errorf("UserMessage(%v, %q) = %q does not start with a capital", c.code, c.raw, got)
+		}
+		if !strings.HasSuffix(got, ".") && !strings.HasSuffix(got, "?") {
+			t.Errorf("UserMessage(%v, %q) = %q does not end in a full stop", c.code, c.raw, got)
+		}
+		// No uuid survived the strip, and no doubled space was left behind
+		// by removing one.
+		if strings.Contains(got, "  ") {
+			t.Errorf("UserMessage(%v, %q) = %q has a doubled space where something was stripped", c.code, c.raw, got)
+		}
+	}
+}
+
+// The two sentences V-10 produces are worth pinning by value, because their
+// whole point is telling a host which of the two happened.
+func TestUserMessage_CancelGuardSentences(t *testing.T) {
+	cases := map[string]string{
+		"repository: meetup 5cb774a6-8283-4f4e-9075-6cd06b64b86e is completed and can no longer be cancelled: conflict": "That meetup has already finished, so it can't be cancelled.",
+		"repository: meetup 5cb774a6-8283-4f4e-9075-6cd06b64b86e is cancelled and can no longer be cancelled: conflict": "That meetup is already cancelled.",
+	}
+	for raw, want := range cases {
+		if got := UserMessage(codes.AlreadyExists, raw); got != want {
+			t.Errorf("UserMessage(%q)\n  = %q\n want %q", raw, got, want)
+		}
+	}
+}

@@ -19,6 +19,17 @@ import 'support/fake_secure_storage_platform.dart';
 /// everything else throws if reached, matching this suite's existing
 /// _FakeAuthService convention (app_shell_test.dart etc.).
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -167,8 +178,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -205,14 +216,14 @@ void main() {
     await tester.pumpWidget(_appWith(auth));
     await tester.pumpAndSettle();
 
-    expect(find.text('SEND CODE'), findsOneWidget);
-    await tester.tap(find.text('SEND CODE'));
+    expect(find.text('Send code'), findsOneWidget);
+    await tester.tap(find.text('Send code'));
     await tester.pumpAndSettle();
     expect(auth.startOtpCallCount, 0);
 
     await tester.enterText(find.byType(TextFormField), 'ada@example.com');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('SEND CODE'));
+    await tester.tap(find.text('Send code'));
     await tester.pumpAndSettle();
 
     expect(auth.startOtpCallCount, 1);
@@ -228,7 +239,7 @@ void main() {
 
       await tester.enterText(find.byType(TextFormField), 'ada@example.com');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('SEND CODE'));
+      await tester.tap(find.text('Send code'));
       await tester.pumpAndSettle();
 
       // Now on the OTP step (reuses OtpEntry) — entering 6 digits and
@@ -237,7 +248,7 @@ void main() {
       // call, there is no separate password step anymore.
       await tester.enterText(find.byType(TextField), '123456');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('VERIFY'));
+      await tester.tap(find.text('Verify'));
       await tester.pumpAndSettle();
 
       expect(auth.lastSignUpEmail, 'ada@example.com');

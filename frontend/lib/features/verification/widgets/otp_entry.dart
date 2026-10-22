@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/secure_screen.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/otp_box_field.dart';
@@ -37,7 +38,13 @@ import 'package:professional_connections_platform/core/widgets/primary_button.da
 /// a countdown for nothing. The failure is shown inline, using the same
 /// error slot a wrong VERIFY attempt uses.
 class OtpEntry extends StatefulWidget {
-  const OtpEntry({super.key, required this.onSend, required this.onSubmit});
+  const OtpEntry({
+    super.key,
+    required this.onSend,
+    required this.onSubmit,
+    this.sendOnMount = true,
+    this.initialCooldownSeconds,
+  });
 
   /// Sends the code — called once automatically on mount (the "first
   /// send"), and again on every user-initiated "Resend code" tap. Every
@@ -45,6 +52,22 @@ class OtpEntry extends StatefulWidget {
   /// for both, so this is intentionally one callback, not two.
   final Future<int> Function() onSend;
   final Future<void> Function(String code) onSubmit;
+
+  /// Whether to call [onSend] once on mount.
+  ///
+  /// False for the claim-an-existing-account popup, where the code was
+  /// already mailed as part of the 409 that opened it. Sending again on
+  /// mount would spend the one-minute cooldown immediately and greet the
+  /// user with "please wait before requesting another code" for a code that
+  /// is sitting in their inbox. [onSend] stays wired either way — it is
+  /// what Resend calls.
+  final bool sendOnMount;
+
+  /// The countdown to start from, when the caller already knows the
+  /// server's real figure (the 409 carries it). Null uses the optimistic
+  /// [resendCooldownSeconds] default, which is what every
+  /// send-on-mount caller wants.
+  final int? initialCooldownSeconds;
 
   /// The optimistic default shown before the first [onSend] call resolves.
   @visibleForTesting
@@ -57,7 +80,7 @@ class OtpEntry extends StatefulWidget {
 class _OtpEntryState extends State<OtpEntry> {
   final _codeController = TextEditingController();
   Timer? _timer;
-  int _secondsRemaining = OtpEntry.resendCooldownSeconds;
+  late int _secondsRemaining;
   bool _submitting = false;
   bool _resending = false;
   String? _error;
@@ -65,12 +88,14 @@ class _OtpEntryState extends State<OtpEntry> {
   @override
   void initState() {
     super.initState();
+    _secondsRemaining =
+        widget.initialCooldownSeconds ?? OtpEntry.resendCooldownSeconds;
     _startTimer();
     // OtpBoxField doesn't expose onChanged — listening on the controller
     // directly is what makes the VERIFY button react as digits are typed
     // (enabled only once all 6 are entered).
     _codeController.addListener(_onCodeChanged);
-    _sendInitialCode();
+    if (widget.sendOnMount) _sendInitialCode();
   }
 
   void _onCodeChanged() => setState(() {});
@@ -166,8 +191,13 @@ class _OtpEntryState extends State<OtpEntry> {
     }
   }
 
+  // Kept out of screenshots, recordings and the app switcher (#94):
+  // a one-time code, which is a credential for as long as it is valid.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SecureScreen(child: _buildSecured(context));
+
+  Widget _buildSecured(BuildContext context) {
     final canResend = _secondsRemaining <= 0 && !_resending;
 
     return Column(
@@ -190,7 +220,7 @@ class _OtpEntryState extends State<OtpEntry> {
         ],
         const SizedBox(height: 16),
         PrimaryButton(
-          label: 'VERIFY',
+          label: 'Verify',
           isLoading: _submitting,
           onPressed: _codeController.text.length == 6 ? _submit : null,
         ),

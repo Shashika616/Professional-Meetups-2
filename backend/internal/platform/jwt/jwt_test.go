@@ -47,6 +47,22 @@ func generateTestKeypair(t *testing.T) (privPath, pubPath string) {
 	return privPath, pubPath
 }
 
+// newTestPair is generateTestKeypair plus the Signer and Verifier over it,
+// which is what every test below actually wants.
+func newTestPair(t *testing.T) (*Signer, *Verifier) {
+	t.Helper()
+	privPath, pubPath := generateTestKeypair(t)
+	signer, err := NewSigner(privPath)
+	if err != nil {
+		t.Fatalf("NewSigner: %v", err)
+	}
+	verifier, err := NewVerifier(pubPath)
+	if err != nil {
+		t.Fatalf("NewVerifier: %v", err)
+	}
+	return signer, verifier
+}
+
 func TestSignVerifyRoundTrip(t *testing.T) {
 	privPath, pubPath := generateTestKeypair(t)
 
@@ -211,5 +227,82 @@ func TestVerifyRejectsWrongKey(t *testing.T) {
 
 	if _, err := verifier.Verify(token); err == nil {
 		t.Fatal("Verify accepted a token signed by a different keypair")
+	}
+}
+
+// TestSign_StampsTheAudience and TestVerify_RejectsTokenWithoutAudience
+// are tracker #93 (review finding N-A7).
+//
+// Without `aud` nothing in a token says what it is FOR, so any RS256
+// token this issuer ever signs — for any purpose added later — would
+// verify as an access token for this API. The pair below pins both
+// halves: the signer states the audience, and the verifier refuses a
+// token that does not.
+func TestSign_StampsTheAudience(t *testing.T) {
+	signer, verifier := newTestPair(t)
+
+	token, err := signer.Sign(Claims{UserID: "u-1", TrustLevel: 2})
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	claims, err := verifier.Verify(token)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(claims.Audience) != 1 || claims.Audience[0] != audience {
+		t.Errorf("Audience = %v, want [%s]", claims.Audience, audience)
+	}
+}
+
+func TestVerify_RejectsTokenWithoutAudience(t *testing.T) {
+	signer, verifier := newTestPair(t)
+
+	// Signed by the real key, correct issuer, unexpired — everything a
+	// token needs except a statement of what it is for.
+	now := time.Now()
+	foreign := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, &Claims{
+		UserID:     "u-1",
+		TrustLevel: 2,
+		RegisteredClaims: jwtlib.RegisteredClaims{
+			Issuer:    issuer,
+			Subject:   "u-1",
+			IssuedAt:  jwtlib.NewNumericDate(now),
+			ExpiresAt: jwtlib.NewNumericDate(now.Add(AccessTokenTTL)),
+		},
+	})
+	foreign.Header["kid"] = signer.KeyID()
+	signed, err := foreign.SignedString(signer.privateKey)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+
+	if _, err := verifier.Verify(signed); err == nil {
+		t.Error("a token with no audience verified as an access token")
+	}
+}
+
+func TestVerify_RejectsTokenForAnotherAudience(t *testing.T) {
+	signer, verifier := newTestPair(t)
+
+	now := time.Now()
+	other := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, &Claims{
+		UserID:     "u-1",
+		TrustLevel: 2,
+		RegisteredClaims: jwtlib.RegisteredClaims{
+			Issuer:    issuer,
+			Subject:   "u-1",
+			Audience:  jwtlib.ClaimStrings{"professional-connections-push"},
+			IssuedAt:  jwtlib.NewNumericDate(now),
+			ExpiresAt: jwtlib.NewNumericDate(now.Add(AccessTokenTTL)),
+		},
+	})
+	other.Header["kid"] = signer.KeyID()
+	signed, err := other.SignedString(signer.privateKey)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+
+	if _, err := verifier.Verify(signed); err == nil {
+		t.Error("a token minted for another audience verified as an access token")
 	}
 }

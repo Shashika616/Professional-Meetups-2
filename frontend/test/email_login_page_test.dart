@@ -22,6 +22,17 @@ import 'support/fake_meetup_service.dart';
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -190,8 +201,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -258,10 +269,10 @@ void main() {
 
       expect(find.text('Welcome back'), findsOneWidget);
       expect(find.textContaining('Enter the email'), findsNothing);
-      expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
-      expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
-      expect(find.text('CONTINUE WITH APPLE'), findsNothing);
-      expect(find.text('CONTINUE WITH EMAIL'), findsOneWidget);
+      expect(find.text('Continue with Google'), findsOneWidget);
+      expect(find.text('Continue with LinkedIn'), findsOneWidget);
+      expect(find.text('Continue with Apple'), findsNothing);
+      expect(find.text('Continue with email'), findsOneWidget);
       // The email field is not on this step; it is one tap away.
       expect(find.byType(TextFormField), findsNothing);
     },
@@ -274,9 +285,9 @@ void main() {
     await tester.pumpWidget(_appWith(_FakeAuthService()));
     await tester.pumpAndSettle();
 
-    expect(find.text('CONTINUE WITH APPLE'), findsOneWidget);
-    expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
-    expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
+    expect(find.text('Continue with Apple'), findsOneWidget);
+    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.text('Continue with LinkedIn'), findsOneWidget);
     final apple = tester.getTopLeft(find.byKey(const Key('continueWithApple')));
     final google = tester.getTopLeft(
       find.byKey(const Key('continueWithGoogle')),
@@ -300,7 +311,7 @@ void main() {
 
       expect(find.byKey(const Key('signingInOverlay')), findsNothing);
 
-      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.tap(find.text('Continue with LinkedIn'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 250));
 
@@ -320,8 +331,8 @@ void main() {
       // The overlay is the ONE loading indicator (gap #49): neither button
       // spins underneath it. Both keep their labels (PrimaryButton swaps
       // the label for a spinner only while loading) and both are disabled.
-      expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
-      expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
+      expect(find.text('Continue with LinkedIn'), findsOneWidget);
+      expect(find.text('Continue with Google'), findsOneWidget);
       for (final key in const ['continueWithLinkedIn', 'continueWithGoogle']) {
         final button = tester.widget<PrimaryButton>(find.byKey(Key(key)));
         expect(button.isLoading, isFalse, reason: '$key must not spin');
@@ -367,11 +378,11 @@ void main() {
     await tester.pumpAndSettle();
     await _confirmAge(tester);
 
-    await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+    await tester.tap(find.text('Continue with LinkedIn'));
     await tester.pumpAndSettle();
 
     expect(auth.linkedInCallCount, 1);
-    expect(find.text('COMPLETE YOUR PROFILE'), findsNothing);
+    expect(find.text('Complete your profile'), findsNothing);
     expect(find.byType(AppShell), findsOneWidget);
   });
 
@@ -384,10 +395,10 @@ void main() {
       await tester.pumpAndSettle();
       await _confirmAge(tester);
 
-      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.tap(find.text('Continue with LinkedIn'));
       await tester.pumpAndSettle();
 
-      expect(find.text('COMPLETE YOUR PROFILE'), findsOneWidget);
+      expect(find.text('Complete your profile'), findsOneWidget);
       expect(find.byType(AppShell), findsNothing);
     },
   );
@@ -405,7 +416,7 @@ void main() {
       expect(find.text(AgeConfirmationCheckbox.statement), findsOneWidget);
 
       // Unchecked: a tap on the provider must not reach the service.
-      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.tap(find.text('Continue with LinkedIn'));
       await tester.pumpAndSettle();
       expect(auth.linkedInCallCount, 0);
       expect(auth.lastAgeConfirmedOver18, isNull);
@@ -413,7 +424,7 @@ void main() {
 
       // Checked: the call goes out with the value the user gave.
       await _confirmAge(tester);
-      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.tap(find.text('Continue with LinkedIn'));
       await tester.pumpAndSettle();
       expect(auth.linkedInCallCount, 1);
       expect(auth.lastAgeConfirmedOver18, isTrue);
@@ -430,8 +441,8 @@ void main() {
     // Unchecked: the email button does nothing.
     await tester.tap(find.byKey(const Key('continueWithEmail')));
     await tester.pumpAndSettle();
-    expect(find.text('SEND CODE'), findsNothing);
-    expect(find.text('CONTINUE WITH EMAIL'), findsOneWidget);
+    expect(find.text('Send code'), findsNothing);
+    expect(find.text('Continue with email'), findsOneWidget);
 
     // Checked: it opens the form and the OTP flow works as before.
     await _confirmAge(tester);
@@ -439,7 +450,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField), 'ada@example.com');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('SEND CODE'));
+    await tester.tap(find.text('Send code'));
     await tester.pumpAndSettle();
     expect(auth.startOtpCallCount, 1);
   });
@@ -450,12 +461,12 @@ void main() {
     await tester.pumpWidget(_appWith(_FakeAuthService()));
     await tester.pumpAndSettle();
     await _openEmailForm(tester);
-    expect(find.text('SEND CODE'), findsOneWidget);
+    expect(find.text('Send code'), findsOneWidget);
 
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
 
-    expect(find.text('CONTINUE WITH EMAIL'), findsOneWidget);
+    expect(find.text('Continue with email'), findsOneWidget);
     expect(find.byType(EmailLoginPage), findsOneWidget);
   });
 
@@ -467,14 +478,14 @@ void main() {
     await tester.pumpAndSettle();
     await _openEmailForm(tester);
 
-    expect(find.text('SEND CODE'), findsOneWidget);
-    await tester.tap(find.text('SEND CODE'));
+    expect(find.text('Send code'), findsOneWidget);
+    await tester.tap(find.text('Send code'));
     await tester.pumpAndSettle();
     expect(auth.startOtpCallCount, 0);
 
     await tester.enterText(find.byType(TextFormField), 'ada@example.com');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('SEND CODE'));
+    await tester.tap(find.text('Send code'));
     await tester.pumpAndSettle();
 
     expect(auth.startOtpCallCount, 1);
@@ -491,12 +502,12 @@ void main() {
 
       await tester.enterText(find.byType(TextFormField), 'ada@example.com');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('SEND CODE'));
+      await tester.tap(find.text('Send code'));
       await tester.pumpAndSettle();
 
       await tester.enterText(find.byType(TextField), '123456');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('VERIFY'));
+      await tester.tap(find.text('Verify'));
       await tester.pumpAndSettle();
 
       expect(auth.lastEmail, 'ada@example.com');
@@ -517,12 +528,12 @@ void main() {
 
     await tester.enterText(find.byType(TextFormField), 'ada@example.com');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('SEND CODE'));
+    await tester.tap(find.text('Send code'));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), '000000');
     await tester.pumpAndSettle();
-    await tester.tap(find.text('VERIFY'));
+    await tester.tap(find.text('Verify'));
     await tester.pumpAndSettle();
 
     expect(find.text('invalid email or code'), findsOneWidget);

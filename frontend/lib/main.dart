@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/features/splash/splash_screen.dart';
 import 'package:professional_connections_platform/firebase_options.dart';
 
@@ -40,11 +41,7 @@ Widget buildFriendlyErrorWidget(FlutterErrorDetails details) {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.error_outline_rounded,
-              color: AppPalette.danger,
-              size: 40,
-            ),
+            AppIcon(AppIcons.warning, color: AppPalette.danger, size: 40),
             const SizedBox(height: 16),
             Text(
               'Something went wrong.',
@@ -235,11 +232,17 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
           systemOverlayStyle: overlayStyle,
           titleTextStyle: TextStyle(
             color: AppPalette.textPrimary,
-            fontSize: 15,
-            // Heavier and more tracked out than body text, which is what
-            // separates it now that nothing else does.
-            fontWeight: FontWeight.w800,
-            letterSpacing: 2.4,
+            // Was 15px / w800 / 2.4 tracking, which was the right setting
+            // for the ALL-CAPS titles the app used to have: wide tracking
+            // is what makes a run of capitals legible. Every title is
+            // sentence case now ("Schedule a meetup", "Trusted contacts"),
+            // and the same tracking on sentence case reads as a stretched,
+            // spaced-out word rather than a heading. Slightly larger and
+            // slightly tightened instead — which is how a sentence-case
+            // title earns its rank.
+            fontSize: 16.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.1,
           ),
           iconTheme: IconThemeData(color: AppPalette.candyBlue),
         ),
@@ -277,44 +280,70 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
           dividerColor: Colors.transparent,
           overlayColor: WidgetStatePropertyAll<Color>(Colors.transparent),
         ),
+        // A floating capsule on a RAISED fill with PRIMARY text (2026-10
+        // redesign). It was a 12px card-coloured slab with candyBlue text:
+        // card-on-card meant the toast had the same fill as whatever it
+        // landed on, and tinting the text blue made every message — including
+        // the failures — read as a link.
         snackBarTheme: SnackBarThemeData(
           behavior: SnackBarBehavior.floating,
-          backgroundColor: AppPalette.card,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          backgroundColor: AppPalette.raised,
+          shape: const StadiumBorder(),
           contentTextStyle: TextStyle(
-            color: AppPalette.candyBlue,
-            fontSize: 13,
+            color: AppPalette.textPrimary,
+            fontSize: 13.5,
+            fontWeight: FontWeight.w600,
           ),
         ),
-        // ADR-032 round 2. Material 3 defaults EVERY button to a
-        // StadiumBorder — a full pill — and nothing here overrode it, so
-        // "Host your own meetup" (an OutlinedButton.icon) and every other
-        // OutlinedButton/TextButton/ElevatedButton in the app kept rendering
-        // as a glass-era capsule even after round 1 flattened their colors.
-        // Set once here rather than at ~40 call sites, matching the
-        // reference image's 12px button/card radius and PrimaryButton's own
-        // fixed 12.
+        // ADR-032 pinned every Material button to a 12px radius to kill the
+        // glass-era capsule. The 2026-10 redesign puts the stadium back (see
+        // PrimaryButton's class doc for why: with a solid fill the colour,
+        // not the corner, is what separates a button from a card). Material
+        // 3's own default is already StadiumBorder, so this is now only
+        // about the things it does NOT default — the hairline side on
+        // outlined buttons, and a foreground that follows the palette rather
+        // than the ColorScheme.
         outlinedButtonTheme: OutlinedButtonThemeData(
           style: OutlinedButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            shape: const StadiumBorder(),
+            side: BorderSide(color: AppPalette.hairline),
+            foregroundColor: AppPalette.textPrimary,
           ),
         ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            shape: const StadiumBorder(),
+            foregroundColor: AppPalette.candyBlue,
           ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
+            shape: const StadiumBorder(),
+            backgroundColor: AppPalette.solid,
+            foregroundColor: AppPalette.solidFg,
+          ),
+        ),
+        dividerTheme: DividerThemeData(
+          color: AppPalette.track,
+          thickness: 1,
+          space: 1,
+        ),
+        // Dialogs and sheets were taking Material's default surface and
+        // corner, which on the new palette meant a grey-violet M3 surface
+        // in the middle of a blue app. The screen set gives dialogs a 26px
+        // corner and sheets a 30px one.
+        dialogTheme: DialogThemeData(
+          backgroundColor: AppPalette.card,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(26),
+          ),
+        ),
+        bottomSheetTheme: BottomSheetThemeData(
+          backgroundColor: AppPalette.card,
+          surfaceTintColor: Colors.transparent,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
           ),
         ),
         // Add premium page transitions

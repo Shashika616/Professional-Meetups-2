@@ -8,6 +8,7 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -196,11 +197,11 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
           backgroundColor: Colors.transparent,
           elevation: 0,
           title: Text(
-            'SHARE YOUR THOUGHTS',
+            'Share your thoughts',
             style: TextStyle(
               color: AppPalette.textPrimary,
               fontSize: 14,
-              letterSpacing: 2,
+              letterSpacing: 0.6,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -226,8 +227,8 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.cloud_off_rounded,
+              AppIcon(
+                AppIcons.cloudOff,
                 size: 40,
                 color: AppPalette.textSecondary,
               ),
@@ -238,7 +239,7 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
               ),
               const SizedBox(height: 16),
               PrimaryButton(
-                label: 'TRY AGAIN',
+                label: 'Try again',
                 height: 44,
                 onPressed: () {
                   setState(() {
@@ -324,7 +325,7 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
           ReviewNotesField(controller: _notesController),
           const SizedBox(height: 20),
           PrimaryButton(
-            label: _toRate.isEmpty ? 'SUBMIT' : 'NEXT',
+            label: _toRate.isEmpty ? 'Submit' : 'Next',
             // Disabled rather than hidden: the button's presence is what
             // tells someone the screen has a next step at all.
             onPressed: level == null
@@ -466,14 +467,14 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 PrimaryButton(
-                  label: 'CONFIRM',
+                  label: 'Confirm',
                   isLoading: _submitting,
                   onPressed: _allRated ? _submit : null,
                 ),
                 TextButton(
                   onPressed: _submitting ? null : () => _goToStep(0),
                   child: Text(
-                    'BACK',
+                    'Back',
                     style: TextStyle(
                       color: AppPalette.textSecondary,
                       letterSpacing: 1.2,
@@ -516,11 +517,11 @@ class _CancelledNotice extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.event_busy_rounded, size: 16, color: tone),
+              AppIcon(AppIcons.calendarX, size: 16, color: tone),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'THIS MEETUP WAS CANCELLED BY THE HOST',
+                  'This meetup was cancelled by the host',
                   style: TextStyle(
                     color: tone,
                     fontSize: 10.5,
@@ -606,7 +607,7 @@ class _PersonRow extends StatelessWidget {
       child: Pressable(
         onTap: onTap,
         child: FlatCard(
-          radius: 14,
+          radius: 18,
           padding: const EdgeInsets.all(14),
           // A rated row takes a quiet green edge, so finished and
           // unfinished are told apart without reading either.
@@ -651,10 +652,8 @@ class _PersonRow extends StatelessWidget {
                       Row(
                         children: [
                           for (var i = 1; i <= 5; i++)
-                            Icon(
-                              i <= score!
-                                  ? Icons.star_rounded
-                                  : Icons.star_outline_rounded,
+                            AppIcon(
+                              i <= score! ? AppIcons.star : AppIcons.star,
                               size: 15,
                               color: i <= score!
                                   ? AppPalette.gold
@@ -688,10 +687,8 @@ class _PersonRow extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(
-                rated
-                    ? Icons.check_circle_rounded
-                    : Icons.chevron_right_rounded,
+              AppIcon(
+                rated ? AppIcons.checkCircle : AppIcons.forward,
                 size: rated ? 20 : 20,
                 color: rated ? AppPalette.verified : AppPalette.textSecondary,
               ),

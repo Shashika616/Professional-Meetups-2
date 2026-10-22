@@ -8,11 +8,9 @@ import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/models/paged_result.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
-import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
-import 'package:professional_connections_platform/core/utils/snacks.dart';
-import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/faded_picture.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
@@ -24,9 +22,6 @@ import 'package:professional_connections_platform/core/widgets/slow_load_notice.
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
-import 'package:professional_connections_platform/features/meetups/widgets/join_confirmation_sheet.dart';
-import 'package:professional_connections_platform/features/meetups/widgets/schedule_conflict_sheet.dart';
-import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 
 /// How far ahead "Happening Soon" looks. Passed through to the backend's
@@ -162,15 +157,16 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
 
   @override
   Widget build(BuildContext context) {
-    final trustLevel =
-        ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    final trustLevel = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.trustLevel ?? 0),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Padding(
           padding: EdgeInsets.fromLTRB(20, 8, 20, 0),
-          child: SectionHeading('HAPPENING SOON'),
+          child: SectionHeading('Happening soon'),
         ),
         const SizedBox(height: 10),
         // Directly under the heading it belongs to, and above every body
@@ -202,7 +198,7 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
               if (location.slow)
                 const SlowLoadNotice(
                   key: Key('locationSlowNotice'),
-                  icon: Icons.my_location_rounded,
+                  icon: AppIcons.locate,
                   message:
                       'Still finding your location. Make sure location is '
                       'on and you have signal.',
@@ -294,7 +290,7 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
                 SlowLoadNotice.after(
                   key: Key('networkSlowNotice'),
                   delay: Duration(seconds: 5),
-                  icon: Icons.wifi_tethering_rounded,
+                  icon: AppIcons.broadcast,
                   message: 'Slow connection. Still loading meetups near you.',
                 ),
               ],
@@ -373,8 +369,6 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
               itemBuilder: (context, meetup, previous) {
                 final card = MeetupCard(
                   meetup: meetup,
-                  viewerTrustLevel: trustLevel,
-                  onRequestToJoin: () => _requestToJoin(context, meetup, key),
                   onTap: () async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
@@ -401,56 +395,6 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
             ),
           ),
         );
-    }
-  }
-
-  Future<void> _requestToJoin(
-    BuildContext context,
-    Meetup meetup,
-    ({IntentType? intent, double viewerLat, double viewerLng, int withinDays})
-    key,
-  ) async {
-    // Who is hosting, before anything is sent — the sheet only answers
-    // yes/no; the request itself still goes through the path below.
-    if (!await showJoinConfirmationSheet(context, meetup: meetup)) return;
-    if (!context.mounted) return;
-    try {
-      await ref.read(meetupServiceProvider).requestToJoin(meetup.id);
-      if (!context.mounted) return;
-      showSnack(context, 'Request sent.', type: ToastType.success);
-      ref.invalidate(openMeetupsProvider(key));
-    } on MeetupSessionExpiredException {
-      // A 401 means the session itself is gone, so every later call
-      // fails too. Falling through to the generic catch below would
-      // show an error the user can only retry forever; signing out is
-      // the only thing that recovers. Mirrors the AuthService
-      // SessionExpiredException idiom in profile_page.dart.
-      if (context.mounted) {
-        ref.read(authSessionProvider.notifier).forceSignOut();
-      }
-    } on MeetupScheduleConflictException catch (error) {
-      // Already committed elsewhere in this window — see the sheet.
-      if (context.mounted) {
-        await showScheduleConflictSheet(context, error: error);
-      }
-    } on MeetupForbiddenException catch (error) {
-      // The server's trust gate, which is the one that counts: the card's
-      // own check can be stale (a profile that has not refreshed since a
-      // verification). Same destination as the locked tap.
-      if (!context.mounted) return;
-      showSnack(context, error.message, type: ToastType.locked);
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
-      );
-    } catch (error) {
-      if (!context.mounted) return;
-      showSnack(
-        context,
-        error is MeetupException
-            ? error.message
-            : 'Something went wrong. Please try again.',
-        type: ToastType.error,
-      );
     }
   }
 }
@@ -482,8 +426,8 @@ class _LocationBlockedState extends StatelessWidget {
             'Turn on location to see meetups near you',
             reason.message,
           ),
-          retryLabel: 'OPEN LOCATION SETTINGS',
-          retryIcon: Icons.settings_outlined,
+          retryLabel: 'Open location settings',
+          retryIcon: AppIcons.settings,
           onRetry: () =>
               reason.reason == LocationUnavailableReason.permissionDenied
               ? Geolocator.openAppSettings()
@@ -491,7 +435,7 @@ class _LocationBlockedState extends StatelessWidget {
           extraAction: SizedBox(
             width: 200,
             child: SecondaryButton(
-              label: 'TRY AGAIN',
+              label: 'Try again',
               height: 42,
               onPressed: onRetry,
             ),
@@ -545,8 +489,7 @@ class _NoMeetupsYet extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Host one and let people come to you, or stay ready to join '
-            'the moment someone nearby posts one.',
+            'Host one, or check back as new meetups go up.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 13,
@@ -591,7 +534,7 @@ bool startsNewWeek(Meetup meetup, Meetup? previous) {
 @visibleForTesting
 String weekLabelFor(Meetup meetup, {DateTime? now}) {
   final start = meetup.windowStart;
-  if (start == null) return 'LATER';
+  if (start == null) return 'Later';
 
   final thisWeek = startOfWeek(now ?? DateTime.now());
   final week = startOfWeek(start);
@@ -599,25 +542,25 @@ String weekLabelFor(Meetup meetup, {DateTime? now}) {
 
   // Negative can happen legitimately: a meetup that began before now is
   // still "happening" until its window ends, and the server includes it.
-  if (weeksAway <= 0) return 'THIS WEEK';
-  if (weeksAway == 1) return 'NEXT WEEK';
+  if (weeksAway <= 0) return 'This week';
+  if (weeksAway == 1) return 'Next week';
   return 'WEEK OF ${_shortDate(week)}';
 }
 
 String _shortDate(DateTime date) {
   const months = [
-    'JAN',
-    'FEB',
-    'MAR',
-    'APR',
-    'MAY',
-    'JUN',
-    'JUL',
-    'AUG',
-    'SEP',
-    'OCT',
-    'NOV',
-    'DEC',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
   return '${date.day} ${months[date.month - 1]}';
 }

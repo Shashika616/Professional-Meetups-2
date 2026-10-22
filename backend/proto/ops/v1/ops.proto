@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package ops.v1;
+
+option go_package = "professional-meetups-monolith/backend/internal/proto/ops/v1;opsv1";
+
+// OpsService drives the monolith's periodic work from outside the process.
+//
+// Every sweep in this binary used to be a time.Ticker loop started in
+// cmd/monolith (the lifecycle sweeps, the outbox pollers, the retention
+// sweeps, the refresh-token sweeper). That works only while an instance is
+// alive with CPU, which on Cloud Run means a reserved, continuously billed
+// instance — minScale "1" plus cpu-throttling "false", about US$120-130/mo
+// for this container pair, against a free allowance of 180,000 vCPU-seconds
+// a month. This project must stay inside the free tier (Shashika,
+// 2026-10-22), so the service scales to zero and Cloud Scheduler (3 jobs
+// always free) calls RunScheduledWork instead.
+//
+// The tickers are still there and still run when an instance happens to be
+// alive. They are a safety net now rather than the mechanism; nothing here
+// replaces them, and running both is harmless because every sweep claims its
+// rows with `FOR UPDATE SKIP LOCKED` and is idempotent by construction.
+//
+// Like AuthService and MeetupService this is never exposed to clients. It is
+// registered on the same server and port, so internal/platform/internalauth
+// already authenticates it. The gateway's public POST /internal/cron/tick
+// carries a second, separate check (a shared secret) because that route IS
+// reachable from the internet.
+service OpsService {
+  // Runs every periodic sweep once and reports what each one did.
+  //
+  // Safe to call concurrently with itself and with the in-process tickers.
+  // Safe to call more often than needed: each sweep is a claim, so a tick
+  // with nothing to do is a handful of indexed queries that return no rows.
+  //
+  // Returns an error only if the request could not be served at all. A sweep
+  // that fails is logged, counted in `failed`, and does not stop the others
+  // — one broken sweep must not block the account-deletion purge, which has
+  // a legal deadline.
+  rpc RunScheduledWork(RunScheduledWorkRequest) returns (RunScheduledWorkResponse);
+}
+
+message RunScheduledWorkRequest {}
+
+// SweepResult is one sweep's outcome. `name` matches the log field used by
+// the equivalent ticker, so the scheduled and in-process paths read the same
+// in the logs.
+message SweepResult {
+  string name = 1;
+  // Rows acted on: meetups notified or closed, outbox rows delivered, rows
+  // deleted by a retention pass.
+  int64 affected = 2;
+  // Empty when the sweep succeeded. Carries the error text otherwise; this
+  // response goes to Cloud Scheduler and the logs, never to an app client.
+  string error = 3;
+}
+
+message RunScheduledWorkResponse {
+  repeated SweepResult results = 1;
+  // Number of entries in `results` that carry an error. Cloud Scheduler
+  // retries on a non-2xx, so the gateway turns a non-zero value here into a
+  // 500 and lets the next tick pick up what this one missed.
+  int32 failed = 2;
+}

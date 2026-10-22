@@ -26,6 +26,25 @@ func (s *service) RequestToJoin(ctx context.Context, req RequestToJoinRequest) (
 		return MeetupRequest{}, fmt.Errorf("meetup: meetup %s is not open: %w", req.MeetupID, apperror.ErrConflict)
 	}
 
+	// The 50 km rule, applied to joining as well as to browsing (D4).
+	// Browse only ever showed meetups within 50 km, but RequestToJoin took
+	// any meetup id, so someone far away who had the id could ask to join
+	// a coffee — or a ride share — in another city.
+	//
+	// Measured from the requester's last known location, the one the app
+	// reports whenever the home screen loads. When none has ever been
+	// reported the rule is not applied: the location is self-reported
+	// either way, so refusing those users would add friction without
+	// adding protection. The host is refused above already, and anyone
+	// already on the meetup has nothing left to request.
+	within, known, err := s.userLocations.WithinBrowseRadius(ctx, req.RequesterID, m.LocationLat, m.LocationLng)
+	if err != nil {
+		return MeetupRequest{}, err
+	}
+	if known && !within {
+		return MeetupRequest{}, fmt.Errorf("meetup: this meetup is more than 50 km from you: %w", apperror.ErrForbidden)
+	}
+
 	// The host's notification is composed and queued INSIDE Create's own
 	// transaction (§F3), so the request row and the notification of it are a
 	// single atomic fact: there is no longer a window in which the request

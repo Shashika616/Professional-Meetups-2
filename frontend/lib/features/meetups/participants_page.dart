@@ -6,8 +6,8 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
-import 'package:professional_connections_platform/core/widgets/intent_backdrop.dart';
 import 'package:professional_connections_platform/core/widgets/trust_level_badge.dart';
 import 'package:professional_connections_platform/core/widgets/verification_badges.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
@@ -67,11 +67,11 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
           centerTitle: true,
           iconTheme: IconThemeData(color: AppPalette.textPrimary),
           title: Text(
-            'WHO\'S COMING',
+            'Who\'s coming',
             style: TextStyle(
               color: AppPalette.textPrimary,
               fontSize: 14,
-              letterSpacing: 2,
+              letterSpacing: 0.6,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -82,8 +82,9 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
   }
 
   Widget _buildBody() {
-    final viewerTrustLevel =
-        ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    final viewerTrustLevel = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.trustLevel ?? 0),
+    );
     final async = ref.watch(meetupParticipantsProvider(widget.meetupId));
 
     // A 401 means the session itself is gone, so every later call fails too.
@@ -111,8 +112,8 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.cloud_off_rounded,
+              AppIcon(
+                AppIcons.cloudOff,
                 size: 40,
                 color: AppPalette.textSecondary,
               ),
@@ -123,7 +124,7 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
               ),
               const SizedBox(height: 16),
               PrimaryButton(
-                label: 'TRY AGAIN',
+                label: 'Try again',
                 height: 44,
                 // Invalidate rather than re-calling the service: it clears
                 // the cached failure so the strip on the page behind this one
@@ -138,7 +139,9 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
     }
 
     final meetup = widget.meetup;
-    final viewerId = ref.watch(authSessionProvider).value?.profile?.id;
+    final viewerId = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.id),
+    );
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
       children: [
@@ -167,12 +170,12 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
           child: Row(
             children: [
               Text(
-                'PEOPLE',
+                'People',
                 style: TextStyle(
                   color: AppPalette.textSecondary,
                   fontSize: 10.5,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: 1.3,
+                  letterSpacing: 0.3,
                 ),
               ),
               const Spacer(),
@@ -194,7 +197,7 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
         // One grouped card, rows divided by hairlines — a list of people,
         // not a stack of identical boxes.
         FlatCard(
-          radius: 14,
+          radius: 18,
           padding: EdgeInsets.zero,
           child: Column(
             children: [
@@ -232,72 +235,66 @@ class _MeetupContextCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(14),
-      child: FlatCard(
-        radius: 14,
-        padding: EdgeInsets.zero,
-        child: Stack(
-          children: [
-            IntentBackdrop(intent: meetup.intent),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: AppPalette.candyBlue.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      meetup.intent.icon,
-                      size: 20,
-                      color: AppPalette.candyBlue,
-                    ),
+    // No photo behind this one. The screen set's "Who's coming" has no
+    // meetup header at all — you arrive here from the meetup, so it does
+    // not re-introduce it. Keeping the summary but dropping the veiled
+    // backdrop splits the difference: the context stays, and the text is
+    // not sitting on a picture.
+    return FlatCard(
+      radius: 18,
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppPalette.candyBlue.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: AppIcon(
+              meetup.intent.iconPath,
+              size: 20,
+              color: AppPalette.candyBlue,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  meetup.intentLabel,
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          meetup.intentLabel,
-                          style: TextStyle(
-                            color: AppPalette.textPrimary,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          meetup.formattedWindow,
-                          style: TextStyle(
-                            color: AppPalette.textPrimary,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        if ((meetup.locationLabel ?? '').isNotEmpty) ...[
-                          const SizedBox(height: 2),
-                          Text(
-                            meetup.locationLabel!,
-                            style: TextStyle(
-                              color: AppPalette.textSecondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  meetup.formattedWindow,
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if ((meetup.locationLabel ?? '').isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    meetup.locationLabel!,
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      fontSize: 12,
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -312,16 +309,12 @@ class _JoinToSeeNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FlatCard(
-      radius: 12,
+      radius: 18,
       padding: const EdgeInsets.all(16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.lock_outline_rounded,
-            size: 17,
-            color: AppPalette.candyBlue,
-          ),
+          AppIcon(AppIcons.lock, size: 17, color: AppPalette.candyBlue),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -360,7 +353,7 @@ class _VerifyToSeeNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FlatCard(
-      radius: 12,
+      radius: 18,
       tint: AppPalette.candyBlue.withValues(alpha: 0.07),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -368,11 +361,7 @@ class _VerifyToSeeNotice extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(
-                Icons.lock_outline_rounded,
-                size: 17,
-                color: AppPalette.candyBlue,
-              ),
+              AppIcon(AppIcons.lock, size: 17, color: AppPalette.candyBlue),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -388,13 +377,12 @@ class _VerifyToSeeNotice extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Names and photos are only shared with verified members. It is the '
-            'same protection everyone here gets.',
+            'Names and photos are only shared with verified members.',
             style: TextStyle(color: AppPalette.textSecondary, fontSize: 12.5),
           ),
           const SizedBox(height: 14),
           PrimaryButton(
-            label: 'GET VERIFIED',
+            label: 'Get verified',
             height: 44,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
@@ -516,21 +504,21 @@ class _ParticipantRow extends StatelessWidget {
                     children: [
                       if (participant.isHost)
                         const _RolePill(
-                          icon: Icons.star_rounded,
-                          label: 'HOST',
+                          icon: AppIcons.star,
+                          label: 'Host',
                           tone: _RoleTone.host,
                         )
                       else if (!redacted)
                         const _RolePill(
-                          icon: Icons.check_rounded,
-                          label: 'JOINED',
+                          icon: AppIcons.check,
+                          label: 'Joined',
                           tone: _RoleTone.joined,
                         ),
                       if (isViewer) ...[
                         const SizedBox(height: 6),
                         const _RolePill(
-                          icon: Icons.person_rounded,
-                          label: 'YOU',
+                          icon: AppIcons.person,
+                          label: 'You',
                           tone: _RoleTone.you,
                         ),
                       ],
@@ -540,8 +528,8 @@ class _ParticipantRow extends StatelessWidget {
               ],
               if (!redacted) ...[
                 const SizedBox(width: 6),
-                Icon(
-                  Icons.chevron_right_rounded,
+                AppIcon(
+                  AppIcons.forward,
                   size: 20,
                   color: AppPalette.textSecondary,
                 ),
@@ -572,7 +560,7 @@ class _RolePill extends StatelessWidget {
     required this.tone,
   });
 
-  final IconData icon;
+  final String icon;
   final String label;
   final _RoleTone tone;
 
@@ -597,7 +585,7 @@ class _RolePill extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 12, color: color),
+            AppIcon(icon, size: 12, color: color),
             const SizedBox(width: 4),
             Text(
               label,

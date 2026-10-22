@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
 import 'package:professional_connections_platform/core/models/intent_type.dart';
@@ -18,6 +21,8 @@ import 'support/fake_auth_service.dart';
 import 'support/scripted_meetup_service.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/profile/public_profile_page.dart';
+
+import 'support/app_icon_finder.dart';
 
 Meetup _hostedMeetup({String id = 'meetup-1'}) => Meetup(
   id: id,
@@ -263,13 +268,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(MeetupDetailPage), findsOneWidget);
-      expect(find.text('YOUR REVIEW'), findsOneWidget);
+      expect(find.text('Your review'), findsOneWidget);
       expect(find.text('"Good turnout."'), findsOneWidget);
-      expect(find.text('HOW YOU RATED THEM'), findsOneWidget);
+      expect(find.text('How you rated them'), findsOneWidget);
       // Request management is for running a meetup, not reviewing a
       // finished one.
-      expect(find.text('ACCEPT'), findsNothing);
-      expect(find.text('REJECT'), findsNothing);
+      expect(find.text('Accept'), findsNothing);
+      expect(find.text('Reject'), findsNothing);
     });
 
     testWidgets('an unreviewed one offers the host the review flow', (
@@ -299,7 +304,7 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe').first);
       await tester.pumpAndSettle();
 
-      expect(find.text('START REVIEW'), findsOneWidget);
+      expect(find.text('Start review'), findsOneWidget);
     });
 
     testWidgets('a LIVE hosted meetup still opens request management — the '
@@ -321,7 +326,7 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      expect(find.text('ACCEPT'), findsOneWidget);
+      expect(find.text('Accept'), findsOneWidget);
       expect(find.byType(MeetupDetailPage), findsNothing);
     });
   });
@@ -348,8 +353,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Grace Hopper'), findsOneWidget);
-      expect(find.text('ACCEPT'), findsOneWidget);
-      expect(find.text('REJECT'), findsOneWidget);
+      expect(find.text('Accept'), findsOneWidget);
+      expect(find.text('Reject'), findsOneWidget);
     },
   );
 
@@ -407,7 +412,7 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('ACCEPT'));
+      await tester.tap(find.text('Accept'));
       await tester.pumpAndSettle();
 
       expect(service.lastRespondToRequestId, 'request-99');
@@ -435,7 +440,7 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('REJECT'));
+      await tester.tap(find.text('Reject'));
       await tester.pumpAndSettle();
 
       expect(service.lastRespondToRequestId, 'request-7');
@@ -458,20 +463,35 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // The OPEN/COMPLETED chip is gone. A card's state is the bar down its
-    // left edge now: green while the meetup is live, gold once it is over and
-    // owed a review. Asserting on the colour rather than on a chip is the
-    // point of the change, so the test follows it there.
-    final edges = tester
-        .widgetList<Container>(find.byType(Container))
-        .where((c) => c.constraints?.maxWidth == 4)
-        .map((c) => c.color)
-        .toList();
-
+    // The OPEN/COMPLETED chip is gone, and so is the 4px bar that replaced
+    // it — a coloured rule on every card in a list of cards distinguishes
+    // nothing. The state is the colour of the intent glyph and its tile:
+    // green while the meetup is live, gold once it is over and owed a
+    // review. The test follows the signal rather than the shape.
+    final glyph = tester.widget<AppIcon>(
+      find
+          .descendant(
+            of: find.byType(EventsPage),
+            matching: find.byType(AppIcon),
+          )
+          .at(0),
+    );
     expect(
-      edges,
+      tester
+          .widgetList<AppIcon>(find.byType(AppIcon))
+          .map((i) => i.color)
+          .toList(),
       contains(AppPalette.verified),
       reason: 'a hosted meetup still ahead of its window reads as live',
+    );
+    expect(glyph, isNotNull);
+    expect(
+      tester
+          .widgetList<Container>(find.byType(Container))
+          .where((c) => c.constraints?.maxWidth == 4)
+          .toList(),
+      isEmpty,
+      reason: 'the coloured left bar is gone from this card',
     );
     expect(find.byType(MeetupStatusBadge), findsNothing);
   });
@@ -500,8 +520,8 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      expect(find.text('CANCEL MEETUP'), findsOneWidget);
-      expect(find.text('CLOSE MEETUP'), findsOneWidget);
+      expect(find.text('Cancel meetup'), findsOneWidget);
+      expect(find.text('Close meetup'), findsOneWidget);
       expect(
         tester
             .widgetList<MeetupStatusBadge>(find.byType(MeetupStatusBadge))
@@ -532,18 +552,18 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('CANCEL MEETUP'));
+      await tester.tap(find.text('Cancel meetup'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Something came up');
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(TextButton, 'CANCEL MEETUP'));
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Cancel meetup'));
       await tester.pumpAndSettle();
 
       expect(service.lastCancelMeetupId, 'meetup-1');
-      expect(find.text('CANCELLED'), findsOneWidget);
+      expect(find.text('Cancelled'), findsOneWidget);
       // Both actions disappear once cancelled — neither applies anymore.
-      expect(find.text('CANCEL MEETUP'), findsNothing);
-      expect(find.text('CLOSE MEETUP'), findsNothing);
+      expect(find.text('Cancel meetup'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
 
       await tester.pump(const Duration(seconds: 3));
     },
@@ -577,15 +597,15 @@ void main() {
       await tester.pumpAndSettle();
 
       // RENAMED by the Home/Events restructure: the tab was 'REQUESTED'.
-      await tester.tap(find.text('Requested Meetings'));
+      await tester.tap(find.text('Requested meetings'));
       await tester.pumpAndSettle();
 
       // Both outcomes read as timing to the requester; neither says
       // rejected or declined.
-      expect(find.text('FILLED UP BEFORE YOUR TURN'), findsOneWidget);
-      expect(find.text('NOT THIS TIME'), findsOneWidget);
+      expect(find.text('Filled up before your turn'), findsOneWidget);
+      expect(find.text('Not this time'), findsOneWidget);
       expect(find.textContaining('DECLINED'), findsNothing);
-      expect(find.textContaining('REJECTED'), findsNothing);
+      expect(find.textContaining('Rejected'), findsNothing);
     },
   );
 
@@ -674,7 +694,7 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('ACCEPTED'));
+      await tester.tap(find.text('Accepted'));
       await tester.pumpAndSettle();
 
       expect(find.text('Accepted Person'), findsOneWidget);
@@ -718,7 +738,7 @@ void main() {
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('REJECTED'));
+      await tester.tap(find.text('Rejected'));
       await tester.pumpAndSettle();
 
       expect(find.text('Rejected Person'), findsOneWidget);
@@ -763,11 +783,11 @@ void main() {
 
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('REJECTED'));
+      await tester.tap(find.text('Rejected'));
       await tester.pumpAndSettle();
 
       expect(
-        find.text('RATE WHO YOU MET'),
+        find.text('Rate who you met'),
         findsNothing,
         reason:
             'a tab reading "No rejected or withdrawn requests." offering '
@@ -813,10 +833,10 @@ void main() {
 
       await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('REJECTED'));
+      await tester.tap(find.text('Rejected'));
       await tester.pumpAndSettle();
 
-      expect(find.text('RATE WHO YOU MET'), findsOneWidget);
+      expect(find.text('Rate who you met'), findsOneWidget);
       // Once in the request list, once in the rating card.
       expect(find.text('Withdrawn Person'), findsNWidgets(2));
       expect(
@@ -849,7 +869,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('VIEW REQUESTS'));
+        await tester.tap(find.text('View requests'));
         await tester.pumpAndSettle();
 
         final text = tester.widget<Text>(find.text(longName));
@@ -959,7 +979,7 @@ void main() {
         await tester.pumpAndSettle();
 
         // RENAMED by the Home/Events restructure: the tab was 'REQUESTED'.
-        await tester.tap(find.text('Requested Meetings'));
+        await tester.tap(find.text('Requested meetings'));
         await tester.pumpAndSettle();
 
         expect(service.listMyMeetupsCallCount, 1);
@@ -998,9 +1018,9 @@ void main() {
         await tester.pumpWidget(_eventsApp(_fourCellService()));
         await tester.pumpAndSettle();
 
-        expect(find.text('EVENTS'), findsOneWidget);
-        expect(find.text('My Meetings'), findsOneWidget);
-        expect(find.text('Requested Meetings'), findsOneWidget);
+        expect(find.text('Events'), findsOneWidget);
+        expect(find.text('My meetings'), findsOneWidget);
+        expect(find.text('Requested meetings'), findsOneWidget);
 
         expect(find.text('Hosted Open Cafe'), findsOneWidget);
         expect(find.text('Hosted History Cafe'), findsNothing);
@@ -1030,7 +1050,7 @@ void main() {
         await tester.pumpWidget(_eventsApp(_fourCellService()));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('Requested Meetings'));
+        await tester.tap(find.text('Requested meetings'));
         await tester.pumpAndSettle();
 
         expect(find.text('Requested Open Cafe'), findsOneWidget);
@@ -1046,7 +1066,7 @@ void main() {
       await tester.pumpWidget(_eventsApp(_fourCellService()));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Requested Meetings'));
+      await tester.tap(find.text('Requested meetings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('History'));
       await tester.pumpAndSettle();
@@ -1069,13 +1089,13 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Nothing on your calendar yet'), findsOneWidget);
-        expect(find.text('HOST A MEETUP'), findsOneWidget);
+        expect(find.text('Host a meetup'), findsOneWidget);
 
         await tester.tap(find.text('History'));
         await tester.pumpAndSettle();
 
         expect(find.text('No past meetups yet'), findsOneWidget);
-        expect(find.text('HOST A MEETUP'), findsNothing);
+        expect(find.text('Host a meetup'), findsNothing);
       },
     );
 
@@ -1101,8 +1121,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.byType(TabBar), findsOneWidget);
-        expect(find.byIcon(Icons.event_available_outlined), findsOneWidget);
-        expect(find.byIcon(Icons.history_rounded), findsOneWidget);
+        expect(findAppIcon(AppIcons.calendarCheck), findsOneWidget);
+        expect(findAppIcon(AppIcons.history), findsOneWidget);
       },
     );
 
@@ -1172,11 +1192,11 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('VIEW REQUESTS'), findsOneWidget);
-      await tester.tap(find.text('VIEW REQUESTS'));
+      expect(find.text('View requests'), findsOneWidget);
+      await tester.tap(find.text('View requests'));
       await tester.pumpAndSettle();
 
-      expect(find.text('ACCEPT'), findsOneWidget);
+      expect(find.text('Accept'), findsOneWidget);
     });
 
     testWidgets('a finished hosted meetup has no VIEW REQUESTS — there is '
@@ -1193,7 +1213,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('VIEW REQUESTS'), findsNothing);
+      expect(find.text('View requests'), findsNothing);
     });
 
     testWidgets('tapping a requester on the request list opens their public '
@@ -1221,7 +1241,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('VIEW REQUESTS'));
+      await tester.tap(find.text('View requests'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Grace Hopper'));
@@ -1234,7 +1254,7 @@ void main() {
   });
 
   group('history cards carry no request state', () {
-    testWidgets('a finished requested meetup does not say YOU\'RE IN — it '
+    testWidgets('a finished requested meetup does not say You\'re in — it '
         'already happened', (tester) async {
       final finished = _requestedFinished(id: 'past-req');
       final service = ScriptedMeetupService(
@@ -1247,21 +1267,21 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Requested Meetings'));
+      await tester.tap(find.text('Requested meetings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('History'));
       await tester.pumpAndSettle();
 
       // The card IS there — its outcome chip proves it — without the
       // request-state text a live card would carry.
-      expect(find.text('COMPLETED'), findsOneWidget);
-      expect(find.text('YOU\'RE IN'), findsNothing);
+      expect(find.text('Completed'), findsOneWidget);
+      expect(find.text('You\'re in'), findsNothing);
     });
   });
 
   group('History outcome chips', () {
     Future<void> openRequestedHistory(WidgetTester tester) async {
-      await tester.tap(find.text('Requested Meetings'));
+      await tester.tap(find.text('Requested meetings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('History'));
       await tester.pumpAndSettle();
@@ -1280,7 +1300,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await openRequestedHistory(tester);
-      expect(find.text('COMPLETED'), findsOneWidget);
+      expect(find.text('Completed'), findsOneWidget);
     });
 
     testWidgets('a cancelled meetup reads CANCELLED', (tester) async {
@@ -1300,8 +1320,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       await openRequestedHistory(tester);
-      expect(find.text('CANCELLED'), findsOneWidget);
-      expect(find.text('COMPLETED'), findsNothing);
+      expect(find.text('Cancelled'), findsOneWidget);
+      expect(find.text('Completed'), findsNothing);
     });
 
     testWidgets('a withdrawn request reads WITHDRAWN', (tester) async {
@@ -1320,8 +1340,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       await openRequestedHistory(tester);
-      expect(find.text('WITHDRAWN'), findsOneWidget);
-      expect(find.text('COMPLETED'), findsNothing);
+      expect(find.text('Withdrawn'), findsOneWidget);
+      expect(find.text('Completed'), findsNothing);
     });
   });
 }

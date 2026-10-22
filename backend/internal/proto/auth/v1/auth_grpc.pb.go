@@ -27,6 +27,8 @@ const (
 	AuthService_GuestSignup_FullMethodName                     = "/auth.v1.AuthService/GuestSignup"
 	AuthService_StartEmailLogin_FullMethodName                 = "/auth.v1.AuthService/StartEmailLogin"
 	AuthService_CompleteEmailLogin_FullMethodName              = "/auth.v1.AuthService/CompleteEmailLogin"
+	AuthService_CompleteAccountClaim_FullMethodName            = "/auth.v1.AuthService/CompleteAccountClaim"
+	AuthService_ResendAccountClaimCode_FullMethodName          = "/auth.v1.AuthService/ResendAccountClaimCode"
 	AuthService_RefreshSession_FullMethodName                  = "/auth.v1.AuthService/RefreshSession"
 	AuthService_RevokeSession_FullMethodName                   = "/auth.v1.AuthService/RevokeSession"
 	AuthService_StartPhoneVerification_FullMethodName          = "/auth.v1.AuthService/StartPhoneVerification"
@@ -44,6 +46,7 @@ const (
 	AuthService_ListTrustedContacts_FullMethodName             = "/auth.v1.AuthService/ListTrustedContacts"
 	AuthService_RemoveTrustedContact_FullMethodName            = "/auth.v1.AuthService/RemoveTrustedContact"
 	AuthService_TriggerSOS_FullMethodName                      = "/auth.v1.AuthService/TriggerSOS"
+	AuthService_ConfirmTrustedContact_FullMethodName           = "/auth.v1.AuthService/ConfirmTrustedContact"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -149,6 +152,25 @@ type AuthServiceClient interface {
 	// rationale), replacing LoginWithPassword's now-removed equivalent.
 	StartEmailLogin(ctx context.Context, in *StartVerificationRequest, opts ...grpc.CallOption) (*StartVerificationResponse, error)
 	CompleteEmailLogin(ctx context.Context, in *VerifyCodeRequest, opts ...grpc.CallOption) (*SessionResponse, error)
+	// Claiming an account that already holds the caller's verified address.
+	//
+	// CompleteFederatedSignup and CompleteLinkedInOnboarding answer
+	// ALREADY_EXISTS with an AccountClaimRequired detail when the provider's
+	// verified email is already on an account (migration 0017 made
+	// lower(personal_email) unique, so the second account cannot be created).
+	// A code goes to that address as part of the same answer, so the app's
+	// popup opens with one already waiting rather than asking for it.
+	//
+	// CompleteAccountClaim spends that code and returns a session for the
+	// EXISTING account, with the new provider attached so the next sign-in
+	// resolves straight through. ResendAccountClaimCode sends another, under
+	// the same one-minute cooldown every other code send obeys.
+	//
+	// Both take the opaque ticket rather than an email: the address and the
+	// identity to attach are inside it, signed, so a code earned for one
+	// address cannot be pointed at a different account.
+	CompleteAccountClaim(ctx context.Context, in *CompleteAccountClaimRequest, opts ...grpc.CallOption) (*SessionResponse, error)
+	ResendAccountClaimCode(ctx context.Context, in *ResendAccountClaimCodeRequest, opts ...grpc.CallOption) (*StartVerificationResponse, error)
 	// Rotates a refresh token for a new access/refresh token pair. The
 	// presented refresh token is invalidated as part of this call, whether or
 	// not it was already valid — see ADR-009 on rotation-as-theft-detection.
@@ -210,6 +232,12 @@ type AuthServiceClient interface {
 	// Dispatch — a trusted contact isn't necessarily a registered app user).
 	// Rejects with InvalidArgument if the caller has zero trusted contacts.
 	TriggerSOS(ctx context.Context, in *TriggerSOSRequest, opts ...grpc.CallOption) (*TriggerSOSResponse, error)
+	// ConfirmTrustedContact records a contact's own consent, from the link
+	// texted to them when they were added (#80). The ONE RPC here with no
+	// caller user: the gateway's public confirmation page calls it, and the
+	// single-use token is the proof. NotFound for a token that is unknown,
+	// expired or already used, deliberately not distinguished.
+	ConfirmTrustedContact(ctx context.Context, in *ConfirmTrustedContactRequest, opts ...grpc.CallOption) (*ConfirmTrustedContactResponse, error)
 }
 
 type authServiceClient struct {
@@ -294,6 +322,26 @@ func (c *authServiceClient) CompleteEmailLogin(ctx context.Context, in *VerifyCo
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SessionResponse)
 	err := c.cc.Invoke(ctx, AuthService_CompleteEmailLogin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) CompleteAccountClaim(ctx context.Context, in *CompleteAccountClaimRequest, opts ...grpc.CallOption) (*SessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SessionResponse)
+	err := c.cc.Invoke(ctx, AuthService_CompleteAccountClaim_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) ResendAccountClaimCode(ctx context.Context, in *ResendAccountClaimCodeRequest, opts ...grpc.CallOption) (*StartVerificationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartVerificationResponse)
+	err := c.cc.Invoke(ctx, AuthService_ResendAccountClaimCode_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -470,6 +518,16 @@ func (c *authServiceClient) TriggerSOS(ctx context.Context, in *TriggerSOSReques
 	return out, nil
 }
 
+func (c *authServiceClient) ConfirmTrustedContact(ctx context.Context, in *ConfirmTrustedContactRequest, opts ...grpc.CallOption) (*ConfirmTrustedContactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ConfirmTrustedContactResponse)
+	err := c.cc.Invoke(ctx, AuthService_ConfirmTrustedContact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations must embed UnimplementedAuthServiceServer
 // for forward compatibility.
@@ -573,6 +631,25 @@ type AuthServiceServer interface {
 	// rationale), replacing LoginWithPassword's now-removed equivalent.
 	StartEmailLogin(context.Context, *StartVerificationRequest) (*StartVerificationResponse, error)
 	CompleteEmailLogin(context.Context, *VerifyCodeRequest) (*SessionResponse, error)
+	// Claiming an account that already holds the caller's verified address.
+	//
+	// CompleteFederatedSignup and CompleteLinkedInOnboarding answer
+	// ALREADY_EXISTS with an AccountClaimRequired detail when the provider's
+	// verified email is already on an account (migration 0017 made
+	// lower(personal_email) unique, so the second account cannot be created).
+	// A code goes to that address as part of the same answer, so the app's
+	// popup opens with one already waiting rather than asking for it.
+	//
+	// CompleteAccountClaim spends that code and returns a session for the
+	// EXISTING account, with the new provider attached so the next sign-in
+	// resolves straight through. ResendAccountClaimCode sends another, under
+	// the same one-minute cooldown every other code send obeys.
+	//
+	// Both take the opaque ticket rather than an email: the address and the
+	// identity to attach are inside it, signed, so a code earned for one
+	// address cannot be pointed at a different account.
+	CompleteAccountClaim(context.Context, *CompleteAccountClaimRequest) (*SessionResponse, error)
+	ResendAccountClaimCode(context.Context, *ResendAccountClaimCodeRequest) (*StartVerificationResponse, error)
 	// Rotates a refresh token for a new access/refresh token pair. The
 	// presented refresh token is invalidated as part of this call, whether or
 	// not it was already valid — see ADR-009 on rotation-as-theft-detection.
@@ -634,6 +711,12 @@ type AuthServiceServer interface {
 	// Dispatch — a trusted contact isn't necessarily a registered app user).
 	// Rejects with InvalidArgument if the caller has zero trusted contacts.
 	TriggerSOS(context.Context, *TriggerSOSRequest) (*TriggerSOSResponse, error)
+	// ConfirmTrustedContact records a contact's own consent, from the link
+	// texted to them when they were added (#80). The ONE RPC here with no
+	// caller user: the gateway's public confirmation page calls it, and the
+	// single-use token is the proof. NotFound for a token that is unknown,
+	// expired or already used, deliberately not distinguished.
+	ConfirmTrustedContact(context.Context, *ConfirmTrustedContactRequest) (*ConfirmTrustedContactResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }
 
@@ -667,6 +750,12 @@ func (UnimplementedAuthServiceServer) StartEmailLogin(context.Context, *StartVer
 }
 func (UnimplementedAuthServiceServer) CompleteEmailLogin(context.Context, *VerifyCodeRequest) (*SessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteEmailLogin not implemented")
+}
+func (UnimplementedAuthServiceServer) CompleteAccountClaim(context.Context, *CompleteAccountClaimRequest) (*SessionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteAccountClaim not implemented")
+}
+func (UnimplementedAuthServiceServer) ResendAccountClaimCode(context.Context, *ResendAccountClaimCodeRequest) (*StartVerificationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResendAccountClaimCode not implemented")
 }
 func (UnimplementedAuthServiceServer) RefreshSession(context.Context, *RefreshSessionRequest) (*SessionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RefreshSession not implemented")
@@ -718,6 +807,9 @@ func (UnimplementedAuthServiceServer) RemoveTrustedContact(context.Context, *Rem
 }
 func (UnimplementedAuthServiceServer) TriggerSOS(context.Context, *TriggerSOSRequest) (*TriggerSOSResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TriggerSOS not implemented")
+}
+func (UnimplementedAuthServiceServer) ConfirmTrustedContact(context.Context, *ConfirmTrustedContactRequest) (*ConfirmTrustedContactResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConfirmTrustedContact not implemented")
 }
 func (UnimplementedAuthServiceServer) mustEmbedUnimplementedAuthServiceServer() {}
 func (UnimplementedAuthServiceServer) testEmbeddedByValue()                     {}
@@ -880,6 +972,42 @@ func _AuthService_CompleteEmailLogin_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).CompleteEmailLogin(ctx, req.(*VerifyCodeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_CompleteAccountClaim_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompleteAccountClaimRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).CompleteAccountClaim(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_CompleteAccountClaim_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).CompleteAccountClaim(ctx, req.(*CompleteAccountClaimRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_ResendAccountClaimCode_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResendAccountClaimCodeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ResendAccountClaimCode(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ResendAccountClaimCode_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ResendAccountClaimCode(ctx, req.(*ResendAccountClaimCodeRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1190,6 +1318,24 @@ func _AuthService_TriggerSOS_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_ConfirmTrustedContact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfirmTrustedContactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).ConfirmTrustedContact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_ConfirmTrustedContact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).ConfirmTrustedContact(ctx, req.(*ConfirmTrustedContactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1228,6 +1374,14 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteEmailLogin",
 			Handler:    _AuthService_CompleteEmailLogin_Handler,
+		},
+		{
+			MethodName: "CompleteAccountClaim",
+			Handler:    _AuthService_CompleteAccountClaim_Handler,
+		},
+		{
+			MethodName: "ResendAccountClaimCode",
+			Handler:    _AuthService_ResendAccountClaimCode_Handler,
 		},
 		{
 			MethodName: "RefreshSession",
@@ -1296,6 +1450,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TriggerSOS",
 			Handler:    _AuthService_TriggerSOS_Handler,
+		},
+		{
+			MethodName: "ConfirmTrustedContact",
+			Handler:    _AuthService_ConfirmTrustedContact_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

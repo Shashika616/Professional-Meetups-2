@@ -27,6 +27,9 @@ type trustedContactResponse struct {
 	PhoneNumber          string `json:"phone_number"`
 	Email                string `json:"email"`
 	CreatedAtUnixSeconds int64  `json:"created_at_unix_seconds"`
+	// "confirmed", "pending" or "expired" (#80). A new key: app builds that
+	// predate it ignore unknown JSON fields.
+	Status string `json:"status"`
 }
 
 func trustedContactResponseFromClient(c monolithclient.TrustedContact) trustedContactResponse {
@@ -36,6 +39,7 @@ func trustedContactResponseFromClient(c monolithclient.TrustedContact) trustedCo
 		PhoneNumber:          c.PhoneNumber,
 		Email:                c.Email,
 		CreatedAtUnixSeconds: c.CreatedAtUnixSeconds,
+		Status:               c.Status,
 	}
 }
 
@@ -88,9 +92,36 @@ func (h *Handler) removeTrustedContact(w http.ResponseWriter, r *http.Request) {
 }
 
 type triggerSOSRequest struct {
-	ContextMessage string  `json:"context_message"`
-	Latitude       float64 `json:"latitude"`
-	Longitude      float64 `json:"longitude"`
+	ContextMessage string `json:"context_message"`
+	// POINTERS, so "absent" survives the decode (tracker #78, finding
+	// N-D2). As plain float64 a body with no coordinates decoded to 0,0
+	// — a real point in the Gulf of Guinea — and the alert would have
+	// confidently named it. The client is now allowed to send an SOS
+	// without a fix at all, so telling the two apart is the difference
+	// between "no location" and a wrong one.
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+	// Shared by an attempt and its automatic retry, so the retry reports
+	// the first attempt's outcome instead of alerting everyone again.
+	// Optional: older app builds do not send it.
+	ClientRequestID string `json:"client_request_id"`
+}
+
+// validClientRequestID admits a short opaque token and nothing else. It is
+// stored and compared, never shown, but a bounded alphabet keeps it from
+// being a place to put anything else.
+func validClientRequestID(id string) bool {
+	if len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 type triggerSOSResponse struct {
@@ -108,11 +139,23 @@ func (h *Handler) triggerSOS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !validClientRequestID(req.ClientRequestID) {
+		writeError(w, http.StatusBadRequest, msgBadRequest)
+		return
+	}
+
 	ctx := r.Context()
+	// Only a COMPLETE pair is a location. One coordinate without the
+	// other is not a point, and passing it on would put a half-truth in
+	// an emergency message.
+	var lat, lng *float64
+	if req.Latitude != nil && req.Longitude != nil {
+		lat, lng = req.Latitude, req.Longitude
+	}
 	contactsNotified, err := h.monolith.TriggerSOS(
 		ctx,
 		middleware.UserIDFromContext(ctx),
-		req.ContextMessage, req.Latitude, req.Longitude,
+		req.ContextMessage, req.ClientRequestID, lat, lng,
 		int32(middleware.TrustLevelFromContext(ctx)),
 	)
 	if err != nil {

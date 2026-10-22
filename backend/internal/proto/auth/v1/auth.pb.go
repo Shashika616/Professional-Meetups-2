@@ -882,6 +882,184 @@ func (x *StartVerificationResponse) GetResendAfterSeconds() int32 {
 	return 0
 }
 
+// AccountClaimRequired rides on the ALREADY_EXISTS status the two federated
+// signup RPCs return when the provider's verified address is already on an
+// account — a status detail rather than a response field, because no
+// session was issued and the call did not succeed. Same shape as
+// meetup.v1's ScheduleConflict, for the same reason: the app needs more
+// than a sentence to show a usable next step.
+//
+// WHAT IS DELIBERATELY NOT IN HERE: anything about the existing account. No
+// name, no photo, no which provider created it, no when. The caller has
+// proved control of this mailbox to their identity provider and nothing
+// more, so they are told that an account exists for their own address and
+// are given a way to prove they still hold it. Everything else would be a
+// statement about a person who may not be them.
+type AccountClaimRequired struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Opaque to the client, which only hands it back. It is an HMAC-signed
+	// {email, provider, subject, expiry} so the server does not have to
+	// remember a pending claim, and so a client cannot move a code onto a
+	// different address.
+	Ticket string `protobuf:"bytes,1,opt,name=ticket,proto3" json:"ticket,omitempty"`
+	// The address the code went to — the caller's own, out of their own
+	// provider token. The popup needs it to say where to look.
+	Email string `protobuf:"bytes,2,opt,name=email,proto3" json:"email,omitempty"`
+	// Cooldown before ResendAccountClaimCode will send another, so the popup
+	// can disable its own resend control instead of discovering the limit by
+	// being refused.
+	ResendAfterSeconds int32 `protobuf:"varint,3,opt,name=resend_after_seconds,json=resendAfterSeconds,proto3" json:"resend_after_seconds,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *AccountClaimRequired) Reset() {
+	*x = AccountClaimRequired{}
+	mi := &file_auth_v1_auth_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountClaimRequired) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountClaimRequired) ProtoMessage() {}
+
+func (x *AccountClaimRequired) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountClaimRequired.ProtoReflect.Descriptor instead.
+func (*AccountClaimRequired) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *AccountClaimRequired) GetTicket() string {
+	if x != nil {
+		return x.Ticket
+	}
+	return ""
+}
+
+func (x *AccountClaimRequired) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *AccountClaimRequired) GetResendAfterSeconds() int32 {
+	if x != nil {
+		return x.ResendAfterSeconds
+	}
+	return 0
+}
+
+type CompleteAccountClaimRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ticket        string                 `protobuf:"bytes,1,opt,name=ticket,proto3" json:"ticket,omitempty"`
+	Code          string                 `protobuf:"bytes,2,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompleteAccountClaimRequest) Reset() {
+	*x = CompleteAccountClaimRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompleteAccountClaimRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompleteAccountClaimRequest) ProtoMessage() {}
+
+func (x *CompleteAccountClaimRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompleteAccountClaimRequest.ProtoReflect.Descriptor instead.
+func (*CompleteAccountClaimRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *CompleteAccountClaimRequest) GetTicket() string {
+	if x != nil {
+		return x.Ticket
+	}
+	return ""
+}
+
+func (x *CompleteAccountClaimRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+type ResendAccountClaimCodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ticket        string                 `protobuf:"bytes,1,opt,name=ticket,proto3" json:"ticket,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResendAccountClaimCodeRequest) Reset() {
+	*x = ResendAccountClaimCodeRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResendAccountClaimCodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResendAccountClaimCodeRequest) ProtoMessage() {}
+
+func (x *ResendAccountClaimCodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResendAccountClaimCodeRequest.ProtoReflect.Descriptor instead.
+func (*ResendAccountClaimCodeRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ResendAccountClaimCodeRequest) GetTicket() string {
+	if x != nil {
+		return x.Ticket
+	}
+	return ""
+}
+
 type VerifyCodeRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	UserId  string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
@@ -901,7 +1079,7 @@ type VerifyCodeRequest struct {
 
 func (x *VerifyCodeRequest) Reset() {
 	*x = VerifyCodeRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[11]
+	mi := &file_auth_v1_auth_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -913,7 +1091,7 @@ func (x *VerifyCodeRequest) String() string {
 func (*VerifyCodeRequest) ProtoMessage() {}
 
 func (x *VerifyCodeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[11]
+	mi := &file_auth_v1_auth_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -926,7 +1104,7 @@ func (x *VerifyCodeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VerifyCodeRequest.ProtoReflect.Descriptor instead.
 func (*VerifyCodeRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{11}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *VerifyCodeRequest) GetUserId() string {
@@ -975,7 +1153,7 @@ type SubmitPersonalDetailsRequest struct {
 
 func (x *SubmitPersonalDetailsRequest) Reset() {
 	*x = SubmitPersonalDetailsRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[12]
+	mi := &file_auth_v1_auth_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -987,7 +1165,7 @@ func (x *SubmitPersonalDetailsRequest) String() string {
 func (*SubmitPersonalDetailsRequest) ProtoMessage() {}
 
 func (x *SubmitPersonalDetailsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[12]
+	mi := &file_auth_v1_auth_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1000,7 +1178,7 @@ func (x *SubmitPersonalDetailsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubmitPersonalDetailsRequest.ProtoReflect.Descriptor instead.
 func (*SubmitPersonalDetailsRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{12}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SubmitPersonalDetailsRequest) GetUserId() string {
@@ -1033,7 +1211,7 @@ type GetProfileRequest struct {
 
 func (x *GetProfileRequest) Reset() {
 	*x = GetProfileRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[13]
+	mi := &file_auth_v1_auth_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1045,7 +1223,7 @@ func (x *GetProfileRequest) String() string {
 func (*GetProfileRequest) ProtoMessage() {}
 
 func (x *GetProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[13]
+	mi := &file_auth_v1_auth_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1058,7 +1236,7 @@ func (x *GetProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProfileRequest.ProtoReflect.Descriptor instead.
 func (*GetProfileRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{13}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetProfileRequest) GetUserId() string {
@@ -1130,7 +1308,7 @@ type ProfileResponse struct {
 
 func (x *ProfileResponse) Reset() {
 	*x = ProfileResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[14]
+	mi := &file_auth_v1_auth_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1142,7 +1320,7 @@ func (x *ProfileResponse) String() string {
 func (*ProfileResponse) ProtoMessage() {}
 
 func (x *ProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[14]
+	mi := &file_auth_v1_auth_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1155,7 +1333,7 @@ func (x *ProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfileResponse.ProtoReflect.Descriptor instead.
 func (*ProfileResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{14}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ProfileResponse) GetUserId() string {
@@ -1303,7 +1481,7 @@ type CompleteProfileSetupRequest struct {
 
 func (x *CompleteProfileSetupRequest) Reset() {
 	*x = CompleteProfileSetupRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[15]
+	mi := &file_auth_v1_auth_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1315,7 +1493,7 @@ func (x *CompleteProfileSetupRequest) String() string {
 func (*CompleteProfileSetupRequest) ProtoMessage() {}
 
 func (x *CompleteProfileSetupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[15]
+	mi := &file_auth_v1_auth_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1328,7 +1506,7 @@ func (x *CompleteProfileSetupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompleteProfileSetupRequest.ProtoReflect.Descriptor instead.
 func (*CompleteProfileSetupRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{15}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *CompleteProfileSetupRequest) GetUserId() string {
@@ -1369,7 +1547,7 @@ type DeleteAccountRequest struct {
 
 func (x *DeleteAccountRequest) Reset() {
 	*x = DeleteAccountRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[16]
+	mi := &file_auth_v1_auth_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1381,7 +1559,7 @@ func (x *DeleteAccountRequest) String() string {
 func (*DeleteAccountRequest) ProtoMessage() {}
 
 func (x *DeleteAccountRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[16]
+	mi := &file_auth_v1_auth_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1394,7 +1572,7 @@ func (x *DeleteAccountRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAccountRequest.ProtoReflect.Descriptor instead.
 func (*DeleteAccountRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{16}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeleteAccountRequest) GetUserId() string {
@@ -1415,7 +1593,7 @@ type DeleteAccountResponse struct {
 
 func (x *DeleteAccountResponse) Reset() {
 	*x = DeleteAccountResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[17]
+	mi := &file_auth_v1_auth_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1427,7 +1605,7 @@ func (x *DeleteAccountResponse) String() string {
 func (*DeleteAccountResponse) ProtoMessage() {}
 
 func (x *DeleteAccountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[17]
+	mi := &file_auth_v1_auth_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1440,7 +1618,7 @@ func (x *DeleteAccountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteAccountResponse.ProtoReflect.Descriptor instead.
 func (*DeleteAccountResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{17}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{20}
 }
 
 type UpdateLastKnownLocationRequest struct {
@@ -1454,7 +1632,7 @@ type UpdateLastKnownLocationRequest struct {
 
 func (x *UpdateLastKnownLocationRequest) Reset() {
 	*x = UpdateLastKnownLocationRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[18]
+	mi := &file_auth_v1_auth_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1466,7 +1644,7 @@ func (x *UpdateLastKnownLocationRequest) String() string {
 func (*UpdateLastKnownLocationRequest) ProtoMessage() {}
 
 func (x *UpdateLastKnownLocationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[18]
+	mi := &file_auth_v1_auth_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1479,7 +1657,7 @@ func (x *UpdateLastKnownLocationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLastKnownLocationRequest.ProtoReflect.Descriptor instead.
 func (*UpdateLastKnownLocationRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{18}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UpdateLastKnownLocationRequest) GetUserId() string {
@@ -1512,7 +1690,7 @@ type UpdateLastKnownLocationResponse struct {
 
 func (x *UpdateLastKnownLocationResponse) Reset() {
 	*x = UpdateLastKnownLocationResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[19]
+	mi := &file_auth_v1_auth_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1524,7 +1702,7 @@ func (x *UpdateLastKnownLocationResponse) String() string {
 func (*UpdateLastKnownLocationResponse) ProtoMessage() {}
 
 func (x *UpdateLastKnownLocationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[19]
+	mi := &file_auth_v1_auth_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1537,7 +1715,7 @@ func (x *UpdateLastKnownLocationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLastKnownLocationResponse.ProtoReflect.Descriptor instead.
 func (*UpdateLastKnownLocationResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{19}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *UpdateLastKnownLocationResponse) GetSuccess() bool {
@@ -1566,7 +1744,7 @@ type AddTrustedContactRequest struct {
 
 func (x *AddTrustedContactRequest) Reset() {
 	*x = AddTrustedContactRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[20]
+	mi := &file_auth_v1_auth_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1578,7 +1756,7 @@ func (x *AddTrustedContactRequest) String() string {
 func (*AddTrustedContactRequest) ProtoMessage() {}
 
 func (x *AddTrustedContactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[20]
+	mi := &file_auth_v1_auth_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1591,7 +1769,7 @@ func (x *AddTrustedContactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddTrustedContactRequest.ProtoReflect.Descriptor instead.
 func (*AddTrustedContactRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{20}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *AddTrustedContactRequest) GetUserId() string {
@@ -1636,13 +1814,16 @@ type TrustedContactResponse struct {
 	PhoneNumber          string                 `protobuf:"bytes,3,opt,name=phone_number,json=phoneNumber,proto3" json:"phone_number,omitempty"`
 	Email                string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
 	CreatedAtUnixSeconds int64                  `protobuf:"varint,5,opt,name=created_at_unix_seconds,json=createdAtUnixSeconds,proto3" json:"created_at_unix_seconds,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// "confirmed", "pending" or "expired" (#80). Only a confirmed contact is
+	// alerted. A new field, so app builds that predate it simply ignore it.
+	Status        string `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TrustedContactResponse) Reset() {
 	*x = TrustedContactResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[21]
+	mi := &file_auth_v1_auth_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1654,7 +1835,7 @@ func (x *TrustedContactResponse) String() string {
 func (*TrustedContactResponse) ProtoMessage() {}
 
 func (x *TrustedContactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[21]
+	mi := &file_auth_v1_auth_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1667,7 +1848,7 @@ func (x *TrustedContactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TrustedContactResponse.ProtoReflect.Descriptor instead.
 func (*TrustedContactResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{21}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *TrustedContactResponse) GetId() string {
@@ -1705,6 +1886,103 @@ func (x *TrustedContactResponse) GetCreatedAtUnixSeconds() int64 {
 	return 0
 }
 
+func (x *TrustedContactResponse) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+type ConfirmTrustedContactRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfirmTrustedContactRequest) Reset() {
+	*x = ConfirmTrustedContactRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfirmTrustedContactRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfirmTrustedContactRequest) ProtoMessage() {}
+
+func (x *ConfirmTrustedContactRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfirmTrustedContactRequest.ProtoReflect.Descriptor instead.
+func (*ConfirmTrustedContactRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ConfirmTrustedContactRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+type ConfirmTrustedContactResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Whose emergency contact the person confirming has become, for the
+	// confirmation page.
+	RequesterName string `protobuf:"bytes,1,opt,name=requester_name,json=requesterName,proto3" json:"requester_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfirmTrustedContactResponse) Reset() {
+	*x = ConfirmTrustedContactResponse{}
+	mi := &file_auth_v1_auth_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfirmTrustedContactResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfirmTrustedContactResponse) ProtoMessage() {}
+
+func (x *ConfirmTrustedContactResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfirmTrustedContactResponse.ProtoReflect.Descriptor instead.
+func (*ConfirmTrustedContactResponse) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ConfirmTrustedContactResponse) GetRequesterName() string {
+	if x != nil {
+		return x.RequesterName
+	}
+	return ""
+}
+
 type ListTrustedContactsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"` // set by the gateway from the verified JWT
@@ -1714,7 +1992,7 @@ type ListTrustedContactsRequest struct {
 
 func (x *ListTrustedContactsRequest) Reset() {
 	*x = ListTrustedContactsRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[22]
+	mi := &file_auth_v1_auth_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1726,7 +2004,7 @@ func (x *ListTrustedContactsRequest) String() string {
 func (*ListTrustedContactsRequest) ProtoMessage() {}
 
 func (x *ListTrustedContactsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[22]
+	mi := &file_auth_v1_auth_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1739,7 +2017,7 @@ func (x *ListTrustedContactsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTrustedContactsRequest.ProtoReflect.Descriptor instead.
 func (*ListTrustedContactsRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{22}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ListTrustedContactsRequest) GetUserId() string {
@@ -1758,7 +2036,7 @@ type ListTrustedContactsResponse struct {
 
 func (x *ListTrustedContactsResponse) Reset() {
 	*x = ListTrustedContactsResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[23]
+	mi := &file_auth_v1_auth_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1770,7 +2048,7 @@ func (x *ListTrustedContactsResponse) String() string {
 func (*ListTrustedContactsResponse) ProtoMessage() {}
 
 func (x *ListTrustedContactsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[23]
+	mi := &file_auth_v1_auth_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1783,7 +2061,7 @@ func (x *ListTrustedContactsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListTrustedContactsResponse.ProtoReflect.Descriptor instead.
 func (*ListTrustedContactsResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{23}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ListTrustedContactsResponse) GetContacts() []*TrustedContactResponse {
@@ -1803,7 +2081,7 @@ type RemoveTrustedContactRequest struct {
 
 func (x *RemoveTrustedContactRequest) Reset() {
 	*x = RemoveTrustedContactRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[24]
+	mi := &file_auth_v1_auth_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1815,7 +2093,7 @@ func (x *RemoveTrustedContactRequest) String() string {
 func (*RemoveTrustedContactRequest) ProtoMessage() {}
 
 func (x *RemoveTrustedContactRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[24]
+	mi := &file_auth_v1_auth_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1828,7 +2106,7 @@ func (x *RemoveTrustedContactRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveTrustedContactRequest.ProtoReflect.Descriptor instead.
 func (*RemoveTrustedContactRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{24}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *RemoveTrustedContactRequest) GetUserId() string {
@@ -1854,7 +2132,7 @@ type RemoveTrustedContactResponse struct {
 
 func (x *RemoveTrustedContactResponse) Reset() {
 	*x = RemoveTrustedContactResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[25]
+	mi := &file_auth_v1_auth_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1866,7 +2144,7 @@ func (x *RemoveTrustedContactResponse) String() string {
 func (*RemoveTrustedContactResponse) ProtoMessage() {}
 
 func (x *RemoveTrustedContactResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[25]
+	mi := &file_auth_v1_auth_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1879,7 +2157,7 @@ func (x *RemoveTrustedContactResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveTrustedContactResponse.ProtoReflect.Descriptor instead.
 func (*RemoveTrustedContactResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{25}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *RemoveTrustedContactResponse) GetSuccess() bool {
@@ -1893,17 +2171,38 @@ type TriggerSOSRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	UserId         string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`                         // set by the gateway from the verified JWT
 	ContextMessage string                 `protobuf:"bytes,2,opt,name=context_message,json=contextMessage,proto3" json:"context_message,omitempty"` // optional — meetup title/location/time, or empty
-	Latitude       float64                `protobuf:"fixed64,3,opt,name=latitude,proto3" json:"latitude,omitempty"`
-	Longitude      float64                `protobuf:"fixed64,4,opt,name=longitude,proto3" json:"longitude,omitempty"`
+	// OPTIONAL, with explicit presence (tracker #78, review finding N-D2).
+	//
+	// These were plain doubles, which in proto3 have no presence: 0,0 is a
+	// real coordinate (in the Gulf of Guinea) and is indistinguishable from
+	// "not supplied". The client worked around that by REFUSING TO SEND AT
+	// ALL until it had a GPS fix — so SOS, the one feature whose whole
+	// purpose is to work when things have gone wrong, was blocked by being
+	// indoors, by a denied permission, and by a slow fix.
+	//
+	// `optional` on a proto3 scalar generates a pointer in Go and a
+	// presence bit on the wire. Field numbers and types are unchanged, so
+	// this is wire-compatible in both directions: an old client's value
+	// still decodes, and a new client omitting them is read as absent
+	// rather than as the equator.
+	//
+	// An alert without coordinates still goes out. It says the location is
+	// unavailable, which is strictly better than no alert at all.
+	Latitude  *float64 `protobuf:"fixed64,3,opt,name=latitude,proto3,oneof" json:"latitude,omitempty"`
+	Longitude *float64 `protobuf:"fixed64,4,opt,name=longitude,proto3,oneof" json:"longitude,omitempty"`
 	// ADR-003 — see AddTrustedContactRequest.caller_trust_level.
 	CallerTrustLevel int32 `protobuf:"varint,5,opt,name=caller_trust_level,json=callerTrustLevel,proto3" json:"caller_trust_level,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The same for an attempt and its automatic retry, so the retry reports
+	// the first attempt's outcome instead of alerting everyone twice. Empty
+	// from app builds that predate it, which are not deduplicated.
+	ClientRequestId string `protobuf:"bytes,6,opt,name=client_request_id,json=clientRequestId,proto3" json:"client_request_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TriggerSOSRequest) Reset() {
 	*x = TriggerSOSRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[26]
+	mi := &file_auth_v1_auth_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1915,7 +2214,7 @@ func (x *TriggerSOSRequest) String() string {
 func (*TriggerSOSRequest) ProtoMessage() {}
 
 func (x *TriggerSOSRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[26]
+	mi := &file_auth_v1_auth_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1928,7 +2227,7 @@ func (x *TriggerSOSRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerSOSRequest.ProtoReflect.Descriptor instead.
 func (*TriggerSOSRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{26}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *TriggerSOSRequest) GetUserId() string {
@@ -1946,15 +2245,15 @@ func (x *TriggerSOSRequest) GetContextMessage() string {
 }
 
 func (x *TriggerSOSRequest) GetLatitude() float64 {
-	if x != nil {
-		return x.Latitude
+	if x != nil && x.Latitude != nil {
+		return *x.Latitude
 	}
 	return 0
 }
 
 func (x *TriggerSOSRequest) GetLongitude() float64 {
-	if x != nil {
-		return x.Longitude
+	if x != nil && x.Longitude != nil {
+		return *x.Longitude
 	}
 	return 0
 }
@@ -1964,6 +2263,13 @@ func (x *TriggerSOSRequest) GetCallerTrustLevel() int32 {
 		return x.CallerTrustLevel
 	}
 	return 0
+}
+
+func (x *TriggerSOSRequest) GetClientRequestId() string {
+	if x != nil {
+		return x.ClientRequestId
+	}
+	return ""
 }
 
 type TriggerSOSResponse struct {
@@ -1978,7 +2284,7 @@ type TriggerSOSResponse struct {
 
 func (x *TriggerSOSResponse) Reset() {
 	*x = TriggerSOSResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[27]
+	mi := &file_auth_v1_auth_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1990,7 +2296,7 @@ func (x *TriggerSOSResponse) String() string {
 func (*TriggerSOSResponse) ProtoMessage() {}
 
 func (x *TriggerSOSResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[27]
+	mi := &file_auth_v1_auth_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2003,7 +2309,7 @@ func (x *TriggerSOSResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TriggerSOSResponse.ProtoReflect.Descriptor instead.
 func (*TriggerSOSResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{27}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *TriggerSOSResponse) GetContactsNotified() int32 {
@@ -2061,7 +2367,16 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\apurpose\x18\x02 \x01(\x0e2\x1c.auth.v1.VerificationPurposeR\apurpose\x12\x16\n" +
 	"\x06target\x18\x03 \x01(\tR\x06target\"M\n" +
 	"\x19StartVerificationResponse\x120\n" +
-	"\x14resend_after_seconds\x18\x01 \x01(\x05R\x12resendAfterSeconds\"\xb3\x01\n" +
+	"\x14resend_after_seconds\x18\x01 \x01(\x05R\x12resendAfterSeconds\"v\n" +
+	"\x14AccountClaimRequired\x12\x16\n" +
+	"\x06ticket\x18\x01 \x01(\tR\x06ticket\x12\x14\n" +
+	"\x05email\x18\x02 \x01(\tR\x05email\x120\n" +
+	"\x14resend_after_seconds\x18\x03 \x01(\x05R\x12resendAfterSeconds\"I\n" +
+	"\x1bCompleteAccountClaimRequest\x12\x16\n" +
+	"\x06ticket\x18\x01 \x01(\tR\x06ticket\x12\x12\n" +
+	"\x04code\x18\x02 \x01(\tR\x04code\"7\n" +
+	"\x1dResendAccountClaimCodeRequest\x12\x16\n" +
+	"\x06ticket\x18\x01 \x01(\tR\x06ticket\"\xb3\x01\n" +
 	"\x11VerifyCodeRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x126\n" +
 	"\apurpose\x18\x02 \x01(\x0e2\x1c.auth.v1.VerificationPurposeR\apurpose\x12\x16\n" +
@@ -2117,13 +2432,18 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fphone_number\x18\x03 \x01(\tR\vphoneNumber\x12\x14\n" +
 	"\x05email\x18\x04 \x01(\tR\x05email\x12,\n" +
-	"\x12caller_trust_level\x18\x05 \x01(\x05R\x10callerTrustLevel\"\xac\x01\n" +
+	"\x12caller_trust_level\x18\x05 \x01(\x05R\x10callerTrustLevel\"\xc4\x01\n" +
 	"\x16TrustedContactResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12!\n" +
 	"\fphone_number\x18\x03 \x01(\tR\vphoneNumber\x12\x14\n" +
 	"\x05email\x18\x04 \x01(\tR\x05email\x125\n" +
-	"\x17created_at_unix_seconds\x18\x05 \x01(\x03R\x14createdAtUnixSeconds\"5\n" +
+	"\x17created_at_unix_seconds\x18\x05 \x01(\x03R\x14createdAtUnixSeconds\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\tR\x06status\"4\n" +
+	"\x1cConfirmTrustedContactRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\"F\n" +
+	"\x1dConfirmTrustedContactResponse\x12%\n" +
+	"\x0erequester_name\x18\x01 \x01(\tR\rrequesterName\"5\n" +
 	"\x1aListTrustedContactsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\"Z\n" +
 	"\x1bListTrustedContactsResponse\x12;\n" +
@@ -2133,13 +2453,17 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\n" +
 	"contact_id\x18\x02 \x01(\tR\tcontactId\"8\n" +
 	"\x1cRemoveTrustedContactResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\"\xbd\x01\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"\x8e\x02\n" +
 	"\x11TriggerSOSRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12'\n" +
-	"\x0fcontext_message\x18\x02 \x01(\tR\x0econtextMessage\x12\x1a\n" +
-	"\blatitude\x18\x03 \x01(\x01R\blatitude\x12\x1c\n" +
-	"\tlongitude\x18\x04 \x01(\x01R\tlongitude\x12,\n" +
-	"\x12caller_trust_level\x18\x05 \x01(\x05R\x10callerTrustLevel\"A\n" +
+	"\x0fcontext_message\x18\x02 \x01(\tR\x0econtextMessage\x12\x1f\n" +
+	"\blatitude\x18\x03 \x01(\x01H\x00R\blatitude\x88\x01\x01\x12!\n" +
+	"\tlongitude\x18\x04 \x01(\x01H\x01R\tlongitude\x88\x01\x01\x12,\n" +
+	"\x12caller_trust_level\x18\x05 \x01(\x05R\x10callerTrustLevel\x12*\n" +
+	"\x11client_request_id\x18\x06 \x01(\tR\x0fclientRequestIdB\v\n" +
+	"\t_latitudeB\f\n" +
+	"\n" +
+	"_longitude\"A\n" +
 	"\x12TriggerSOSResponse\x12+\n" +
 	"\x11contacts_notified\x18\x01 \x01(\x05R\x10contactsNotified*\x95\x01\n" +
 	"\x15IdentityProviderProto\x12!\n" +
@@ -2153,7 +2477,7 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"#VERIFICATION_PURPOSE_PERSONAL_EMAIL\x10\x02\x12(\n" +
 	"$VERIFICATION_PURPOSE_CORPORATE_EMAIL\x10\x03\x12%\n" +
 	"!VERIFICATION_PURPOSE_EMAIL_SIGNUP\x10\x04\x12$\n" +
-	" VERIFICATION_PURPOSE_EMAIL_LOGIN\x10\x052\x8b\x11\n" +
+	" VERIFICATION_PURPOSE_EMAIL_LOGIN\x10\x052\xb1\x13\n" +
 	"\vAuthService\x12\\\n" +
 	"\x17CompleteFederatedSignup\x12'.auth.v1.CompleteFederatedSignupRequest\x1a\x18.auth.v1.SessionResponse\x12b\n" +
 	"\x1aCompleteLinkedInOnboarding\x12*.auth.v1.CompleteLinkedInOnboardingRequest\x1a\x18.auth.v1.SessionResponse\x12F\n" +
@@ -2162,7 +2486,9 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x13CompleteEmailSignup\x12#.auth.v1.CompleteEmailSignupRequest\x1a\x18.auth.v1.SessionResponse\x12D\n" +
 	"\vGuestSignup\x12\x1b.auth.v1.GuestSignupRequest\x1a\x18.auth.v1.SessionResponse\x12X\n" +
 	"\x0fStartEmailLogin\x12!.auth.v1.StartVerificationRequest\x1a\".auth.v1.StartVerificationResponse\x12J\n" +
-	"\x12CompleteEmailLogin\x12\x1a.auth.v1.VerifyCodeRequest\x1a\x18.auth.v1.SessionResponse\x12J\n" +
+	"\x12CompleteEmailLogin\x12\x1a.auth.v1.VerifyCodeRequest\x1a\x18.auth.v1.SessionResponse\x12V\n" +
+	"\x14CompleteAccountClaim\x12$.auth.v1.CompleteAccountClaimRequest\x1a\x18.auth.v1.SessionResponse\x12d\n" +
+	"\x16ResendAccountClaimCode\x12&.auth.v1.ResendAccountClaimCodeRequest\x1a\".auth.v1.StartVerificationResponse\x12J\n" +
 	"\x0eRefreshSession\x12\x1e.auth.v1.RefreshSessionRequest\x1a\x18.auth.v1.SessionResponse\x12N\n" +
 	"\rRevokeSession\x12\x1d.auth.v1.RevokeSessionRequest\x1a\x1e.auth.v1.RevokeSessionResponse\x12_\n" +
 	"\x16StartPhoneVerification\x12!.auth.v1.StartVerificationRequest\x1a\".auth.v1.StartVerificationResponse\x12G\n" +
@@ -2181,7 +2507,8 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"\x13ListTrustedContacts\x12#.auth.v1.ListTrustedContactsRequest\x1a$.auth.v1.ListTrustedContactsResponse\x12c\n" +
 	"\x14RemoveTrustedContact\x12$.auth.v1.RemoveTrustedContactRequest\x1a%.auth.v1.RemoveTrustedContactResponse\x12E\n" +
 	"\n" +
-	"TriggerSOS\x12\x1a.auth.v1.TriggerSOSRequest\x1a\x1b.auth.v1.TriggerSOSResponseBEZCprofessional-meetups-monolith/backend/internal/proto/auth/v1;authv1b\x06proto3"
+	"TriggerSOS\x12\x1a.auth.v1.TriggerSOSRequest\x1a\x1b.auth.v1.TriggerSOSResponse\x12f\n" +
+	"\x15ConfirmTrustedContact\x12%.auth.v1.ConfirmTrustedContactRequest\x1a&.auth.v1.ConfirmTrustedContactResponseBEZCprofessional-meetups-monolith/backend/internal/proto/auth/v1;authv1b\x06proto3"
 
 var (
 	file_auth_v1_auth_proto_rawDescOnce sync.Once
@@ -2196,7 +2523,7 @@ func file_auth_v1_auth_proto_rawDescGZIP() []byte {
 }
 
 var file_auth_v1_auth_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
 var file_auth_v1_auth_proto_goTypes = []any{
 	(IdentityProviderProto)(0),                // 0: auth.v1.IdentityProviderProto
 	(VerificationPurpose)(0),                  // 1: auth.v1.VerificationPurpose
@@ -2211,30 +2538,35 @@ var file_auth_v1_auth_proto_goTypes = []any{
 	(*RevokeSessionResponse)(nil),             // 10: auth.v1.RevokeSessionResponse
 	(*StartVerificationRequest)(nil),          // 11: auth.v1.StartVerificationRequest
 	(*StartVerificationResponse)(nil),         // 12: auth.v1.StartVerificationResponse
-	(*VerifyCodeRequest)(nil),                 // 13: auth.v1.VerifyCodeRequest
-	(*SubmitPersonalDetailsRequest)(nil),      // 14: auth.v1.SubmitPersonalDetailsRequest
-	(*GetProfileRequest)(nil),                 // 15: auth.v1.GetProfileRequest
-	(*ProfileResponse)(nil),                   // 16: auth.v1.ProfileResponse
-	(*CompleteProfileSetupRequest)(nil),       // 17: auth.v1.CompleteProfileSetupRequest
-	(*DeleteAccountRequest)(nil),              // 18: auth.v1.DeleteAccountRequest
-	(*DeleteAccountResponse)(nil),             // 19: auth.v1.DeleteAccountResponse
-	(*UpdateLastKnownLocationRequest)(nil),    // 20: auth.v1.UpdateLastKnownLocationRequest
-	(*UpdateLastKnownLocationResponse)(nil),   // 21: auth.v1.UpdateLastKnownLocationResponse
-	(*AddTrustedContactRequest)(nil),          // 22: auth.v1.AddTrustedContactRequest
-	(*TrustedContactResponse)(nil),            // 23: auth.v1.TrustedContactResponse
-	(*ListTrustedContactsRequest)(nil),        // 24: auth.v1.ListTrustedContactsRequest
-	(*ListTrustedContactsResponse)(nil),       // 25: auth.v1.ListTrustedContactsResponse
-	(*RemoveTrustedContactRequest)(nil),       // 26: auth.v1.RemoveTrustedContactRequest
-	(*RemoveTrustedContactResponse)(nil),      // 27: auth.v1.RemoveTrustedContactResponse
-	(*TriggerSOSRequest)(nil),                 // 28: auth.v1.TriggerSOSRequest
-	(*TriggerSOSResponse)(nil),                // 29: auth.v1.TriggerSOSResponse
+	(*AccountClaimRequired)(nil),              // 13: auth.v1.AccountClaimRequired
+	(*CompleteAccountClaimRequest)(nil),       // 14: auth.v1.CompleteAccountClaimRequest
+	(*ResendAccountClaimCodeRequest)(nil),     // 15: auth.v1.ResendAccountClaimCodeRequest
+	(*VerifyCodeRequest)(nil),                 // 16: auth.v1.VerifyCodeRequest
+	(*SubmitPersonalDetailsRequest)(nil),      // 17: auth.v1.SubmitPersonalDetailsRequest
+	(*GetProfileRequest)(nil),                 // 18: auth.v1.GetProfileRequest
+	(*ProfileResponse)(nil),                   // 19: auth.v1.ProfileResponse
+	(*CompleteProfileSetupRequest)(nil),       // 20: auth.v1.CompleteProfileSetupRequest
+	(*DeleteAccountRequest)(nil),              // 21: auth.v1.DeleteAccountRequest
+	(*DeleteAccountResponse)(nil),             // 22: auth.v1.DeleteAccountResponse
+	(*UpdateLastKnownLocationRequest)(nil),    // 23: auth.v1.UpdateLastKnownLocationRequest
+	(*UpdateLastKnownLocationResponse)(nil),   // 24: auth.v1.UpdateLastKnownLocationResponse
+	(*AddTrustedContactRequest)(nil),          // 25: auth.v1.AddTrustedContactRequest
+	(*TrustedContactResponse)(nil),            // 26: auth.v1.TrustedContactResponse
+	(*ConfirmTrustedContactRequest)(nil),      // 27: auth.v1.ConfirmTrustedContactRequest
+	(*ConfirmTrustedContactResponse)(nil),     // 28: auth.v1.ConfirmTrustedContactResponse
+	(*ListTrustedContactsRequest)(nil),        // 29: auth.v1.ListTrustedContactsRequest
+	(*ListTrustedContactsResponse)(nil),       // 30: auth.v1.ListTrustedContactsResponse
+	(*RemoveTrustedContactRequest)(nil),       // 31: auth.v1.RemoveTrustedContactRequest
+	(*RemoveTrustedContactResponse)(nil),      // 32: auth.v1.RemoveTrustedContactResponse
+	(*TriggerSOSRequest)(nil),                 // 33: auth.v1.TriggerSOSRequest
+	(*TriggerSOSResponse)(nil),                // 34: auth.v1.TriggerSOSResponse
 }
 var file_auth_v1_auth_proto_depIdxs = []int32{
 	0,  // 0: auth.v1.CompleteFederatedSignupRequest.provider:type_name -> auth.v1.IdentityProviderProto
 	0,  // 1: auth.v1.LinkIdentityRequest.provider:type_name -> auth.v1.IdentityProviderProto
 	1,  // 2: auth.v1.StartVerificationRequest.purpose:type_name -> auth.v1.VerificationPurpose
 	1,  // 3: auth.v1.VerifyCodeRequest.purpose:type_name -> auth.v1.VerificationPurpose
-	23, // 4: auth.v1.ListTrustedContactsResponse.contacts:type_name -> auth.v1.TrustedContactResponse
+	26, // 4: auth.v1.ListTrustedContactsResponse.contacts:type_name -> auth.v1.TrustedContactResponse
 	2,  // 5: auth.v1.AuthService.CompleteFederatedSignup:input_type -> auth.v1.CompleteFederatedSignupRequest
 	3,  // 6: auth.v1.AuthService.CompleteLinkedInOnboarding:input_type -> auth.v1.CompleteLinkedInOnboardingRequest
 	4,  // 7: auth.v1.AuthService.LinkIdentity:input_type -> auth.v1.LinkIdentityRequest
@@ -2242,51 +2574,57 @@ var file_auth_v1_auth_proto_depIdxs = []int32{
 	6,  // 9: auth.v1.AuthService.CompleteEmailSignup:input_type -> auth.v1.CompleteEmailSignupRequest
 	5,  // 10: auth.v1.AuthService.GuestSignup:input_type -> auth.v1.GuestSignupRequest
 	11, // 11: auth.v1.AuthService.StartEmailLogin:input_type -> auth.v1.StartVerificationRequest
-	13, // 12: auth.v1.AuthService.CompleteEmailLogin:input_type -> auth.v1.VerifyCodeRequest
-	8,  // 13: auth.v1.AuthService.RefreshSession:input_type -> auth.v1.RefreshSessionRequest
-	9,  // 14: auth.v1.AuthService.RevokeSession:input_type -> auth.v1.RevokeSessionRequest
-	11, // 15: auth.v1.AuthService.StartPhoneVerification:input_type -> auth.v1.StartVerificationRequest
-	13, // 16: auth.v1.AuthService.VerifyPhoneCode:input_type -> auth.v1.VerifyCodeRequest
-	11, // 17: auth.v1.AuthService.StartPersonalEmailVerification:input_type -> auth.v1.StartVerificationRequest
-	13, // 18: auth.v1.AuthService.VerifyPersonalEmailCode:input_type -> auth.v1.VerifyCodeRequest
-	14, // 19: auth.v1.AuthService.SubmitPersonalDetails:input_type -> auth.v1.SubmitPersonalDetailsRequest
-	11, // 20: auth.v1.AuthService.StartCorporateEmailVerification:input_type -> auth.v1.StartVerificationRequest
-	13, // 21: auth.v1.AuthService.VerifyCorporateEmailCode:input_type -> auth.v1.VerifyCodeRequest
-	15, // 22: auth.v1.AuthService.GetProfile:input_type -> auth.v1.GetProfileRequest
-	17, // 23: auth.v1.AuthService.CompleteProfileSetup:input_type -> auth.v1.CompleteProfileSetupRequest
-	20, // 24: auth.v1.AuthService.UpdateLastKnownLocation:input_type -> auth.v1.UpdateLastKnownLocationRequest
-	18, // 25: auth.v1.AuthService.DeleteAccount:input_type -> auth.v1.DeleteAccountRequest
-	22, // 26: auth.v1.AuthService.AddTrustedContact:input_type -> auth.v1.AddTrustedContactRequest
-	24, // 27: auth.v1.AuthService.ListTrustedContacts:input_type -> auth.v1.ListTrustedContactsRequest
-	26, // 28: auth.v1.AuthService.RemoveTrustedContact:input_type -> auth.v1.RemoveTrustedContactRequest
-	28, // 29: auth.v1.AuthService.TriggerSOS:input_type -> auth.v1.TriggerSOSRequest
-	7,  // 30: auth.v1.AuthService.CompleteFederatedSignup:output_type -> auth.v1.SessionResponse
-	7,  // 31: auth.v1.AuthService.CompleteLinkedInOnboarding:output_type -> auth.v1.SessionResponse
-	7,  // 32: auth.v1.AuthService.LinkIdentity:output_type -> auth.v1.SessionResponse
-	12, // 33: auth.v1.AuthService.StartEmailSignup:output_type -> auth.v1.StartVerificationResponse
-	7,  // 34: auth.v1.AuthService.CompleteEmailSignup:output_type -> auth.v1.SessionResponse
-	7,  // 35: auth.v1.AuthService.GuestSignup:output_type -> auth.v1.SessionResponse
-	12, // 36: auth.v1.AuthService.StartEmailLogin:output_type -> auth.v1.StartVerificationResponse
-	7,  // 37: auth.v1.AuthService.CompleteEmailLogin:output_type -> auth.v1.SessionResponse
-	7,  // 38: auth.v1.AuthService.RefreshSession:output_type -> auth.v1.SessionResponse
-	10, // 39: auth.v1.AuthService.RevokeSession:output_type -> auth.v1.RevokeSessionResponse
-	12, // 40: auth.v1.AuthService.StartPhoneVerification:output_type -> auth.v1.StartVerificationResponse
-	7,  // 41: auth.v1.AuthService.VerifyPhoneCode:output_type -> auth.v1.SessionResponse
-	12, // 42: auth.v1.AuthService.StartPersonalEmailVerification:output_type -> auth.v1.StartVerificationResponse
-	7,  // 43: auth.v1.AuthService.VerifyPersonalEmailCode:output_type -> auth.v1.SessionResponse
-	7,  // 44: auth.v1.AuthService.SubmitPersonalDetails:output_type -> auth.v1.SessionResponse
-	12, // 45: auth.v1.AuthService.StartCorporateEmailVerification:output_type -> auth.v1.StartVerificationResponse
-	7,  // 46: auth.v1.AuthService.VerifyCorporateEmailCode:output_type -> auth.v1.SessionResponse
-	16, // 47: auth.v1.AuthService.GetProfile:output_type -> auth.v1.ProfileResponse
-	16, // 48: auth.v1.AuthService.CompleteProfileSetup:output_type -> auth.v1.ProfileResponse
-	21, // 49: auth.v1.AuthService.UpdateLastKnownLocation:output_type -> auth.v1.UpdateLastKnownLocationResponse
-	19, // 50: auth.v1.AuthService.DeleteAccount:output_type -> auth.v1.DeleteAccountResponse
-	23, // 51: auth.v1.AuthService.AddTrustedContact:output_type -> auth.v1.TrustedContactResponse
-	25, // 52: auth.v1.AuthService.ListTrustedContacts:output_type -> auth.v1.ListTrustedContactsResponse
-	27, // 53: auth.v1.AuthService.RemoveTrustedContact:output_type -> auth.v1.RemoveTrustedContactResponse
-	29, // 54: auth.v1.AuthService.TriggerSOS:output_type -> auth.v1.TriggerSOSResponse
-	30, // [30:55] is the sub-list for method output_type
-	5,  // [5:30] is the sub-list for method input_type
+	16, // 12: auth.v1.AuthService.CompleteEmailLogin:input_type -> auth.v1.VerifyCodeRequest
+	14, // 13: auth.v1.AuthService.CompleteAccountClaim:input_type -> auth.v1.CompleteAccountClaimRequest
+	15, // 14: auth.v1.AuthService.ResendAccountClaimCode:input_type -> auth.v1.ResendAccountClaimCodeRequest
+	8,  // 15: auth.v1.AuthService.RefreshSession:input_type -> auth.v1.RefreshSessionRequest
+	9,  // 16: auth.v1.AuthService.RevokeSession:input_type -> auth.v1.RevokeSessionRequest
+	11, // 17: auth.v1.AuthService.StartPhoneVerification:input_type -> auth.v1.StartVerificationRequest
+	16, // 18: auth.v1.AuthService.VerifyPhoneCode:input_type -> auth.v1.VerifyCodeRequest
+	11, // 19: auth.v1.AuthService.StartPersonalEmailVerification:input_type -> auth.v1.StartVerificationRequest
+	16, // 20: auth.v1.AuthService.VerifyPersonalEmailCode:input_type -> auth.v1.VerifyCodeRequest
+	17, // 21: auth.v1.AuthService.SubmitPersonalDetails:input_type -> auth.v1.SubmitPersonalDetailsRequest
+	11, // 22: auth.v1.AuthService.StartCorporateEmailVerification:input_type -> auth.v1.StartVerificationRequest
+	16, // 23: auth.v1.AuthService.VerifyCorporateEmailCode:input_type -> auth.v1.VerifyCodeRequest
+	18, // 24: auth.v1.AuthService.GetProfile:input_type -> auth.v1.GetProfileRequest
+	20, // 25: auth.v1.AuthService.CompleteProfileSetup:input_type -> auth.v1.CompleteProfileSetupRequest
+	23, // 26: auth.v1.AuthService.UpdateLastKnownLocation:input_type -> auth.v1.UpdateLastKnownLocationRequest
+	21, // 27: auth.v1.AuthService.DeleteAccount:input_type -> auth.v1.DeleteAccountRequest
+	25, // 28: auth.v1.AuthService.AddTrustedContact:input_type -> auth.v1.AddTrustedContactRequest
+	29, // 29: auth.v1.AuthService.ListTrustedContacts:input_type -> auth.v1.ListTrustedContactsRequest
+	31, // 30: auth.v1.AuthService.RemoveTrustedContact:input_type -> auth.v1.RemoveTrustedContactRequest
+	33, // 31: auth.v1.AuthService.TriggerSOS:input_type -> auth.v1.TriggerSOSRequest
+	27, // 32: auth.v1.AuthService.ConfirmTrustedContact:input_type -> auth.v1.ConfirmTrustedContactRequest
+	7,  // 33: auth.v1.AuthService.CompleteFederatedSignup:output_type -> auth.v1.SessionResponse
+	7,  // 34: auth.v1.AuthService.CompleteLinkedInOnboarding:output_type -> auth.v1.SessionResponse
+	7,  // 35: auth.v1.AuthService.LinkIdentity:output_type -> auth.v1.SessionResponse
+	12, // 36: auth.v1.AuthService.StartEmailSignup:output_type -> auth.v1.StartVerificationResponse
+	7,  // 37: auth.v1.AuthService.CompleteEmailSignup:output_type -> auth.v1.SessionResponse
+	7,  // 38: auth.v1.AuthService.GuestSignup:output_type -> auth.v1.SessionResponse
+	12, // 39: auth.v1.AuthService.StartEmailLogin:output_type -> auth.v1.StartVerificationResponse
+	7,  // 40: auth.v1.AuthService.CompleteEmailLogin:output_type -> auth.v1.SessionResponse
+	7,  // 41: auth.v1.AuthService.CompleteAccountClaim:output_type -> auth.v1.SessionResponse
+	12, // 42: auth.v1.AuthService.ResendAccountClaimCode:output_type -> auth.v1.StartVerificationResponse
+	7,  // 43: auth.v1.AuthService.RefreshSession:output_type -> auth.v1.SessionResponse
+	10, // 44: auth.v1.AuthService.RevokeSession:output_type -> auth.v1.RevokeSessionResponse
+	12, // 45: auth.v1.AuthService.StartPhoneVerification:output_type -> auth.v1.StartVerificationResponse
+	7,  // 46: auth.v1.AuthService.VerifyPhoneCode:output_type -> auth.v1.SessionResponse
+	12, // 47: auth.v1.AuthService.StartPersonalEmailVerification:output_type -> auth.v1.StartVerificationResponse
+	7,  // 48: auth.v1.AuthService.VerifyPersonalEmailCode:output_type -> auth.v1.SessionResponse
+	7,  // 49: auth.v1.AuthService.SubmitPersonalDetails:output_type -> auth.v1.SessionResponse
+	12, // 50: auth.v1.AuthService.StartCorporateEmailVerification:output_type -> auth.v1.StartVerificationResponse
+	7,  // 51: auth.v1.AuthService.VerifyCorporateEmailCode:output_type -> auth.v1.SessionResponse
+	19, // 52: auth.v1.AuthService.GetProfile:output_type -> auth.v1.ProfileResponse
+	19, // 53: auth.v1.AuthService.CompleteProfileSetup:output_type -> auth.v1.ProfileResponse
+	24, // 54: auth.v1.AuthService.UpdateLastKnownLocation:output_type -> auth.v1.UpdateLastKnownLocationResponse
+	22, // 55: auth.v1.AuthService.DeleteAccount:output_type -> auth.v1.DeleteAccountResponse
+	26, // 56: auth.v1.AuthService.AddTrustedContact:output_type -> auth.v1.TrustedContactResponse
+	30, // 57: auth.v1.AuthService.ListTrustedContacts:output_type -> auth.v1.ListTrustedContactsResponse
+	32, // 58: auth.v1.AuthService.RemoveTrustedContact:output_type -> auth.v1.RemoveTrustedContactResponse
+	34, // 59: auth.v1.AuthService.TriggerSOS:output_type -> auth.v1.TriggerSOSResponse
+	28, // 60: auth.v1.AuthService.ConfirmTrustedContact:output_type -> auth.v1.ConfirmTrustedContactResponse
+	33, // [33:61] is the sub-list for method output_type
+	5,  // [5:33] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -2297,13 +2635,14 @@ func file_auth_v1_auth_proto_init() {
 	if File_auth_v1_auth_proto != nil {
 		return
 	}
+	file_auth_v1_auth_proto_msgTypes[31].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_v1_auth_proto_rawDesc), len(file_auth_v1_auth_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   28,
+			NumMessages:   33,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -12,10 +12,44 @@ import (
 )
 
 type Querier interface {
+	// Written BEFORE any alert is sent, so a retry carrying the same
+	// client_request_id finds it and reports this attempt's outcome instead of
+	// texting everyone again (migration 0023).
+	ClaimSOSEvent(ctx context.Context, arg ClaimSOSEventParams) (uuid.UUID, error)
 	// Same claim as ClaimMeetupsCompletedOutboxBatch: bump attempts and push
 	// next_attempt_at out by the visibility timeout, so a crashed claimer's rows
 	// come back on their own and two pollers never take the same row.
 	ClaimUserDeletedOutboxBatch(ctx context.Context, arg ClaimUserDeletedOutboxBatchParams) ([]ClaimUserDeletedOutboxBatchRow, error)
+	// V-1 (security review 2026-10-01): spend an attempt ATOMICALLY, before the
+	// code is compared.
+	//
+	// The old flow read the row, checked `attempts >= 5` in Go, compared, and
+	// incremented only on a mismatch. Every concurrent guess read attempts = 0
+	// before any increment landed, so the five-guess cap bounded nothing: a
+	// hundred parallel requests got a hundred guesses at a six-digit code, and a
+	// fresh code could be requested every sixty seconds. For email login that is
+	// an unauthenticated takeover path against any account with a personal email.
+	//
+	// `attempts < max_attempts` inside the UPDATE is what fixes it. Postgres
+	// serialises concurrent UPDATEs of the same row, and each one re-evaluates
+	// the predicate against the committed value, so exactly max_attempts of them
+	// can ever succeed no matter how many arrive at once. The losers get zero
+	// rows back and never reach the comparison at all.
+	//
+	// `expires_at > now()` folds the expiry check into the same statement rather
+	// than leaving it as a separate Go-side read that could pass and then go
+	// stale. Zero rows therefore means one of: no such code, expired, or the cap
+	// is already spent — the service distinguishes them with a follow-up read
+	// purely to keep the three user-facing messages it has always had.
+	//
+	// max_attempts is a parameter, not a literal 5, so otpMaxAttempts in Go stays
+	// the only place the cap is written down.
+	ClaimVerificationAttempt(ctx context.Context, arg ClaimVerificationAttemptParams) (AuthVerificationCode, error)
+	// The target-keyed twin of ClaimVerificationAttempt — same reasoning, and
+	// the one that matters most: these purposes (email signup, email login,
+	// account_claim) are UNAUTHENTICATED, so this is the cap an attacker meets
+	// before they have any credential at all.
+	ClaimVerificationAttemptByTarget(ctx context.Context, arg ClaimVerificationAttemptByTargetParams) (AuthVerificationCode, error)
 	// Linking Apple or Google to an existing account (LinkIdentityToUser's
 	// non-LinkedIn branch, ADR-002 §3). That path writes only user_identities,
 	// so unlike every other verification it has no users UPDATE to ride along
@@ -26,7 +60,28 @@ type Querier interface {
 	// would strand a freshly-upgraded guest at 0 until some unrelated write
 	// happened to recompute it.
 	ClearUserGuestFlag(ctx context.Context, arg ClearUserGuestFlagParams) (AuthUser, error)
+	CompleteSOSEvent(ctx context.Context, arg CompleteSOSEventParams) error
+	// The contact's own consent, from the link they were texted. Deleting the
+	// pending row IS the confirmation, so it is single-use by construction: a
+	// second press of the same link matches nothing. An expired link matches
+	// nothing either. Returns whose contact they have become, for the page.
+	ConfirmTrustedContactByToken(ctx context.Context, tokenHash string) (string, error)
+	// The other half of V-1: delete the row AND report whether this caller was
+	// the one that deleted it.
+	//
+	// The old success path was an unconditional DELETE whose result nobody
+	// looked at, so two concurrent requests holding the same correct code both
+	// "succeeded" and both got a session. Matching on code_hash and returning
+	// the row makes the delete the point at which the code is spent: the first
+	// caller gets a row, every later one gets zero and is told the code is
+	// invalid, which by then it is.
+	ConsumeVerificationCode(ctx context.Context, arg ConsumeVerificationCodeParams) (AuthVerificationCode, error)
+	// The target-keyed twin of ConsumeVerificationCode.
+	ConsumeVerificationCodeByTarget(ctx context.Context, arg ConsumeVerificationCodeByTargetParams) (AuthVerificationCode, error)
+	CountContactInvitesSentByUserSince(ctx context.Context, arg CountContactInvitesSentByUserSinceParams) (int64, error)
+	CountContactInvitesSentToPhoneSince(ctx context.Context, arg CountContactInvitesSentToPhoneSinceParams) (int64, error)
 	CountPendingUserDeleted(ctx context.Context) (int64, error)
+	CountSOSEventsForUserSince(ctx context.Context, arg CountSOSEventsForUserSinceParams) (int64, error)
 	// Backs the soft cap of 3 per user (ADR-026 §1), enforced at the service
 	// layer, not a DB constraint.
 	CountTrustedContactsForUser(ctx context.Context, userID uuid.UUID) (int64, error)
@@ -47,6 +102,15 @@ type Querier interface {
 	// guest path is the only caller that sets it true, and making every caller
 	// state which kind of account it is creating keeps a future fifth signup path
 	// from silently inheriting "not a guest" without anyone deciding it.
+	//
+	// personal_email arrives from the provider on a federated signup (Apple,
+	// Google and now LinkedIn all return one, and identity.Verify only hands it
+	// over when the provider marked it verified). NULLIF is load-bearing rather
+	// than tidy: 0017's unique index is partial, ON lower(personal_email) WHERE
+	// personal_email IS NOT NULL, so NULL rows are exempt from it but empty
+	// strings are not — two accounts created without an address would both store
+	// '' and the second would fail on a uniqueness rule neither of them meant to
+	// be part of.
 	CreateUser(ctx context.Context, arg CreateUserParams) (AuthUser, error)
 	// Guest-account cleanup (plan 14 Part B). A guest signs up, never verifies,
 	// eventually signs out — and the row sits there forever with no way to reach
@@ -83,6 +147,8 @@ type Querier interface {
 	//
 	// The row count is the INSERT's, which equals the number of guests deleted.
 	DeleteAbandonedGuests(ctx context.Context, arg DeleteAbandonedGuestsParams) (int64, error)
+	// The cap log only ever looks back one day; batched like every other sweep.
+	DeleteContactInvitesSentBefore(ctx context.Context, arg DeleteContactInvitesSentBeforeParams) (int64, error)
 	DeleteDeadLetteredUserDeleted(ctx context.Context, arg DeleteDeadLetteredUserDeletedParams) (int64, error)
 	// The retention sweep (§B3). Every login and every refresh inserts a row and
 	// nothing ever deleted one, so this table grew without bound — cheap to trim
@@ -102,6 +168,27 @@ type Querier interface {
 	//   * expires_at < now() - retention — expired, plus a grace window kept
 	//     deliberately so a recent expiry is still visible while debugging a
 	//     "why was I logged out" report.
+	//
+	// ONLY rows nothing still points at. `replaced_by` is a self-reference
+	// (0001_auth_schema) with no ON DELETE action, and rotation links each row
+	// to the one that replaced it: old.replaced_by = new.id. So the NEWER row
+	// in a chain is the referenced one, and deleting an arbitrary LIMIT-sized
+	// batch hit `violates foreign key constraint
+	// "refresh_tokens_replaced_by_fkey"` whenever a batch contained a row whose
+	// referrer was not also in it. In production this meant the sweep failed on
+	// every run and the table never shrank at all.
+	//
+	// Restricting the batch to unreferenced rows deletes each chain from its
+	// OLDEST end, which is the only order the constraint permits. One pass
+	// removes one layer; the caller loops until a pass deletes nothing, so a
+	// whole chain still goes in a single sweep. A chain whose newest token is
+	// still live keeps that token and loses the dead ones behind it, which is
+	// exactly right.
+	//
+	// ON DELETE SET NULL on the constraint would also "work" and is the wrong
+	// fix: `replaced_by IS NULL` is how MarkRefreshTokenReplaced detects that a
+	// token has not yet been rotated, so nulling it on an arbitrary delete
+	// would make a rotated token look fresh to the reuse check.
 	DeleteExpiredRefreshTokens(ctx context.Context, arg DeleteExpiredRefreshTokensParams) (int64, error)
 	// The sweeper, batched like the refresh-token sweep so no single statement
 	// holds a long lock.
@@ -151,6 +238,7 @@ type Querier interface {
 	GetKnownCompanyByNameNormalized(ctx context.Context, nameNormalized string) (AuthKnownCompany, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (AuthRefreshToken, error)
 	GetRefreshTokenByID(ctx context.Context, id uuid.UUID) (AuthRefreshToken, error)
+	GetSOSEventByClientRequest(ctx context.Context, arg GetSOSEventByClientRequestParams) (GetSOSEventByClientRequestRow, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (AuthUser, error)
 	// The read half of every trust-level write (gap-tracker #17). FOR UPDATE
 	// holds a row lock for the rest of the enclosing transaction, so a
@@ -167,7 +255,13 @@ type Querier interface {
 	// Used by SignUpOrRecoverWithEmail (ADR-014 decision #3, passwordless as
 	// of ADR-019 §1) to detect the recovery case: an email-OTP signup against
 	// an address that's already someone's verified personal_email.
-	GetUserByPersonalEmail(ctx context.Context, personalEmail pgtype.Text) (AuthUser, error)
+	// lower() on both sides, matching idx_users_personal_email_lower (0017):
+	// the index is on lower(personal_email), so a bare equality here would not
+	// use it AND would miss a stored "Ada@Gmail.com" for a lookup of
+	// "ada@gmail.com" — which is the duplicate-account bug the index exists to
+	// prevent, reintroduced at the read side. Callers normalize too; this is
+	// the backstop that makes the guarantee structural rather than remembered.
+	GetUserByPersonalEmail(ctx context.Context, personalEmail string) (AuthUser, error)
 	// Reuse-abuse check (ADR-019 §3) — called before committing a corporate-
 	// email verification to detect whether this exact mailbox already
 	// verified a DIFFERENT account. Returns apperror.ErrNotFound (wrapped) if
@@ -177,8 +271,9 @@ type Querier interface {
 	GetVerificationCodeByTarget(ctx context.Context, arg GetVerificationCodeByTargetParams) (AuthVerificationCode, error)
 	IncrementVerificationAttempts(ctx context.Context, arg IncrementVerificationAttemptsParams) (AuthVerificationCode, error)
 	IncrementVerificationAttemptsByTarget(ctx context.Context, arg IncrementVerificationAttemptsByTargetParams) (AuthVerificationCode, error)
+	InsertContactInviteSent(ctx context.Context, arg InsertContactInviteSentParams) error
 	InsertIdentity(ctx context.Context, arg InsertIdentityParams) (AuthUserIdentity, error)
-	InsertSOSEvent(ctx context.Context, arg InsertSOSEventParams) error
+	InsertPendingTrustedContact(ctx context.Context, arg InsertPendingTrustedContactParams) error
 	// Minimal real SOS + trusted contacts (ADR-026, Slice H).
 	InsertTrustedContact(ctx context.Context, arg InsertTrustedContactParams) (AuthTrustedContact, error)
 	// Flags an unknown-company (name, domain) pair for the not-yet-assigned
@@ -186,8 +281,49 @@ type Querier interface {
 	// queue.
 	InsertUnverifiedCompanyClaim(ctx context.Context, arg InsertUnverifiedCompanyClaimParams) error
 	ListIdentitiesForUser(ctx context.Context, userID uuid.UUID) ([]AuthUserIdentity, error)
-	ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]AuthTrustedContact, error)
-	MarkRefreshTokenReplaced(ctx context.Context, arg MarkRefreshTokenReplacedParams) error
+	// With each contact's consent state (#80, migration 0024): a contact with a
+	// pending row has not confirmed yet, and pending_expires_at says whether the
+	// link it was sent can still be used. No pending row means confirmed —
+	// including every contact added before consent existed (D2).
+	//
+	// Explicit columns, not c.*: a star query here is what made 0024 keep its
+	// state out of this table, and it should not come back.
+	ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]ListTrustedContactsForUserRow, error)
+	// Serialises one user's SOS claims: the duplicate check, the daily count and
+	// the insert below run as one unit. Namespace 5.
+	LockSOSForUser(ctx context.Context, userID string) error
+	// The same for one destination number, across every user, for the
+	// per-number cap. Always taken AFTER the user lock, so two additions can
+	// never wait on each other in opposite orders.
+	LockTrustedContactInvitesForPhone(ctx context.Context, phoneHash string) error
+	// Serialises one user's contact additions, so the contact cap and the daily
+	// invite cap are a count and an insert that cannot interleave (#80).
+	// Namespace 3; ratings use 2.
+	LockTrustedContactInvitesForUser(ctx context.Context, userID string) error
+	// The claim that makes rotation single-use (tracker #83, review finding
+	// N-A2 / #57).
+	//
+	// # WHAT THE MISSING GUARD COST
+	//
+	// This was `WHERE id = $1` and nothing else, with the "is this token
+	// still live?" check done earlier, in Go, on a row read outside the
+	// transaction. Two refreshes presenting the SAME token concurrently both
+	// passed that check, both inserted a child, and both marked the parent
+	// replaced: one parent, two live children, two session chains descended
+	// from one token. Reuse detection keys on replaced_by being set, so
+	// neither chain ever looks stolen — the fork is permanent and invisible.
+	//
+	// The three conditions are the whole check, moved to where it can be
+	// trusted: the row's own UPDATE. A second transaction blocks on this
+	// row's lock, then re-evaluates against the committed version and
+	// matches nothing, so it gets zero rows instead of a second child.
+	//
+	// expires_at > now() is here as well as in Go for the same reason — the
+	// Go check reads a snapshot, this one reads the row being written.
+	//
+	// :one, so zero rows surfaces as pgx.ErrNoRows rather than a silent
+	// success. The caller turns that into reuse, which revokes the family.
+	MarkRefreshTokenReplaced(ctx context.Context, arg MarkRefreshTokenReplacedParams) (AuthRefreshToken, error)
 	MarkUserDeletedDeadLettered(ctx context.Context, arg MarkUserDeletedDeadLetteredParams) error
 	MarkUserDeletedFailed(ctx context.Context, arg MarkUserDeletedFailedParams) error
 	MarkUserDeletedProcessed(ctx context.Context, id uuid.UUID) error
@@ -326,6 +462,19 @@ type Querier interface {
 	// (user_id, purpose), via idx_verification_codes_signup_target. Used for
 	// both VERIFICATION_PURPOSE_EMAIL_SIGNUP and VERIFICATION_PURPOSE_EMAIL_LOGIN
 	// (migration 0006, ADR-019 §1) — user_id is always NULL on these rows.
+	// ON CONFLICT infers target_normalized, not target (tracker #82).
+	//
+	// The service normalises before it calls, so for every row this writes
+	// the two columns hold the same string. The difference is what happens
+	// when they do NOT: a call site that forgets to normalise, or a second
+	// spelling arriving from somewhere new, must land on the SAME row rather
+	// than inserting a second one with its own attempt counter and its own
+	// cooldown. Conflicting on the normalised column is what makes "one
+	// target, one budget" a property of the table instead of a convention
+	// every caller has to remember.
+	//
+	// target_normalized is GENERATED ALWAYS (migration 0020), so it cannot
+	// be written directly and cannot drift from target.
 	UpsertVerificationCodeForSignup(ctx context.Context, arg UpsertVerificationCodeForSignupParams) (AuthVerificationCode, error)
 }
 

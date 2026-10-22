@@ -28,7 +28,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     // LandingPage requires tapping "GET STARTED" to reach OnboardingFlow.
-    await tester.tap(find.text('GET STARTED'));
+    await tester.tap(find.text('Get started'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
@@ -42,12 +42,12 @@ void main() {
 
     await tester.tap(find.byType(Checkbox));
     await tester.pump();
-    await tester.tap(find.text('CONTINUE'));
+    await tester.tap(find.text('Continue'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
     // Verify that the onboarding choose-method screen builds without
     // crashing.
-    expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
+    expect(find.text('Continue with LinkedIn'), findsOneWidget);
   });
 }

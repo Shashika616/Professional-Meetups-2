@@ -107,17 +107,17 @@ void main() {
     expect(find.text('Weekly'), findsOneWidget);
     expect(find.text('Monthly'), findsOneWidget);
     expect(find.text('Yearly'), findsOneWidget);
-    // The store's strings, verbatim: the yearly price appears on its row and
-    // again on the featured card.
+    // The store's strings, verbatim, once each: a price belongs to its
+    // tier row, and the card above them no longer repeats one of them.
     expect(find.text('Rs 390.00'), findsOneWidget);
     expect(find.text('Rs 1,490.00'), findsOneWidget);
-    expect(find.textContaining('Rs 12,900.00'), findsNWidgets(2));
+    expect(find.textContaining('Rs 12,900.00'), findsOneWidget);
     expect(find.text('Popular'), findsOneWidget);
 
     final button = tester.widget<PrimaryButton>(
       find.byKey(const Key('premiumSubscribe')),
     );
-    expect(button.label, 'SUBSCRIBE');
+    expect(button.label, 'Subscribe');
     expect(button.onPressed, isNotNull);
   });
 
@@ -136,7 +136,7 @@ void main() {
     );
     expect(find.byKey(const Key('tier-$premiumWeeklyProductId')), findsNothing);
     expect(find.byKey(const Key('tier-$premiumYearlyProductId')), findsNothing);
-    expect(find.textContaining('Rs 1,490.00'), findsNWidgets(2));
+    expect(find.textContaining('Rs 1,490.00'), findsOneWidget);
     expect(find.textContaining("isn't available"), findsNothing);
     expect(
       tester
@@ -182,11 +182,11 @@ void main() {
     expect(find.byKey(const Key('premiumSubscribe')), findsNothing);
     // The perks card is still there: what Premium gets you does not depend
     // on the store; only prices do, and none is shown.
-    expect(find.text('This plan gets'), findsOneWidget);
-    expect(find.text('TieHere Premium'), findsOneWidget);
+    expect(find.text('Unlock all features'), findsOneWidget);
+    expect(find.text('Free'), findsOneWidget);
     expect(find.textContaining('/year'), findsNothing);
     // Restore stays reachable regardless.
-    expect(find.text('Restore Purchases'), findsOneWidget);
+    expect(find.text('Restore purchases'), findsOneWidget);
   });
 
   testWidgets('a store failure shows the load error, not a crash', (
@@ -201,7 +201,7 @@ void main() {
 
     expect(find.textContaining('Could not load'), findsOneWidget);
     expect(find.byKey(const Key('premiumSubscribe')), findsNothing);
-    expect(find.text('This plan gets'), findsOneWidget);
+    expect(find.text('Unlock all features'), findsOneWidget);
   });
 
   testWidgets('an entitled account sees CURRENT PLAN on its own tier and '
@@ -224,19 +224,19 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('PREMIUM'), findsWidgets);
+    expect(find.text('Premium'), findsWidgets);
     expect(find.textContaining('Monthly plan'), findsOneWidget);
     // The badge sits on the monthly row (the featured card shows yearly,
     // which is not the held tier).
     final monthlyRow = find.byKey(const Key('tier-$premiumMonthlyProductId'));
     expect(
-      find.descendant(of: monthlyRow, matching: find.text('CURRENT PLAN')),
+      find.descendant(of: monthlyRow, matching: find.text('Current plan')),
       findsOneWidget,
     );
     final button = tester.widget<PrimaryButton>(
       find.byKey(const Key('premiumSubscribe')),
     );
-    expect(button.label, 'CURRENT PLAN');
+    expect(button.label, 'Current plan');
     expect(button.onPressed, isNull);
   });
 
@@ -257,7 +257,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('CURRENT PLAN'), findsOneWidget); // the button only
+    expect(find.text('Current plan'), findsOneWidget); // the button only
     expect(
       tester
           .widget<PrimaryButton>(find.byKey(const Key('premiumSubscribe')))

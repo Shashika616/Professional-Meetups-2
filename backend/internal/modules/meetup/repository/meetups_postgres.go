@@ -642,7 +642,11 @@ func (r *postgresMeetupRepository) Cancel(ctx context.Context, id, reason, hostU
 	row, err := q.CancelMeetup(ctx, sqlcgen.CancelMeetupParams{ID: meetupID, CancellationReason: textOrNull(reason), HostUserID: host})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Meetup{}, fmt.Errorf("repository: meetup %s: %w", id, apperror.ErrNotFound)
+			// Three conditions can produce zero rows now, and they are not
+			// the same answer (V-10). "Not found" for a meetup that is
+			// merely in the wrong state tells the host their meetup has
+			// vanished, which is both wrong and alarming.
+			return Meetup{}, r.explainFailedCancel(ctx, q, meetupID, host, id)
 		}
 		return Meetup{}, fmt.Errorf("repository: cancel meetup: %w", err)
 	}
@@ -1153,10 +1157,37 @@ func (r *postgresMeetupRepository) PurgeUser(ctx context.Context, userID string)
 		return fmt.Errorf("repository: purge found %d live hosted meetup(s) created after the cancel step; will retry", commitments.HostingCount)
 	}
 
+	// # LOCK ORDER: meetups BEFORE meetup_requests
+	//
+	// Every other transaction that touches both takes the meetup row first
+	// and the request rows second (Accept's SELECT ... FOR UPDATE then its
+	// accept/auto-reject writes; Cancel's UPDATE then its pending-request
+	// writes). This one used to go the other way, which is the shape a
+	// deadlock is made of: two transactions holding one of the pair and
+	// each waiting for the other's.
+	//
+	// It was not actually reachable, for a reason that has nothing to do
+	// with locking: a cycle needs this purge to hold a request row that an
+	// Accept wants AND to want a meetup row that the same Accept holds,
+	// which means one person being both the host of a meetup and a
+	// requester on it. RequestToJoin refuses that (meetup: cannot request
+	// to join your own meetup) and there is no FK or CHECK behind it — the
+	// tables deliberately have no cross-row constraints — so the safety of
+	// this purge rested entirely on a guard in an unrelated service
+	// method, with nothing anywhere saying so.
+	//
+	// These twelve statements are independent: each is one table, keyed on
+	// this one user id, and none reads what another wrote. So the order is
+	// free, and spending it on agreeing with everything else costs nothing
+	// and removes the cycle by construction rather than by coincidence.
+	// Keep anything added here on the same side of that line.
 	steps := []struct {
 		name string
 		run  func(context.Context, uuid.UUID) error
 	}{
+		// Anonymised, not deleted: each row is part of another member's
+		// record. See the queries for why a fresh id per row.
+		{"meetups they hosted (anonymise host)", q.AnonymiseHostOfMeetups},
 		{"requests", q.DeleteUserRequests},
 		{"safety shares", q.DeleteUserSafetyShares},
 		{"safety state", q.DeleteUserSafetyState},
@@ -1170,11 +1201,9 @@ func (r *postgresMeetupRepository) PurgeUser(ctx context.Context, userID string)
 		{"display cache", q.DeleteUserDisplayCache},
 		{"location cache", q.DeleteUserLocationCache},
 		{"subscription cache", q.DeleteUserSubscriptionCache},
-		// Anonymised, not deleted: each row is part of another member's
-		// record. See the queries for why a fresh id per row.
+		// Anonymised for the same reason as the meetups above.
 		{"ratings they gave (anonymise)", q.AnonymiseRatingsGivenByUser},
 		{"ratings about them (anonymise)", q.AnonymiseRatingsAboutUser},
-		{"meetups they hosted (anonymise host)", q.AnonymiseHostOfMeetups},
 	}
 	for _, step := range steps {
 		if err := step.run(ctx, parsed); err != nil {
@@ -1201,4 +1230,50 @@ func (r *postgresMeetupRepository) ListLiveHostedMeetupIDs(ctx context.Context, 
 		ids = append(ids, id.String())
 	}
 	return ids, nil
+}
+
+// explainFailedCancel says why a cancel matched no row: the meetup is gone,
+// it is not the caller's, or it is no longer cancellable (V-10).
+//
+// Read on the SAME transaction the failed UPDATE ran on, so it sees exactly
+// the state that refused it rather than a later one.
+//
+// A meetup that exists but belongs to someone else reports not-found, not
+// "forbidden": a stranger guessing ids must not be able to tell the
+// difference between a meetup that is not theirs and one that does not
+// exist.
+//
+// Nothing has been written at this point and the caller returns immediately
+// on this error, so the notify callback never runs and the transaction rolls
+// back — no participant is told about a cancellation that did not happen.
+func (r *postgresMeetupRepository) explainFailedCancel(
+	ctx context.Context, q *sqlcgen.Queries, meetupID, host uuid.UUID, id string,
+) error {
+	row, err := q.GetMeetupByIDForUpdate(ctx, meetupID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("repository: meetup %s: %w", id, apperror.ErrNotFound)
+		}
+		return fmt.Errorf("repository: read meetup after failed cancel: %w", err)
+	}
+	if row.HostUserID != host {
+		return fmt.Errorf("repository: meetup %s: %w", id, apperror.ErrNotFound)
+	}
+	return fmt.Errorf("repository: meetup %s is %s and can no longer be cancelled: %w",
+		id, row.Status, apperror.ErrConflict)
+}
+
+func (r *postgresMeetupRepository) CountCreatedByHostSince(ctx context.Context, hostUserID string, since time.Time) (int, error) {
+	host, err := uuid.Parse(hostUserID)
+	if err != nil {
+		return 0, fmt.Errorf("repository: invalid host user id %q: %w", hostUserID, apperror.ErrInvalidInput)
+	}
+	n, err := r.q.CountMeetupsCreatedByHostSince(ctx, sqlcgen.CountMeetupsCreatedByHostSinceParams{
+		HostUserID: host,
+		Since:      toTimestamptz(since),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("repository: count meetups by host: %w", err)
+	}
+	return int(n), nil
 }

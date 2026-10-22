@@ -48,8 +48,8 @@ void main() {
       ], now: now);
 
       expect(groups.map((g) => g.label).toList(), [
-        'TODAY',
-        'YESTERDAY',
+        'Today',
+        'Yesterday',
         '2026/09/05',
       ]);
       // The two same-day rows land in one group rather than two headings.
@@ -60,14 +60,14 @@ void main() {
       final groups = groupNotificationsByDay([
         _notification(createdAt: DateTime(2026, 9, 9, 23, 59)),
       ], now: now);
-      expect(groups.single.label, 'TODAY');
+      expect(groups.single.label, 'Today');
     });
 
     test('midnight yesterday is YESTERDAY, not two days ago', () {
       final groups = groupNotificationsByDay([
         _notification(createdAt: DateTime(2026, 9, 8, 0, 0)),
       ], now: now);
-      expect(groups.single.label, 'YESTERDAY');
+      expect(groups.single.label, 'Yesterday');
     });
 
     test('empty in, empty out', () {
@@ -98,8 +98,8 @@ void main() {
     await tester.pumpWidget(_appWith(service));
     await tester.pumpAndSettle();
 
-    expect(find.text('TODAY'), findsOneWidget);
-    expect(find.text('YESTERDAY'), findsOneWidget);
+    expect(find.text('Today'), findsOneWidget);
+    expect(find.text('Yesterday'), findsOneWidget);
     expect(find.text('New join request'), findsOneWidget);
     expect(find.text('Request accepted'), findsOneWidget);
   });
@@ -129,14 +129,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(LoadFailedState), findsOneWidget);
-    expect(find.text('TRY AGAIN'), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
     // The empty state must not be shown for a failure — they mean different
     // things and only one of them is the user's fault to wait out.
     expect(find.text('All quiet for now'), findsNothing);
 
     service.notificationsError = null;
     service.notifications = [_notification(createdAt: DateTime.now())];
-    await tester.tap(find.text('TRY AGAIN'));
+    await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
 
     expect(find.text('New join request'), findsOneWidget);

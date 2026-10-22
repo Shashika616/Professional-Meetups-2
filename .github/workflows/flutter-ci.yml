@@ -1,14 +1,23 @@
 name: Flutter CI
 
-# Copied unmodified from the sibling microservices repo's
-# .github/workflows/flutter-ci.yml — frontend/ here is the same, unmodified
-# frontend (see this repo's README), so its CI doesn't need to change either.
+# Started as a copy of the sibling microservices repo's
+# .github/workflows/flutter-ci.yml, when frontend/ here was still that same
+# frontend unmodified. It is not any more — this app has diverged a long way
+# (its own maps, review, safety and account-deletion flows), so treat this
+# pipeline as this repo's own and change it on this repo's needs rather than
+# keeping it in step with the sibling.
 
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+
+# Read-only by default (#95). Nothing here pushes, comments or publishes, so
+# a compromised step or dependency gets a token that cannot write to the
+# repository. A job that ever needs more should ask for it on its own.
+permissions:
+  contents: read
 
 jobs:
   analyze-and-test:
@@ -17,7 +26,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Pinned, not `channel: stable` — an unpinned channel drifts to whatever
       # Dart/Flutter release is current on the day CI happens to run, which
@@ -26,7 +35,7 @@ jobs:
       # sibling repo once — see its own flutter-ci.yml comment). Bump this
       # deliberately, in step with whatever Flutter SDK version developers
       # actually run locally, not passively.
-      - uses: subosito/flutter-action@v2
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           flutter-version: '3.47.0'
           cache: true
@@ -44,7 +53,7 @@ jobs:
         run: flutter test --coverage
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-report
           path: frontend/coverage/lcov.info

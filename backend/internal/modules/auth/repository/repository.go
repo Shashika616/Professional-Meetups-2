@@ -14,6 +14,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -117,6 +118,22 @@ type NewUser struct {
 	Headline           string
 	TrustLevel         int
 	AgeConfirmedOver18 bool
+	// PersonalEmail is the provider's verified address for this person, or
+	// "" when there isn't one (a guest, or a provider that withheld it).
+	//
+	// It is stored at creation rather than left for the in-app verification
+	// step because this column is what makes an account findable by the
+	// person who owns it: 0017 made lower(personal_email) unique precisely
+	// so a second signup with the same address resolves to the first
+	// account instead of silently making another one. An address we only
+	// learn about three screens later cannot do that job.
+	//
+	// Only ever a verified address. identity.Verify withholds the email
+	// unless the provider set email_verified, and LinkedIn's client does the
+	// same, so presence here keeps meaning what it has always meant —
+	// `PersonalEmailVerified` is derived as `PersonalEmail != ""` and stays
+	// true by construction.
+	PersonalEmail string
 	// IsGuest is true only for GuestSignup (ADR-002 §3). Every other
 	// creation path leaves it false, which is what lands those accounts at
 	// Level 1 immediately.
@@ -365,6 +382,17 @@ const (
 	// OTP-send time), but verified against an ALREADY-existing account
 	// rather than creating/recovering one.
 	VerificationPurposeEmailLogin VerificationPurpose = "email_login"
+	// VerificationPurposeAccountClaim is the third target-keyed purpose
+	// (migration 0018): a federated signup found the provider's verified
+	// address already on an account, and this code is how the person proves
+	// they still hold that mailbox before it is handed to them.
+	//
+	// Separate from EmailLogin even though both end in a session for the
+	// same account, because a code minted for one ceremony must not be
+	// spendable on the other — otpMatches and every lookup here are keyed
+	// by (purpose, target), and sharing a purpose would make the two
+	// interchangeable by accident rather than by decision.
+	VerificationPurposeAccountClaim VerificationPurpose = "account_claim"
 )
 
 // VerificationCode is a pending OTP row. CodeHash is always the SHA-256
@@ -396,11 +424,33 @@ type VerificationCodeRepository interface {
 	// IncrementAttempts returns the row's new attempt count after
 	// incrementing — callers compare this against the 5-attempt cap.
 	IncrementAttempts(ctx context.Context, userID string, purpose VerificationPurpose) (VerificationCode, error)
+	// ClaimAttempt spends one attempt and returns the row it spent it on,
+	// or apperror.ErrNotFound when there was nothing to spend: no such
+	// code, it has expired, or maxAttempts are already gone.
+	//
+	// This is the ONLY correct way to consume an attempt (V-1). Reading the
+	// row, deciding in Go whether the cap is reached, and incrementing
+	// afterwards cannot bound anything, because every concurrent caller
+	// reads the same pre-increment value. The cap lives in the UPDATE's own
+	// WHERE clause so Postgres enforces it per row, under its own
+	// serialisation of concurrent updates.
+	ClaimAttempt(ctx context.Context, userID string, purpose VerificationPurpose, maxAttempts int) (VerificationCode, error)
+	// Consume deletes the row only if codeHash still matches, and returns
+	// apperror.ErrNotFound when it did not — which is what makes a correct
+	// code single-use under concurrency instead of merely usually-once.
+	Consume(ctx context.Context, userID string, purpose VerificationPurpose, codeHash string) error
 	// Delete removes the pending code — called on successful verification
 	// (so the raw target, kept only transiently here, doesn't linger; the
 	// corporate-email case's ADR-003 minimal-retention requirement) and can
 	// also be used to force a fresh code after the attempt cap is hit.
 	Delete(ctx context.Context, userID string, purpose VerificationPurpose) error
+
+	// ClaimAttemptByTarget/ConsumeByTarget are the target-keyed twins of
+	// ClaimAttempt/Consume, and carry the same reasoning. These purposes
+	// are the unauthenticated ones, so this is the cap an attacker meets
+	// with no credential at all.
+	ClaimAttemptByTarget(ctx context.Context, purpose VerificationPurpose, target string, maxAttempts int) (VerificationCode, error)
+	ConsumeByTarget(ctx context.Context, purpose VerificationPurpose, target, codeHash string) error
 
 	// UpsertForSignup/GetByTarget/IncrementAttemptsByTarget/DeleteByTarget
 	// mirror Upsert/Get/IncrementAttempts/Delete exactly, except keyed by
@@ -470,15 +520,61 @@ type TrustedContact struct {
 	Email       string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	// PendingUntil is when an unconfirmed contact's link expires (#80). Zero
+	// means confirmed, which includes every contact added before consent
+	// existed (migration 0024, decision D2).
+	PendingUntil time.Time
 }
+
+// Confirmed reports whether this contact may receive alerts.
+func (c TrustedContact) Confirmed() bool { return c.PendingUntil.IsZero() }
+
+// NewPendingContact is a trusted contact being added, pending its own
+// consent (#80). The caps travel with it because they are enforced inside
+// the same transaction as the insert: counted and written under one lock,
+// so two concurrent additions cannot both squeeze under a limit.
+type NewPendingContact struct {
+	UserID      string
+	Name        string
+	PhoneNumber string
+	Email       string
+	// PhoneHash is sha256 of the normalised number, for the per-number cap.
+	PhoneHash string
+	// TokenHash is sha256 of the single-use token in the invitation link.
+	TokenHash string
+	ExpiresAt time.Time
+
+	MaxContacts        int
+	MaxInvitesPerUser  int
+	MaxInvitesPerPhone int
+	CapWindow          time.Duration
+}
+
+var (
+	// ErrTooManyTrustedContacts: the user already has MaxContacts.
+	ErrTooManyTrustedContacts = errors.New("too many trusted contacts")
+	// ErrContactInviteLimit: a daily invitation cap, per user or per number.
+	ErrContactInviteLimit = errors.New("contact invitation limit reached")
+	// ErrSOSLimit: the user's daily SOS cap.
+	ErrSOSLimit = errors.New("sos limit reached")
+)
 
 // TrustedContactRepository is the persistence boundary for trusted
 // contacts. The soft cap of 3 per user (ADR-026 §1) is enforced by the
 // service layer via Count, not a DB constraint here.
 type TrustedContactRepository interface {
-	Insert(ctx context.Context, userID, name, phoneNumber, email string) (TrustedContact, error)
+	// InsertPending adds a contact awaiting consent and logs the invitation,
+	// enforcing every cap in NewPendingContact atomically. Returns
+	// ErrTooManyTrustedContacts or ErrContactInviteLimit (wrapped).
+	InsertPending(ctx context.Context, contact NewPendingContact) (TrustedContact, error)
 	ListForUser(ctx context.Context, userID string) ([]TrustedContact, error)
-	CountForUser(ctx context.Context, userID string) (int, error)
+	// Confirm records the contact's consent from the token in their link,
+	// and returns the name of the user whose contact they now are.
+	// apperror.ErrNotFound (wrapped) for a token that is unknown, expired or
+	// already used — deliberately not distinguished.
+	Confirm(ctx context.Context, tokenHash string) (requesterName string, err error)
+	// DeleteInvitesSentBefore trims the invitation log the caps read.
+	DeleteInvitesSentBefore(ctx context.Context, before time.Time, batchSize int) (int, error)
 	// Delete scopes the DELETE to (contactID, userID) in one statement —
 	// returns apperror.ErrNotFound (wrapped) if no row matched, which the
 	// service layer maps to Forbidden (the caller either doesn't own this
@@ -494,14 +590,43 @@ type TrustedContactRepository interface {
 // audit log (Action Tracker §4b-3), which stays open and tracked
 // separately.
 type SOSEvent struct {
-	UserID           string
-	ContextMessage   string
-	Latitude         float64
-	Longitude        float64
+	UserID         string
+	ContextMessage string
+	// nil when the device had no usable fix (#78). NULL in the audit
+	// trail, not 0,0 — a real point in the Gulf of Guinea would be a lie
+	// in a safety record. Migration 0021 drops the NOT NULL.
+	Latitude         *float64
+	Longitude        *float64
+	ContactsNotified int
+}
+
+// SOSClaim asks to record a new SOS before any alert is sent.
+type SOSClaim struct {
+	Event SOSEvent
+	// ClientRequestID is shared by an attempt and its automatic retry.
+	// Empty for app builds that predate it; those are never deduplicated.
+	ClientRequestID string
+	MaxPerWindow    int
+	Window          time.Duration
+}
+
+// SOSOutcome is what a claim found or created.
+type SOSOutcome struct {
+	EventID string
+	// Duplicate: an earlier request with the same ClientRequestID already
+	// claimed this SOS. The caller must not send anything.
+	Duplicate        bool
+	Completed        bool
 	ContactsNotified int
 }
 
 // SOSEventRepository is the persistence boundary for the SOS audit trail.
 type SOSEventRepository interface {
-	Insert(ctx context.Context, event SOSEvent) error
+	// Claim records an SOS, or finds the one this request is a retry of.
+	// Returns ErrSOSLimit (wrapped) when the daily cap is reached.
+	Claim(ctx context.Context, claim SOSClaim) (SOSOutcome, error)
+	// Complete stores how many contacts were reached.
+	Complete(ctx context.Context, eventID string, contactsNotified int) error
+	// Outcome reads a claimed SOS by its client request id.
+	Outcome(ctx context.Context, userID, clientRequestID string) (SOSOutcome, error)
 }

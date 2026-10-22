@@ -49,9 +49,32 @@ func newTestServiceForSOS(t *testing.T) (*service, *fakeUserRepository, *fakeTru
 	return svc, users, trustedContacts, sosEvents, emailSender, smsSender
 }
 
+// confirmFromInvite plays the contact: it reads the link out of the most
+// recent invitation texted and confirms through it, exactly as the real
+// person would on the confirmation page (#80).
+func confirmFromInvite(t *testing.T, svc *service, smsSender *fakeSmsSender) {
+	t.Helper()
+	if len(smsSender.alertsSent) == 0 {
+		t.Fatal("no invitation was texted")
+	}
+	msg := smsSender.alertsSent[len(smsSender.alertsSent)-1].message
+	i := strings.Index(msg, "/c/")
+	if i < 0 {
+		t.Fatalf("invitation has no confirmation link: %q", msg)
+	}
+	token := msg[i+3:]
+	if j := strings.IndexAny(token, " )"); j >= 0 {
+		token = token[:j]
+	}
+	if _, err := svc.ConfirmTrustedContact(context.Background(), token); err != nil {
+		t.Fatalf("ConfirmTrustedContact from the invitation link: %v", err)
+	}
+}
+
 func TestAddTrustedContact_EnforcesSoftCapOfThree(t *testing.T) {
-	svc, _, _, _, _, _ := newTestServiceForSOS(t)
+	svc, users, _, _, _, _ := newTestServiceForSOS(t)
 	ctx := context.Background()
+	seedUser(t, users, "user-1")
 
 	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
 		_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
@@ -177,7 +200,7 @@ func TestTriggerSOS_RejectsWithZeroContacts(t *testing.T) {
 	ctx := context.Background()
 	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
 
-	_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
 	if !errors.Is(err, apperror.ErrInvalidInput) {
 		t.Fatalf("TriggerSOS() with zero contacts: code = %v, want %v", err, apperror.ErrInvalidInput)
 	}
@@ -210,7 +233,7 @@ func TestTriggerSOS_RejectsInvalidLatLng(t *testing.T) {
 				t.Fatalf("seed error: %v", err)
 			}
 
-			_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: tc.lat, Longitude: tc.lng})
+			_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(tc.lat), Longitude: coord(tc.lng)})
 			if !errors.Is(err, apperror.ErrInvalidInput) {
 				t.Errorf("TriggerSOS() with lat=%v lng=%v: code = %v, want %v", tc.lat, tc.lng, err, apperror.ErrInvalidInput)
 			}
@@ -231,7 +254,7 @@ func TestTriggerSOS_SendsToAllContacts(t *testing.T) {
 
 	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
 		CallerTrustLevel: safetyFeatureTrustFloor,
-		UserID:           "user-1", ContextMessage: "at the coffee meetup", Latitude: 6.9271, Longitude: 79.8612,
+		UserID:           "user-1", ContextMessage: "at the coffee meetup", Latitude: coord(6.9271), Longitude: coord(79.8612),
 	})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
@@ -242,8 +265,17 @@ func TestTriggerSOS_SendsToAllContacts(t *testing.T) {
 	if len(smsSender.alertsSent) != 1 || !strings.Contains(smsSender.alertsSent[0].message, "Ada Lovelace") {
 		t.Errorf("sms alerts = %+v, want one containing the caller's name", smsSender.alertsSent)
 	}
-	if len(emailSender.alertsSent) != 1 || !strings.Contains(emailSender.alertsSent[0].message, "at the coffee meetup") {
-		t.Errorf("email alerts = %+v, want one containing the context message", emailSender.alertsSent)
+	// The client's context string must NOT reach the alert (#80): SOS text
+	// is a fixed template, so it cannot carry words or links of the
+	// sender's choosing. The string is still kept in the audit row.
+	if len(emailSender.alertsSent) != 1 {
+		t.Fatalf("email alerts = %d, want 1", len(emailSender.alertsSent))
+	}
+	if strings.Contains(emailSender.alertsSent[0].message, "at the coffee meetup") {
+		t.Errorf("email alert = %q carries the client's context string", emailSender.alertsSent[0].message)
+	}
+	if len(sosEvents.events) == 1 && sosEvents.events[0].ContextMessage != "at the coffee meetup" {
+		t.Errorf("audit row context = %q, want the string the client sent", sosEvents.events[0].ContextMessage)
 	}
 	if len(sosEvents.events) != 1 || sosEvents.events[0].ContactsNotified != 2 {
 		t.Errorf("sos_events = %+v, want one row with contacts_notified=2", sosEvents.events)
@@ -266,7 +298,7 @@ func TestTriggerSOS_TolerantOfPartialSendFailure(t *testing.T) {
 	}
 	smsSender.alertErr = errAlertSendFailed
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 1, Longitude: 2})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(1), Longitude: coord(2)})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v, want the call to succeed despite the SMS failure", err)
 	}
@@ -294,7 +326,7 @@ func TestTriggerSOS_RetriesTransientSendFailure(t *testing.T) {
 	smsSender.alertErr = errAlertSendFailed
 	smsSender.alertFailFirstN = 1 // fails once (transient), succeeds on the retry
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}
@@ -324,7 +356,7 @@ func TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel(t *testi
 	}
 	smsSender.alertErr = errAlertSendFailed // sustained failure (alertFailFirstN left at 0)
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}
@@ -365,7 +397,7 @@ func TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures(t *testing.T) {
 	}
 	smsSender.alertErr = errAlertSendFailed // sustained failure
 
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
 	if err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}
@@ -401,7 +433,7 @@ func TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel(t *te
 	smsSender.alertErr = errAlertSendFailed
 
 	// First call trips the SMS breaker open (5 recorded failures).
-	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: 6.9, Longitude: 79.8}); err != nil {
+	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)}); err != nil {
 		t.Fatalf("first TriggerSOS() error: %v", err)
 	}
 	callsAfterFirst := smsSender.alertCallCount
@@ -413,7 +445,7 @@ func TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel(t *te
 	// known to be down, so it must fail fast — zero further real sends, and
 	// no retry delay paid.
 	start := time.Now()
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-2", Latitude: 6.9, Longitude: 79.8})
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-2", Latitude: coord(6.9), Longitude: coord(79.8)})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("second TriggerSOS() error: %v", err)
@@ -447,7 +479,7 @@ func TestTriggerSOS_WritesSosEventRow(t *testing.T) {
 
 	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
 		CallerTrustLevel: safetyFeatureTrustFloor,
-		UserID:           "user-1", ContextMessage: "help", Latitude: 6.9, Longitude: 79.8,
+		UserID:           "user-1", ContextMessage: "help", Latitude: coord(6.9), Longitude: coord(79.8),
 	}); err != nil {
 		t.Fatalf("TriggerSOS() error: %v", err)
 	}
@@ -456,7 +488,9 @@ func TestTriggerSOS_WritesSosEventRow(t *testing.T) {
 		t.Fatalf("sos_events rows = %d, want 1", len(sosEvents.events))
 	}
 	got := sosEvents.events[0]
-	if got.UserID != "user-1" || got.ContextMessage != "help" || got.Latitude != 6.9 || got.Longitude != 79.8 {
+	if got.UserID != "user-1" || got.ContextMessage != "help" ||
+		got.Latitude == nil || *got.Latitude != 6.9 ||
+		got.Longitude == nil || *got.Longitude != 79.8 {
 		t.Errorf("sos event = %+v, want the trigger's own values recorded", got)
 	}
 }
@@ -571,5 +605,72 @@ func TestMeetupShareMessage_StatesAWindowAndPlaceNotLiveTracking(t *testing.T) {
 	// Not an emergency: it must not borrow SOS's alarm wording.
 	if strings.Contains(msg, "may need help") {
 		t.Errorf("message %q reads as an SOS alert", msg)
+	}
+}
+
+// coord is the address of a coordinate literal. TriggerSOSRequest's
+// latitude and longitude became *float64 in #78 so that "no fix" is
+// representable; the tests that do supply a location say so with this.
+func coord(v float64) *float64 { return &v }
+
+// TestTriggerSOS_SendsWithoutALocationFix is tracker #78 (review finding
+// N-D2): the feature whose whole point is to work when things have gone
+// wrong must not be blocked by being indoors.
+//
+// Before this, latitude and longitude were required proto3 doubles with
+// no presence, so the client refused to send at all until it had a GPS
+// fix — a safety feature that failed exactly when it was most needed.
+// The alert now goes out and says the location is unavailable, which a
+// contact can act on; silence is not.
+func TestTriggerSOS_SendsWithoutALocationFix(t *testing.T) {
+	svc, users, trustedContacts, sosEvents, _, smsSender := newTestServiceForSOS(t)
+	ctx := context.Background()
+	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
+	if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
+		CallerTrustLevel: safetyFeatureTrustFloor,
+		UserID:           "user-1", Name: "Mum", PhoneNumber: "+94770000001",
+	}); err != nil {
+		t.Fatalf("AddTrustedContact: %v", err)
+	}
+	_ = trustedContacts
+	// Mum agrees through her link; only then can the alert reach her (#80).
+	confirmFromInvite(t, svc, smsSender)
+	smsSender.alertsSent = nil
+
+	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
+		CallerTrustLevel: safetyFeatureTrustFloor,
+		UserID:           "user-1",
+		ContextMessage:   "at the coffee meetup",
+		// No fix: indoors, permission denied, or the read timed out.
+		Latitude:  nil,
+		Longitude: nil,
+	})
+	if err != nil {
+		t.Fatalf("TriggerSOS without a location: %v", err)
+	}
+	if resp.ContactsNotified != 1 {
+		t.Fatalf("contacts notified = %d, want 1 — the alert was suppressed for want of a fix",
+			resp.ContactsNotified)
+	}
+
+	if len(smsSender.alertsSent) != 1 {
+		t.Fatalf("sms alerts = %d, want 1", len(smsSender.alertsSent))
+	}
+	body := smsSender.alertsSent[0].message
+	if !strings.Contains(body, "Location unavailable") {
+		t.Errorf("alert body = %q, want it to say the location is unavailable", body)
+	}
+	if strings.Contains(body, "maps.google.com") {
+		t.Errorf("alert body = %q, want no maps link when there is no location", body)
+	}
+
+	// 0,0 is a real place in the Gulf of Guinea; the audit trail must not
+	// claim it.
+	if len(sosEvents.events) != 1 {
+		t.Fatalf("sos_events rows = %d, want 1", len(sosEvents.events))
+	}
+	if sosEvents.events[0].Latitude != nil || sosEvents.events[0].Longitude != nil {
+		t.Errorf("recorded location = (%v, %v), want NULL",
+			sosEvents.events[0].Latitude, sosEvents.events[0].Longitude)
 	}
 }

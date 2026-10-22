@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
-import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
@@ -17,6 +18,8 @@ import 'support/fake_geolocator_platform.dart';
 import 'support/fake_meetup_service.dart';
 import 'support/scripted_meetup_service.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
+
+import 'support/app_icon_finder.dart';
 
 /// Resolves immediately to a fixed [AuthSessionState] instead of reading
 /// secure storage — HomePage only ever reads `.profile` off this provider,
@@ -93,7 +96,7 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.byIcon(Icons.notifications_none_rounded));
+      await tester.tap(findAppIcon(AppIcons.bell));
       await tester.pumpAndSettle();
 
       expect(find.byType(NotificationsPage), findsOneWidget);
@@ -429,14 +432,27 @@ void main() {
         final button = tester.widget<PrimaryButton>(
           find.byKey(const Key('hostYourOwnMeetup')),
         );
-        // The visual identity that was hand-rolled before is carried over
-        // verbatim — this swap must not be visible as a colour or size
-        // change, only as a change in how the button behaves under a finger.
-        expect(button.label, 'HOST YOUR OWN MEETUP');
-        expect(button.icon, Icons.add_circle_outline);
+        expect(button.label, 'Host your own meetup');
+        expect(button.icon, AppIcons.plusCircle);
         expect(button.height, 50);
-        expect(button.fillColor, AppPalette.verified);
-        expect(button.foregroundColor, Colors.black);
+
+        // CHANGED BY UI REVIEW #1. This used to assert the green fill that
+        // the hand-rolled button had, which is exactly what made the app
+        // show two different primary colours for the same action (green
+        // here, candyBlue on Events and Profile) and gave
+        // AppPalette.verified a second, unrelated job as an action colour.
+        //
+        // Asserting NULL rather than candyBlue on purpose: the point is that
+        // this button no longer makes a colour decision of its own, so if
+        // the shared default ever changes this one follows instead of
+        // drifting away from it again.
+        expect(
+          button.fillColor,
+          isNull,
+          reason:
+              'the Home CTA must take the shared primary fill, not pick its own',
+        );
+        expect(button.foregroundColor, isNull);
       },
     );
   });

@@ -7,6 +7,7 @@ import 'package:professional_connections_platform/core/services/meetup_service.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_dialog.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 
 /// Host-only Cancel/Close actions, extracted so this logic exists once
@@ -56,43 +57,12 @@ class HostMeetupControls extends ConsumerWidget {
   bool get _canCancel => meetup.isHostedByMe && _isOpenOrFull;
 
   Future<void> _confirmClose(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppPalette.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'CLOSE MEETUP',
-          style: TextStyle(
-            color: AppPalette.textPrimary,
-            letterSpacing: 1.6,
-            fontSize: 15,
-          ),
-        ),
-        content: Text(
-          'Mark this meetup as done?',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'CANCEL',
-              style: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              'CONFIRM',
-              style: TextStyle(
-                color: AppPalette.candyBlue,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Close meetup',
+      message: 'Mark this meetup as done?',
+      confirmLabel: 'Close meetup',
+      cancelLabel: 'Back',
     );
     if (confirmed != true) return;
     if (!context.mounted) return;
@@ -130,8 +100,8 @@ class HostMeetupControls extends ConsumerWidget {
   }
 
   Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
-    final reason = await showDialog<String>(
-      context: context,
+    final reason = await showAppDialog<String>(
+      context,
       builder: (context) => const _CancelReasonDialog(),
     );
     if (reason == null) return;
@@ -192,14 +162,14 @@ class HostMeetupControls extends ConsumerWidget {
     if (!canClose && !canCancel) return const SizedBox.shrink();
 
     final closeButton = SecondaryButton(
-      label: 'CLOSE MEETUP',
+      label: 'Close meetup',
       height: 44,
       color: AppPalette.textPrimary,
       onPressed: () => _confirmClose(context, ref),
     );
 
     final cancelButton = SecondaryButton(
-      label: 'CANCEL MEETUP',
+      label: 'Cancel meetup',
       height: 44,
       color: AppPalette.danger,
       borderColor: AppPalette.danger,
@@ -255,67 +225,22 @@ class _CancelReasonDialogState extends State<_CancelReasonDialog> {
   @override
   Widget build(BuildContext context) {
     final trimmed = _controller.text.trim();
-    return AlertDialog(
-      backgroundColor: AppPalette.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: Text(
-        'CANCEL MEETUP',
-        style: TextStyle(
-          color: AppPalette.danger,
-          letterSpacing: 1.6,
-          fontSize: 15,
-        ),
+    return AppConfirmDialog(
+      title: 'Cancel meetup',
+      message:
+          'Cancel this meetup? This cannot be undone. Accepted '
+          'participants will be notified with your reason.',
+      confirmLabel: 'Cancel meetup',
+      cancelLabel: 'Back',
+      danger: true,
+      // Null while the reason is empty, which leaves the confirm button
+      // dimmed and inert rather than looking live and doing nothing.
+      onConfirm: trimmed.isEmpty ? null : () => Navigator.pop(context, trimmed),
+      child: DialogTextArea(
+        controller: _controller,
+        hint: 'Reason for cancelling (required)',
+        onChanged: (_) => setState(() {}),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Cancel this meetup? This can\'t be undone. Accepted '
-            'participants will be notified with your reason.',
-            style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _controller,
-            onChanged: (_) => setState(() {}),
-            maxLines: 3,
-            style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Reason for cancelling (required)',
-              hintStyle: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(
-            'BACK',
-            style: TextStyle(color: AppPalette.textSecondary),
-          ),
-        ),
-        TextButton(
-          onPressed: trimmed.isEmpty
-              ? null
-              : () => Navigator.pop(context, trimmed),
-          child: Text(
-            'CANCEL MEETUP',
-            // Greyed while disabled. `onPressed: null` already blocks the
-            // tap, but an explicit `style:` overrides TextButton's own
-            // disabled colour, so the control looked fully active while
-            // doing nothing — the user reads that as a broken button, not
-            // as "fill the field in".
-            style: TextStyle(
-              color: trimmed.isEmpty
-                  ? AppPalette.textSecondary.withValues(alpha: 0.45)
-                  : AppPalette.danger,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

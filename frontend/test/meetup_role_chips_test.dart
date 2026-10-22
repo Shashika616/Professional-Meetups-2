@@ -36,7 +36,7 @@ void main() {
   group('present tense (default)', () {
     testWidgets('host', (tester) async {
       await _pump(tester, MeetupRoleChips(meetup: _meetup(isHostedByMe: true)));
-      expect(find.text("YOU'RE HOSTING"), findsOneWidget);
+      expect(find.text("You're hosting"), findsOneWidget);
     });
 
     testWidgets('accepted viewer, with the host named', (tester) async {
@@ -46,8 +46,8 @@ void main() {
           meetup: _meetup(myRequestStatus: MeetupRequestStatus.accepted),
         ),
       );
-      expect(find.text('HOST · ADA LOVELACE'), findsOneWidget);
-      expect(find.text("YOU'RE IN"), findsOneWidget);
+      expect(find.text('Host · Ada Lovelace'), findsOneWidget);
+      expect(find.text("You're in"), findsOneWidget);
     });
 
     testWidgets('pending viewer', (tester) async {
@@ -58,8 +58,8 @@ void main() {
           showHostName: false,
         ),
       );
-      expect(find.text('HOST'), findsOneWidget);
-      expect(find.text('REQUEST PENDING'), findsOneWidget);
+      expect(find.text('Host'), findsOneWidget);
+      expect(find.text('Request pending'), findsOneWidget);
     });
   });
 
@@ -69,8 +69,8 @@ void main() {
         tester,
         MeetupRoleChips(meetup: _meetup(isHostedByMe: true), concluded: true),
       );
-      expect(find.text('YOU HOSTED'), findsOneWidget);
-      expect(find.text("YOU'RE HOSTING"), findsNothing);
+      expect(find.text('You hosted'), findsOneWidget);
+      expect(find.text("You're hosting"), findsNothing);
     });
 
     testWidgets('accepted viewer, with and without the host named', (
@@ -83,8 +83,8 @@ void main() {
           concluded: true,
         ),
       );
-      expect(find.text('HOSTED BY ADA LOVELACE'), findsOneWidget);
-      expect(find.text('YOU JOINED'), findsOneWidget);
+      expect(find.text('Hosted by Ada Lovelace'), findsOneWidget);
+      expect(find.text('You joined'), findsOneWidget);
 
       await _pump(
         tester,
@@ -94,7 +94,7 @@ void main() {
           showHostName: false,
         ),
       );
-      expect(find.text('HOSTED'), findsOneWidget);
+      expect(find.text('Hosted'), findsOneWidget);
     });
 
     testWidgets('a request nobody answered', (tester) async {
@@ -105,8 +105,8 @@ void main() {
           concluded: true,
         ),
       );
-      expect(find.text('NOT ANSWERED'), findsOneWidget);
-      expect(find.text('REQUEST PENDING'), findsNothing);
+      expect(find.text('Not answered'), findsOneWidget);
+      expect(find.text('Request pending'), findsNothing);
     });
 
     testWidgets('rejected and withdrawn already read as past', (tester) async {
@@ -118,8 +118,8 @@ void main() {
         ),
       );
       // Never "rejected" where the requester reads it.
-      expect(find.text('NOT THIS TIME'), findsOneWidget);
-      expect(find.textContaining('REJECTED'), findsNothing);
+      expect(find.text('Not this time'), findsOneWidget);
+      expect(find.textContaining('Rejected'), findsNothing);
     });
   });
 }

@@ -1,0 +1,4 @@
+
+# `go build ./cmd/monolith` from this directory writes the binary here.
+/monolith
+/gateway

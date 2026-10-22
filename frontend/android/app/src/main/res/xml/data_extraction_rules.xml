@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Nothing leaves the device (tracker #94, finding N-D4).
+
+  Android 12 (API 31) split backup into two channels and this file is the
+  only way to speak to both: cloud-backup (Google Drive) and device-to-
+  device transfer. android:allowBackup="false" alone no longer covers D2D
+  on those versions, so a session this app deliberately keeps in secure
+  storage could still be carried to a new handset with the rest of the
+  app's private data.
+
+  Both channels are refused outright rather than filtered. There is
+  nothing in this app's private storage worth restoring — the session is
+  re-established by signing in, and everything else is server state — so
+  an allowlist would be a list of things to get wrong later.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

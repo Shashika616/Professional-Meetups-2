@@ -67,7 +67,7 @@ void main() {
     );
     expect(find.byType(Image), findsOneWidget);
     expect(find.text('You look offline'), findsOneWidget);
-    await tester.tap(find.text('TRY AGAIN'));
+    await tester.tap(find.text('Try again'));
     expect(retried, 1);
   });
 

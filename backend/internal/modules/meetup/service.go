@@ -72,6 +72,14 @@ const sweepBatchSize = 100
 // used to be a week ago is worse than not notifying them.
 const nearbyNotifyStaleness = 24 * time.Hour
 
+// nearbyNotifyMaxPerHostPerDay bounds how many of one host's meetups a day
+// push to everyone nearby (#89). Each fan-out can reach 500 people, and the
+// gateway allows a host 10 creations an hour, so without this one account
+// could push well over 100,000 notifications a day at the neighbourhood.
+// Meetups past the cap are still created and still appear in browse; they
+// just do not ring anyone's phone.
+const nearbyNotifyMaxPerHostPerDay = 3
+
 // Service is the meetup module's entire surface — one method per
 // MeetupService RPC in the source's proto contract, in the same order, plus
 // the two lifecycle sweeps the poller drives. Every method that takes a
@@ -823,6 +831,19 @@ type NearbyNotifyPayload struct {
 // sent. The bus itself also logs and swallows a handler error, so a failure
 // here can never fail the CreateMeetup that triggered it.
 func (s *service) HandleMeetupCreated(ctx context.Context, payload NearbyNotifyPayload) error {
+	// Counted after the insert, so the meetup that triggered this is
+	// included: the first nearbyNotifyMaxPerHostPerDay notify, later ones
+	// do not.
+	created, err := s.meetups.CountCreatedByHostSince(ctx, payload.HostUserID, time.Now().Add(-24*time.Hour))
+	if err != nil {
+		return fmt.Errorf("meetup: count host's meetups for nearby notify: %w", err)
+	}
+	if created > nearbyNotifyMaxPerHostPerDay {
+		s.logger.Info("nearby-notify skipped: host over daily fan-out cap",
+			"meetup_id", payload.MeetupID, "created_today", created)
+		return nil
+	}
+
 	nearby, err := s.userLocations.ListWithinRadius(ctx, payload.LocationLat, payload.LocationLng, time.Now().Add(-nearbyNotifyStaleness))
 	if err != nil {
 		return fmt.Errorf("meetup: list nearby users for meetup-created notify: %w", err)

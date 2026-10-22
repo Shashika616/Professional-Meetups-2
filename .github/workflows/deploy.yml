@@ -1,0 +1,116 @@
+name: Deploy backend
+
+# Builds both images, applies migrations, and deploys a new Cloud Run
+# revision (#95) — the same steps as docs/deploy/gcp-runbook.md §3, from a
+# clean checkout instead of a laptop.
+#
+# MANUAL ONLY. Nothing deploys because a commit landed: someone presses Run
+# workflow (Actions tab) and names the revision. Authentication is Workload
+# Identity Federation through the same pool as the backup, whose condition
+# admits only this repository's main branch, so a pull request or a fork
+# cannot run this with Google credentials.
+#
+# Order is the safety: migrations run BEFORE the deploy. The monolith refuses
+# to start against a schema older than it was built for (cmd/monolith/
+# schema_check.go), so if migrations did not land the new revision never
+# becomes ready and Cloud Run keeps serving the previous one.
+#
+# Needs the SUPABASE_DIRECT_URL secret the backup already uses (the session
+# pooler URL, runbook §9) and the deployer service account (runbook §11).
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Revision suffix, e.g. r38 (must be new)"
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  REGION: asia-south1
+  SERVICE: meetups-backend
+  REPO: asia-south1-docker.pkg.dev/project-285b9289-549d-4fef-92c/meetups-repo
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/740861671089/locations/global/workloadIdentityPools/github/providers/github
+  GCP_DEPLOY_SERVICE_ACCOUNT: deployer@project-285b9289-549d-4fef-92c.iam.gserviceaccount.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Check the revision name
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          if ! [[ "$REVISION" =~ ^r[0-9]+$ ]]; then
+            echo "revision must look like r38, got '$REVISION'" >&2
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build and push images
+        working-directory: backend
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker buildx build --platform linux/amd64 -f cmd/monolith/Dockerfile -t "$REPO/monolith:$REVISION" --push .
+          docker buildx build --platform linux/amd64 -f cmd/gateway/Dockerfile  -t "$REPO/gateway:$REVISION"  --push .
+
+      # Over the session pooler: golang-migrate holds a session advisory lock,
+      # which the 6543 transaction pooler cannot keep, and the free tier's
+      # direct host is IPv6-only, which these runners do not have.
+      - name: Apply migrations
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "SUPABASE_DIRECT_URL is not set (runbook §9)" >&2
+            exit 1
+          fi
+          docker run --rm -v "$PWD/backend/migrations:/migrations:ro" \
+            migrate/migrate:v4.17.1 -path=/migrations -database "$DATABASE_URL" up
+
+      - name: Deploy the revision
+        working-directory: backend
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          sed -E -i \
+            -e "s|name: ${SERVICE}-r[0-9]+|name: ${SERVICE}-${REVISION}|" \
+            -e "s|(meetups-repo/gateway):r[0-9]+|\1:${REVISION}|" \
+            -e "s|(meetups-repo/monolith):r[0-9]+|\1:${REVISION}|" \
+            service.yaml
+          grep -E "name: ${SERVICE}-${REVISION}|gateway:${REVISION}|monolith:${REVISION}" service.yaml
+          gcloud run services replace service.yaml --region "$REGION"
+
+      - name: Confirm it is serving
+        run: |
+          url="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.url)')"
+          serving="$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(status.traffic[0].revisionName)')"
+          echo "serving: $serving"
+          [ "$serving" = "${SERVICE}-${{ inputs.revision }}" ] || { echo "traffic is not on the new revision" >&2; exit 1; }
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$url/readyz"; then echo; exit 0; fi
+            sleep 6
+          done
+          echo "/readyz did not answer" >&2
+          exit 1

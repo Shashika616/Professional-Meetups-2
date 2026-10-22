@@ -5,8 +5,9 @@ import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/cafe_scene.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/app_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/signing_in_overlay.dart';
@@ -159,7 +160,7 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
         // Same fix as profile_setup_screen.dart's identical Scaffold shape.
         extendBodyBehindAppBar: true,
         appBar: AppBar(
-          title: const Text('SIGN IN'),
+          title: const Text('Sign in'),
           // The email step is a page within the page: back returns to the
           // method choice rather than leaving sign-in altogether. The first
           // and last steps keep the default back (pop to LandingPage).
@@ -235,8 +236,8 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
           opacity: _ageConfirmed ? 1 : 0.45,
           child: SecondaryButton(
             key: const Key('continueWithEmail'),
-            label: 'CONTINUE WITH EMAIL',
-            icon: Icons.mail_outline_rounded,
+            label: 'Continue with email',
+            icon: AppIcons.mail,
             height: 52,
             color: AppPalette.candyBlue,
             borderColor: AppPalette.candyBlue.withValues(alpha: 0.55),
@@ -272,15 +273,15 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
           ),
         ),
         const SizedBox(height: 24),
-        GlassTextField(
+        AppTextField(
           controller: _emailController,
-          icon: Icons.alternate_email_rounded,
+          icon: AppIcons.atSign,
           hint: 'you@example.com',
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 16),
         PrimaryButton(
-          label: 'SEND CODE',
+          label: 'Send code',
           onPressed: _emailLooksValid ? _showOtp : null,
         ),
       ],

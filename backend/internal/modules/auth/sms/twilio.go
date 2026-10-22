@@ -3,6 +3,7 @@ package sms
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -90,9 +91,55 @@ func (s *TwilioSmsSender) send(ctx context.Context, to, body string) error {
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusCreated {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("sms: twilio send failed with status %d: %s", resp.StatusCode, respBody)
+		// # THE BODY IS NOT IN THE ERROR (tracker #92, finding N-A9)
+		//
+		// Twilio's error payloads echo the request back, which for this
+		// endpoint means the destination phone number and, on some
+		// failures, the message body — an OTP, or an SOS alert naming a
+		// real person and their location. This error gets wrapped and
+		// logged by every caller, so putting that payload in it writes
+		// exactly the data this service is careful about everywhere else
+		// into logs that a wider set of people can read.
+		//
+		// The status code and Twilio's own error CODE (a stable integer,
+		// no personal data) are what anyone debugging actually needs:
+		// 21211 is a malformed number, 21608 an unverified trial
+		// recipient, 20003 bad credentials. The body adds nothing but
+		// exposure.
+		//
+		// Still drained before closing, so the connection is reusable.
+		code := twilioErrorCode(resp.Body)
+		if code != 0 {
+			return fmt.Errorf("sms: twilio send failed with status %d (twilio error %d)",
+				resp.StatusCode, code)
+		}
+		return fmt.Errorf("sms: twilio send failed with status %d", resp.StatusCode)
 	}
 
 	return nil
+}
+
+// twilioErrorCode pulls the numeric `code` out of a Twilio error payload
+// and discards everything else (#92).
+//
+// Twilio replies to a failure with JSON that echoes the request,
+// including the destination number and often the message body. Only the
+// code crosses back out of this function: it identifies the failure
+// precisely (21211 malformed number, 21608 unverified trial recipient,
+// 20003 bad credentials) and contains nothing about the recipient.
+//
+// Returns 0 when the payload is missing, unreadable or not JSON, which
+// the caller reports as a bare status code. A redaction helper that
+// errored would be worse than one that says less.
+func twilioErrorCode(body io.Reader) int {
+	var payload struct {
+		Code int `json:"code"`
+	}
+	// Bounded: an error payload is small, and this must not become a way
+	// to make the service read an unbounded response.
+	limited := io.LimitReader(body, 8<<10)
+	if err := json.NewDecoder(limited).Decode(&payload); err != nil {
+		return 0
+	}
+	return payload.Code
 }

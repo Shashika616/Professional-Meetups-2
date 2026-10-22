@@ -174,10 +174,12 @@ in practice.
 Same shape as the phone list - comma-separated, scoped to purpose and target - 
 with two differences that matter:
 
-- **Purpose** - all four email purposes (`email_signup`, `email_login`,
+- **Purpose** - four email purposes (`email_signup`, `email_login`,
   `personal_email`, `corporate_email`). Wider than the phone list, because
   the point is to exercise the whole ladder, including the Level 2 and
-  Level 3 climbs.
+  Level 3 climbs. **Not `account_claim`** (added 2026-10-08, ADR-009):
+  `isEmailOTPPurpose` does not list it, so `123456` is rejected for it. See
+  "The account-claim purpose is NOT covered by this allowlist" below.
 - **The allowlist match is case-insensitive and trimmed**, unlike the phone
   list's byte-exact rule. An email domain is case-insensitive (RFC 4343) and
   the client sends whatever the user typed, so an allowlist entry of
@@ -199,6 +201,13 @@ with two differences that matter:
   in as `john.smith@example.com`. Worth fixing properly one day (a functional
   index or a normalize-on-write), but that is a schema and uniqueness decision,
   not a testing one.
+
+  **Update 2026-10-08: fixed in the working tree, not yet deployed.** Migration
+  0017 replaces the case-sensitive unique index with one on
+  `lower(personal_email)`, and `GetUserByPersonalEmail` now compares `lower()`
+  on both sides (ADR-009). Once 0017 and the matching code are live, mixed-case
+  test addresses will find their user. **Until then, everything above still
+  describes the deployed service: use lowercase.**
 
 #### The risk is genuinely larger than the phone list's, and differently shaped
 
@@ -318,3 +327,86 @@ AVD; reinstall and sign in again (l3.a@meetups.test, code 123456).
 when one is set (Features > Location in the Simulator menu, or
 `xcrun simctl location booted set 6.9271,79.8612`), and that setting does not
 always survive a reboot; accuracy does not come into it.
+
+## The account-claim purpose is NOT covered by this allowlist (2026-10-08)
+
+ADR-009 added a fifth email OTP purpose, `account_claim`, used when a Google,
+Apple or LinkedIn sign-in presents a verified address that already has an
+account. Two parts of the test-address machinery treat it differently, and the
+combination is a trap:
+
+- **Verify side:** `isEmailOTPPurpose` (`auth/otp.go`) is an explicit list, on
+  purpose ("a new email purpose must be added here on purpose, not
+  inherited"), and `account_claim` is not on it. `TEST_OTP_BYPASS_EMAILS`
+  therefore does **not** make `123456` work for a claim.
+- **Send side:** the skip in `startTargetKeyedVerification` tests only
+  `testOTPBypassEmails()[normalizeBypassEmail(target)]`, not the purpose. An
+  allowlisted `.test` address therefore gets **no email** for a claim.
+
+Net effect for a test user on an allowlisted address: no mail arrives, and
+`123456` is refused. The only code that works is the real one, which is in the
+WARN log line `TEST_OTP_BYPASS_EMAILS: real email send skipped ...`
+(`gcloud run services logs read`, field `code`).
+
+Whether to close this is an open decision (ADR-009, Open question 2). To make
+claims testable with `123456`, add `VerificationPurposeAccountClaim` to the
+`switch` in `isEmailOTPPurpose`, and update the Purpose bullet above. Leaving
+it as is keeps the claim ceremony closer to production behaviour.
+
+## What the bypass log lines actually print
+
+`TESTING-NOTES` above says the startup WARN logs only a **count** of
+allowlisted numbers. That is true of the startup line. The **per-send** skip
+lines are different: `verification.go` and `service.go` log the **target and
+the real generated code** at WARN whenever a send is skipped for an allowlisted
+phone or email (by design, so the real code stays recoverable if `123456`
+stops working). The comment in `cmd/monolith/main.go` saying the numbers are
+never logged applies to startup only. Anyone with log access can therefore read
+allowlisted numbers and live codes; treat the Cloud Run log as sensitive.
+
+## Seeded test users: production status is not recorded (2026-10-08)
+
+`backend/testdata/seed-test-users.sql` creates the eight `@meetups.test`
+accounts. It is applied by hand, not by a migration, and **no document records
+whether it has been applied to the production Supabase database.** If it has,
+then on the live service:
+
+- anyone who knows an address from the list can sign in as that account with
+  `123456` (accepted risk, see "The risk is genuinely larger" above);
+- the seeded L3 accounts host and hold meetups that appear in real users'
+  nearby feeds, and creating or cancelling them triggers real push fan-out to
+  real devices;
+- they count toward any "how many users" or ratings number you read off the
+  database.
+
+**To record here once known:** applied to production yes/no, on what date, and
+whether the meetups they hold should be cancelled before launch.
+
+## Other test-only things that ship in a release build
+
+- `debugLaunchUrlOverride` in `frontend/lib/features/meetups/location_view_page.dart` is a
+  test hook compiled into release builds. Harmless (it only affects which map
+  URL is opened), but it is test code in the shipped app.
+- `frontend/ios/Runner/Runner.entitlements` has `aps-environment` set to
+  `development`. Push to TestFlight and App Store builds needs `production`.
+  Deliberately deferred while the Apple Developer Program is pending.
+
+## Before any public release: checklist
+
+1. `ALLOW_TEST_OTP_BYPASS` is unset or `false` everywhere it can be set
+   (`backend/service.yaml`, the Cloud Run revision, any CI environment).
+   `grep ALLOW_TEST_OTP_BYPASS` the deployed manifest, do not trust memory.
+2. `TEST_OTP_BYPASS_PHONES` and `TEST_OTP_BYPASS_EMAILS` are removed from
+   `backend/service.yaml` and the service is redeployed with a bumped revision
+   suffix. Confirm the startup log no longer prints either WARN.
+3. The eight seeded `@meetups.test` users are deleted from production (or you
+   have decided, in writing, to keep them), along with any meetups they host.
+4. `aps-environment` is `production` for the release configuration.
+5. `debugLaunchUrlOverride` is removed or compiled out.
+6. A real Twilio sender (Alphanumeric Sender ID registered for Sri Lanka) and a
+   real email sender are configured, so `LoggingSmsSender`/`LoggingEmailSender`
+   (which print live codes at Info) are not the production fallback.
+7. Android release builds are signed with a release keystore, not the debug key
+   (`docs/security-review-2026-10-01.md`, V-5).
+8. Re-read this file top to bottom and delete every section whose mechanism no
+   longer exists.

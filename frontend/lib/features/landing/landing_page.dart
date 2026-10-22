@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/landing_collage.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
@@ -119,8 +120,8 @@ class _LandingPageState extends State<LandingPage> {
                   _wordmark(),
                   const SizedBox(height: 26),
                   PrimaryButton(
-                    label: 'GET STARTED',
-                    icon: Icons.arrow_forward_rounded,
+                    label: 'Get started',
+                    icon: AppIcons.arrowRight,
                     onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
@@ -140,19 +141,19 @@ class _LandingPageState extends State<LandingPage> {
                       TextSpan(
                         children: [
                           TextSpan(
-                            text: 'ALREADY A MEMBER?   ',
+                            text: 'Already a member?   ',
                             style: TextStyle(
                               fontSize: 10,
-                              letterSpacing: 1.6,
+                              letterSpacing: 0.3,
                               fontWeight: FontWeight.w700,
                               color: AppPalette.textSecondary,
                             ),
                           ),
                           TextSpan(
-                            text: 'SIGN IN',
+                            text: 'Sign in',
                             style: TextStyle(
                               fontSize: 10,
-                              letterSpacing: 1.6,
+                              letterSpacing: 0.3,
                               fontWeight: FontWeight.w900,
                               color: AppPalette.candyBlue,
                             ),

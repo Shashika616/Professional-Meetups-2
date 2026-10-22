@@ -133,29 +133,45 @@ class _Box extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = active
-        ? AppPalette.candyBlue
-        : (filled
-              ? AppPalette.candyBlue.withValues(alpha: 0.4)
-              : AppPalette.hairline);
-
+    // The screen set draws the active box as a 2px accent RING around an
+    // otherwise unchanged box, and every other box with no outline at all
+    // — the card fill alone is the box. The previous version outlined all
+    // six, which made a half-typed code read as six empty slots with one
+    // of them slightly bluer; the ring is unmistakable by comparison.
+    //
+    // A filled box carries no outline either: the digit in it is already
+    // the strongest possible "this one is done".
     return AnimatedContainer(
       duration: const Duration(milliseconds: 140),
       curve: Curves.easeOut,
       width: 46,
-      height: 56,
+      height: 54,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: AppPalette.card,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: borderColor, width: active ? 2 : 1),
+        borderRadius: BorderRadius.circular(14),
+        border: active
+            ? Border.all(color: AppPalette.candyBlue, width: 2)
+            : null,
+        boxShadow: AppPalette.isLight
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
       ),
       child: Text(
         digit,
         style: TextStyle(
           color: AppPalette.textPrimary,
-          fontSize: 22,
+          fontSize: 21,
           fontWeight: FontWeight.w700,
+          // Six boxes of digits that each shift width as they are typed
+          // is the most visible possible place for proportional figures.
+          fontFeatures: const [FontFeature.tabularFigures()],
         ),
       ),
     );

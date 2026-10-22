@@ -42,6 +42,11 @@ Future<void> showParticipantReviewSheet(
 }) {
   return showAppSheet<void>(
     context,
+    // Near full height. This sheet is a task — a score, then optional
+    // traits, then done — and at its content height it opened as a half
+    // panel that then grew as traits appeared, which moved the buttons
+    // under the user's thumb while they were using them.
+    minHeightFactor: 0.92,
     builder: (_) => _ParticipantReviewSheet(
       participant: participant,
       isHost: isHost,
@@ -109,7 +114,7 @@ class _ParticipantReviewSheetState extends State<_ParticipantReviewSheet> {
   Widget build(BuildContext context) {
     final scored = _score != null;
     return AppSheet(
-      title: widget.isHost ? 'RATE THE HOST' : 'RATE THIS PERSON',
+      title: widget.isHost ? 'Rate the host' : 'Rate this person',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -175,7 +180,7 @@ class _ParticipantReviewSheetState extends State<_ParticipantReviewSheet> {
           ),
           const SizedBox(height: 22),
           PrimaryButton(
-            label: 'DONE',
+            label: 'Done',
             // Nothing to confirm until there is a score: traits are
             // optional, a score is not.
             onPressed: scored ? () => Navigator.pop(context) : null,

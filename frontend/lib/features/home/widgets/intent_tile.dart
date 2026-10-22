@@ -2,18 +2,29 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
-/// One intent on the Schedule flow's "What kind of meetup?" step: a scene
-/// from the landing collage as backdrop, a scrim so type stays legible over
-/// any of those images, the intent's icon in a chip and its name. Same
-/// corner radius and hairline as the meetup cards,
-/// so the picker reads as part of the same system rather than a different
-/// app.
+/// One intent on the Schedule flow's "What kind of meetup?" step: the
+/// scene photo on top, the intent's name on the card surface under it.
 ///
-/// Locked intents stay visible: the image is desaturated and dimmed, a
-/// lock replaces the icon chip, and the required level is named on the
-/// card — the point of showing a lock is telling the user what would open
-/// it, and the tap still routes to the unlock page (schedule_flow.dart).
+/// # THE NAME CAME OUT FROM ON TOP OF THE PHOTO
+///
+/// This used to lay the icon and the name over the image, with a scrim to
+/// keep them legible. The scrim had to be heavy — 86% black at the
+/// bottom — because the assets are bright illustrations, and at that
+/// weight the lower third of every picture was a black band. So the tile
+/// was paying for a photo it was then hiding, and "Mentorship" over a
+/// white whiteboard was still the worst-read label on the screen.
+///
+/// The screen set puts the name in a row UNDER the picture, which is also
+/// what makes it readable without covering anything: image, then label.
+/// The photo is now fully visible and the type is on the card surface at
+/// full contrast.
+///
+/// Locked intents stay visible: the image is desaturated, a lock sits in
+/// the label row, and the required level is named there — the point of
+/// showing a lock is telling the user what would open it, and the tap
+/// still routes to the unlock page (schedule_flow.dart).
 ///
 /// The image decodes at the card's own pixel width (cacheWidth), never at
 /// the asset's native size — six of these render at once.
@@ -31,11 +42,45 @@ class IntentTile extends StatelessWidget {
   final bool locked;
   final VoidCallback onTap;
 
-  static const _radius = 14.0;
+  static const _radius = 18.0;
+
+  /// Greyscale, for a locked intent. Luminance weights, so the result
+  /// reads as a dimmed photograph rather than a flat average.
+  static const List<double> _grey = <double>[
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0.2126,
+    0.7152,
+    0.0722,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+  ];
 
   @override
   Widget build(BuildContext context) {
     final accent = AppPalette.brandGreen;
+
+    // The note on the right of the label row: what is stopping this one
+    // being picked, or nothing at all.
+    final String? note = !locked
+        ? null
+        : intent.hostingDeferred
+        ? 'Coming soon'
+        : 'Level ${intent.requiredTrustLevelToHost}';
+
     return Semantics(
       button: true,
       selected: selected,
@@ -55,6 +100,7 @@ class IntentTile extends StatelessWidget {
               duration: const Duration(milliseconds: 160),
               curve: Curves.easeOut,
               decoration: BoxDecoration(
+                color: AppPalette.card,
                 borderRadius: BorderRadius.circular(_radius),
                 border: Border.all(
                   color: selected ? accent : AppPalette.hairline,
@@ -63,125 +109,80 @@ class IntentTile extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(_radius - 1),
-                child: Stack(
-                  fit: StackFit.expand,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Locked → greyscale via a saturation-zero matrix, then
-                    // dimmed by the scrim below. Colour filter on the image
-                    // alone, not the text, so the lock copy stays crisp.
-                    ColorFiltered(
-                      colorFilter: locked
-                          ? const ColorFilter.matrix(<double>[
-                              0.2126,
-                              0.7152,
-                              0.0722,
-                              0,
-                              0,
-                              0.2126,
-                              0.7152,
-                              0.0722,
-                              0,
-                              0,
-                              0.2126,
-                              0.7152,
-                              0.0722,
-                              0,
-                              0,
-                              0,
-                              0,
-                              0,
-                              1,
-                              0,
-                            ])
-                          : const ColorFilter.mode(
-                              Colors.transparent,
-                              BlendMode.dst,
-                            ),
-                      child: Image.asset(
-                        intent.imageAsset,
-                        fit: BoxFit.cover,
-                        cacheWidth: cacheWidth > 0 ? cacheWidth : null,
-                        excludeFromSemantics: true,
-                        errorBuilder: (_, _, _) =>
-                            ColoredBox(color: AppPalette.card),
-                      ),
-                    ),
-                    // Scrim: the scene stays clear over the top ~45%, then
-                    // shades firmly toward the bottom so the icon and type
-                    // sit on a dark ground rather than on whatever the
-                    // picture happens to be there. Locked cards are dimmed
-                    // throughout. Always dark regardless of theme — the
-                    // text over it is always light.
-                    DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: locked ? 0.55 : 0.0),
-                            Colors.black.withValues(
-                              alpha: locked ? 0.70 : 0.35,
-                            ),
-                            Colors.black.withValues(
-                              alpha: locked ? 0.88 : 0.86,
-                            ),
-                          ],
-                          stops: const [0.30, 0.55, 1.0],
+                    // Expanded, not a fixed aspect ratio: the GRID sets
+                    // the cell height (childAspectRatio in schedule_flow),
+                    // so the picture takes whatever is left after the
+                    // label row. Claiming a ratio of its own overflowed
+                    // every tile by a couple of pixels.
+                    Expanded(
+                      child: ColorFiltered(
+                        colorFilter: locked
+                            ? const ColorFilter.matrix(_grey)
+                            : const ColorFilter.mode(
+                                Colors.transparent,
+                                BlendMode.dst,
+                              ),
+                        child: Opacity(
+                          opacity: locked ? 0.55 : 1,
+                          child: Image.asset(
+                            intent.imageAsset,
+                            fit: BoxFit.cover,
+                            cacheWidth: cacheWidth > 0 ? cacheWidth : null,
+                            excludeFromSemantics: true,
+                            errorBuilder: (_, _, _) =>
+                                ColoredBox(color: AppPalette.raised),
+                          ),
                         ),
                       ),
                     ),
                     Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      padding: const EdgeInsets.fromLTRB(11, 9, 11, 10),
+                      child: Row(
                         children: [
-                          Align(
-                            alignment: Alignment.topRight,
-                            child: locked
-                                ? _LockPill(
-                                    text: intent.hostingDeferred
-                                        ? 'COMING SOON'
-                                        : 'LEVEL ${intent.requiredTrustLevelToHost}',
-                                  )
-                                : selected
-                                ? Icon(
-                                    Icons.check_circle_rounded,
-                                    size: 20,
-                                    color: accent,
-                                  )
-                                : const SizedBox(height: 20),
-                          ),
-                          const Spacer(),
-                          _IconChip(
-                            icon: locked ? Icons.lock_outline : intent.icon,
-                            locked: locked,
-                          ),
-                          const SizedBox(height: 8),
-                          // Full card width, and SCALED rather than
-                          // clipped: a half-width card on a narrow phone
-                          // cannot always fit "NETWORKING" at 14px with
-                          // tracking, and "NETWOR..." is not a name. The
-                          // widest label is what sets the size; the rest
-                          // render at the natural size unchanged.
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                intent.label,
-                                maxLines: 1,
-                                softWrap: false,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.2,
-                                  height: 1.1,
-                                ),
+                          // No lock glyph. The screen set's locked tile is
+                          // the dimmed photo and the reason, nothing else —
+                          // and on a half-width card the glyph was taking
+                          // the room that turned "Ride share" into
+                          // "Ride sh…". The greyed picture already says
+                          // this one is not available; the note says why.
+                          if (selected) ...[
+                            AppIcon(
+                              AppIcons.checkCircle,
+                              size: 14,
+                              color: accent,
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          Flexible(
+                            child: Text(
+                              intent.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: locked
+                                    ? AppPalette.textSecondary
+                                    : AppPalette.textPrimary,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
+                          if (note != null) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              note,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: AppPalette.textTertiary,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -190,58 +191,6 @@ class IntentTile extends StatelessWidget {
               ),
             );
           },
-        ),
-      ),
-    );
-  }
-}
-
-class _IconChip extends StatelessWidget {
-  const _IconChip({required this.icon, required this.locked});
-
-  final IconData icon;
-  final bool locked;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 30,
-      height: 30,
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
-      ),
-      child: Icon(
-        icon,
-        size: 16,
-        color: Colors.white.withValues(alpha: locked ? 0.7 : 1.0),
-      ),
-    );
-  }
-}
-
-class _LockPill extends StatelessWidget {
-  const _LockPill({required this.text});
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
-      ),
-      child: Text(
-        text,
-        style: TextStyle(
-          color: Colors.white.withValues(alpha: 0.85),
-          fontSize: 9.5,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1.1,
         ),
       ),
     );

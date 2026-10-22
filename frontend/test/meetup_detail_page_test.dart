@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 
 import 'package:professional_connections_platform/core/models/intent_type.dart';
@@ -19,6 +22,8 @@ import 'package:professional_connections_platform/features/meetups/review/experi
 
 import 'package:professional_connections_platform/features/meetups/widgets/other_meetups_nearby.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
+
+import 'support/app_icon_finder.dart';
 import 'support/fake_geolocator_platform.dart';
 import 'support/scripted_meetup_service.dart';
 
@@ -100,7 +105,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CLOSE MEETUP'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
     });
 
     testWidgets('hidden for the host before the window has started', (
@@ -123,7 +128,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CLOSE MEETUP'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
     });
 
     testWidgets('shown for the host once the window has started, behind a '
@@ -146,23 +151,28 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CLOSE MEETUP'), findsOneWidget);
+      expect(find.text('Close meetup'), findsOneWidget);
 
-      await tester.tap(find.text('CLOSE MEETUP'));
+      // The meetup's photo header made this page taller than the 600px
+      // test viewport, so the host controls now sit below the fold
+      // here; on a phone they are comfortably on screen.
+      await tester.ensureVisible(find.text('Close meetup'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Close meetup'));
       await tester.pumpAndSettle();
 
       // Dialog is up — the API must not have been called yet.
       expect(find.text('Mark this meetup as done?'), findsOneWidget);
       expect(service.lastCloseMeetupId, isNull);
 
-      await tester.tap(find.text('CONFIRM'));
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Close meetup'));
       await tester.pumpAndSettle();
 
       expect(service.lastCloseMeetupId, 'meetup-1');
       expect(find.text('Meetup closed.'), findsOneWidget);
       // The button reflects the server's authoritative response (status
       // now COMPLETED) rather than a locally-guessed state.
-      expect(find.text('CLOSE MEETUP'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
 
       // Let the toast's hold timer + dismiss animation fully finish so
       // its OverlayEntry doesn't outlive this test's widget tree — the
@@ -188,23 +198,22 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('CLOSE MEETUP'));
+        // The meetup's photo header made this page taller than the 600px
+        // test viewport, so the host controls now sit below the fold
+        // here; on a phone they are comfortably on screen.
+        await tester.ensureVisible(find.text('Close meetup'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Close meetup'));
         await tester.pumpAndSettle();
 
-        // The dialog's own dismiss button is also labelled CANCEL — this
-        // targets it specifically among the two 'CANCEL' texts now on
-        // screen (the dialog's, and the CANCEL MEETUP button underneath).
-        await tester.tap(
-          find.descendant(
-            of: find.byType(AlertDialog),
-            matching: find.text('CANCEL'),
-          ),
-        );
+        // The dialog's own way out, which is the only SecondaryButton on
+        // screen while it is open.
+        await tester.tap(find.widgetWithText(SecondaryButton, 'Back'));
         await tester.pumpAndSettle();
 
         expect(service.lastCloseMeetupId, isNull);
         // Still showing the un-actioned button — nothing changed.
-        expect(find.text('CLOSE MEETUP'), findsOneWidget);
+        expect(find.text('Close meetup'), findsOneWidget);
       },
     );
   });
@@ -226,7 +235,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CANCEL MEETUP'), findsNothing);
+      expect(find.text('Cancel meetup'), findsNothing);
     });
 
     testWidgets('shown for the host, behind a confirmation dialog, and calls '
@@ -260,9 +269,14 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CANCEL MEETUP'), findsOneWidget);
+      expect(find.text('Cancel meetup'), findsOneWidget);
 
-      await tester.tap(find.text('CANCEL MEETUP'));
+      // The meetup's photo header made this page taller than the 600px
+      // test viewport, so the host controls now sit below the fold
+      // here; on a phone they are comfortably on screen.
+      await tester.ensureVisible(find.text('Cancel meetup'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel meetup'));
       await tester.pumpAndSettle();
 
       expect(find.textContaining('Cancel this meetup?'), findsOneWidget);
@@ -273,14 +287,14 @@ void main() {
 
       // The dialog's title also reads "CANCEL MEETUP" — only the
       // action is a TextButton, so that's what disambiguates it.
-      await tester.tap(find.widgetWithText(TextButton, 'CANCEL MEETUP'));
+      await tester.tap(find.widgetWithText(PrimaryButton, 'Cancel meetup'));
       await tester.pumpAndSettle();
 
       expect(service.lastCancelMeetupId, 'meetup-1');
       expect(service.lastCancelMeetupReason, 'Something came up');
       expect(find.text('Meetup cancelled.'), findsOneWidget);
-      expect(find.text('CANCEL MEETUP'), findsNothing);
-      expect(find.text('CLOSE MEETUP'), findsNothing);
+      expect(find.text('Cancel meetup'), findsNothing);
+      expect(find.text('Close meetup'), findsNothing);
 
       await tester.pump(const Duration(seconds: 3));
     });
@@ -317,14 +331,19 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('CANCEL MEETUP'));
+      // The meetup's photo header made this page taller than the 600px
+      // test viewport, so the host controls now sit below the fold
+      // here; on a phone they are comfortably on screen.
+      await tester.ensureVisible(find.text('Cancel meetup'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel meetup'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('BACK'));
+      await tester.tap(find.widgetWithText(SecondaryButton, 'Back'));
       await tester.pumpAndSettle();
 
       expect(service.lastCancelMeetupId, isNull);
-      expect(find.text('CANCEL MEETUP'), findsOneWidget);
+      expect(find.text('Cancel meetup'), findsOneWidget);
     });
 
     testWidgets(
@@ -345,8 +364,8 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CANCEL MEETUP'), findsOneWidget);
-        expect(find.text('CLOSE MEETUP'), findsOneWidget);
+        expect(find.text('Cancel meetup'), findsOneWidget);
+        expect(find.text('Close meetup'), findsOneWidget);
       },
     );
   });
@@ -368,8 +387,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('WITHDRAW REQUEST'), findsNothing);
-      expect(find.text('CANCEL REQUEST'), findsNothing);
+      expect(find.text('Withdraw request'), findsNothing);
+      expect(find.text('Cancel request'), findsNothing);
     });
 
     testWidgets(
@@ -406,10 +425,10 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('CANCEL REQUEST'), findsOneWidget);
-        expect(find.text('WITHDRAW REQUEST'), findsNothing);
+        expect(find.text('Cancel request'), findsOneWidget);
+        expect(find.text('Withdraw request'), findsNothing);
 
-        await tester.tap(find.text('CANCEL REQUEST'));
+        await tester.tap(find.text('Cancel request'));
         await tester.pumpAndSettle();
         expect(service.lastWithdrawRequestId, isNull); // dialog first
         // No note: the host has not acted and is not told anything.
@@ -417,13 +436,13 @@ void main() {
         expect(find.textContaining('nothing is sent to them'), findsOneWidget);
 
         // KEEP IT leaves everything as it was.
-        await tester.tap(find.text('KEEP IT'));
+        await tester.tap(find.text('Keep it'));
         await tester.pumpAndSettle();
         expect(service.lastWithdrawRequestId, isNull);
 
-        await tester.tap(find.text('CANCEL REQUEST'));
+        await tester.tap(find.text('Cancel request'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(TextButton, 'CANCEL REQUEST'));
+        await tester.tap(find.widgetWithText(PrimaryButton, 'Cancel request'));
         await tester.pumpAndSettle();
 
         expect(service.lastWithdrawRequestId, 'request-1');
@@ -466,7 +485,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('WITHDRAW REQUEST'), findsOneWidget);
+      expect(find.text('Withdraw request'), findsOneWidget);
     });
 
     testWidgets(
@@ -503,9 +522,11 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('WITHDRAW REQUEST'));
+        await tester.tap(find.text('Withdraw request'));
         await tester.pumpAndSettle();
-        await tester.tap(find.widgetWithText(TextButton, 'WITHDRAW'));
+        await tester.tap(
+          find.widgetWithText(PrimaryButton, 'Withdraw request'),
+        );
         await tester.pumpAndSettle();
 
         expect(service.lastWithdrawRequestId, 'request-1');
@@ -578,12 +599,12 @@ void main() {
         detail: upcoming(myRequestStatus: MeetupRequestStatus.rejected),
       );
 
-      expect(find.text('NOT THIS TIME'), findsOneWidget);
+      expect(find.text('Not this time'), findsOneWidget);
       expect(find.textContaining('keep their groups small'), findsOneWidget);
       expect(find.textContaining('DECLINED'), findsNothing);
-      expect(find.textContaining('REJECTED'), findsNothing);
+      expect(find.textContaining('Rejected'), findsNothing);
       expect(find.textContaining('did not accept'), findsNothing);
-      expect(find.byIcon(Icons.cancel_rounded), findsNothing);
+      expect(findAppIcon(AppIcons.xCircle), findsNothing);
     });
 
     testWidgets('other open meetups nearby are suggested, minus this one and '
@@ -606,7 +627,7 @@ void main() {
       );
 
       expect(find.byType(OtherMeetupsNearby), findsOneWidget);
-      expect(find.text('OTHERS HAPPENING SOON'), findsOneWidget);
+      expect(find.text('Others happening soon'), findsOneWidget);
       expect(find.text('Ada Lovelace'), findsOneWidget);
       expect(find.text('Barbara Liskov'), findsOneWidget);
       expect(find.text('Alan Turing'), findsNothing);
@@ -619,7 +640,7 @@ void main() {
         ),
         findsNothing,
       );
-      expect(find.text('SEE ALL NEARBY'), findsOneWidget);
+      expect(find.text('See all nearby'), findsOneWidget);
     });
 
     testWidgets('with nothing else on, the section still points forward', (
@@ -635,7 +656,7 @@ void main() {
         find.textContaining('New meetups go up every day'),
         findsOneWidget,
       );
-      expect(find.text('BROWSE MEETUPS'), findsOneWidget);
+      expect(find.text('Browse meetups'), findsOneWidget);
       expect(find.byType(LoadFailedState), findsNothing);
     });
 
@@ -695,31 +716,31 @@ void main() {
       addTearDown(tester.view.reset);
       await _pumpDetail(tester, live(isHostedByMe: true));
 
-      expect(find.text('VIEW REQUESTS'), findsOneWidget);
+      expect(find.text('View requests'), findsOneWidget);
       expect(
         find.text('See who asked to join, accept or pass'),
         findsOneWidget,
       );
       expect(
-        tester.getTopLeft(find.text('VIEW REQUESTS')).dy,
-        greaterThan(tester.getTopLeft(find.text('LOCATION')).dy),
+        tester.getTopLeft(find.text('View requests')).dy,
+        greaterThan(tester.getTopLeft(find.text('Location')).dy),
       );
 
-      await tester.tap(find.text('VIEW REQUESTS'));
+      await tester.tap(find.text('View requests'));
       await tester.pumpAndSettle();
       expect(find.byType(RequestManagementPage), findsOneWidget);
     });
 
     testWidgets('a viewer who is not the host never sees it', (tester) async {
       await _pumpDetail(tester, live());
-      expect(find.text('VIEW REQUESTS'), findsNothing);
+      expect(find.text('View requests'), findsNothing);
     });
 
     testWidgets('a finished hosted meetup has nothing left to manage', (
       tester,
     ) async {
       await _pumpDetail(tester, _endedMeetup(isHostedByMe: true));
-      expect(find.text('VIEW REQUESTS'), findsNothing);
+      expect(find.text('View requests'), findsNothing);
     });
   });
 
@@ -760,10 +781,10 @@ void main() {
       // All of this exists to help someone arrive at a meetup, and offering
       // it after the fact was the bug — a WITHDRAW REQUEST for an evening
       // that already finished.
-      expect(find.text('WITHDRAW REQUEST'), findsNothing);
-      expect(find.text('SAFETY GATE'), findsNothing);
-      expect(find.text('I UNDERSTAND'), findsNothing);
-      expect(find.text('TELL SOMEONE'), findsNothing);
+      expect(find.text('Withdraw request'), findsNothing);
+      expect(find.text('Safety gate'), findsNothing);
+      expect(find.text('I understand'), findsNothing);
+      expect(find.text('Tell someone'), findsNothing);
       expect(find.text('How did it go?'), findsNothing);
     });
 
@@ -780,7 +801,7 @@ void main() {
       expect(find.text('Colombo Fort Cafe'), findsOneWidget);
       // The two full-width outlined bars became a pair of icon tiles sharing
       // one row, so the label lost its now-redundant VIEW prefix.
-      expect(find.text('LOCATION'), findsOneWidget);
+      expect(find.text('Location'), findsOneWidget);
     });
 
     testWidgets('an unreviewed past meetup offers the review — this is what '
@@ -798,7 +819,7 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(find.text('START REVIEW'));
+      await tester.tap(find.text('Start review'));
       await tester.pumpAndSettle();
       expect(find.text('How was your experience?'), findsOneWidget);
     });
@@ -817,8 +838,8 @@ void main() {
             );
       await pumpPast(tester, service);
 
-      expect(find.text('START REVIEW'), findsOneWidget);
-      await tester.tap(find.text('START REVIEW'));
+      expect(find.text('Start review'), findsOneWidget);
+      await tester.tap(find.text('Start review'));
       await tester.pumpAndSettle();
 
       // The picture above is full-width now, so the slider can sit below a
@@ -828,8 +849,8 @@ void main() {
       final slider = tester.getRect(find.byType(ExperienceSlider));
       await tester.tapAt(Offset(slider.center.dx, slider.center.dy));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('SUBMIT'));
-      await tester.tap(find.text('SUBMIT'));
+      await tester.ensureVisible(find.text('Submit'));
+      await tester.tap(find.text('Submit'));
       await tester.pumpAndSettle();
 
       expect(service.submitReviewCallCount, 1);
@@ -866,16 +887,16 @@ void main() {
           ),
       );
 
-      expect(find.text('YOUR REVIEW'), findsOneWidget);
+      expect(find.text('Your review'), findsOneWidget);
       expect(find.text('Excellent'), findsOneWidget);
       expect(find.text('"Genuinely useful."'), findsOneWidget);
-      expect(find.text('HOW YOU RATED THEM'), findsOneWidget);
+      expect(find.text('How you rated them'), findsOneWidget);
       expect(find.text('Grace Hopper'), findsOneWidget);
       // Stored as a key; rendered as words, without shipping a second copy
       // of the server's vocabulary.
       expect(find.text('Great listener'), findsOneWidget);
       // The prompt is gone once there is nothing left to ask for.
-      expect(find.text('START REVIEW'), findsNothing);
+      expect(find.text('Start review'), findsNothing);
     });
   });
 
@@ -901,7 +922,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(find.text('SAFETY GATE'), findsNothing);
+        expect(find.text('Safety gate'), findsNothing);
         expect(find.text('CHECK IN'), findsNothing);
         // The page itself still loaded fine — Forbidden on the safety
         // fetch alone must not surface as a page-level load error.
@@ -972,20 +993,20 @@ void main() {
         await tester.pumpWidget(app(service, contacts: const [amma, friend]));
         await tester.pumpAndSettle();
 
-        await tester.ensureVisible(find.text('TELL SOMEONE'));
+        await tester.ensureVisible(find.text('Tell someone'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('TELL SOMEONE'));
+        await tester.tap(find.text('Tell someone'));
         await tester.pumpAndSettle();
 
         // Nothing selected yet — the confirm must not be usable.
         final button = tester.widget<PrimaryButton>(
-          find.widgetWithText(PrimaryButton, 'SHARE THIS MEETUP'),
+          find.widgetWithText(PrimaryButton, 'Share this meetup'),
         );
         expect(button.onPressed, isNull);
 
         await tester.tap(find.text('Amma'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('SHARE THIS MEETUP'));
+        await tester.tap(find.text('Share this meetup'));
         await tester.pumpAndSettle();
 
         expect(service.sharedContactIds, [
@@ -1004,13 +1025,13 @@ void main() {
       await tester.pumpWidget(app(service, contacts: const [amma, friend]));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('TELL SOMEONE'));
+      await tester.ensureVisible(find.text('Tell someone'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('TELL SOMEONE'));
+      await tester.tap(find.text('Tell someone'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('SELECT ALL'));
+      await tester.tap(find.text('Select all'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('SHARE THIS MEETUP'));
+      await tester.tap(find.text('Share this meetup'));
       await tester.pumpAndSettle();
 
       expect(service.sharedContactIds, containsAll(['contact-1', 'contact-2']));
@@ -1035,9 +1056,9 @@ void main() {
         // The prior share is visible without reopening anything.
         expect(find.text('Told 1 trusted contact'), findsOneWidget);
 
-        await tester.ensureVisible(find.text('TELL SOMEONE ELSE'));
+        await tester.ensureVisible(find.text('Tell someone else'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('TELL SOMEONE ELSE'));
+        await tester.tap(find.text('Tell someone else'));
         await tester.pumpAndSettle();
 
         expect(find.text('Already told'), findsOneWidget);
@@ -1046,7 +1067,7 @@ void main() {
         await tester.tap(find.text('Amma'));
         await tester.pumpAndSettle();
         final button = tester.widget<PrimaryButton>(
-          find.widgetWithText(PrimaryButton, 'SHARE THIS MEETUP'),
+          find.widgetWithText(PrimaryButton, 'Share this meetup'),
         );
         expect(button.onPressed, isNull);
       },
@@ -1064,14 +1085,14 @@ void main() {
         await tester.pumpWidget(app(service, contacts: const []));
         await tester.pumpAndSettle();
 
-        await tester.ensureVisible(find.text('TELL SOMEONE'));
+        await tester.ensureVisible(find.text('Tell someone'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('TELL SOMEONE'));
+        await tester.tap(find.text('Tell someone'));
         await tester.pumpAndSettle();
 
         expect(find.textContaining('not added anyone yet'), findsOneWidget);
 
-        await tester.tap(find.text('ADD A TRUSTED CONTACT'));
+        await tester.tap(find.text('Add a trusted contact'));
         await tester.pumpAndSettle();
 
         expect(find.byType(ManageTrustedContactsPage), findsOneWidget);
@@ -1089,13 +1110,13 @@ void main() {
       await tester.pumpWidget(app(service, contacts: const [amma]));
       await tester.pumpAndSettle();
 
-      await tester.ensureVisible(find.text('TELL SOMEONE'));
+      await tester.ensureVisible(find.text('Tell someone'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('TELL SOMEONE'));
+      await tester.tap(find.text('Tell someone'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Amma'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('SHARE THIS MEETUP'));
+      await tester.tap(find.text('Share this meetup'));
       await tester.pumpAndSettle();
 
       expect(find.text('SMS is down'), findsOneWidget);
@@ -1129,7 +1150,7 @@ void main() {
     ) async {
       await _pumpDetail(tester, _endedMeetup());
       expect(find.text('Share your thoughts about this meetup'), findsNothing);
-      expect(find.text('START REVIEW'), findsNothing);
+      expect(find.text('Start review'), findsNothing);
     });
 
     testWidgets('hidden for a viewer whose request is only PENDING', (
@@ -1180,7 +1201,7 @@ void main() {
   group('a finished meetup cannot be joined', () {
     testWidgets('no join action once the window has ended', (tester) async {
       await _pumpDetail(tester, _endedMeetup());
-      expect(find.text('I\'M INTERESTED'), findsNothing);
+      expect(find.text('I\'m interested'), findsNothing);
     });
   });
 
@@ -1208,7 +1229,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CANCELLED BY THE HOST'), findsOneWidget);
+      expect(find.text('Cancelled by the host'), findsOneWidget);
       expect(
         find.text('\u201CVenue closed unexpectedly.\u201D'),
         findsOneWidget,
@@ -1234,7 +1255,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('CANCELLED BY THE HOST'), findsOneWidget);
+      expect(find.text('Cancelled by the host'), findsOneWidget);
       expect(find.textContaining('Share your thoughts'), findsNothing);
     });
   });

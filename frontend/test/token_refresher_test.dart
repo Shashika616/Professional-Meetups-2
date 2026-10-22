@@ -9,17 +9,49 @@ import 'package:professional_connections_platform/core/storage/session_storage.d
 
 import 'support/fake_secure_storage_platform.dart';
 
-AuthSession _sessionExpiringIn(Duration delta, {String accessToken = 'a1'}) {
+AuthSession _sessionExpiringIn(
+  Duration delta, {
+  String accessToken = 'a1',
+  // Only the reuse-detection tests care which refresh token a session
+  // carries; everything else keeps the original single value.
+  String refreshToken = 'refresh-1',
+}) {
   return AuthSession(
     userId: 'user-1',
     accessToken: accessToken,
-    refreshToken: 'refresh-1',
+    refreshToken: refreshToken,
     trustLevel: 1,
     isNewUser: false,
     accessTokenExpiresAt: DateTime.now().add(delta),
     fullName: 'Ada Lovelace',
     profilePhotoUrl: '',
   );
+}
+
+/// Serves exactly one STALE read once [armed], then behaves normally.
+///
+/// This is the interleaving `_doRefresh` guards against, and it cannot be
+/// produced through one real storage: the caller has to be holding a
+/// session that storage itself has already replaced. A read that was
+/// SERVED before the refresh's save and RETURNED after the in-flight
+/// future was cleared is exactly that, and this reproduces it exactly once
+/// and deterministically.
+class _StaleReadOnceStorage extends SecureSessionStorage {
+  _StaleReadOnceStorage({required this.stale})
+    : super(storage: const FlutterSecureStorage());
+
+  final AuthSession stale;
+  bool armed = false;
+  bool _served = false;
+
+  @override
+  Future<AuthSession?> loadSession() async {
+    if (armed && !_served) {
+      _served = true;
+      return stale;
+    }
+    return super.loadSession();
+  }
 }
 
 void main() {
@@ -165,6 +197,137 @@ void main() {
     );
 
     expect(await storage.loadSession(), isNull);
+  });
+
+  // V-17a. A network failure is not evidence the session is dead. It used to
+  // clear storage exactly like a rejected token, so one slow refresh — with
+  // a 15 s request deadline, an ordinary moment on a train — signed the user
+  // out.
+  for (final (name, failure) in [
+    ('offline', const AuthNetworkException('no connection')),
+    ('timed out', const AuthNetworkException('timed out')),
+  ]) {
+    test(
+      'keeps the stored session when the refresh fails because $name',
+      () async {
+        final stale = _sessionExpiringIn(const Duration(minutes: -1));
+        await storage.saveSession(stale);
+
+        final refresher = TokenRefresher(
+          storage: storage,
+          refreshSession: (token) async => throw failure,
+        );
+
+        await expectLater(
+          refresher.getValidSession(),
+          throwsA(isA<AuthNetworkException>()),
+        );
+
+        final kept = await storage.loadSession();
+        expect(
+          kept,
+          isNotNull,
+          reason: 'a network failure signed the user out',
+        );
+        expect(kept!.refreshToken, stale.refreshToken);
+      },
+    );
+  }
+
+  test(
+    'the kept session refreshes normally once the network is back',
+    () async {
+      final stale = _sessionExpiringIn(const Duration(minutes: -1));
+      await storage.saveSession(stale);
+
+      var online = false;
+      final refresher = TokenRefresher(
+        storage: storage,
+        refreshSession: (token) async {
+          if (!online) throw const AuthNetworkException('no connection');
+          return _sessionExpiringIn(
+            const Duration(minutes: 15),
+            accessToken: 'a2',
+            refreshToken: 'refresh-2',
+          );
+        },
+      );
+
+      await expectLater(refresher.getValidSession(), throwsA(anything));
+      online = true;
+      final session = await refresher.getValidSession();
+      expect(session?.accessToken, 'a2');
+    },
+  );
+
+  // The hole single-flighting alone leaves. See _doRefresh's comment.
+  group('a caller holding a token another refresh already spent', () {
+    test('returns the session that refresh wrote, instead of being logged '
+        'out by the backend\'s own reuse detection', () async {
+      final stale = _sessionExpiringIn(const Duration(minutes: -1));
+      final staleStorage = _StaleReadOnceStorage(stale: stale);
+      await staleStorage.saveSession(stale);
+
+      var refreshCalls = 0;
+      final refresher = TokenRefresher(
+        storage: staleStorage,
+        refreshSession: (token) async {
+          refreshCalls++;
+          if (token != 'refresh-1') {
+            throw StateError('unexpected token $token');
+          }
+          // The second presentation of the same refresh token is a replay
+          // as far as the backend is concerned, and it says so.
+          if (refreshCalls > 1) {
+            throw const SessionExpiredException('refresh token reused');
+          }
+          return _sessionExpiringIn(
+            const Duration(minutes: 15),
+            accessToken: 'a2',
+            refreshToken: 'refresh-2',
+          );
+        },
+      );
+
+      // The refresh that wins: storage now holds refresh-2.
+      expect((await refresher.getValidSession())?.accessToken, 'a2');
+
+      // The straggler, still holding refresh-1 and seeing no refresh in
+      // flight. Its own call is rejected — and it must still come back
+      // with the good session rather than wiping it.
+      staleStorage.armed = true;
+      final late = await refresher.getValidSession();
+
+      expect(refreshCalls, 2, reason: 'the straggler did spend its token');
+      expect(late?.accessToken, 'a2');
+      expect(
+        (await staleStorage.loadSession())?.accessToken,
+        'a2',
+        reason: 'a valid session must not be cleared out from under the app',
+      );
+    });
+
+    test('a genuinely rejected token is still cleared and rethrown — the '
+        'recovery must not swallow a real expiry', () async {
+      final stale = _sessionExpiringIn(const Duration(minutes: -1));
+      final staleStorage = _StaleReadOnceStorage(stale: stale);
+      await staleStorage.saveSession(stale);
+
+      final refresher = TokenRefresher(
+        storage: staleStorage,
+        refreshSession: (token) async =>
+            throw const SessionExpiredException('refresh token rejected'),
+      );
+
+      // Armed, so the re-read also sees the SAME refresh token the failed
+      // call used: nothing else succeeded, so there is nothing to recover.
+      staleStorage.armed = true;
+      await expectLater(
+        refresher.getValidSession(),
+        throwsA(isA<SessionExpiredException>()),
+      );
+      expect(await staleStorage.loadSession(), isNull);
+    });
   });
 
   test('getValidAccessToken() returns just the access token string', () async {

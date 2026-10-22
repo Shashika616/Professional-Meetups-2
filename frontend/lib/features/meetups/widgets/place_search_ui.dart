@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 
 /// The pieces of the map step's place search that are the same on both
@@ -126,8 +127,8 @@ class _PlaceSearchBarState extends State<PlaceSearchBar> {
         key: const Key('placeSearchClear'),
         onPressed: _clear,
         tooltip: 'Clear',
-        icon: Icon(
-          Icons.cancel_rounded,
+        icon: AppIcon(
+          AppIcons.xCircle,
           size: 18,
           color: AppPalette.textSecondary,
         ),
@@ -152,7 +153,7 @@ class _PlaceSearchBarState extends State<PlaceSearchBar> {
       ),
       child: Row(
         children: [
-          Icon(Icons.search_rounded, size: 20, color: accent),
+          AppIcon(AppIcons.search, size: 20, color: accent),
           const SizedBox(width: 10),
           Expanded(
             child: TextField(
@@ -184,15 +185,32 @@ class _PlaceSearchBarState extends State<PlaceSearchBar> {
 /// The suggestions under the search bar. Solid, not translucent: over a map
 /// the rows must stay legible whatever terrain is behind them. Capped at
 /// about five rows and scrolling within itself beyond that.
+///
+/// # IT OPENS BEFORE THERE IS ANYTHING IN IT
+///
+/// This used to exist only once results had arrived. The geocoders behind
+/// it take seconds to answer — four and more, measured against the live
+/// service — so typing produced an empty map and no sign that anything
+/// was happening, and a search that genuinely matched nothing was
+/// indistinguishable from a search that was still running, or from a
+/// field that had not registered the keystrokes at all. The panel now
+/// opens as soon as there is a query to answer and says which of the
+/// three it is.
 class PlaceSuggestionsDropdown extends StatelessWidget {
   const PlaceSuggestionsDropdown({
     super.key,
     required this.suggestions,
     required this.onSelect,
+    this.searching = false,
   });
 
   final List<PlaceSuggestion> suggestions;
   final void Function(int index) onSelect;
+
+  /// A lookup is in flight. With results already on screen they stay
+  /// there under a thin progress line, so the list does not blank out
+  /// between keystrokes; with none, the panel says it is looking.
+  final bool searching;
 
   static const _maxVisibleRows = 5;
   static const _rowHeight = 60.0;
@@ -208,19 +226,95 @@ class PlaceSuggestionsDropdown extends StatelessWidget {
         side: BorderSide(color: AppPalette.hairline),
       ),
       clipBehavior: Clip.antiAlias,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxHeight: _maxVisibleRows * _rowHeight,
-        ),
-        child: ListView.separated(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          shrinkWrap: true,
-          itemCount: suggestions.length,
-          separatorBuilder: (_, _) =>
-              Divider(height: 1, indent: 60, color: AppPalette.hairline),
-          itemBuilder: (context, index) =>
-              _SuggestionRow(suggestions[index], onTap: () => onSelect(index)),
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // A 2px line along the top edge while a lookup runs: visible
+          // whether or not the list under it has anything in it yet, and
+          // it costs no height when it is gone.
+          SizedBox(
+            height: 2,
+            child: searching
+                ? LinearProgressIndicator(
+                    minHeight: 2,
+                    color: AppPalette.candyBlue,
+                    backgroundColor: AppPalette.candyBlue.withValues(
+                      alpha: 0.15,
+                    ),
+                  )
+                : null,
+          ),
+          if (suggestions.isEmpty)
+            _StatusRow(
+              searching ? 'Looking for places…' : 'No places found',
+              hint: searching
+                  ? null
+                  : 'Try a venue name, a street, or an area.',
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxHeight: _maxVisibleRows * _rowHeight,
+              ),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                shrinkWrap: true,
+                itemCount: suggestions.length,
+                separatorBuilder: (_, _) =>
+                    Divider(height: 1, indent: 60, color: AppPalette.hairline),
+                itemBuilder: (context, index) => _SuggestionRow(
+                  suggestions[index],
+                  onTap: () => onSelect(index),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The panel with no rows in it: looking, or nothing found.
+class _StatusRow extends StatelessWidget {
+  const _StatusRow(this.title, {this.hint});
+
+  final String title;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+      child: Row(
+        children: [
+          AppIcon(AppIcons.search, size: 17, color: AppPalette.textSecondary),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (hint != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    hint!,
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -246,7 +340,7 @@ class _SuggestionRow extends StatelessWidget {
           shape: BoxShape.circle,
           color: accent.withValues(alpha: 0.14),
         ),
-        child: Icon(Icons.place_rounded, size: 17, color: accent),
+        child: AppIcon(AppIcons.pin, size: 17, color: accent),
       ),
       // One rich line rather than a title and a subtitle: the name carries
       // the weight, the address follows in the secondary colour, and the
@@ -297,8 +391,8 @@ class UseCurrentLocationButton extends StatelessWidget {
   Widget build(BuildContext context) {
     if (busy) return const _FindingYouButton();
     return SecondaryButton(
-      label: 'USE MY CURRENT LOCATION',
-      icon: Icons.my_location_rounded,
+      label: 'Use my current location',
+      icon: AppIcons.locate,
       height: 44,
       color: AppPalette.candyBlue,
       borderColor: AppPalette.candyBlue.withValues(alpha: 0.6),
@@ -368,13 +462,13 @@ class _FindingYouButtonState extends State<_FindingYouButton>
                         backgroundColor: color.withValues(alpha: 0.18),
                       ),
                     ),
-                    Icon(Icons.my_location_rounded, size: 11, color: color),
+                    AppIcon(AppIcons.locate, size: 11, color: color),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
               Text(
-                'FINDING YOU',
+                'Finding you',
                 maxLines: 1,
                 style: TextStyle(
                   color: color.withValues(alpha: breath),
@@ -428,11 +522,11 @@ Future<Position?> resolveCurrentLocationForMap(BuildContext context) async {
     if (!context.mounted) return null;
     final settingsAction = switch (error.reason) {
       LocationUnavailableReason.permissionDenied => SnackBarAction(
-        label: 'SETTINGS',
+        label: 'Settings',
         onPressed: Geolocator.openAppSettings,
       ),
       LocationUnavailableReason.servicesDisabled => SnackBarAction(
-        label: 'SETTINGS',
+        label: 'Settings',
         onPressed: Geolocator.openLocationSettings,
       ),
       _ => null,

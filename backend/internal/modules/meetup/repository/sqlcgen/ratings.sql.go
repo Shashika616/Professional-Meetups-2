@@ -327,3 +327,37 @@ func (q *Queries) ListRatableParticipants(ctx context.Context, arg ListRatablePa
 	}
 	return items, nil
 }
+
+const lockUserRatingAggregate = `-- name: LockUserRatingAggregate :exec
+SELECT pg_advisory_xact_lock(2, hashtext($1::text))
+`
+
+// Serialises everyone rating ONE person, so the aggregate each rater
+// computes includes every rating committed before it (tracker #86, review
+// finding N-B4).
+//
+// Without it, two people rating the same participant at the same time each
+// INSERT their own row and then each run ComputeUserRatingAggregate inside
+// their own transaction. Neither sees the other's uncommitted row, so both
+// compute N+1 when the truth after both commits is N+2, and both publish
+// that count as rating-updated. The auth module's consumer is guarded on
+// OccurredAt, so the LATER event wins — and it carries the wrong number.
+// The cache then disagrees with the ratings table until something else
+// happens to that user.
+//
+// Taken as the first statement of the transaction that will insert and
+// then compute, so the second rater queues behind the first and reads a
+// state that includes it. Transaction-scoped: released at commit or
+// rollback, no row and no constraint involved.
+//
+// The two-argument form puts this in a different lock space from
+// LockUserSchedule's single-argument hashtext(user_id) — Postgres keeps
+// (int, int) keys and bigint keys separate — so a person being rated and
+// the same person scheduling cannot block each other. 2 is this module's
+// rating namespace; hashtext folds the UUID into int4. A hash collision
+// between two different users costs a brief false serialisation and
+// nothing else.
+func (q *Queries) LockUserRatingAggregate(ctx context.Context, ratedUserID string) error {
+	_, err := q.db.Exec(ctx, lockUserRatingAggregate, ratedUserID)
+	return err
+}

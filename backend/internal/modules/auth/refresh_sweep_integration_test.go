@@ -188,3 +188,220 @@ func remainingHashes(t *testing.T, pool *pgxpool.Pool, userID string) map[string
 	}
 	return out
 }
+
+// A rotation chain must be deletable. This is the bug the Cloud Scheduler
+// tick surfaced on 2026-10-22, the first time anything reported the sweep's
+// return value instead of logging it:
+//
+//	repository: delete expired refresh tokens: ERROR: update or delete on
+//	table "refresh_tokens" violates foreign key constraint
+//	"refresh_tokens_replaced_by_fkey"
+//
+// `replaced_by` is a self-reference with no ON DELETE action, and rotation
+// points the OLD row at the NEW one. Deleting an arbitrary batch therefore
+// failed whenever it contained a referenced row without its referrer — in
+// production, on every single run, so the table had never been swept at all.
+//
+// Nothing in the old test caught it because every row it seeds is
+// unreferenced: a chain is the one shape that triggers the constraint.
+func TestRefreshTokenSweep_DeletesAWholeRotationChain_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	session := h.signUpByEmail(t, "sweep-chain@example.com")
+	userID := session.UserID
+
+	// Three dead rows linked oldest -> newest, the shape rotation leaves
+	// behind: oldest.replaced_by = middle, middle.replaced_by = newest.
+	// All three are long expired, so all three are eligible.
+	expired := time.Now().Add(-auth.RefreshTokenRetention - time.Hour)
+	insert := func(label string) string {
+		t.Helper()
+		var id string
+		err := h.pool.QueryRow(ctx, `
+			INSERT INTO auth.refresh_tokens (user_id, token_hash, expires_at)
+			VALUES ($1, $2, $3) RETURNING id`,
+			userID, "chain-"+label, expired).Scan(&id)
+		if err != nil {
+			t.Fatalf("insert %s: %v", label, err)
+		}
+		return id
+	}
+	link := func(from, to string) {
+		t.Helper()
+		if _, err := h.pool.Exec(ctx,
+			`UPDATE auth.refresh_tokens SET replaced_by = $2 WHERE id = $1`,
+			from, to); err != nil {
+			t.Fatalf("link: %v", err)
+		}
+	}
+
+	newest := insert("newest")
+	middle := insert("middle")
+	oldest := insert("oldest")
+	link(middle, newest)
+	link(oldest, middle)
+
+	// Before the fix this returns the FK error and deletes nothing.
+	deleted, err := h.svc.SweepExpiredRefreshTokens(ctx)
+	if err != nil {
+		t.Fatalf("SweepExpiredRefreshTokens: %v\n"+
+			"A rotation chain must be deletable. The DELETE has to take "+
+			"each chain from its oldest end, because the FK forbids "+
+			"removing a row another row still points at.", err)
+	}
+	if deleted < 3 {
+		t.Errorf("deleted %d rows, want at least the 3 chained ones.\n"+
+			"One pass peels one layer, so the caller must loop until a "+
+			"pass deletes nothing rather than stopping on a short batch.",
+			deleted)
+	}
+
+	for _, tc := range []struct{ label, id string }{
+		{"oldest", oldest}, {"middle", middle}, {"newest", newest},
+	} {
+		var n int
+		if err := h.pool.QueryRow(ctx,
+			`SELECT count(*) FROM auth.refresh_tokens WHERE id = $1`,
+			tc.id).Scan(&n); err != nil {
+			t.Fatalf("count %s: %v", tc.label, err)
+		}
+		if n != 0 {
+			t.Errorf("%s row survived the sweep", tc.label)
+		}
+	}
+
+	// The live token from signup must be untouched: it is not expired, so
+	// no amount of chain-unwinding may reach it.
+	var live int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM auth.refresh_tokens
+		 WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now()`,
+		userID).Scan(&live); err != nil {
+		t.Fatalf("count live: %v", err)
+	}
+	if live != 1 {
+		t.Errorf("%d live tokens after the sweep, want 1", live)
+	}
+}
+
+// The actual production failure, 2026-10-22: a LIVE row pointing at a DEAD
+// one.
+//
+// Rotation sets old.replaced_by = new but does NOT revoke the old row, so a
+// referrer can outlive what it points at: the replacement expires while the
+// referrer is still unexpired and unrevoked. Deleting the referenced row
+// then leaves a dangling pointer, and Postgres refuses:
+//
+//	ERROR: update or delete on table "refresh_tokens" violates foreign key
+//	constraint "refresh_tokens_replaced_by_fkey"
+//
+// 17 rows in production were in exactly this state, which is why the sweep
+// failed on every run and the table had never been swept at all.
+//
+// Note what does NOT reproduce it: a chain where every row is eligible.
+// Postgres checks the FK at end of statement, so a single DELETE that
+// removes the whole chain is accepted. The violation needs a SURVIVOR
+// holding the pointer.
+func TestRefreshTokenSweep_SkipsADeadRowALiveTokenStillPointsAt_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	session := h.signUpByEmail(t, "sweep-live-referrer@example.com")
+	userID := session.UserID
+
+	// The dead replacement: expired well past the retention window, so the
+	// sweep considers it eligible.
+	var deadID string
+	if err := h.pool.QueryRow(ctx, `
+		INSERT INTO auth.refresh_tokens (user_id, token_hash, expires_at)
+		VALUES ($1, 'live-referrer-dead', $2) RETURNING id`,
+		userID, time.Now().Add(-auth.RefreshTokenRetention-time.Hour),
+	).Scan(&deadID); err != nil {
+		t.Fatalf("insert dead replacement: %v", err)
+	}
+
+	// The live referrer: not revoked, not expired, pointing at the dead row.
+	var liveID string
+	if err := h.pool.QueryRow(ctx, `
+		INSERT INTO auth.refresh_tokens (user_id, token_hash, expires_at, replaced_by)
+		VALUES ($1, 'live-referrer', $2, $3) RETURNING id`,
+		userID, time.Now().Add(30*24*time.Hour), deadID,
+	).Scan(&liveID); err != nil {
+		t.Fatalf("insert live referrer: %v", err)
+	}
+
+	// Before the fix this returns the foreign-key error and deletes nothing
+	// — including every unrelated eligible row in the same batch.
+	if _, err := h.svc.SweepExpiredRefreshTokens(ctx); err != nil {
+		t.Fatalf("SweepExpiredRefreshTokens: %v\n"+
+			"A dead row that a surviving row still points at must be "+
+			"SKIPPED, not deleted. One such row must not fail the whole "+
+			"sweep.", err)
+	}
+
+	// The dead row has to stay: the FK requires it while the pointer lives.
+	// It becomes deletable on a later sweep, once the referrer is eligible.
+	var deadLeft, liveLeft int
+	if err := h.pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE id = $1), count(*) FILTER (WHERE id = $2)
+		FROM auth.refresh_tokens WHERE id IN ($1, $2)`,
+		deadID, liveID).Scan(&deadLeft, &liveLeft); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if deadLeft != 1 {
+		t.Error("the referenced row was deleted; the pointer is now dangling")
+	}
+	if liveLeft != 1 {
+		t.Error("the LIVE token was deleted — this signs a user out for no reason")
+	}
+}
+
+// One unreachable row must not block the rest of the sweep. Before the fix
+// the FK error aborted the whole DELETE, so a single stuck pair kept every
+// other eligible row in the table forever.
+func TestRefreshTokenSweep_StillClearsOtherRowsAroundAStuckPair_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+
+	session := h.signUpByEmail(t, "sweep-around-stuck@example.com")
+	userID := session.UserID
+	expired := time.Now().Add(-auth.RefreshTokenRetention - time.Hour)
+
+	var deadID string
+	if err := h.pool.QueryRow(ctx, `
+		INSERT INTO auth.refresh_tokens (user_id, token_hash, expires_at)
+		VALUES ($1, 'stuck-dead', $2) RETURNING id`,
+		userID, expired).Scan(&deadID); err != nil {
+		t.Fatalf("insert stuck row: %v", err)
+	}
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO auth.refresh_tokens (user_id, token_hash, expires_at, replaced_by)
+		VALUES ($1, 'stuck-live-referrer', $2, $3)`,
+		userID, time.Now().Add(30*24*time.Hour), deadID); err != nil {
+		t.Fatalf("insert referrer: %v", err)
+	}
+
+	// An ordinary eligible row, unrelated to the stuck pair.
+	var ordinaryID string
+	if err := h.pool.QueryRow(ctx, `
+		INSERT INTO auth.refresh_tokens (user_id, token_hash, expires_at)
+		VALUES ($1, 'stuck-ordinary', $2) RETURNING id`,
+		userID, expired).Scan(&ordinaryID); err != nil {
+		t.Fatalf("insert ordinary row: %v", err)
+	}
+
+	if _, err := h.svc.SweepExpiredRefreshTokens(ctx); err != nil {
+		t.Fatalf("SweepExpiredRefreshTokens: %v", err)
+	}
+
+	var n int
+	if err := h.pool.QueryRow(ctx,
+		`SELECT count(*) FROM auth.refresh_tokens WHERE id = $1`,
+		ordinaryID).Scan(&n); err != nil {
+		t.Fatalf("count ordinary: %v", err)
+	}
+	if n != 0 {
+		t.Error("an ordinary expired row survived because another row was stuck")
+	}
+}

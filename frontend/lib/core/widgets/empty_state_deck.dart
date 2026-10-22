@@ -20,7 +20,7 @@ class EmptyStateDeck extends StatelessWidget {
   const EmptyStateDeck({
     super.key,
     required this.title,
-    required this.message,
+    this.message,
     this.scenes = EmptyDeckScenes.meetups,
     this.actionLabel,
     this.onAction,
@@ -28,7 +28,11 @@ class EmptyStateDeck extends StatelessWidget {
   });
 
   final String title;
-  final String message;
+
+  /// Optional. The screen set's empty states are a picture and one line;
+  /// a second line of explanation is the exception, not the rule, and most
+  /// of the time it only restates the title at greater length.
+  final String? message;
 
   /// Exactly three asset paths, drawn left to right; the middle one sits
   /// on top.
@@ -63,19 +67,21 @@ class EmptyStateDeck extends StatelessWidget {
               letterSpacing: -0.2,
             ),
           ),
-          const SizedBox(height: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 320),
-            child: Text(
-              message,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppPalette.textSecondary,
-                fontSize: 13,
-                height: 1.45,
+          if (message != null) ...[
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(
+                message!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: AppPalette.textSecondary,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
               ),
             ),
-          ),
+          ],
           if (actionLabel != null && onAction != null) ...[
             SizedBox(height: compact ? 16 : 22),
             SizedBox(
@@ -173,7 +179,7 @@ class _CardFan extends StatelessWidget {
 abstract final class EmptyDeckScenes {
   static const meetups = [
     'assets/images/landing/l11.jpg',
-    'assets/images/landing/l13.jpg',
+    'assets/images/landing/l26.jpg',
     'assets/images/landing/l14.jpg',
   ];
   static const requests = [
@@ -188,7 +194,7 @@ abstract final class EmptyDeckScenes {
   ];
   static const inbox = [
     'assets/images/landing/l02.jpg',
-    'assets/images/landing/l13.jpg',
+    'assets/images/landing/l26.jpg',
     'assets/images/landing/l07.jpg',
   ];
 }

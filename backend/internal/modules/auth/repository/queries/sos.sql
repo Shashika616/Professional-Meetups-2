@@ -6,7 +6,20 @@ VALUES ($1, $2, $3, $4)
 RETURNING *;
 
 -- name: ListTrustedContactsForUser :many
-SELECT * FROM auth.trusted_contacts WHERE user_id = $1 ORDER BY created_at ASC;
+-- With each contact's consent state (#80, migration 0024): a contact with a
+-- pending row has not confirmed yet, and pending_expires_at says whether the
+-- link it was sent can still be used. No pending row means confirmed —
+-- including every contact added before consent existed (D2).
+--
+-- Explicit columns, not c.*: a star query here is what made 0024 keep its
+-- state out of this table, and it should not come back.
+SELECT
+  c.id, c.user_id, c.name, c.phone_number, c.email, c.created_at, c.updated_at,
+  p.expires_at AS pending_expires_at
+FROM auth.trusted_contacts c
+LEFT JOIN auth.pending_trusted_contacts p ON p.contact_id = c.id
+WHERE c.user_id = $1
+ORDER BY c.created_at ASC;
 
 -- name: CountTrustedContactsForUser :one
 -- Backs the soft cap of 3 per user (ADR-026 §1), enforced at the service
@@ -20,10 +33,6 @@ SELECT count(*) FROM auth.trusted_contacts WHERE user_id = $1;
 -- pattern ratings.go/safety.go already established) rather than relying on
 -- this WHERE clause alone to produce the right error shape.
 DELETE FROM auth.trusted_contacts WHERE id = $1 AND user_id = $2;
-
--- name: InsertSOSEvent :exec
-INSERT INTO auth.sos_events (user_id, context_message, latitude, longitude, contacts_notified)
-VALUES ($1, $2, $3, $4, $5);
 
 -- name: DeleteTrustedContactsForUser :exec
 -- Account deletion. Not reached by the ON DELETE CASCADE from auth.users:
@@ -72,3 +81,82 @@ WHERE id IN (
   WHERE purge_after < now()
   LIMIT sqlc.arg(batch_size)
 );
+
+-- name: LockTrustedContactInvitesForUser :exec
+-- Serialises one user's contact additions, so the contact cap and the daily
+-- invite cap are a count and an insert that cannot interleave (#80).
+-- Namespace 3; ratings use 2.
+SELECT pg_advisory_xact_lock(3, hashtext(sqlc.arg(user_id)::text));
+
+-- name: LockTrustedContactInvitesForPhone :exec
+-- The same for one destination number, across every user, for the
+-- per-number cap. Always taken AFTER the user lock, so two additions can
+-- never wait on each other in opposite orders.
+SELECT pg_advisory_xact_lock(4, hashtext(sqlc.arg(phone_hash)::text));
+
+-- name: CountContactInvitesSentByUserSince :one
+SELECT count(*) FROM auth.contact_invites_sent
+WHERE user_id = $1 AND sent_at > sqlc.arg(since)::timestamptz;
+
+-- name: CountContactInvitesSentToPhoneSince :one
+SELECT count(*) FROM auth.contact_invites_sent
+WHERE phone_hash = $1 AND sent_at > sqlc.arg(since)::timestamptz;
+
+-- name: InsertContactInviteSent :exec
+INSERT INTO auth.contact_invites_sent (user_id, phone_hash) VALUES ($1, $2);
+
+-- name: InsertPendingTrustedContact :exec
+INSERT INTO auth.pending_trusted_contacts (contact_id, token_hash, expires_at)
+VALUES ($1, $2, $3);
+
+-- name: ConfirmTrustedContactByToken :one
+-- The contact's own consent, from the link they were texted. Deleting the
+-- pending row IS the confirmation, so it is single-use by construction: a
+-- second press of the same link matches nothing. An expired link matches
+-- nothing either. Returns whose contact they have become, for the page.
+WITH confirmed AS (
+  DELETE FROM auth.pending_trusted_contacts
+  WHERE token_hash = $1 AND expires_at > now()
+  RETURNING contact_id
+)
+SELECT u.full_name
+FROM confirmed
+JOIN auth.trusted_contacts c ON c.id = confirmed.contact_id
+JOIN auth.users u ON u.id = c.user_id;
+
+-- name: DeleteContactInvitesSentBefore :execrows
+-- The cap log only ever looks back one day; batched like every other sweep.
+DELETE FROM auth.contact_invites_sent
+WHERE id IN (
+  SELECT id FROM auth.contact_invites_sent
+  WHERE sent_at < sqlc.arg(sent_before)::timestamptz
+  LIMIT sqlc.arg(batch_size)
+);
+
+-- name: LockSOSForUser :exec
+-- Serialises one user's SOS claims: the duplicate check, the daily count and
+-- the insert below run as one unit. Namespace 5.
+SELECT pg_advisory_xact_lock(5, hashtext(sqlc.arg(user_id)::text));
+
+-- name: GetSOSEventByClientRequest :one
+SELECT id, contacts_notified, completed_at
+FROM auth.sos_events
+WHERE user_id = $1 AND client_request_id = $2;
+
+-- name: CountSOSEventsForUserSince :one
+SELECT count(*) FROM auth.sos_events
+WHERE user_id = $1 AND triggered_at > sqlc.arg(since)::timestamptz;
+
+-- name: ClaimSOSEvent :one
+-- Written BEFORE any alert is sent, so a retry carrying the same
+-- client_request_id finds it and reports this attempt's outcome instead of
+-- texting everyone again (migration 0023).
+INSERT INTO auth.sos_events
+  (user_id, client_request_id, context_message, latitude, longitude, contacts_notified)
+VALUES ($1, $2, $3, $4, $5, 0)
+RETURNING id;
+
+-- name: CompleteSOSEvent :exec
+UPDATE auth.sos_events
+SET contacts_notified = $2, completed_at = now()
+WHERE id = $1;

@@ -70,7 +70,6 @@ class LandingCollage extends StatefulWidget {
     'assets/images/landing/l10.jpg',
     'assets/images/landing/l11.jpg',
     'assets/images/landing/l12.jpg',
-    'assets/images/landing/l13.jpg',
     'assets/images/landing/l14.jpg',
     'assets/images/landing/l15.jpg',
     'assets/images/landing/l16.jpg',

@@ -75,7 +75,7 @@ func (q *Queries) AnonymiseRatingsGivenByUser(ctx context.Context, raterUserID u
 
 const cancelMeetup = `-- name: CancelMeetup :one
 UPDATE meetup.meetups SET status = 'cancelled', cancelled_at = now(), cancellation_reason = $2
-WHERE id = $1 AND host_user_id = $3
+WHERE id = $1 AND host_user_id = $3 AND status IN ('open', 'full')
 RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location
 `
 
@@ -93,6 +93,22 @@ type CancelMeetupParams struct {
 // Go-level ownership check in service.go's CancelMeetup — mirrors
 // CloseMeetup's own ownership clause exactly; the Go-level check stays,
 // this doesn't replace it.
+//
+// `status IN ('open','full')` added for V-10 (security review 2026-10-01).
+// Without it the only conditions were "right meetup, right host", so a host
+// could cancel a meetup that had already COMPLETED: it flipped to
+// cancelled, which erased it from their public history, re-notified every
+// participant about a meetup that had already happened, and opened the
+// cancellation-review path on an event nobody was wronged by. Cancelling an
+// already-cancelled meetup re-notified everyone a second time too.
+//
+// No window check here, deliberately. CloseMeetup owns the past-window case
+// (`status IN ('open','full') AND now() >= window_start` -> completed), and
+// a host whose window has started but whose meetup is still open has a
+// legitimate reason to cancel — nobody came, or they cannot make it. The
+// auto-close sweep moves those to completed, and this guard then protects
+// them. Adding `window_end > now()` would block the honest case and protect
+// nothing the status does not already cover.
 func (q *Queries) CancelMeetup(ctx context.Context, arg CancelMeetupParams) (MeetupMeetup, error) {
 	row := q.db.QueryRow(ctx, cancelMeetup, arg.ID, arg.CancellationReason, arg.HostUserID)
 	var i MeetupMeetup
@@ -360,6 +376,25 @@ func (q *Queries) CountActiveCommitments(ctx context.Context, userID uuid.UUID) 
 	var i CountActiveCommitmentsRow
 	err := row.Scan(&i.HostingCount, &i.AcceptedCount, &i.PendingCount)
 	return i, err
+}
+
+const countMeetupsCreatedByHostSince = `-- name: CountMeetupsCreatedByHostSince :one
+SELECT count(*) FROM meetup.meetups
+WHERE host_user_id = $1 AND created_at > $2::timestamptz
+`
+
+type CountMeetupsCreatedByHostSinceParams struct {
+	HostUserID uuid.UUID          `json:"host_user_id"`
+	Since      pgtype.Timestamptz `json:"since"`
+}
+
+// How many meetups one host has created recently, for the nearby-notify
+// cap (#89). idx_meetups_host narrows to the host; a host's rows are few.
+func (q *Queries) CountMeetupsCreatedByHostSince(ctx context.Context, arg CountMeetupsCreatedByHostSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMeetupsCreatedByHostSince, arg.HostUserID, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createMeetup = `-- name: CreateMeetup :one
@@ -1288,73 +1323,68 @@ func (q *Queries) ListMeetupsRequestedByUserFirstPage(ctx context.Context, arg L
 }
 
 const listOpenMeetupsAfterCursor = `-- name: ListOpenMeetupsAfterCursor :many
-WITH deduped AS (
-  SELECT DISTINCT ON (m.id)
-    m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location,
-    COALESCE(u.full_name, '') AS host_full_name,
-    u.profile_photo_url AS host_profile_photo_url,
-    COALESCE(u.trust_level, 0) AS host_trust_level,
-    COALESCE(ratings.rating_average, 0)::numeric(3,2) AS host_rating_average,
-    COALESCE(ratings.rating_count, 0)::int AS host_rating_count,
-    (SELECT count(*) FROM meetup.meetup_requests r2 WHERE r2.meetup_id = m.id AND r2.status = 'accepted') AS accepted_count,
-    r.status AS my_request_status
+WITH page AS (
+  SELECT m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location
   FROM meetup.meetups m
-  LEFT JOIN meetup.user_display_cache u ON u.user_id = m.host_user_id
-  LEFT JOIN LATERAL (
-    SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
-    FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
-  ) ratings ON true
-  LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = $4
-  -- BROWSABLE is narrower than LIVE: 'open' only, a full meetup takes no
-  -- more requests. LIVE ('open' or 'full', not yet ended) is defined in
-  -- FindScheduleConflict below and in the service's ListActiveMeetups
-  -- isLive closure; a change to what counts as live must be made in all
-  -- three, and this one (plus its AfterCursor twin) if it means browsable.
   WHERE m.status = 'open'
-    -- Same clock filter as ListOpenMeetupsFirstPage, and it has to be here
-    -- too: a predicate that held on page 1 but not on page 2 would let an
-    -- ended meetup reappear the moment the user scrolled. See that query for
-    -- why the status column alone is not enough.
+    -- A meetup whose window has ENDED is not browsable, whatever its status
+    -- column still says, so this list stays correct when the auto-close
+    -- sweep has not run yet (a meetup sat joinable for 1h53m after its end
+    -- on 2026-09-10 because the service had scaled to zero). window_END,
+    -- not window_start: a meetup already underway is still joinable.
     AND m.window_end > now()
-    -- Both filters below are OPTIONAL and default to today's exact
-    -- behaviour when unset, so every pre-existing caller is unaffected.
-    --
-    -- intent NULL = every intent (the home screen's "All" chip). Expressed
-    -- as a NULL check rather than a separate query so there is one place
-    -- where "which open meetups is this viewer allowed to see" is decided —
-    -- a second near-identical query is how the ST_DWithin exemption below
-    -- would eventually drift between them.
-    AND ($5::meetup.intent_type IS NULL OR m.intent = $5::meetup.intent_type)
-    -- within_days 0 = unrestricted. > 0 caps how far out window_start may
-    -- be, which is what makes a "Happening Soon" view possible; nothing in
-    -- this module supported a date-range filter before.
-    AND ($6::int = 0
-         OR m.window_start <= now() + ($6::int * INTERVAL '1 day'))
+    -- Both optional, defaulting to "no filter": intent NULL is every intent
+    -- (the "All" chip); within_days 0 is unrestricted.
+    AND ($2::meetup.intent_type IS NULL OR m.intent = $2::meetup.intent_type)
+    AND ($3::int = 0
+         OR m.window_start <= now() + ($3::int * INTERVAL '1 day'))
+    -- A host always sees their own meetups; everyone else only within the
+    -- 50 km browse radius (ADR-027).
     AND (
-      m.host_user_id = $4
+      m.host_user_id = $1
       OR ST_DWithin(
         m.location,
-        ST_SetSRID(ST_MakePoint($7::float8, $8::float8), 4326)::geography,
+        ST_SetSRID(ST_MakePoint($4::float8, $5::float8), 4326)::geography,
         50000
       )
     )
-  ORDER BY m.id, r.created_at DESC NULLS LAST
+    AND (m.created_at, m.id) < ($6::timestamptz, $7::uuid)
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT $8
 )
-SELECT id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, host_full_name, host_profile_photo_url, host_trust_level, host_rating_average, host_rating_count, accepted_count, my_request_status FROM deduped
-WHERE (created_at, id) < ($1::timestamptz, $2::uuid)
-ORDER BY created_at DESC, id DESC
-LIMIT $3
+SELECT
+  p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location,
+  COALESCE(u.full_name, '') AS host_full_name,
+  u.profile_photo_url AS host_profile_photo_url,
+  COALESCE(u.trust_level, 0) AS host_trust_level,
+  COALESCE(ratings.rating_average, 0)::numeric(3,2) AS host_rating_average,
+  COALESCE(ratings.rating_count, 0)::int AS host_rating_count,
+  (SELECT count(*) FROM meetup.meetup_requests r2 WHERE r2.meetup_id = p.id AND r2.status = 'accepted') AS accepted_count,
+  r.status AS my_request_status
+FROM page p
+LEFT JOIN meetup.user_display_cache u ON u.user_id = p.host_user_id
+LEFT JOIN LATERAL (
+  SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
+  FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = p.host_user_id
+) ratings ON true
+LEFT JOIN meetup.meetup_requests r ON r.id = (
+  SELECT r3.id FROM meetup.meetup_requests r3
+  WHERE r3.meetup_id = p.id AND r3.requester_id = $1
+  ORDER BY r3.created_at DESC
+  LIMIT 1
+)
+ORDER BY p.created_at DESC, p.id DESC
 `
 
 type ListOpenMeetupsAfterCursorParams struct {
-	CursorCreatedAt pgtype.Timestamptz   `json:"cursor_created_at"`
-	CursorID        uuid.UUID            `json:"cursor_id"`
-	PageLimit       int32                `json:"page_limit"`
 	RequesterID     uuid.UUID            `json:"requester_id"`
 	Intent          NullMeetupIntentType `json:"intent"`
 	WithinDays      int32                `json:"within_days"`
 	ViewerLng       float64              `json:"viewer_lng"`
 	ViewerLat       float64              `json:"viewer_lat"`
+	CursorCreatedAt pgtype.Timestamptz   `json:"cursor_created_at"`
+	CursorID        uuid.UUID            `json:"cursor_id"`
+	PageLimit       int32                `json:"page_limit"`
 }
 
 type ListOpenMeetupsAfterCursorRow struct {
@@ -1392,16 +1422,28 @@ type ListOpenMeetupsAfterCursorRow struct {
 // (m.host_user_id = requester_id) are exempt from the 50km radius — the exemption
 // must stay identical in both queries, or a host's own out-of-range meetup
 // would appear on page 1 and then vanish from page 2 onward.
+// Only the page's rows are decorated. The per-row lookups below — the
+// host's cached name, their rating aggregate, the accepted count and the
+// viewer's own latest request — used to run for EVERY open meetup in range
+// before the page was cut (#87): at 100k meetups, 20,000 times to return
+// 20 rows, 195 ms. The page is chosen first now, and the result is the same
+// rows with the same columns.
+// The viewer's most recent request on this meetup, if any — what the old
+// DISTINCT ON (m.id) ... ORDER BY r.created_at DESC picked. A plain LEFT
+// JOIN to the table rather than a LATERAL, because sqlc only knows a
+// LEFT-JOINed TABLE column can be NULL; through a LATERAL it generates a
+// non-nullable field, and a meetup the viewer never requested would fail
+// to scan.
 func (q *Queries) ListOpenMeetupsAfterCursor(ctx context.Context, arg ListOpenMeetupsAfterCursorParams) ([]ListOpenMeetupsAfterCursorRow, error) {
 	rows, err := q.db.Query(ctx, listOpenMeetupsAfterCursor,
-		arg.CursorCreatedAt,
-		arg.CursorID,
-		arg.PageLimit,
 		arg.RequesterID,
 		arg.Intent,
 		arg.WithinDays,
 		arg.ViewerLng,
 		arg.ViewerLat,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -1446,81 +1488,65 @@ func (q *Queries) ListOpenMeetupsAfterCursor(ctx context.Context, arg ListOpenMe
 }
 
 const listOpenMeetupsFirstPage = `-- name: ListOpenMeetupsFirstPage :many
-WITH deduped AS (
-  SELECT DISTINCT ON (m.id)
-    m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location,
-    COALESCE(u.full_name, '') AS host_full_name,
-    u.profile_photo_url AS host_profile_photo_url,
-    COALESCE(u.trust_level, 0) AS host_trust_level,
-    COALESCE(ratings.rating_average, 0)::numeric(3,2) AS host_rating_average,
-    COALESCE(ratings.rating_count, 0)::int AS host_rating_count,
-    (SELECT count(*) FROM meetup.meetup_requests r2 WHERE r2.meetup_id = m.id AND r2.status = 'accepted') AS accepted_count,
-    r.status AS my_request_status
+WITH page AS (
+  SELECT m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location
   FROM meetup.meetups m
-  LEFT JOIN meetup.user_display_cache u ON u.user_id = m.host_user_id
-  LEFT JOIN LATERAL (
-    SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
-    FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
-  ) ratings ON true
-  LEFT JOIN meetup.meetup_requests r ON r.meetup_id = m.id AND r.requester_id = $2
-  -- BROWSABLE is narrower than LIVE: 'open' only, a full meetup takes no
-  -- more requests. LIVE ('open' or 'full', not yet ended) is defined in
-  -- FindScheduleConflict below and in the service's ListActiveMeetups
-  -- isLive closure; a change to what counts as live must be made in all
-  -- three, and this one (plus its AfterCursor twin) if it means browsable.
   WHERE m.status = 'open'
     -- A meetup whose window has ENDED is not browsable, whatever its status
-    -- column still says. This is NOT redundant with the auto-close sweep --
-    -- it is what keeps this list correct when the sweep has not run.
-    --
-    -- On 2026-09-10 a production meetup whose window ended at 11:15 was not
-    -- closed until 13:08, because Cloud Run scales to zero and the lifecycle
-    -- poller only advances while a container exists. For 1h53m it sat in the
-    -- browse list, still presented as joinable. Filtering on status alone
-    -- makes this read path depend on a background job having run; filtering
-    -- on the clock as well makes it self-consistent, and demotes the sweep
-    -- back to bookkeeping and notifications rather than a correctness
-    -- dependency of the browse screen.
-    --
-    -- window_END, deliberately, not window_start: a meetup already underway
-    -- is still joinable and must stay listed.
+    -- column still says, so this list stays correct when the auto-close
+    -- sweep has not run yet (a meetup sat joinable for 1h53m after its end
+    -- on 2026-09-10 because the service had scaled to zero). window_END,
+    -- not window_start: a meetup already underway is still joinable.
     AND m.window_end > now()
-    -- Both filters below are OPTIONAL and default to today's exact
-    -- behaviour when unset, so every pre-existing caller is unaffected.
-    --
-    -- intent NULL = every intent (the home screen's "All" chip). Expressed
-    -- as a NULL check rather than a separate query so there is one place
-    -- where "which open meetups is this viewer allowed to see" is decided —
-    -- a second near-identical query is how the ST_DWithin exemption below
-    -- would eventually drift between them.
-    AND ($3::meetup.intent_type IS NULL OR m.intent = $3::meetup.intent_type)
-    -- within_days 0 = unrestricted. > 0 caps how far out window_start may
-    -- be, which is what makes a "Happening Soon" view possible; nothing in
-    -- this module supported a date-range filter before.
-    AND ($4::int = 0
-         OR m.window_start <= now() + ($4::int * INTERVAL '1 day'))
+    -- Both optional, defaulting to "no filter": intent NULL is every intent
+    -- (the "All" chip); within_days 0 is unrestricted.
+    AND ($2::meetup.intent_type IS NULL OR m.intent = $2::meetup.intent_type)
+    AND ($3::int = 0
+         OR m.window_start <= now() + ($3::int * INTERVAL '1 day'))
+    -- A host always sees their own meetups; everyone else only within the
+    -- 50 km browse radius (ADR-027).
     AND (
-      m.host_user_id = $2
+      m.host_user_id = $1
       OR ST_DWithin(
         m.location,
-        ST_SetSRID(ST_MakePoint($5::float8, $6::float8), 4326)::geography,
+        ST_SetSRID(ST_MakePoint($4::float8, $5::float8), 4326)::geography,
         50000
       )
     )
-  ORDER BY m.id, r.created_at DESC NULLS LAST
+  ORDER BY m.created_at DESC, m.id DESC
+  LIMIT $6
 )
-SELECT id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, host_full_name, host_profile_photo_url, host_trust_level, host_rating_average, host_rating_count, accepted_count, my_request_status FROM deduped
-ORDER BY created_at DESC, id DESC
-LIMIT $1
+SELECT
+  p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location,
+  COALESCE(u.full_name, '') AS host_full_name,
+  u.profile_photo_url AS host_profile_photo_url,
+  COALESCE(u.trust_level, 0) AS host_trust_level,
+  COALESCE(ratings.rating_average, 0)::numeric(3,2) AS host_rating_average,
+  COALESCE(ratings.rating_count, 0)::int AS host_rating_count,
+  (SELECT count(*) FROM meetup.meetup_requests r2 WHERE r2.meetup_id = p.id AND r2.status = 'accepted') AS accepted_count,
+  r.status AS my_request_status
+FROM page p
+LEFT JOIN meetup.user_display_cache u ON u.user_id = p.host_user_id
+LEFT JOIN LATERAL (
+  SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
+  FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = p.host_user_id
+) ratings ON true
+LEFT JOIN meetup.meetup_requests r ON r.id = (
+  SELECT r3.id FROM meetup.meetup_requests r3
+  WHERE r3.meetup_id = p.id AND r3.requester_id = $1
+  ORDER BY r3.created_at DESC
+  LIMIT 1
+)
+ORDER BY p.created_at DESC, p.id DESC
 `
 
 type ListOpenMeetupsFirstPageParams struct {
-	PageLimit   int32                `json:"page_limit"`
 	RequesterID uuid.UUID            `json:"requester_id"`
 	Intent      NullMeetupIntentType `json:"intent"`
 	WithinDays  int32                `json:"within_days"`
 	ViewerLng   float64              `json:"viewer_lng"`
 	ViewerLat   float64              `json:"viewer_lat"`
+	PageLimit   int32                `json:"page_limit"`
 }
 
 type ListOpenMeetupsFirstPageRow struct {
@@ -1580,14 +1606,26 @@ type ListOpenMeetupsFirstPageRow struct {
 // Scoped to hosts only; a meetup the viewer merely has an accepted request
 // for is NOT exempted here (it already surfaces distance-unfiltered via
 // "Your Meetups"/Active Meetups).
+// Only the page's rows are decorated. The per-row lookups below — the
+// host's cached name, their rating aggregate, the accepted count and the
+// viewer's own latest request — used to run for EVERY open meetup in range
+// before the page was cut (#87): at 100k meetups, 20,000 times to return
+// 20 rows, 195 ms. The page is chosen first now, and the result is the same
+// rows with the same columns.
+// The viewer's most recent request on this meetup, if any — what the old
+// DISTINCT ON (m.id) ... ORDER BY r.created_at DESC picked. A plain LEFT
+// JOIN to the table rather than a LATERAL, because sqlc only knows a
+// LEFT-JOINed TABLE column can be NULL; through a LATERAL it generates a
+// non-nullable field, and a meetup the viewer never requested would fail
+// to scan.
 func (q *Queries) ListOpenMeetupsFirstPage(ctx context.Context, arg ListOpenMeetupsFirstPageParams) ([]ListOpenMeetupsFirstPageRow, error) {
 	rows, err := q.db.Query(ctx, listOpenMeetupsFirstPage,
-		arg.PageLimit,
 		arg.RequesterID,
 		arg.Intent,
 		arg.WithinDays,
 		arg.ViewerLng,
 		arg.ViewerLat,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -1671,19 +1709,18 @@ WITH participants AS (
 )
 SELECT p.user_id,
        (
-           SELECT count(*)
-             FROM meetup.meetups done
-            WHERE done.status = 'completed'
-              AND (
-                  done.host_user_id = p.user_id
-                  OR EXISTS (
-                      SELECT 1
-                        FROM meetup.meetup_requests dr
-                       WHERE dr.meetup_id = done.id
-                         AND dr.requester_id = p.user_id
-                         AND dr.status = 'accepted'
-                  )
-              )
+           SELECT count(*) FROM (
+               SELECT done.id
+                 FROM meetup.meetups done
+                WHERE done.host_user_id = p.user_id
+                  AND done.status = 'completed'
+               UNION
+               SELECT dr.meetup_id
+                 FROM meetup.meetup_requests dr
+                 JOIN meetup.meetups done ON done.id = dr.meetup_id AND done.status = 'completed'
+                WHERE dr.requester_id = p.user_id
+                  AND dr.status = 'accepted'
+           ) mine
        )::bigint AS meetups_completed
   FROM participants p
 `
@@ -1710,6 +1747,11 @@ type RecomputeMeetupsCompletedForParticipantsRow struct {
 // One statement rather than "list participants, then count per participant":
 // the fan-out is small (a meetup's capacity), but the 1+N version would run
 // inside the close transaction and hold it open for the round trips.
+// Two indexed counts joined by UNION, not one scan with an OR (#87). The
+// old `host_user_id = p.user_id OR EXISTS (...)` could use neither index,
+// so it read every meetup in the table once per participant: 1.2 s for a
+// 20-meetup batch at 100k meetups, on every completion. UNION also keeps a
+// meetup from counting twice, exactly as the OR did.
 func (q *Queries) RecomputeMeetupsCompletedForParticipants(ctx context.Context, meetupIds []uuid.UUID) ([]RecomputeMeetupsCompletedForParticipantsRow, error) {
 	rows, err := q.db.Query(ctx, recomputeMeetupsCompletedForParticipants, meetupIds)
 	if err != nil {

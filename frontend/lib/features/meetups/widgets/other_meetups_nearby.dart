@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/section_heading.dart';
@@ -103,7 +104,7 @@ class OtherMeetupsNearby extends ConsumerWidget {
                 _SuggestionRow(meetup: meetup, onTap: () => onOpen(meetup)),
               const SizedBox(height: 4),
               SecondaryButton(
-                label: 'SEE ALL NEARBY',
+                label: 'See all nearby',
                 height: 40,
                 onPressed: () => _browse(context, ref),
               ),
@@ -131,7 +132,7 @@ class _Frame extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SectionHeading('OTHERS HAPPENING SOON'),
+        const SectionHeading('Others happening soon'),
         const SizedBox(height: 12),
         child,
       ],
@@ -156,7 +157,7 @@ class _SuggestionRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: FlatCard(
-        radius: 12,
+        radius: 18,
         padding: EdgeInsets.zero,
         child: InkWell(
           onTap: onTap,
@@ -172,8 +173,8 @@ class _SuggestionRow extends StatelessWidget {
                     color: AppPalette.brandGreen.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(
-                    meetup.intent.icon,
+                  child: AppIcon(
+                    meetup.intent.iconPath,
                     size: 20,
                     color: AppPalette.brandGreen,
                   ),
@@ -187,7 +188,7 @@ class _SuggestionRow extends StatelessWidget {
                         meetup.intentLabel,
                         style: TextStyle(
                           fontSize: 10,
-                          letterSpacing: 1.4,
+                          letterSpacing: 0.3,
                           fontWeight: FontWeight.w700,
                           color: AppPalette.textSecondary,
                         ),
@@ -219,8 +220,8 @@ class _SuggestionRow extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right_rounded,
+                AppIcon(
+                  AppIcons.forward,
                   size: 22,
                   color: AppPalette.textSecondary,
                 ),
@@ -245,7 +246,7 @@ class _Rows extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: FlatCard(
-              radius: 12,
+              radius: 18,
               padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
               child: Row(
                 children: [
@@ -282,14 +283,13 @@ class _Fallback extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FlatCard(
-      radius: 12,
+      radius: 18,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'New meetups go up every day. Keep an eye on Happening Soon, '
-            'or host one and let people come to you.',
+            'New meetups go up every day. Host one, or check Happening Soon.',
             style: TextStyle(
               fontSize: 13,
               height: 1.45,
@@ -298,7 +298,7 @@ class _Fallback extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           SecondaryButton(
-            label: 'BROWSE MEETUPS',
+            label: 'Browse meetups',
             height: 40,
             onPressed: onBrowse,
           ),

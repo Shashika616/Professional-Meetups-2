@@ -1,19 +1,27 @@
 name: Database backup
 
 # Nightly pg_dump of the production Supabase database to Google Cloud
-# Storage (ADR-007, Plan 20 Fix 2). The free tier has no managed backups,
-# so this workflow is the backup. A failed run is the alert: GitHub shows a
-# failed scheduled workflow and emails the repo owner; nothing else is
-# wired on purpose for this round.
+# Storage (ADR-007, Plan 20 Fix 2, Plan 28 #95). The free tier has no
+# managed backups, so this workflow is the backup.
 #
-# Secrets this needs (Settings > Secrets and variables > Actions):
-#   SUPABASE_DIRECT_URL  the direct (not pooler) connection URL
-#   BACKUP_GCS_BUCKET    the bucket name, without gs://
-#   GCP_BACKUP_SA_KEY    JSON key of a service account that holds
-#                        roles/storage.objectAdmin on that bucket ONLY
-# Bucket retention is the lifecycle policy in
-# backend/scripts/backup-lifecycle.json, applied once with
-# `gsutil lifecycle set`.
+# Authentication is Workload Identity Federation: GitHub mints a short-lived
+# OIDC token, Google exchanges it for a ~1 hour access token. There is no
+# JSON service-account key, so there is no long-lived credential in this
+# repository's secrets to leak or to expire silently.
+#
+# The only secret this needs is SUPABASE_DIRECT_URL (the direct, NOT pooler,
+# connection URL, which contains the database password). The bucket, the
+# provider and the service account below are resource identifiers, not
+# secrets; access is gated by the provider's attribute condition, which
+# admits only this repository on this branch.
+#
+# Run backend/scripts/setup-backup-infra.sh once to create the bucket, the
+# service account and the federation (docs/deploy/gcp-runbook.md §9).
+#
+# A failed run opens a GitHub issue. Between 2026-09-25 and 2026-10-22 this
+# workflow failed 27 times in a row without anyone noticing, and the database
+# was lost while those failures sat unread. A backup nobody is told about is
+# not a backup.
 
 on:
   schedule:
@@ -25,6 +33,13 @@ on:
 
 permissions:
   contents: read
+  id-token: write # mint the OIDC token Google exchanges
+  issues: write # open the alert issue when a run fails
+
+env:
+  BACKUP_GCS_BUCKET: meetups-db-backups-740861671089
+  GCP_WORKLOAD_IDENTITY_PROVIDER: projects/740861671089/locations/global/workloadIdentityPools/github/providers/github
+  GCP_BACKUP_SERVICE_ACCOUNT: db-backup@project-285b9289-549d-4fef-92c.iam.gserviceaccount.com
 
 jobs:
   backup:
@@ -32,7 +47,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # pg_dump must be at least the server's major version (Postgres 17 on
       # Supabase, runbook §6); an older client refuses to dump a newer
@@ -50,17 +65,89 @@ jobs:
           sudo apt-get install -y -qq postgresql-client-17
           pg_dump --version
 
+      # Fail here with a clear message rather than deep inside the dump
+      # script, where a missing secret reads as a connection error.
+      - name: Check the database URL secret is set
+        env:
+          SUPABASE_DIRECT_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
+        run: |
+          if [ -z "${SUPABASE_DIRECT_URL}" ]; then
+            echo "SUPABASE_DIRECT_URL is not set in this repository's Actions secrets." >&2
+            echo "See docs/deploy/gcp-runbook.md §9." >&2
+            exit 1
+          fi
+
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
         with:
-          credentials_json: ${{ secrets.GCP_BACKUP_SA_KEY }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_BACKUP_SERVICE_ACCOUNT }}
 
       # Provides gsutil on PATH, authenticated by the step above.
       - name: Set up gcloud
-        uses: google-github-actions/setup-gcloud@v2
+        uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2
 
       - name: Dump and upload
         env:
           SUPABASE_DIRECT_URL: ${{ secrets.SUPABASE_DIRECT_URL }}
-          BACKUP_GCS_BUCKET: ${{ secrets.BACKUP_GCS_BUCKET }}
+          BACKUP_GCS_BUCKET: ${{ env.BACKUP_GCS_BUCKET }}
         run: backend/scripts/backup-database.sh
+
+      # The upload step already reads its own object back. This checks the
+      # other half: that the bucket holds a backup from today, which is what
+      # someone restoring actually depends on.
+      - name: Confirm today's backup is in the bucket
+        env:
+          BACKUP_GCS_BUCKET: ${{ env.BACKUP_GCS_BUCKET }}
+        run: |
+          set -euo pipefail
+          today="$(date -u +%Y%m%d)"
+          if ! gsutil ls "gs://${BACKUP_GCS_BUCKET}/backup-${today}T"*.dump >/dev/null 2>&1; then
+            echo "no backup dated ${today} in gs://${BACKUP_GCS_BUCKET}" >&2
+            exit 1
+          fi
+          echo "bucket holds:"
+          gsutil ls -l "gs://${BACKUP_GCS_BUCKET}/" | tail -5
+
+      # The alert. One open issue at a time: a nightly job that fails for a
+      # week should not file seven issues, and it must not go quiet either.
+      - name: Open an issue if the backup failed
+        if: failure()
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const title = 'Database backup failed';
+            const body = [
+              `The nightly database backup failed.`,
+              ``,
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              ``,
+              `Supabase's free tier has no managed backups, so until this is`,
+              `fixed the production database has no recovery point.`,
+              ``,
+              `Runbook: docs/deploy/gcp-runbook.md §9.`,
+            ].join('\n');
+
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'backup-failure',
+            });
+
+            if (open.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: open.data[0].number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['backup-failure'],
+              });
+            }

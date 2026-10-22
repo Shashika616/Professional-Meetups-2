@@ -83,23 +83,44 @@ verify_ios() {
   check_binary "$1" "$1/Frameworks/App.framework/App" no
 }
 
+# --obfuscate --split-debug-info on every PROD target (tracker #94,
+# review finding N-D6).
+#
+# Without them a release build ships Dart class, method and field names in
+# the clear inside libapp.so, which is a free map of the app for anyone
+# who unzips the APK: the trust-level gates, the OTP paths, the SOS flow
+# and the names of every service method.
+#
+# The symbols are not thrown away, they are MOVED — into
+# build/symbols/<target>/, which must be kept for any build that ships.
+# A stack trace from an obfuscated binary is unreadable without the
+# matching symbol file, and "matching" means that exact build: keep the
+# directory with the artifact, or crash reports from it are noise.
+#
+# Debug and emulator targets below deliberately get neither. Obfuscating
+# a build nobody ships only makes local stack traces useless.
+OBFUSCATE_ANDROID=(--obfuscate --split-debug-info=build/symbols/android)
+OBFUSCATE_IOS=(--obfuscate --split-debug-info=build/symbols/ios)
+
 case "${1:-}" in
   prod-android)
-    fl build apk --release --split-per-abi --dart-define=GATEWAY_BASE_URL="$PROD_URL"
-    fl build apk --release --dart-define=GATEWAY_BASE_URL="$PROD_URL"
+    fl build apk --release --split-per-abi "${OBFUSCATE_ANDROID[@]}" --dart-define=GATEWAY_BASE_URL="$PROD_URL"
+    fl build apk --release "${OBFUSCATE_ANDROID[@]}" --dart-define=GATEWAY_BASE_URL="$PROD_URL"
     for apk in build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
                build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
                build/app/outputs/flutter-apk/app-release.apk; do
       verify_android "$apk"
     done
+    echo "symbols kept in build/symbols/android — REQUIRED to read any crash from these artifacts"
     ;;
   prod-ios)
-    fl build ios --release --no-codesign --dart-define=GATEWAY_BASE_URL="$PROD_URL"
+    fl build ios --release --no-codesign "${OBFUSCATE_IOS[@]}" --dart-define=GATEWAY_BASE_URL="$PROD_URL"
     verify_ios build/ios/iphoneos/Runner.app
     rm -rf build/ios/ipa-unsigned && mkdir -p build/ios/ipa-unsigned/Payload
     cp -R build/ios/iphoneos/Runner.app build/ios/ipa-unsigned/Payload/
     (cd build/ios/ipa-unsigned && zip -qry TieHere-prod-unsigned.ipa Payload)
     echo "packaged build/ios/ipa-unsigned/TieHere-prod-unsigned.ipa"
+    echo "symbols kept in build/symbols/ios — REQUIRED to read any crash from this artifact"
     ;;
   emulator)
     fl build apk --debug --dart-define=GATEWAY_BASE_URL="$EMULATOR_URL"

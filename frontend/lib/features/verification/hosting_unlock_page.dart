@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -73,16 +74,14 @@ class HostingUnlockPage extends ConsumerWidget {
       // Same Scaffold shape as VerificationChecklistPage — see its comment
       // for why extendBodyBehindAppBar is load-bearing with AppBackground.
       extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('UNLOCK HOSTING MEETUPS')),
+      appBar: AppBar(title: const Text('Unlock hosting meetups')),
       body: AppBackground(
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
             children: [
               Text(
-                'Hosting a meetup means taking responsibility for a real gathering, '
-                'so it asks for a little more than joining one. Add your organisation '
-                'to reach Level 3 trust.',
+                'Add your organisation to reach Level 3 trust and host meetups.',
                 style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 20),
@@ -100,10 +99,10 @@ class HostingUnlockPage extends ConsumerWidget {
                 const SizedBox(height: 20),
               ],
 
-              const SectionLabel('YOUR ORGANISATION'),
+              const SectionLabel('Your organisation'),
               const SizedBox(height: 12),
               FlatCard(
-                radius: 12,
+                radius: 18,
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
                   vertical: 6,
@@ -112,7 +111,7 @@ class HostingUnlockPage extends ConsumerWidget {
                   children: [
                     _HostingRow(
                       key: const Key('hostingUnlockCompanyNameRow'),
-                      icon: Icons.business_outlined,
+                      icon: AppIcons.building,
                       title: 'Company / Organisation',
                       doneLabel: profile?.companyName ?? '',
                       pendingLabel: 'Not added',
@@ -123,7 +122,7 @@ class HostingUnlockPage extends ConsumerWidget {
                     const _HostingDivider(),
                     _HostingRow(
                       key: const Key('hostingUnlockCompanyEmailRow'),
-                      icon: Icons.mail_outline_rounded,
+                      icon: AppIcons.mail,
                       title: 'Company / Organisation Email',
                       doneLabel: 'Verified',
                       pendingLabel: 'Not verified',
@@ -134,19 +133,13 @@ class HostingUnlockPage extends ConsumerWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                'Both are set together, entering your organisation name is part of '
-                'verifying its email address.',
-                style: TextStyle(color: AppPalette.textSecondary, fontSize: 11),
-              ),
               const SizedBox(height: 28),
               // Pops rather than retrying the host action that led here, the
               // same choice VerificationChecklistPage makes (ADR-028 § 3):
               // the next tap on HOST simply works now.
               PrimaryButton(
                 key: const Key('hostingUnlockComplete'),
-                label: 'COMPLETE',
+                label: 'Complete',
                 height: 48,
                 onPressed: canHost ? () => Navigator.of(context).pop() : null,
               ),
@@ -196,18 +189,14 @@ class _LevelTwoPrerequisite extends StatelessWidget {
     ];
 
     return FlatCard(
-      radius: 12,
+      radius: 18,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                Icons.info_outline_rounded,
-                size: 18,
-                color: AppPalette.textSecondary,
-              ),
+              AppIcon(AppIcons.info, size: 18, color: AppPalette.textSecondary),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
@@ -267,7 +256,7 @@ class _HostingRow extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData icon;
+  final String icon;
   final String title;
   final String doneLabel;
   final String pendingLabel;
@@ -278,13 +267,9 @@ class _HostingRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final trailing = done
-        ? Icon(Icons.check_circle_rounded, size: 18, color: AppPalette.verified)
+        ? AppIcon(AppIcons.checkCircle, size: 18, color: AppPalette.verified)
         : locked
-        ? Icon(
-            Icons.lock_outline_rounded,
-            size: 16,
-            color: AppPalette.textSecondary,
-          )
+        ? AppIcon(AppIcons.lock, size: 16, color: AppPalette.textSecondary)
         : Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
@@ -294,10 +279,10 @@ class _HostingRow extends StatelessWidget {
               ),
             ),
             child: Text(
-              'ADD',
+              'Add',
               style: TextStyle(
                 fontSize: 8,
-                letterSpacing: 1.4,
+                letterSpacing: 0.3,
                 fontWeight: FontWeight.w800,
                 color: AppPalette.candyBlue,
               ),
@@ -316,7 +301,7 @@ class _HostingRow extends StatelessWidget {
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, size: 18, color: AppPalette.candyBlue),
+            child: AppIcon(icon, size: 18, color: AppPalette.candyBlue),
           ),
           const SizedBox(width: 12),
           Expanded(

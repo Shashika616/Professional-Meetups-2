@@ -25,6 +25,58 @@ void main() {
         .setMockMethodCallHandler(_channel, null);
   });
 
+  testWidgets('the suggestions panel opens on the second character and says '
+      'it is looking, long before any completion arrives', (tester) async {
+    // MKLocalSearchCompleter is a delegate, not a promise, and the step
+    // used to show nothing at all until completions landed — so a slow or
+    // silent completer was indistinguishable from a field that had
+    // ignored the typing.
+    final held = Completer<List<Map<String, String>>>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(_channel, (call) async {
+          if (call.method == 'autocomplete') return held.future;
+          return null;
+        });
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox.expand(
+            child: IosMapLocationStep(onSubmit: (_, _, _) {}),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    final field = find.widgetWithText(
+      TextField,
+      'Search for a cafe, restaurant, or venue',
+    );
+
+    // One character is not a query: nothing is sent and nothing opens.
+    await tester.enterText(field, 'c');
+    await tester.pump();
+    expect(find.text('Looking for places…'), findsNothing);
+
+    // Two is. The panel is up before the debounce has even fired.
+    await tester.enterText(field, 'co');
+    await tester.pump();
+    expect(find.text('Looking for places…'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Looking for places…'), findsOneWidget);
+
+    held.complete(const []);
+    await tester.pumpAndSettle();
+    expect(find.text('No places found'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('placeSearchClear')));
+    await tester.pumpAndSettle();
+    expect(find.text('No places found'), findsNothing);
+    expect(find.text('Looking for places…'), findsNothing);
+  });
+
   testWidgets('debounces: several rapid keystrokes collapse into exactly one '
       'autocomplete call', (tester) async {
     var autocompleteCalls = 0;
@@ -131,9 +183,9 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.ensureVisible(find.text('Continue'));
       await tester.pump();
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pump();
 
       expect(submittedLat, closeTo(6.9213, 0.0001));
@@ -271,9 +323,9 @@ void main() {
 
       expect(find.text('Department of Coffee'), findsWidgets);
 
-      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.ensureVisible(find.text('Continue'));
       await tester.pump();
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pump();
 
       expect(submittedLat, closeTo(6.9172, 0.0001));
@@ -324,9 +376,9 @@ void main() {
       // scrim while the dropdown is open — before the scrim, this tap
       // reached CONTINUE directly, which is exactly the bug being fixed
       // (submitting instead of picking a completion).
-      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.ensureVisible(find.text('Continue'));
       await tester.pump();
-      await tester.tap(find.text('CONTINUE'), warnIfMissed: false);
+      await tester.tap(find.text('Continue'), warnIfMissed: false);
       await tester.pump();
 
       expect(
@@ -366,7 +418,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('Where?'), findsOneWidget);
-      expect(find.text('CONTINUE'), findsOneWidget);
+      expect(find.text('Continue'), findsOneWidget);
       expect(find.textContaining('not configured'), findsNothing);
     },
   );
@@ -402,7 +454,7 @@ void main() {
       );
       await tester.pump();
 
-      await tester.tap(find.text('USE MY CURRENT LOCATION'));
+      await tester.tap(find.text('Use my current location'));
       await tester.pump();
       await tester.pump();
 
@@ -419,9 +471,9 @@ void main() {
 
       // CONTINUE must still be enabled even with an empty field — using
       // current location is itself enough to unlock it.
-      await tester.ensureVisible(find.text('CONTINUE'));
+      await tester.ensureVisible(find.text('Continue'));
       await tester.pump();
-      await tester.tap(find.text('CONTINUE'));
+      await tester.tap(find.text('Continue'));
       await tester.pump();
 
       expect(submittedLat, closeTo(6.9213, 0.0001));

@@ -14,6 +14,12 @@ on:
   pull_request:
     branches: [main, develop]
 
+# Read-only by default (#95). Nothing here pushes, comments or publishes, so
+# a compromised step or dependency gets a token that cannot write to the
+# repository. A job that ever needs more should ask for it on its own.
+permissions:
+  contents: read
+
 jobs:
   build-lint-test:
     runs-on: ubuntu-latest
@@ -50,15 +56,15 @@ jobs:
       DATABASE_URL: postgres://app:app@localhost:5432/monolith_db?sslmode=disable
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Pinned, not a floating channel — same lesson already learned and
       # documented in the sibling repo's flutter-ci.yml: an unpinned
       # toolchain silently drifts to whatever's current on the day CI runs.
       # Keep this in step with backend/go.mod's own go directive.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.6"
+          go-version: "1.26.10"
 
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
@@ -75,12 +81,43 @@ jobs:
         working-directory: backend
         run: golangci-lint run ./...
 
-      # -race is not optional here: this backend runs four concurrent
-      # background loops (the lifecycle poller, the notification outbox
-      # poller, and two retention sweeps) alongside request handling, and
-      # several tests deliberately exercise concurrent claimers. A data race
-      # in that code is exactly the kind of defect that passes a serial test
-      # run and fails in production.
+      # Known vulnerabilities in Go itself or a dependency (#95) — but only
+      # on code paths this backend actually calls, so it fails on what is
+      # reachable, not on every advisory in the module graph. Bump the Go
+      # version above (and in both Dockerfiles) when it flags the standard
+      # library.
+      - name: Vulnerability check
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          govulncheck ./...
+
+      # Insecure patterns in our own code (#95). Fails on any finding.
+      #
+      # G115 (integer conversions) is excluded, after review on 2026-10-22:
+      # its 64 sites all convert a value already bounded — validated input
+      # (capacity 1-20, scores 1-5), the server-signed trust level (0-4), or
+      # a compile-time batch size. The one that was NOT bounded, query-string
+      # page_size and within_days, was fixed by parsing as 32-bit. Five
+      # reviewed false positives carry `#nosec` with the reason beside them.
+      - name: Security lint
+        working-directory: backend
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.22.8
+          gosec -quiet -exclude-generated -exclude=G115 ./...
+
+      # -race is not optional here: this backend runs seven concurrent
+      # background loops alongside request handling — the meetup lifecycle
+      # poller, three outbox pollers (notification, meetups-completed and
+      # user-deleted), their two retention sweeps, and the refresh-token /
+      # guest / safety-hold sweeper — and several tests deliberately
+      # exercise concurrent claimers. A data race in that code is exactly
+      # the kind of defect that passes a serial test run and fails in
+      # production.
+      #
+      # Keep the count honest when a loop is added: it is the justification
+      # for this flag, and a stale number quietly erodes the reason anyone
+      # keeps paying for it.
       #
       # -coverprofile (§D6): coverage was previously not merely unenforced
       # but entirely unmeasured. The profile is uploaded as an artifact
@@ -97,13 +134,75 @@ jobs:
           go tool cover -html=coverage.out -o coverage.html
 
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: backend-coverage
           path: |
             backend/coverage.out
             backend/coverage.html
           retention-days: 14
+
+  # Generated code is COMMITTED in this repo (so a fresh clone builds
+  # without sqlc, buf or the protoc plugins), which means it can silently
+  # fall out of step with the .sql and .proto files it came from. Nothing
+  # else here would notice: a stale sqlcgen file compiles, passes vet, lints
+  # clean and runs — it just runs the OLD query. This job is the only thing
+  # that would catch "edited the query, forgot to regenerate".
+  #
+  # Every generator is pinned to the version recorded in the committed
+  # output's own header (sqlc.yaml/buf.gen.yaml do not pin them), because a
+  # different generator version reformats files it did not otherwise change
+  # and would fail this check for no real reason.
+  # Secrets committed to git (#95). This repository is public, so a leak is
+  # exposure the moment it is pushed. Scans the full history; the reviewed
+  # allowlist is .gitleaks.toml.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan history for secrets
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 \
+            git /repo --config /repo/.gitleaks.toml --redact --no-banner
+
+  generated-code:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.10"
+
+      - name: Install the generators
+        run: |
+          set -euo pipefail
+          go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+          go install github.com/bufbuild/buf/cmd/buf@v1.72.0
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+
+      - name: Regenerate
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          sqlc generate
+          buf generate
+
+      - name: Fail if the committed output is stale
+        run: |
+          set -euo pipefail
+          if ! git diff --quiet -- backend/internal; then
+            echo "Generated code does not match its sources. Run 'sqlc generate' and 'buf generate' in backend/ and commit the result."
+            echo
+            git diff --stat -- backend/internal
+            git diff -- backend/internal | head -200
+            exit 1
+          fi
+          echo "OK: sqlc and buf output matches the committed files"
 
   # §D5: builds both images. The Go job above compiles the binaries but never
   # exercised a Dockerfile, so a wrong COPY path, a wrong ENTRYPOINT, or a
@@ -116,12 +215,12 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build monolith image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: backend
           file: backend/cmd/monolith/Dockerfile
@@ -132,7 +231,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build gateway image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: backend
           file: backend/cmd/gateway/Dockerfile

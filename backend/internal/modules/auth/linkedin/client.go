@@ -14,11 +14,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"time"
 )
 
 const (
-	defaultTokenURL    = "https://www.linkedin.com/oauth/v2/accessToken"
+	defaultTokenURL    = "https://www.linkedin.com/oauth/v2/accessToken" // #nosec G101 -- LinkedIn's public endpoint URL
 	defaultUserInfoURL = "https://api.linkedin.com/v2/userinfo"
 
 	// defaultTimeout is deliberately explicit — the zero-value http.Client
@@ -84,6 +85,15 @@ type UserInfo struct {
 	Sub     string
 	Name    string
 	Picture string
+	// Email is LinkedIn's verified address for this member, or "" when
+	// LinkedIn did not return one or marked it unverified.
+	//
+	// This WAS discarded. The app has always asked for the `email` scope,
+	// so members were consenting to share it on LinkedIn's own screen and
+	// the backend dropped it at decode — paying the consent cost for
+	// nothing, and leaving LinkedIn as the one provider that could not
+	// recognise a returning member by their address.
+	Email string
 }
 
 type tokenResponse struct {
@@ -147,6 +157,13 @@ type userInfoResponse struct {
 	Sub     string `json:"sub"`
 	Name    string `json:"name"`
 	Picture string `json:"picture"`
+	Email   string `json:"email"`
+	// LinkedIn documents this as a JSON boolean. It is read through the
+	// same tolerant decoder the Apple/Google path uses, because the cost of
+	// being wrong is asymmetric: a provider that changes shape would
+	// silently stop yielding emails, and silence is the failure mode this
+	// whole feature exists to remove.
+	EmailVerified identity.FlexibleBool `json:"email_verified"`
 }
 
 // FetchUserInfo calls LinkedIn's OIDC userinfo endpoint with token. Callers
@@ -179,5 +196,18 @@ func (c *Client) FetchUserInfo(ctx context.Context, token Token) (UserInfo, erro
 		return UserInfo{}, fmt.Errorf("linkedin: parse userinfo response: %w", err)
 	}
 
-	return UserInfo(parsed), nil
+	// No longer a straight conversion: the two structs have deliberately
+	// stopped matching field for field, because email is only carried
+	// across when LinkedIn says it verified it. An address LinkedIn has not
+	// verified is about to become an account's identity anchor if we let
+	// it through, and an unverified one is just a string on a profile.
+	info := UserInfo{
+		Sub:     parsed.Sub,
+		Name:    parsed.Name,
+		Picture: parsed.Picture,
+	}
+	if bool(parsed.EmailVerified) {
+		info.Email = identity.NormalizeEmail(parsed.Email)
+	}
+	return info, nil
 }

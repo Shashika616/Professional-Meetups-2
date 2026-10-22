@@ -31,7 +31,7 @@ void main() {
                   ),
                   Expanded(
                     child: SecondaryButton(
-                      label: 'CANCEL MEETUP',
+                      label: 'Cancel meetup',
                       height: 42,
                       onPressed: null,
                     ),
@@ -57,7 +57,7 @@ void main() {
         const MaterialApp(
           home: Scaffold(
             body: SecondaryButton(
-              label: 'CANCEL MEETUP',
+              label: 'Cancel meetup',
               onPressed: null,
               color: Colors.red,
               borderColor: Colors.red,
@@ -66,19 +66,76 @@ void main() {
         ),
       );
 
-      final text = tester.widget<Text>(find.text('CANCEL MEETUP'));
+      final text = tester.widget<Text>(find.text('Cancel meetup'));
       expect(text.style?.color, Colors.red);
     });
 
-    testWidgets('onPressed null disables the button', (tester) async {
+    // Was `tester.widget<OutlinedButton>(...).onPressed == null`. The
+    // 2026-10 redesign made SecondaryButton a filled pill built from a
+    // GestureDetector rather than an OutlinedButton, and that assertion
+    // was testing WHICH WIDGET was used, not what the button does. These
+    // two test the contract instead, so the next restyle can't break them
+    // without actually breaking the behaviour.
+    testWidgets('onPressed null does not fire, and reads as disabled to '
+        'assistive tech', (tester) async {
+      final handle = tester.ensureSemantics();
+      var taps = 0;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Column(
+              children: [
+                const SecondaryButton(label: 'SKIP', onPressed: null),
+                SecondaryButton(label: 'GO', onPressed: () => taps++),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('SKIP'));
+      await tester.pump();
+      expect(taps, 0, reason: 'a disabled button must not invoke anything');
+
+      await tester.tap(find.text('GO'));
+      await tester.pump();
+      expect(taps, 1, reason: 'the enabled control still works');
+
+      expect(
+        tester.getSemantics(find.text('SKIP')),
+        matchesSemantics(
+          label: 'SKIP',
+          isButton: true,
+          hasEnabledState: true,
+          // No isEnabled, and crucially no hasTapAction: a disabled
+          // control must not be offered as actionable.
+        ),
+      );
+      expect(
+        tester.getSemantics(find.text('GO')),
+        matchesSemantics(
+          label: 'GO',
+          isButton: true,
+          hasEnabledState: true,
+          isEnabled: true,
+          hasTapAction: true,
+        ),
+      );
+      handle.dispose();
+    });
+
+    testWidgets('a disabled button is visibly dimmed', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(body: SecondaryButton(label: 'SKIP', onPressed: null)),
         ),
       );
 
-      final button = tester.widget<OutlinedButton>(find.byType(OutlinedButton));
-      expect(button.onPressed, isNull);
+      final opacity = tester.widget<Opacity>(
+        find.ancestor(of: find.text('SKIP'), matching: find.byType(Opacity)),
+      );
+      expect(opacity.opacity, lessThan(1.0));
     });
   });
 }

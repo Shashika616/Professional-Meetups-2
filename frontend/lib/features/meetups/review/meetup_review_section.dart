@@ -5,6 +5,7 @@ import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
@@ -142,10 +143,10 @@ class _ReviewInvitation extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionLabel('YOUR REVIEW'),
+        const SectionLabel('Your review'),
         const SizedBox(height: 10),
         FlatCard(
-          radius: 12,
+          radius: 18,
           tint: tone.withValues(alpha: 0.06),
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -153,10 +154,8 @@ class _ReviewInvitation extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  Icon(
-                    cancelled
-                        ? Icons.event_busy_rounded
-                        : Icons.auto_awesome_rounded,
+                  AppIcon(
+                    cancelled ? AppIcons.calendarX : AppIcons.star,
                     size: 18,
                     color: tone,
                   ),
@@ -177,7 +176,7 @@ class _ReviewInvitation extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                'Rate how it went and who you met. It only takes a moment.',
+                'Rate how it went and who you met.',
                 style: TextStyle(
                   color: AppPalette.textSecondary,
                   fontSize: 12.5,
@@ -185,7 +184,7 @@ class _ReviewInvitation extends StatelessWidget {
               ),
               const SizedBox(height: 14),
               PrimaryButton(
-                label: 'START REVIEW',
+                label: 'Start review',
                 height: 44,
                 onPressed: onTap,
               ),
@@ -210,10 +209,10 @@ class _GivenReview extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const SectionLabel('YOUR REVIEW'),
+        const SectionLabel('Your review'),
         const SizedBox(height: 10),
         FlatCard(
-          radius: 12,
+          radius: 18,
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -266,13 +265,13 @@ class _GivenReview extends StatelessWidget {
         ),
         if (review.participants.isNotEmpty) ...[
           const SizedBox(height: 18),
-          const SectionLabel('HOW YOU RATED THEM'),
+          const SectionLabel('How you rated them'),
           const SizedBox(height: 10),
           // One grouped card, rows divided by hairlines — the same shape as
           // the participants list, so the two screens that list the same
           // people look like the same app.
           FlatCard(
-            radius: 14,
+            radius: 18,
             padding: EdgeInsets.zero,
             child: Column(
               children: [
@@ -339,10 +338,10 @@ class _RatedPersonRow extends StatelessWidget {
                     Row(
                       children: [
                         for (var i = 1; i <= 5; i++)
-                          Icon(
+                          AppIcon(
                             i <= participant.score
-                                ? Icons.star_rounded
-                                : Icons.star_outline_rounded,
+                                ? AppIcons.star
+                                : AppIcons.star,
                             size: 18,
                             color: i <= participant.score
                                 ? AppPalette.gold
@@ -378,14 +377,14 @@ class _RatedPersonRow extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.star_rounded,
+                      AppIcon(
+                        AppIcons.star,
                         size: 12,
                         color: AppPalette.brandGreen,
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        'HOST',
+                        'Host',
                         style: TextStyle(
                           color: AppPalette.brandGreen,
                           fontSize: 9.5,

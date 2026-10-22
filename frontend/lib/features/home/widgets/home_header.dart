@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
 
@@ -27,18 +28,24 @@ class HomeHeader extends StatelessWidget {
                     Text(
                       _greeting(),
                       style: TextStyle(
-                        color: AppPalette.textSecondary.withValues(alpha: 0.8),
-                        fontSize: 13,
+                        color: AppPalette.textSecondary,
+                        fontSize: 12.5,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 1),
                     Text(
                       userName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppPalette.textPrimary,
-                        fontSize: 22,
+                        // 22 was competing with the meetup titles further
+                        // down the page: the user's own name is the one
+                        // thing on Home they already know.
+                        fontSize: 19,
+                        height: 1.15,
                         fontWeight: FontWeight.w700,
-                        letterSpacing: -0.5,
+                        letterSpacing: -0.4,
                       ),
                     ),
                   ],
@@ -51,8 +58,16 @@ class HomeHeader extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              ProfessionalAvatar(size: 44, name: userName, imageUrl: imageUrl),
+              const SizedBox(width: 10),
+              ProfessionalAvatar(
+                size: 40,
+                name: userName,
+                imageUrl: imageUrl,
+                // The one avatar in the app that is unambiguously the
+                // viewer's own, which is what the ring and the dot mean.
+                ring: true,
+                showPresenceDot: true,
+              ),
             ],
           ),
           // The two "Your Meetings"/"Requested Meetups" chips that used to
@@ -86,10 +101,10 @@ class _NotificationBell extends StatelessWidget {
       onTap: onTap,
       child: Padding(
         padding: EdgeInsets.all(8.0),
-        child: Icon(
-          Icons.notifications_none_rounded,
-          size: 24,
-          color: AppPalette.textPrimary,
+        child: AppIcon(
+          AppIcons.bell,
+          size: 23,
+          color: AppPalette.textSecondary,
         ),
       ),
     );

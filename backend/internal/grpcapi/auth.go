@@ -16,11 +16,44 @@ package grpcapi
 
 import (
 	"context"
+	"errors"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"professional-meetups-monolith/backend/internal/modules/auth"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
 )
+
+// authStatus is apperror.ToGRPCStatus plus the one structured error this
+// module has: an *auth.AccountClaimRequiredError travels as ALREADY_EXISTS
+// carrying an authv1.AccountClaimRequired detail, so the gateway can put
+// the ticket and the address into the 409 body and the app can open its
+// claim popup with a code already waiting.
+//
+// Same shape as meetup.go's toStatus, deliberately — a second structured
+// error should look like the first one rather than invent a second
+// convention. If attaching the detail fails (it cannot, for a well-formed
+// proto) the plain status still goes out: the sentence is the fallback the
+// detail only improves on, and the app falls back to telling the user to
+// sign in with their original method.
+func authStatus(err error) error {
+	var claim *auth.AccountClaimRequiredError
+	if !errors.As(err, &claim) {
+		return apperror.ToGRPCStatus(err)
+	}
+	st := status.New(codes.AlreadyExists, claim.Error())
+	detail := &authv1.AccountClaimRequired{
+		Ticket:             claim.Ticket,
+		Email:              claim.Email,
+		ResendAfterSeconds: claim.ResendAfterSeconds,
+	}
+	if withDetail, detailErr := st.WithDetails(detail); detailErr == nil {
+		st = withDetail
+	}
+	return st.Err()
+}
 
 // AuthServer adapts the auth module to authv1.AuthServiceServer.
 type AuthServer struct {
@@ -141,7 +174,7 @@ func (s *AuthServer) CompleteFederatedSignup(ctx context.Context, req *authv1.Co
 		FullNameHint:       req.GetFullNameHint(),
 	})
 	if err != nil {
-		return nil, apperror.ToGRPCStatus(err)
+		return nil, authStatus(err)
 	}
 	return sessionToProto(session), nil
 }
@@ -153,7 +186,7 @@ func (s *AuthServer) CompleteLinkedInOnboarding(ctx context.Context, req *authv1
 		AgeConfirmedOver18: req.GetAgeConfirmedOver_18(),
 	})
 	if err != nil {
-		return nil, apperror.ToGRPCStatus(err)
+		return nil, authStatus(err)
 	}
 	return sessionToProto(session), nil
 }
@@ -220,6 +253,25 @@ func (s *AuthServer) CompleteEmailLogin(ctx context.Context, req *authv1.VerifyC
 		return nil, apperror.ToGRPCStatus(err)
 	}
 	return sessionToProto(session), nil
+}
+
+func (s *AuthServer) CompleteAccountClaim(ctx context.Context, req *authv1.CompleteAccountClaimRequest) (*authv1.SessionResponse, error) {
+	session, err := s.svc.CompleteAccountClaim(ctx, auth.CompleteAccountClaimRequest{
+		Ticket: req.GetTicket(),
+		Code:   req.GetCode(),
+	})
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return sessionToProto(session), nil
+}
+
+func (s *AuthServer) ResendAccountClaimCode(ctx context.Context, req *authv1.ResendAccountClaimCodeRequest) (*authv1.StartVerificationResponse, error) {
+	result, err := s.svc.ResendAccountClaimCode(ctx, req.GetTicket())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.StartVerificationResponse{ResendAfterSeconds: result.ResendAfterSeconds}, nil
 }
 
 func (s *AuthServer) RefreshSession(ctx context.Context, req *authv1.RefreshSessionRequest) (*authv1.SessionResponse, error) {
@@ -343,6 +395,7 @@ func trustedContactToProto(c auth.TrustedContact) *authv1.TrustedContactResponse
 		PhoneNumber:          c.PhoneNumber,
 		Email:                c.Email,
 		CreatedAtUnixSeconds: c.CreatedAtUnixSeconds,
+		Status:               c.Status,
 	}
 }
 
@@ -384,14 +437,26 @@ func (s *AuthServer) RemoveTrustedContact(ctx context.Context, req *authv1.Remov
 
 func (s *AuthServer) TriggerSOS(ctx context.Context, req *authv1.TriggerSOSRequest) (*authv1.TriggerSOSResponse, error) {
 	result, err := s.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
-		UserID:           req.GetUserId(),
-		ContextMessage:   req.GetContextMessage(),
-		Latitude:         req.GetLatitude(),
-		Longitude:        req.GetLongitude(),
+		UserID:         req.GetUserId(),
+		ContextMessage: req.GetContextMessage(),
+		// Presence, not the zero value (#78): proto3 optional gives these
+		// pointers, and GetLatitude() would flatten "absent" back into
+		// 0,0 — the exact confusion the optional was added to remove.
+		Latitude:         req.Latitude,
+		Longitude:        req.Longitude,
 		CallerTrustLevel: int(req.GetCallerTrustLevel()),
+		ClientRequestID:  req.GetClientRequestId(),
 	})
 	if err != nil {
 		return nil, apperror.ToGRPCStatus(err)
 	}
 	return &authv1.TriggerSOSResponse{ContactsNotified: result.ContactsNotified}, nil
+}
+
+func (s *AuthServer) ConfirmTrustedContact(ctx context.Context, req *authv1.ConfirmTrustedContactRequest) (*authv1.ConfirmTrustedContactResponse, error) {
+	name, err := s.svc.ConfirmTrustedContact(ctx, req.GetToken())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.ConfirmTrustedContactResponse{RequesterName: name}, nil
 }

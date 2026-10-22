@@ -8,6 +8,8 @@ import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
@@ -25,6 +27,17 @@ import 'support/fake_meetup_service.dart';
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -202,8 +215,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -233,7 +246,7 @@ final _testSession = AuthSession(
 Future<void> _confirmAge(WidgetTester tester) async {
   await tester.tap(find.byType(Checkbox));
   await tester.pumpAndSettle();
-  await tester.tap(find.text('CONTINUE'));
+  await tester.tap(find.text('Continue'));
   await tester.pumpAndSettle();
 }
 
@@ -243,9 +256,130 @@ Future<void> _confirmAge(WidgetTester tester) async {
 /// pre-filled from the session, so CONTINUE is already enabled with no
 /// typing needed; company fields are left blank (optional).
 Future<void> _completeProfileSetup(WidgetTester tester) async {
-  expect(find.text('COMPLETE YOUR PROFILE'), findsOneWidget);
-  await tester.tap(find.text('CONTINUE'));
+  expect(find.text('Complete your profile'), findsOneWidget);
+  await tester.tap(find.text('Continue'));
   await tester.pumpAndSettle();
+}
+
+/// Pushes [OnboardingFlow] on top of a host page, the way LandingPage does
+/// it. [_appWith] makes the flow the root route, where "leave the flow" has
+/// nowhere to go — these tests are about exactly that edge, so they need a
+/// route underneath to come back to.
+Widget _appWithHostBelow(AuthService authService) {
+  return ProviderScope(
+    overrides: [
+      authServiceProvider.overrideWithValue(authService),
+      sessionStorageProvider.overrideWithValue(
+        SecureSessionStorage(storage: const FlutterSecureStorage()),
+      ),
+      meetupServiceProvider.overrideWithValue(ImmediateMeetupService()),
+    ],
+    child: MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: ElevatedButton(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const OnboardingFlow()),
+              ),
+              child: const Text('Get started'),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+Future<void> _openFlowFromHost(WidgetTester tester) async {
+  await tester.tap(find.text('Get started'));
+  await tester.pumpAndSettle();
+}
+
+void _backButtonGroup() {
+  const ageCopy = 'I confirm I am 18 years of age or older.';
+
+  testWidgets('back on the method picker returns to the age step', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _appWithHostBelow(_FakeAuthService.success(_testSession)),
+    );
+    await _openFlowFromHost(tester);
+    await _confirmAge(tester);
+    expect(find.text('Continue with LinkedIn'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(ageCopy), findsOneWidget);
+    expect(find.text('Continue with LinkedIn'), findsNothing);
+    // Still inside the flow, not back on the host page.
+    expect(find.text('Get started'), findsNothing);
+  });
+
+  testWidgets('the attestation comes back unchecked, and re-confirming still '
+      'sends it as given', (tester) async {
+    final auth = _FakeAuthService.success(_testSession);
+    await tester.pumpWidget(_appWithHostBelow(auth));
+    await _openFlowFromHost(tester);
+    await _confirmAge(tester);
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+
+    // The box the user is looking at is empty, so the value held for it
+    // must be too — which means CONTINUE is disabled again.
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isFalse);
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text(ageCopy), findsOneWidget);
+
+    // And the forward path still works after the round trip.
+    await _confirmAge(tester);
+    await tester.tap(find.text('Continue with LinkedIn'));
+    await tester.pumpAndSettle();
+    expect(auth.callCount, 1);
+    expect(auth.lastAgeConfirmedOver18, isTrue);
+  });
+
+  testWidgets('back on the first step leaves the flow entirely', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _appWithHostBelow(_FakeAuthService.success(_testSession)),
+    );
+    await _openFlowFromHost(tester);
+    expect(find.text(ageCopy), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Get started'), findsOneWidget);
+    expect(find.text(ageCopy), findsNothing);
+  });
+
+  testWidgets('the system back gesture does the same two stages the arrow '
+      'does', (tester) async {
+    await tester.pumpWidget(
+      _appWithHostBelow(_FakeAuthService.success(_testSession)),
+    );
+    await _openFlowFromHost(tester);
+    await _confirmAge(tester);
+
+    // First pop is intercepted by PopScope and spends itself stepping back
+    // inside the flow...
+    final navigator = tester.state<NavigatorState>(find.byType(Navigator));
+    await navigator.maybePop();
+    await tester.pumpAndSettle();
+    expect(find.text(ageCopy), findsOneWidget);
+    expect(find.text('Get started'), findsNothing);
+
+    // ...the second leaves it.
+    await navigator.maybePop();
+    await tester.pumpAndSettle();
+    expect(find.text('Get started'), findsOneWidget);
+  });
 }
 
 Widget _appWith(AuthService authService) {
@@ -271,6 +405,7 @@ void main() {
   });
 
   group('guest entry point (ADR-002 § 6)', _guestGroup);
+  group('a user can always get back out (no dead ends)', _backButtonGroup);
 
   testWidgets(
     'success path goes straight from LinkedIn sign-in to the profile-setup '
@@ -280,13 +415,13 @@ void main() {
       await tester.pumpAndSettle();
       await _confirmAge(tester);
 
-      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.tap(find.text('Continue with LinkedIn'));
       await tester.pumpAndSettle();
 
       // Straight to the mandatory profile-setup screen — not AppShell yet,
       // and none of the phone/personal-email/personal-details/corporate-
       // email screens are shown at all during initial onboarding anymore.
-      expect(find.text('COMPLETE YOUR PROFILE'), findsOneWidget);
+      expect(find.text('Complete your profile'), findsOneWidget);
       expect(find.text('Verify Your Phone'), findsNothing);
       expect(find.byType(AppShell), findsNothing);
 
@@ -316,7 +451,7 @@ void main() {
       await tester.pumpAndSettle();
       await _confirmAge(tester);
 
-      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.tap(find.text('Continue with LinkedIn'));
       await tester.pumpAndSettle();
 
       expect(find.text('Verify Your Phone'), findsNothing);
@@ -345,10 +480,10 @@ void main() {
     await tester.pumpAndSettle();
     await _confirmAge(tester);
 
-    await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+    await tester.tap(find.text('Continue with LinkedIn'));
     await tester.pumpAndSettle();
 
-    expect(find.text('COMPLETE YOUR PROFILE'), findsNothing);
+    expect(find.text('Complete your profile'), findsNothing);
     expect(find.byType(AppShell), findsOneWidget);
     expect(find.byType(OnboardingFlow), findsNothing);
   });
@@ -362,10 +497,10 @@ void main() {
       await tester.pumpAndSettle();
       await _confirmAge(tester);
 
-      await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+      await tester.tap(find.text('Continue with LinkedIn'));
       await tester.pumpAndSettle();
 
-      expect(find.text('COMPLETE YOUR PROFILE'), findsOneWidget);
+      expect(find.text('Complete your profile'), findsOneWidget);
       await tester.tap(find.text('Skip for now'));
       await tester.pumpAndSettle();
 
@@ -384,7 +519,7 @@ void main() {
     await tester.pumpAndSettle();
     await _confirmAge(tester);
 
-    await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+    await tester.tap(find.text('Continue with LinkedIn'));
     await tester.pumpAndSettle();
 
     expect(find.byType(OnboardingFlow), findsOneWidget);
@@ -402,10 +537,10 @@ void main() {
       find.text('I confirm I am 18 years of age or older.'),
       findsOneWidget,
     );
-    expect(find.text('CONTINUE WITH LINKEDIN'), findsNothing);
+    expect(find.text('Continue with LinkedIn'), findsNothing);
 
     // CONTINUE is disabled until the box is checked.
-    await tester.tap(find.text('CONTINUE'));
+    await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
     expect(
       find.text('I confirm I am 18 years of age or older.'),
@@ -413,7 +548,7 @@ void main() {
     );
 
     await _confirmAge(tester);
-    expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
+    expect(find.text('Continue with LinkedIn'), findsOneWidget);
   });
 
   testWidgets('the sign-up path sends the attestation the age step recorded, '
@@ -423,7 +558,7 @@ void main() {
     await tester.pumpAndSettle();
     await _confirmAge(tester);
 
-    await tester.tap(find.text('CONTINUE WITH LINKEDIN'));
+    await tester.tap(find.text('Continue with LinkedIn'));
     await tester.pumpAndSettle();
 
     expect(auth.callCount, 1);
@@ -453,8 +588,8 @@ void main() {
     );
 
     // The entry points themselves must all survive the layout change.
-    expect(find.text('SIGN UP WITH EMAIL'), findsOneWidget);
-    expect(find.text('CONTINUE AS GUEST'), findsOneWidget);
+    expect(find.text('Sign up with email'), findsOneWidget);
+    expect(find.text('Continue as guest'), findsOneWidget);
   });
 
   testWidgets(
@@ -497,14 +632,14 @@ void main() {
         await tester.pumpAndSettle();
         await _confirmAge(tester);
 
-        expect(find.text('CONTINUE WITH APPLE'), findsOneWidget);
+        expect(find.text('Continue with Apple'), findsOneWidget);
         // Plan 21: Google is offered on iOS too, as the same button.
-        expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
-        expect(find.text('CONTINUE WITH LINKEDIN'), findsOneWidget);
+        expect(find.text('Continue with Google'), findsOneWidget);
+        expect(find.text('Continue with LinkedIn'), findsOneWidget);
 
         final appleSize = tester.getSize(
           find.ancestor(
-            of: find.text('CONTINUE WITH APPLE'),
+            of: find.text('Continue with Apple'),
             matching: find.byType(PrimaryButton),
           ),
         );
@@ -556,7 +691,7 @@ void main() {
       expect(auth.googleCallCount, 1);
       expect(auth.callCount, 0, reason: 'LinkedIn must not have been called');
       expect(auth.lastAgeConfirmedOver18, isTrue);
-      expect(find.text('COMPLETE YOUR PROFILE'), findsOneWidget);
+      expect(find.text('Complete your profile'), findsOneWidget);
     });
   });
 }
@@ -614,7 +749,7 @@ void _guestGroup() {
       // asking about something they did not choose and cannot meaningfully
       // change here.
       expect(
-        find.text('COMPLETE YOUR PROFILE'),
+        find.text('Complete your profile'),
         findsNothing,
         reason: 'a guest was routed through the profile-setup screen',
       );
@@ -672,7 +807,7 @@ void _guestGroup() {
         final button = find.byKey(Key(key));
         expect(button, findsOneWidget, reason: '$key must be present');
         expect(
-          find.descendant(of: button, matching: find.byType(Icon)),
+          find.descendant(of: button, matching: find.byType(AppIcon)),
           findsOneWidget,
           reason: '$key needs its leading icon',
         );
@@ -758,7 +893,7 @@ void _guestGroup() {
       // The other provider is Apple or Google depending on platform; both
       // paths must carry a mark.
       final other = find.ancestor(
-        of: find.textContaining('CONTINUE WITH'),
+        of: find.textContaining('Continue with'),
         matching: find.byType(PrimaryButton),
       );
       expect(other, findsNWidgets(2));
@@ -819,7 +954,7 @@ void _guestGroup() {
 
       // Skipped on the Apple path, where this button is not built at all.
       final google = find.ancestor(
-        of: find.text('CONTINUE WITH GOOGLE'),
+        of: find.text('Continue with Google'),
         matching: find.byType(PrimaryButton),
       );
       if (google.evaluate().isEmpty) return;
@@ -840,7 +975,7 @@ void _guestGroup() {
       await _confirmAge(tester);
 
       final label = tester
-          .widget<Text>(find.text('CONTINUE WITH LINKEDIN'))
+          .widget<Text>(find.text('Continue with LinkedIn'))
           .style!;
       // The buttons used to be set at 15/1.5, which read at a glance as the
       // same weight as the 20px logo above them.

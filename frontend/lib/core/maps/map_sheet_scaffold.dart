@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// The "map behind, panel in front" layout every map screen in the app now
 /// uses: a map filling the whole area, something floating over its top
@@ -43,6 +44,9 @@ class MapSheetScaffold extends StatelessWidget {
 
   /// Floats over the top of the map, inside the visible area — the search
   /// field on the pickers, nothing on the read-only view.
+  ///
+  /// Painted ABOVE [overlay], so a full-screen scrim can dim and blur the
+  /// entire map without touching the field the person is typing into.
   final Widget? topOverlay;
 
   /// Centred in the VISIBLE map, above the panel. Must not take hit tests
@@ -54,8 +58,8 @@ class MapSheetScaffold extends StatelessWidget {
   /// recentre button.
   final Widget? mapActions;
 
-  /// Covers everything, panel included. For the search suggestions and
-  /// their scrim, which must paint over the map AND the panel.
+  /// Covers the map and the panel, but not [topOverlay]. For the search
+  /// suggestions and their scrim.
   final Widget? overlay;
 
   @override
@@ -74,13 +78,6 @@ class MapSheetScaffold extends StatelessWidget {
                 child: Stack(
                   children: [
                     if (centrePin != null) Center(child: centrePin!),
-                    if (topOverlay != null)
-                      Positioned(
-                        top: 12,
-                        left: 16,
-                        right: 16,
-                        child: topOverlay!,
-                      ),
                     if (mapActions != null)
                       Positioned(right: 16, bottom: 12, child: mapActions!),
                   ],
@@ -91,8 +88,20 @@ class MapSheetScaffold extends StatelessWidget {
           ),
         ),
 
-        // Layer 3: anything that must cover the panel too.
+        // Layer 3: anything that must cover the map and the panel.
         if (overlay != null) Positioned.fill(child: overlay!),
+
+        // Layer 4: the floating top control, above the overlay.
+        //
+        // It used to live inside the Expanded above, under the scrim,
+        // which forced the scrim to start below it — and a blur that
+        // covers four fifths of a screen and leaves a sharp band across
+        // the top reads as a rendering fault rather than as a material.
+        // Up here the scrim can run edge to edge while the field stays
+        // crisp and tappable. The Expanded's top IS the stack's top, so
+        // the same `top: 12` puts it exactly where it was.
+        if (topOverlay != null)
+          Positioned(top: 12, left: 16, right: 16, child: topOverlay!),
       ],
     );
   }
@@ -196,7 +205,7 @@ class MapActionButton extends StatelessWidget {
     this.semanticLabel,
   });
 
-  final IconData icon;
+  final String icon;
   final VoidCallback? onPressed;
   final bool busy;
   final String? semanticLabel;
@@ -227,7 +236,7 @@ class MapActionButton extends StatelessWidget {
                         color: AppPalette.candyBlue,
                       ),
                     )
-                  : Icon(icon, size: 21, color: AppPalette.textPrimary),
+                  : AppIcon(icon, size: 21, color: AppPalette.textPrimary),
             ),
           ),
         ),

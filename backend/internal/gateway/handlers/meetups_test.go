@@ -318,6 +318,11 @@ func TestListOpenMeetups_RequiresViewerCoordinates(t *testing.T) {
 		{"unparseable latitude", "?intent=coffee&viewer_lat=north&viewer_lng=79.8"},
 		{"unparseable page size", "?intent=coffee&viewer_lat=6.9&viewer_lng=79.8&page_size=many"},
 		{"unparseable within_days", "?intent=coffee&viewer_lat=6.9&viewer_lng=79.8&within_days=soon"},
+		// Out of int32 range. These used to be parsed as int and truncated,
+		// so they wrapped silently into a different, in-range value
+		// (4294967306 became 10) instead of being refused (gosec G109).
+		{"page size beyond int32", "?intent=coffee&viewer_lat=6.9&viewer_lng=79.8&page_size=4294967306"},
+		{"within_days beyond int32", "?intent=coffee&viewer_lat=6.9&viewer_lng=79.8&within_days=2147483648"},
 	}
 
 	for _, tc := range cases {

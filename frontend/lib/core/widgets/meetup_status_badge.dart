@@ -1,42 +1,47 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart';
-import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_tag.dart';
 
-/// A compact, color-coded lifecycle-status pill (ADR-016 addendum,
-/// 2026-08-20) — every card that renders a [Meetup] shows this, additively
-/// alongside whatever accepted-count/request-status text it already shows.
-/// Mirrors [TrustLevelBadge]'s shape (`core/widgets/trust_level_badge.dart`),
-/// the one existing compact-pill convention in this codebase.
+/// A compact, colour-coded lifecycle-status pill (ADR-016 addendum,
+/// 2026-08-20) — every card that renders a [Meetup] shows this.
+///
+/// # IT IS AN [AppTag] NOW, AND THAT FIXED A CONTRAST BUG
+///
+/// This drew its own `Container`: a 10%-alpha fill with the SAME colour at
+/// full strength as the 10px label. On the light theme that put
+/// `AppPalette.verified` (#2DAA45) on a near-white ground at **2.4:1** —
+/// a third of what AA asks for 10px text — and the cancelled variant was
+/// not much better.
+///
+/// [AppTag] resolves a tone to a tint AND a separately-chosen readable
+/// foreground ([AppPalette.verifiedText], [AppPalette.dangerOnTint]), so
+/// the problem cannot come back by someone picking a fill they liked.
+///
+/// The mapping is the interesting part and is deliberate:
+///
+///  * `open` → [AppTone.success], because it is an invitation.
+///  * `full` → [AppTone.accent], NOT danger. A full meetup is not a
+///    failure; it is a normal, common, successful state that simply is not
+///    available to you. Red would read as an error the user caused.
+///  * `cancelled` → [AppTone.danger].
+///  * `completed` → [AppTone.neutral]. It is history.
 class MeetupStatusBadge extends StatelessWidget {
-  const MeetupStatusBadge({super.key, required this.status});
+  const MeetupStatusBadge({super.key, required this.status, this.onSurface});
 
   final MeetupStatus status;
 
+  /// See [AppTag.onSurface].
+  final Color? onSurface;
+
   @override
   Widget build(BuildContext context) {
-    final (label, color) = switch (status) {
-      MeetupStatus.open => ('OPEN', AppPalette.verified),
-      MeetupStatus.full => ('FULL', AppPalette.candyBlue),
-      MeetupStatus.cancelled => ('CANCELLED', AppPalette.danger),
-      MeetupStatus.completed => ('COMPLETED', AppPalette.textSecondary),
+    final (label, tone) = switch (status) {
+      MeetupStatus.open => ('Open', AppTone.success),
+      MeetupStatus.full => ('Full', AppTone.accent),
+      MeetupStatus.cancelled => ('Cancelled', AppTone.danger),
+      MeetupStatus.completed => ('Completed', AppTone.neutral),
     };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(10),
-        color: color.withValues(alpha: 0.10),
-        border: Border.all(color: color.withValues(alpha: 0.30)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 0.6,
-          color: color,
-        ),
-      ),
-    );
+    return AppTag(label, tone: tone, onSurface: onSurface);
   }
 }

@@ -10,7 +10,9 @@ import 'package:professional_connections_platform/core/services/meetup_service.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_back_button.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -186,8 +188,9 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
     // Level 0 is the safe default while the profile hasn't resolved yet —
     // ADR-014 made Level 0 (Apple/Google/email, no LinkedIn) a real account
     // state, so this must never assume a higher level than confirmed.
-    final trustLevel =
-        ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    final trustLevel = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.trustLevel ?? 0),
+    );
 
     // The OS back gesture used to pop the whole five-step wizard, throwing
     // away a part-filled draft — the in-app back button has always stepped
@@ -289,6 +292,27 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
     // The map fills whatever it is handed; everything else scrolls inside
     // the flow's own gutter.
     if (_step == _Step.location) return body;
+    // The timing step is handed AT LEAST the height of the viewport, so
+    // it can push its CONTINUE to the bottom edge with a Spacer instead
+    // of leaving the button stranded halfway up a blank page — and it
+    // still scrolls when the content is taller than the screen, which a
+    // SliverFillRemaining would not have done (it sizes its child past
+    // the viewport without making the overflow reachable).
+    //
+    // Only that step: IntrinsicHeight questions its child, and the
+    // intent step's shrink-wrapped GridView is a viewport, which cannot
+    // answer a question about its own intrinsic height.
+    if (_step == _Step.timing) {
+      return LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: IntrinsicHeight(child: body),
+          ),
+        ),
+      );
+    }
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       child: body,
@@ -319,23 +343,17 @@ class _Header extends StatelessWidget {
         children: [
           Row(
             children: [
-              IconButton(
-                onPressed: onBack,
-                icon: Icon(
-                  Icons.arrow_back_ios_new_rounded,
-                  size: 18,
-                  color: AppPalette.textPrimary,
-                ),
-              ),
+              // Was a hardcoded iOS chevron, which Android users saw too.
+              AppBackButton(onPressed: onBack),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  'SCHEDULE A MEETUP',
+                  'Schedule a meetup',
                   style: TextStyle(
                     color: AppPalette.textPrimary,
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 1.6,
+                    letterSpacing: 0.3,
                   ),
                 ),
               ),
@@ -553,7 +571,17 @@ class _TimingStepState extends State<_TimingStep> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _StepTitle('When should it happen?'),
-        _IllustratedCard(
+        // THE PICTURE SITS ON TOP, NOT DOWN THE SIDE.
+        //
+        // Both cards used to be a row: copy on the left, a 104pt strip of
+        // photograph down the right edge. At that width the artwork was a
+        // sliver nobody could read as a picture, and it squeezed the date
+        // and the two time fields into two thirds of the card — the
+        // "compacted" feeling was mostly this. The screen set draws these
+        // as a banner across the top with the content beneath it, which
+        // is also the shape the intent tiles and the meetup hero already
+        // use everywhere else in the app.
+        _BannerCard(
           asset: 'assets/images/schedule/date_card.jpg',
           onTap: _pickDate,
           child: Row(
@@ -562,82 +590,71 @@ class _TimingStepState extends State<_TimingStep> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const _FieldLabel('DATE'),
-                    const SizedBox(height: 4),
+                    const _FieldLabel('Date'),
+                    const SizedBox(height: 5),
                     Text(
                       formatPickedDate(_date, now: _now()),
                       style: TextStyle(
                         color: AppPalette.textPrimary,
-                        fontSize: 17,
+                        fontSize: 19,
                         fontWeight: FontWeight.w800,
                         height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Tap to change',
-                      style: TextStyle(
-                        color: AppPalette.textSecondary,
-                        fontSize: 11.5,
                       ),
                     ),
                   ],
                 ),
               ),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: AppPalette.textSecondary,
-              ),
+              const SizedBox(width: 10),
+              AppIcon(AppIcons.forward, color: AppPalette.textSecondary),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        // FROM and TO side by side in one card, an arrow between them —
-        // the window is one thing, so it gets one surface.
-        _IllustratedCard(
+        const SizedBox(height: 16),
+        // FROM and TO side by side in one card — the window is one thing,
+        // so it gets one surface.
+        _BannerCard(
           asset: 'assets/images/schedule/time_card.jpg',
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
                     child: TimeField24h(
-                      label: 'FROM',
+                      label: 'From',
                       initialValue: _from,
                       onChanged: (t) => setState(() => _from = t),
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-                    child: Icon(
-                      Icons.arrow_forward_rounded,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    child: AppIcon(
+                      AppIcons.arrowRight,
                       size: 18,
                       color: AppPalette.textSecondary,
                     ),
                   ),
                   Expanded(
                     child: TimeField24h(
-                      label: 'TO',
+                      label: 'To',
                       initialValue: _to,
                       onChanged: (t) => setState(() => _to = t),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               // Named outright: the fields accept only the 24-hour clock,
               // and a person used to "7:30" needs to be told so before
               // they type it, not by a rejected digit.
               Row(
                 children: [
-                  Icon(
-                    Icons.schedule_rounded,
+                  AppIcon(
+                    AppIcons.clock,
                     size: 13,
                     color: AppPalette.textSecondary,
                   ),
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       '24-hour format, e.g. 09:30 or 18:00',
@@ -654,15 +671,11 @@ class _TimingStepState extends State<_TimingStep> {
           ),
         ),
         if (problem != null) ...[
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                Icons.error_outline_rounded,
-                size: 16,
-                color: AppPalette.danger,
-              ),
+              AppIcon(AppIcons.warning, size: 16, color: AppPalette.danger),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -673,7 +686,7 @@ class _TimingStepState extends State<_TimingStep> {
             ],
           ),
         ] else if (resolved != null) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           // The resolved window read back in one line, with its length —
           // the sanity check that catches a mistyped hour here rather than
           // on the review step. The next-day case gets a second, explicit
@@ -686,14 +699,20 @@ class _TimingStepState extends State<_TimingStep> {
                 : null,
           ),
         ],
-        const SizedBox(height: 20),
+        // Pushes CONTINUE to the bottom edge when the step does not fill
+        // the screen, which until now left a third of the page empty
+        // under the button while everything above it was crowded. It
+        // collapses to nothing once the keyboard takes the room.
+        const Spacer(),
+        const SizedBox(height: 24),
         PrimaryButton(
-          label: 'CONTINUE',
+          label: 'Continue',
           isLoading: _checking,
           onPressed: resolved != null && resolved.isValid && !_checking
               ? () => _continue(resolved.start, resolved.end)
               : null,
         ),
+        const SizedBox(height: 16),
       ],
     );
   }
@@ -708,23 +727,24 @@ class _TimingStepState extends State<_TimingStep> {
   }
 }
 
-/// A timing-step card with an illustration panel down its right edge. The
-/// panel keeps the artwork's own warm ground rather than tinting it to the
-/// theme — it is meant to read as a picture on the card, the way the intent
-/// cards carry their scenes. Decoded at panel size, not asset size.
-class _IllustratedCard extends StatelessWidget {
-  const _IllustratedCard({
-    required this.asset,
-    required this.child,
-    this.onTap,
-  });
+/// A timing-step card: a wide illustration across the top, the content
+/// beneath it.
+///
+/// The artwork keeps its own warm ground rather than being tinted to the
+/// theme — it is meant to read as a picture on the card, the way the
+/// intent tiles carry their scenes. Decoded at the banner's own width.
+class _BannerCard extends StatelessWidget {
+  const _BannerCard({required this.asset, required this.child, this.onTap});
 
   final String asset;
   final Widget child;
   final VoidCallback? onTap;
 
-  static const double _panelWidth = 104;
-  static const double _radius = 14;
+  // Generous on purpose. At 92 the two cards finished a third of the way
+  // down the screen and everything below them was dead space; the step
+  // read as crammed into the top even though the page was mostly empty.
+  static const double _bannerHeight = 126;
+  static const double _radius = 18;
 
   @override
   Widget build(BuildContext context) {
@@ -732,33 +752,35 @@ class _IllustratedCard extends StatelessWidget {
     final card = FlatCard(
       radius: _radius,
       padding: EdgeInsets.zero,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(_radius - 1),
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-                  child: child,
-                ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(
+              top: Radius.circular(_radius - 1),
+            ),
+            // Sized off the screen rather than a LayoutBuilder: the card
+            // is the full width of the step's gutter, and a LayoutBuilder
+            // here cannot answer the intrinsic-height question the
+            // step's SliverFillRemaining asks of it.
+            child: SizedBox(
+              height: _bannerHeight,
+              child: Image.asset(
+                asset,
+                fit: BoxFit.cover,
+                cacheWidth: (MediaQuery.sizeOf(context).width * dpr).round(),
+                excludeFromSemantics: true,
+                errorBuilder: (_, _, _) =>
+                    ColoredBox(color: AppPalette.surface),
               ),
-              SizedBox(
-                width: _panelWidth,
-                child: Image.asset(
-                  asset,
-                  fit: BoxFit.cover,
-                  alignment: Alignment.center,
-                  cacheWidth: (_panelWidth * dpr).round(),
-                  excludeFromSemantics: true,
-                  errorBuilder: (_, _, _) =>
-                      ColoredBox(color: AppPalette.surface),
-                ),
-              ),
-            ],
+            ),
           ),
-        ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+            child: child,
+          ),
+        ],
       ),
     );
     if (onTap == null) return card;
@@ -780,7 +802,7 @@ class _FieldLabel extends StatelessWidget {
         color: AppPalette.textSecondary,
         fontSize: 10.5,
         fontWeight: FontWeight.w800,
-        letterSpacing: 1.3,
+        letterSpacing: 0.3,
       ),
     );
   }
@@ -797,21 +819,23 @@ class _WindowSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // No coloured rule down the left edge, and an opaque tint rather
+    // than a translucent one — the same two corrections every other
+    // card in the app got. The leading check already carries the green.
     return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(14),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: AppPalette.brandGreen.withValues(alpha: 0.08),
-          border: Border(
-            left: BorderSide(color: AppPalette.brandGreen, width: 3),
+          color: AppPalette.tintedSurface(
+            AppPalette.brandGreen.withValues(alpha: 0.10),
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          padding: const EdgeInsets.fromLTRB(13, 11, 13, 11),
           child: Row(
             children: [
-              Icon(
-                Icons.check_circle_outline_rounded,
+              AppIcon(
+                AppIcons.checkCircle,
                 size: 16,
                 color: AppPalette.brandGreen,
               ),
@@ -943,15 +967,15 @@ class _WindowSummary extends StatelessWidget {
 //           style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
 //         ),
 //         const SizedBox(height: 16),
-//         GlassTextField(
+//         AppTextField(
 //           controller: _labelController,
-//           icon: Icons.place_outlined,
+//           icon: AppIcons.pin,
 //           hint: 'Venue name / address',
 //         ),
 //         const SizedBox(height: 12),
-//         GlassTextField(
+//         AppTextField(
 //           controller: _latController,
-//           icon: Icons.explore_outlined,
+//           icon: AppIcons.explore,
 //           hint: 'Latitude (e.g. 6.9271)',
 //           keyboardType: const TextInputType.numberWithOptions(
 //             decimal: true,
@@ -959,9 +983,9 @@ class _WindowSummary extends StatelessWidget {
 //           ),
 //         ),
 //         const SizedBox(height: 12),
-//         GlassTextField(
+//         AppTextField(
 //           controller: _lngController,
-//           icon: Icons.explore_outlined,
+//           icon: AppIcons.explore,
 //           hint: 'Longitude (e.g. 79.8612)',
 //           keyboardType: const TextInputType.numberWithOptions(
 //             decimal: true,
@@ -1011,13 +1035,13 @@ class _CapacityStepState extends State<_CapacityStep> {
         const StepHero(asset: 'assets/images/schedule/capacity_card.jpg'),
         const SizedBox(height: 14),
         FlatCard(
-          radius: 14,
+          radius: 18,
           padding: const EdgeInsets.symmetric(vertical: 22),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _StepperButton(
-                icon: Icons.remove_rounded,
+                icon: AppIcons.minus,
                 onTap: _capacity > _min
                     ? () => setState(() => _capacity--)
                     : null,
@@ -1036,7 +1060,7 @@ class _CapacityStepState extends State<_CapacityStep> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    _capacity == 1 ? 'JUST YOU' : 'PEOPLE · INCLUDING YOU',
+                    _capacity == 1 ? 'Just you' : 'People · including you',
                     style: TextStyle(
                       color: AppPalette.textSecondary,
                       fontSize: 10,
@@ -1047,7 +1071,7 @@ class _CapacityStepState extends State<_CapacityStep> {
                 ],
               ),
               _StepperButton(
-                icon: Icons.add_rounded,
+                icon: AppIcons.plus,
                 onTap: _capacity < _max
                     ? () => setState(() => _capacity++)
                     : null,
@@ -1057,7 +1081,7 @@ class _CapacityStepState extends State<_CapacityStep> {
         ),
         const SizedBox(height: 20),
         PrimaryButton(
-          label: 'CONTINUE',
+          label: 'Continue',
           onPressed: () => widget.onSubmit(_capacity),
         ),
       ],
@@ -1068,7 +1092,7 @@ class _CapacityStepState extends State<_CapacityStep> {
 class _StepperButton extends StatelessWidget {
   const _StepperButton({required this.icon, required this.onTap});
 
-  final IconData icon;
+  final String icon;
   final VoidCallback? onTap;
 
   @override
@@ -1089,7 +1113,7 @@ class _StepperButton extends StatelessWidget {
                   AppPalette.textPrimary.withValues(alpha: 0.05),
                 ),
         ),
-        child: Icon(
+        child: AppIcon(
           icon,
           color: enabled ? AppPalette.candyBlue : AppPalette.textSecondary,
         ),
@@ -1131,21 +1155,21 @@ class _ReviewStep extends StatelessWidget {
         const StepHero(asset: 'assets/images/schedule/review_card.jpg'),
         const SizedBox(height: 14),
         FlatCard(
-          radius: 14,
+          radius: 18,
           padding: const EdgeInsets.fromLTRB(18, 6, 18, 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _ReviewRow(
-                icon: intent.icon,
-                label: 'INTENT',
+                icon: intent.iconPath,
+                label: 'Intent',
                 value: intent.labelFor(windowStart),
                 detail: intent.tagline,
               ),
               const _ReviewDivider(),
               _ReviewRow(
-                icon: Icons.schedule_rounded,
-                label: 'WHEN',
+                icon: AppIcons.clock,
+                label: 'When',
                 // formatMeetupWindow renders a midnight-crossing window as
                 // e.g. "10:00 PM–1:00 AM" with no day marker — fine on a
                 // card, but this is the last look before it is created, so
@@ -1158,10 +1182,8 @@ class _ReviewStep extends StatelessWidget {
               ),
               const _ReviewDivider(),
               _ReviewRow(
-                icon: placeLabel.isEmpty
-                    ? Icons.my_location_rounded
-                    : Icons.place_outlined,
-                label: 'LOCATION',
+                icon: placeLabel.isEmpty ? AppIcons.locate : AppIcons.pin,
+                label: 'Location',
                 // An empty label is the "use my current location" path
                 // (ADR-029): coordinates are set, the address is resolved
                 // server-side on creation. Say that rather than render a
@@ -1175,8 +1197,8 @@ class _ReviewStep extends StatelessWidget {
               ),
               const _ReviewDivider(),
               _ReviewRow(
-                icon: Icons.people_outline,
-                label: 'CAPACITY',
+                icon: AppIcons.people,
+                label: 'Capacity',
                 value: capacity == 1 ? '1 person' : '$capacity people',
                 detail: 'Including you',
               ),
@@ -1185,7 +1207,7 @@ class _ReviewStep extends StatelessWidget {
         ),
         const SizedBox(height: 20),
         PrimaryButton(
-          label: 'CONFIRM & SCHEDULE',
+          label: 'Confirm & schedule',
           isLoading: submitting,
           onPressed: onConfirm,
         ),
@@ -1207,7 +1229,7 @@ class _ReviewRow extends StatelessWidget {
     this.detail,
   });
 
-  final IconData icon;
+  final String icon;
   final String label;
   final String value;
   final String? detail;
@@ -1226,7 +1248,7 @@ class _ReviewRow extends StatelessWidget {
               color: AppPalette.candyBlue.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, size: 18, color: AppPalette.candyBlue),
+            child: AppIcon(icon, size: 18, color: AppPalette.candyBlue),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -1239,7 +1261,7 @@ class _ReviewRow extends StatelessWidget {
                     color: AppPalette.textSecondary,
                     fontSize: 10.5,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: 1.3,
+                    letterSpacing: 0.3,
                   ),
                 ),
                 const SizedBox(height: 3),

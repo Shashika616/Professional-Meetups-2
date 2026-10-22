@@ -6,6 +6,7 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
@@ -295,16 +296,27 @@ class _HomePageState extends ConsumerState<HomePage>
               // opted out of the shared button, and with it out of the
               // tap-scale press feedback, the loading state and the
               // shrink-the-label-instead-of-truncating-it behaviour that
-              // live there. The green fill and 50pt height are carried over
-              // exactly; only the label's own type comes from the shared
-              // widget now, which is the point of using it.
+              // live there.
+              //
+              // THE FILL IS NO LONGER OVERRIDDEN (UI review #1). It used to
+              // carry the hand-rolled version's green over verbatim, which
+              // left the app with two primary colours: green here, candyBlue
+              // for the identical action on Events and Profile. Worse, the
+              // green was AppPalette.verified — a STATUS colour, meaning
+              // "this person is verified", doing a second job as an action
+              // colour. Same shade, two unrelated meanings, on the same
+              // screen as a verified badge.
+              //
+              // Dropping both overrides takes the shared default, so this
+              // button now looks like every other primary action by
+              // construction rather than by matching. The green stays where
+              // it means something: the safety tip card below, the section
+              // bars, the checks.
               child: PrimaryButton(
                 key: const Key('hostYourOwnMeetup'),
-                label: 'HOST YOUR OWN MEETUP',
-                icon: Icons.add_circle_outline,
+                label: 'Host your own meetup',
+                icon: AppIcons.plusCircle,
                 height: 50,
-                fillColor: AppPalette.verified,
-                foregroundColor: Colors.black,
                 onPressed: onHostMeetup,
               ),
             ),

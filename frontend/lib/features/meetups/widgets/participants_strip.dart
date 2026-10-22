@@ -5,6 +5,7 @@ import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/features/meetups/participants_page.dart';
 
@@ -45,8 +46,9 @@ class ParticipantsStrip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final viewerTrustLevel =
-        ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    final viewerTrustLevel = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.trustLevel ?? 0),
+    );
     final verb = finished ? 'joined' : 'going';
     // Was a ConsumerStatefulWidget fetching in initState, which made this and
     // ParticipantsPage two independent uncached reads of the same rows about a
@@ -122,11 +124,7 @@ class ParticipantsStrip extends ConsumerWidget {
               ),
             ),
           ),
-          Icon(
-            Icons.chevron_right_rounded,
-            size: 18,
-            color: AppPalette.textSecondary,
-          ),
+          AppIcon(AppIcons.forward, size: 18, color: AppPalette.textSecondary),
         ],
       ),
     );
@@ -186,8 +184,8 @@ class RedactedFace extends StatelessWidget {
           ],
         ),
       ),
-      child: Icon(
-        Icons.person_rounded,
+      child: AppIcon(
+        AppIcons.person,
         size: size * 0.62,
         color: AppPalette.card,
       ),

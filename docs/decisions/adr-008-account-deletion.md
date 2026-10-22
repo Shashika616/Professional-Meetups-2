@@ -2,8 +2,17 @@
 
 ## Status
 
-Accepted (2026-09-28). Code complete; migrations 0014-0016 not yet applied
-to production.
+Accepted (2026-09-28). **Shipped 2026-10-01**: migrations 0014-0016 applied
+to production (schema v13 to v16) and the code deployed as Cloud Run
+revision `r34`, in that order — the new code writes to
+`auth.user_deleted_outbox` and `auth.safety_holds`, so the tables had to
+exist first.
+
+The privacy-policy wording at the end of this document is still a DRAFT and
+has not been published. Deleting an account works in the app today; the
+disclosure the stores require for the 90-day SOS hold does not exist yet,
+and that disclosure is a condition of the hold being allowed at all. Publish
+it before the next store submission.
 
 ## Context
 
@@ -60,8 +69,18 @@ then the other. Neither service calls the other.
 Anonymised rows use a new id per row, not one replacement id per account:
 one id per account would still link every rating that account wrote, which
 is pseudonymisation, not anonymisation. Database backups still contain the
-original rows until they age out; the privacy policy states an upper bound
-of 30 days, so check the Supabase plan's backup retention stays within it.
+original rows until they age out, which is why the privacy policy states an
+upper bound of 30 days.
+
+That bound is kept by us, not by a plan we do not control: the Supabase free
+tier has no managed backups at all, so the ONLY copies are the nightly
+`pg_dump` the `Database backup` workflow uploads to GCS, and the bucket's
+lifecycle rule (`backend/scripts/backup-lifecycle.json`) deletes every
+object at 30 days. Verified 2026-10-01: the rule is `Delete` at `age: 30`,
+and the dump is unfiltered (`pg_dump -Fc`, no `--schema`), so it does carry
+`auth.safety_holds` and every anonymised row. If backups ever move to a
+managed provider, that retention becomes the number the policy has to
+match — change one and you have to change the other.
 
 ### How the two modules stay independent
 

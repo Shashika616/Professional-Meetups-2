@@ -13,7 +13,6 @@ import 'package:professional_connections_platform/core/services/meetup_service.d
 import 'package:professional_connections_platform/core/widgets/meetup_status_badge.dart';
 import 'package:professional_connections_platform/core/widgets/faded_picture.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
-import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
@@ -22,6 +21,7 @@ import 'package:professional_connections_platform/features/home/widgets/happenin
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/meetups/location_view_page.dart';
+import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 
 import 'support/fake_auth_service.dart';
@@ -194,8 +194,9 @@ void main() {
     );
 
     testWidgets(
-      'the join button on a locked card is enabled (ADR-028 drops the '
-      'disabled-button pattern), not a dead end',
+      'a locked card carries no join button at all — the browse card has no '
+      'actions now, so ADR-028\'s "never a dead end" rule is carried by the '
+      'card tap and by the meetup page, not by a button here',
       (tester) async {
         _useTallViewport(tester);
         final service = ScriptedMeetupService(
@@ -205,14 +206,12 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 0));
         await tester.pumpAndSettle();
 
-        final button = tester.widget<PrimaryButton>(
-          find.widgetWithText(PrimaryButton, 'I\'M INTERESTED'),
-        );
-        expect(button.onPressed, isNotNull);
+        expect(find.text('I\'m interested'), findsNothing);
+        expect(find.text('View location'), findsNothing);
       },
     );
 
-    testWidgets('tapping a locked card\'s join button shows a toast and pushes '
+    testWidgets('tapping a locked card shows a toast and pushes '
         'VerificationChecklistPage — never reaches requestToJoin, never '
         'opens the meetup detail page', (tester) async {
       _useTallViewport(tester);
@@ -223,10 +222,12 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 0));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('I\'M INTERESTED'));
+      // The card itself is the gate; it used to be the card's join button.
+      await tester.tap(find.text('Colombo Fort Cafe'));
       await tester.pumpAndSettle();
 
       expect(service.lastRequestToJoinMeetupId, isNull);
+      expect(find.byType(MeetupDetailPage), findsNothing);
       expect(find.byType(VerificationChecklistPage), findsOneWidget);
       expect(
         find.text('Verify your account to join coffee meetups.'),
@@ -246,16 +247,24 @@ void main() {
         _useTallViewport(tester);
         final service = ScriptedMeetupService(
           openMeetups: [_meetup(id: 'meetup-55')],
+          meetupDetail: _meetup(id: 'meetup-55'),
         );
 
         await tester.pumpWidget(_appWith(service, trustLevel: 1));
         await tester.pumpAndSettle();
 
         expect(find.text('Grace Hopper'), findsOneWidget); // not redacted
-        await tester.tap(find.text('I\'M INTERESTED'));
+
+        // The card has no join button, so the real path is card -> meetup
+        // page -> join. The gate moved with it and still holds.
+        await tester.tap(find.text('Colombo Fort Cafe'));
+        await tester.pumpAndSettle();
+        expect(find.byType(MeetupDetailPage), findsOneWidget);
+
+        await tester.tap(find.text('I\'m interested'));
         await tester.pumpAndSettle();
 
-        expect(find.text('CONFIRM YOUR INTEREST'), findsNothing);
+        expect(find.text('Confirm your interest'), findsNothing);
         expect(service.lastRequestToJoinMeetupId, isNull);
         expect(find.byType(VerificationChecklistPage), findsOneWidget);
         expect(
@@ -277,9 +286,13 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 0));
         await tester.pumpAndSettle();
 
-        // Tap the card's own container, not the button text — find the lock
-        // icon that only the locked header renders.
-        await tester.tap(find.byIcon(Icons.lock_outline_rounded).first);
+        // Tap the card's own body, not its button. This used to find
+        // `Icons.lock_outline_rounded`, which the locked list card no
+        // longer draws (the redesigned row shows the intent photo and a
+        // shimmer where the redacted time goes). The location label is
+        // rendered by the card and by nothing else on the page, so it is
+        // an equally precise handle on the card's surface.
+        await tester.tap(find.text('Colombo Fort Cafe'));
         await tester.pumpAndSettle();
 
         expect(find.byType(VerificationChecklistPage), findsOneWidget);
@@ -291,6 +304,7 @@ void main() {
       _useTallViewport(tester);
       final service = ScriptedMeetupService(
         openMeetups: [_meetup(id: 'meetup-42')],
+        meetupDetail: _meetup(id: 'meetup-42'),
       );
 
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
@@ -300,14 +314,16 @@ void main() {
       expect(find.text('Colombo Fort Cafe'), findsOneWidget);
       expect(find.text('Sign up to see who\'s hosting'), findsNothing);
 
-      await tester.tap(find.text('I\'M INTERESTED'));
+      await tester.tap(find.text('Colombo Fort Cafe'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('I\'m interested'));
       await tester.pumpAndSettle();
 
-      // The host's profile sheet comes first now; nothing is sent until it
-      // is confirmed.
+      // The host's profile sheet comes first; nothing is sent until it is
+      // confirmed.
       expect(service.lastRequestToJoinMeetupId, isNull);
-      expect(find.text('YOUR HOST'), findsOneWidget);
-      await tester.tap(find.text('CONFIRM YOUR INTEREST'));
+      expect(find.text('Your host'), findsOneWidget);
+      await tester.tap(find.text('Confirm your interest'));
       await tester.pumpAndSettle();
 
       expect(service.lastRequestToJoinMeetupId, 'meetup-42');
@@ -330,27 +346,30 @@ void main() {
       expect(find.text('Grace Hopper'), findsOneWidget);
       expect(find.text('Colombo Fort Cafe'), findsOneWidget);
       expect(find.text('1/4 JOINED'), findsOneWidget);
-      expect(find.text('I\'M INTERESTED'), findsOneWidget);
+      // No actions on the card any more — see MeetupCard's build().
+      expect(find.text('I\'m interested'), findsNothing);
     });
 
     testWidgets(
-      'tapping I\'M INTERESTED calls requestToJoin with the meetup id',
+      'tapping I\'m interested calls requestToJoin with the meetup id',
       (tester) async {
         _useTallViewport(tester);
         final service = ScriptedMeetupService(
           openMeetups: [_meetup(id: 'meetup-42')],
+          meetupDetail: _meetup(id: 'meetup-42'),
         );
 
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('I\'M INTERESTED'));
+        await tester.tap(find.text('Colombo Fort Cafe'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('CONFIRM YOUR INTEREST'));
+        await tester.tap(find.text('I\'m interested'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Confirm your interest'));
         await tester.pumpAndSettle();
 
         expect(service.lastRequestToJoinMeetupId, 'meetup-42');
-        expect(find.text('Request sent.'), findsOneWidget);
       },
     );
 
@@ -365,8 +384,11 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        expect(find.text('FULL'), findsOneWidget);
-        expect(find.text('I\'M INTERESTED'), findsNothing);
+        // "Full" was the join button's label. The card has no button, so
+        // it is a tag beside the intent now — without it a full meetup
+        // looked identical to a joinable one.
+        expect(find.text('Full'), findsOneWidget);
+        expect(find.text('I\'m interested'), findsNothing);
       },
     );
 
@@ -384,12 +406,11 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        // The status chip that used to carry this is gone; the card's state
-        // edge encodes live/over/cancelled, not fullness. The action button
-        // is what says it now, and it is the better place: it stops the user
-        // asking to join something nobody can join.
-        expect(find.text('FULL'), findsOneWidget);
-        expect(find.text('I\'M INTERESTED'), findsNothing);
+        // A tag says it now. The server's `full` and the accepted count
+        // can disagree — this meetup is 0 of 4 — and the server decides,
+        // which is the whole point of this test.
+        expect(find.text('Full'), findsOneWidget);
+        expect(find.text('I\'m interested'), findsNothing);
         expect(find.byType(MeetupStatusBadge), findsNothing);
       },
     );
@@ -406,16 +427,13 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('No meetups near you this week'), findsOneWidget);
-        // The empty state is the balcony picture with a nudge to host or
-        // stay ready to join, not a bare icon.
+        // The empty state is the balcony picture with a nudge to host,
+        // not a bare icon.
         expect(find.byType(FadedPicture), findsOneWidget);
-        expect(
-          find.textContaining('Host one and let people come to you'),
-          findsOneWidget,
-        );
+        expect(find.textContaining('Host one'), findsOneWidget);
 
         // None of the failure affordances.
-        expect(find.text('RETRY'), findsNothing);
+        expect(find.text('Retry'), findsNothing);
         expect(find.byType(LoadFailedState), findsNothing);
         expect(find.textContaining('Could not load'), findsNothing);
         expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -464,7 +482,7 @@ void main() {
         findsOneWidget,
       );
       expect(find.byType(LoadFailedState), findsOneWidget);
-      expect(find.text('TRY AGAIN'), findsOneWidget);
+      expect(find.text('Try again'), findsOneWidget);
     });
 
     testWidgets(
@@ -482,7 +500,7 @@ void main() {
         expect(find.text('Something went wrong on our side'), findsOneWidget);
         expect(find.text('You look offline'), findsNothing);
         expect(find.textContaining('Check your network'), findsNothing);
-        expect(find.text('TRY AGAIN'), findsOneWidget);
+        expect(find.text('Try again'), findsOneWidget);
       },
     );
 
@@ -500,7 +518,7 @@ void main() {
         final before = service.listOpenMeetupsCallCount;
         expect(before, greaterThanOrEqualTo(1));
 
-        await tester.tap(find.text('TRY AGAIN'));
+        await tester.tap(find.text('Try again'));
         await tester.pumpAndSettle();
 
         // Not pinned to an exact count: Riverpod retries a failed provider
@@ -721,7 +739,7 @@ void main() {
             find.textContaining('Couldn\'t pin down your location'),
             findsOneWidget,
           );
-          expect(find.text('TRY AGAIN'), findsOneWidget);
+          expect(find.text('Try again'), findsOneWidget);
           expect(service.listOpenMeetupsCallCount, 0);
         },
       );
@@ -850,13 +868,17 @@ void main() {
             find.text('Turn on location to see meetups near you'),
             findsOneWidget,
           );
-          expect(find.text('OPEN LOCATION SETTINGS'), findsOneWidget);
+          expect(find.text('Open location settings'), findsOneWidget);
         },
       );
     },
   );
 
-  group('View Location from a browse card (ADR-029, ADR-002 § 5)', () {
+  // The browse card no longer carries a View location link — see
+  // MeetupCard's build(). The gate these tests exist for lives in
+  // LocationViewPage.open, which the meetup page's Location row calls, so
+  // they drive it from there now: card -> meetup page -> Location.
+  group('View Location from the meetup page (ADR-029, ADR-002 § 5)', () {
     testWidgets(
       'a Level 1+ viewer\'s VIEW LOCATION opens LocationViewPage showing the '
       'meetup\'s real label',
@@ -864,12 +886,15 @@ void main() {
         _useTallViewport(tester);
         final service = ScriptedMeetupService(
           openMeetups: [_meetup(id: 'meetup-42')],
+          meetupDetail: _meetup(id: 'meetup-42'),
         );
 
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('VIEW LOCATION'));
+        await tester.tap(find.text('Colombo Fort Cafe'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Location'));
         await tester.pumpAndSettle();
 
         expect(find.byType(LocationViewPage), findsOneWidget);
@@ -884,12 +909,17 @@ void main() {
         _useTallViewport(tester);
         final service = ScriptedMeetupService(
           openMeetups: [_meetup(id: 'meetup-99', lockedForViewer: true)],
+          meetupDetail: _meetup(id: 'meetup-99', lockedForViewer: true),
         );
 
         await tester.pumpWidget(_appWith(service, trustLevel: 0));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('VIEW LOCATION'));
+        // A locked card does not reach the meetup page at all — the card
+        // tap is itself the gate (ADR-028 § 2), so the exact-coordinate
+        // map stays out of reach for a guest by the earlier of the two
+        // gates rather than the later one.
+        await tester.tap(find.text('Colombo Fort Cafe'));
         await tester.pumpAndSettle();
 
         expect(find.byType(LocationViewPage), findsNothing);
@@ -903,7 +933,7 @@ void main() {
   /// deliberately left those fields alone, so a browse card that showed
   /// them before must still show them now.
   group('hosted-by-you / requested badges on the browse card', () {
-    testWidgets('a meetup the viewer hosts shows YOU\'RE HOSTING instead of '
+    testWidgets('a meetup the viewer hosts shows You\'re hosting instead of '
         'a join button', (tester) async {
       _useTallViewport(tester);
       final service = ScriptedMeetupService(
@@ -913,8 +943,9 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('YOU\'RE HOSTING'), findsOneWidget);
-      expect(find.text('I\'M INTERESTED'), findsNothing);
+      expect(find.text('You\'re hosting'), findsOneWidget);
+      // No card has a join button now; the pill is the whole signal.
+      expect(find.text('I\'m interested'), findsNothing);
     });
 
     testWidgets('a meetup the viewer already requested shows its request '
@@ -927,11 +958,11 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('REQUEST PENDING'), findsOneWidget);
-      expect(find.text('I\'M INTERESTED'), findsNothing);
+      expect(find.text('Request pending'), findsOneWidget);
+      expect(find.text('I\'m interested'), findsNothing);
     });
 
-    testWidgets('an accepted request shows YOU\'RE IN', (tester) async {
+    testWidgets('an accepted request shows You\'re in', (tester) async {
       _useTallViewport(tester);
       final service = ScriptedMeetupService(
         openMeetups: [_meetup(myRequestStatus: MeetupRequestStatus.accepted)],
@@ -940,7 +971,7 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('YOU\'RE IN'), findsOneWidget);
+      expect(find.text('You\'re in'), findsOneWidget);
     });
   });
 
@@ -1169,7 +1200,7 @@ void main() {
         ),
         now: now,
       );
-      expect(labelFor(now.add(const Duration(days: 1))), 'THIS WEEK');
+      expect(labelFor(now.add(const Duration(days: 1))), 'This week');
 
       String labelForWeeksAhead(int weeks) {
         final start = startOfWeek(now).add(Duration(days: 7 * weeks + 1));
@@ -1194,7 +1225,7 @@ void main() {
         );
       }
 
-      expect(labelForWeeksAhead(1), 'NEXT WEEK');
+      expect(labelForWeeksAhead(1), 'Next week');
       // Beyond that, a date beats arithmetic: "WEEK OF 21 SEP" is readable
       // where "IN 2 WEEKS" makes the reader compute.
       expect(labelForWeeksAhead(2), startsWith('WEEK OF '));
@@ -1222,9 +1253,9 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('THIS WEEK'), findsOneWidget);
+      expect(find.text('This week'), findsOneWidget);
       expect(
-        find.text('NEXT WEEK'),
+        find.text('Next week'),
         findsOneWidget,
         reason: 'three meetups across two weeks means two headers, not three',
       );
@@ -1246,8 +1277,8 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('THIS WEEK'), findsOneWidget);
-      expect(find.text('NEXT WEEK'), findsNothing);
+      expect(find.text('This week'), findsOneWidget);
+      expect(find.text('Next week'), findsNothing);
     });
   });
 
@@ -1265,12 +1296,30 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.byIcon(Icons.event_outlined), findsWidgets);
-      expect(find.byIcon(Icons.place_outlined), findsWidgets);
+      // Was `find.byIcon(Icons.event_outlined/place_outlined)`. The
+      // redesigned row carries no icon on either line — the screen set
+      // sets the time as the row's title and the place as its subtitle —
+      // so the icons were testing the decoration rather than the fact.
+      // What has to hold is that both facts are present, on their own
+      // lines, with the TIME ABOVE the place: the time decides whether
+      // you can come at all.
+      final when = find.textContaining('Colombo Fort Cafe');
       expect(
         find.text('Colombo Fort Cafe'),
         findsOneWidget,
         reason: 'exactly once — it used to also sit under the host name',
+      );
+      expect(when, findsOneWidget);
+      final timeRow = find.textContaining(RegExp(r'\d'));
+      expect(
+        timeRow,
+        findsWidgets,
+        reason: 'the formatted window is missing from the card',
+      );
+      expect(
+        tester.getTopLeft(find.text('Colombo Fort Cafe')).dy,
+        greaterThan(tester.getTopLeft(timeRow.first).dy),
+        reason: 'the place must sit under the time, not above it',
       );
     });
 
@@ -1286,7 +1335,16 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 0));
         await tester.pumpAndSettle();
 
-        expect(find.byIcon(Icons.event_outlined), findsNothing);
+        // The window is redacted for a guest (ADR-028), so the card must
+        // not print one. Asserting the absence of a Material icon stopped
+        // meaning anything once the row had no icons at all; this asserts
+        // the actual contract — no time on screen — by checking the
+        // formatted window itself is gone.
+        expect(
+          find.textContaining(RegExp(r'\d{1,2}:\d{2}')),
+          findsNothing,
+          reason: 'a guest must not be shown the meetup window',
+        );
         expect(
           find.text('Colombo Fort Cafe'),
           findsOneWidget,
@@ -1401,7 +1459,7 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        final heading = tester.getTopLeft(find.text('HAPPENING SOON')).dy;
+        final heading = tester.getTopLeft(find.text('Happening soon')).dy;
         final chips = tester.getTopLeft(find.byType(IntentFilterBar)).dy;
         expect(chips, greaterThan(heading));
       },

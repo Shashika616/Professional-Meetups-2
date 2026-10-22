@@ -34,8 +34,26 @@ WHERE updated_at > sqlc.arg(not_before)::timestamptz
     ST_SetSRID(ST_MakePoint(sqlc.arg(center_lng)::float8, sqlc.arg(center_lat)::float8), 4326)::geography,
     50000
   )
+-- NEAREST FIRST (#89). The 500 cap used to keep an arbitrary 500 of the
+-- people in range; in a dense area that could leave out the people next
+-- door and notify someone 49 km away. <-> is the GiST index's own distance
+-- operator, so the ordering is an index walk, not a sort of every match.
+ORDER BY location <-> ST_SetSRID(ST_MakePoint(sqlc.arg(center_lng)::float8, sqlc.arg(center_lat)::float8), 4326)::geography
 LIMIT 500;
 
 -- name: DeleteUserLocationCache :exec
 -- Cached copy of auth-owned data; must not outlive the account.
 DELETE FROM meetup.user_location_cache WHERE user_id = $1;
+
+-- name: IsUserLocationWithinRadius :one
+-- Whether a user's last known location is within 50 km of a point — the
+-- same ST_DWithin on geography, and the same 50000 m, as browse uses, so
+-- the join rule (D4) is exactly the rule that decided what they could see.
+-- No row means the location is unknown, which the caller decides about.
+SELECT ST_DWithin(
+  location,
+  ST_SetSRID(ST_MakePoint(sqlc.arg(center_lng)::float8, sqlc.arg(center_lat)::float8), 4326)::geography,
+  50000
+)::bool AS within
+FROM meetup.user_location_cache
+WHERE user_id = sqlc.arg(user_id);

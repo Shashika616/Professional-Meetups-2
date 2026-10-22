@@ -26,6 +26,17 @@ import 'support/fake_secure_storage_platform.dart';
 /// verify) reflects the new state — the same reactive path the real app
 /// uses, not a shortcut around it.
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -199,8 +210,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -252,11 +263,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Not verified'), findsNWidgets(3));
-    expect(find.text('Work Email'), findsNothing);
+    expect(find.text('Work email'), findsNothing);
     expect(find.text('Corporate Email'), findsNothing);
 
     final complete = tester.widget<PrimaryButton>(
-      find.widgetWithText(PrimaryButton, 'COMPLETE'),
+      find.widgetWithText(PrimaryButton, 'Complete'),
     );
     expect(complete.onPressed, isNull);
   });
@@ -351,7 +362,7 @@ void main() {
       expect(find.text('Not verified'), findsNWidgets(2));
 
       // --- Personal Email ---
-      await tester.tap(find.text('Personal Email'));
+      await tester.tap(find.text('Personal email'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'ada@example.com');
       await tester.pump();
@@ -367,12 +378,12 @@ void main() {
 
       // COMPLETE still disabled — Personal Details remains.
       var complete = tester.widget<PrimaryButton>(
-        find.widgetWithText(PrimaryButton, 'COMPLETE'),
+        find.widgetWithText(PrimaryButton, 'Complete'),
       );
       expect(complete.onPressed, isNull);
 
       // --- Personal Details ---
-      await tester.tap(find.text('Personal Details'));
+      await tester.tap(find.text('Personal details'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField), 'Ada Lovelace');
       await tester.pump();
@@ -384,13 +395,13 @@ void main() {
       expect(find.text('Verified'), findsNWidgets(3));
 
       complete = tester.widget<PrimaryButton>(
-        find.widgetWithText(PrimaryButton, 'COMPLETE'),
+        find.widgetWithText(PrimaryButton, 'Complete'),
       );
       expect(complete.onPressed, isNotNull);
 
       // Tapping COMPLETE pops back — it does not retry any join action
       // (there's nothing to retry from this page in isolation).
-      await tester.tap(find.text('COMPLETE'));
+      await tester.tap(find.text('Complete'));
       await tester.pumpAndSettle();
       expect(find.byType(VerificationChecklistPage), findsNothing);
     },

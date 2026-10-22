@@ -42,9 +42,12 @@ func (q *Queries) CreateRefreshToken(ctx context.Context, arg CreateRefreshToken
 const deleteExpiredRefreshTokens = `-- name: DeleteExpiredRefreshTokens :execrows
 DELETE FROM auth.refresh_tokens
 WHERE id IN (
-  SELECT id FROM auth.refresh_tokens
-  WHERE revoked_at IS NOT NULL
-     OR expires_at < $1::timestamptz
+  SELECT t.id FROM auth.refresh_tokens t
+  WHERE (t.revoked_at IS NOT NULL
+      OR t.expires_at < $1::timestamptz)
+    AND NOT EXISTS (
+      SELECT 1 FROM auth.refresh_tokens r WHERE r.replaced_by = t.id
+    )
   LIMIT $2
 )
 `
@@ -72,6 +75,27 @@ type DeleteExpiredRefreshTokensParams struct {
 //   - expires_at < now() - retention — expired, plus a grace window kept
 //     deliberately so a recent expiry is still visible while debugging a
 //     "why was I logged out" report.
+//
+// ONLY rows nothing still points at. `replaced_by` is a self-reference
+// (0001_auth_schema) with no ON DELETE action, and rotation links each row
+// to the one that replaced it: old.replaced_by = new.id. So the NEWER row
+// in a chain is the referenced one, and deleting an arbitrary LIMIT-sized
+// batch hit `violates foreign key constraint
+// "refresh_tokens_replaced_by_fkey"` whenever a batch contained a row whose
+// referrer was not also in it. In production this meant the sweep failed on
+// every run and the table never shrank at all.
+//
+// Restricting the batch to unreferenced rows deletes each chain from its
+// OLDEST end, which is the only order the constraint permits. One pass
+// removes one layer; the caller loops until a pass deletes nothing, so a
+// whole chain still goes in a single sweep. A chain whose newest token is
+// still live keeps that token and loses the dead ones behind it, which is
+// exactly right.
+//
+// ON DELETE SET NULL on the constraint would also "work" and is the wrong
+// fix: `replaced_by IS NULL` is how MarkRefreshTokenReplaced detects that a
+// token has not yet been rotated, so nulling it on an arbitrary delete
+// would make a rotated token look fresh to the reuse check.
 func (q *Queries) DeleteExpiredRefreshTokens(ctx context.Context, arg DeleteExpiredRefreshTokensParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredRefreshTokens, arg.ExpiredBefore, arg.BatchSize)
 	if err != nil {
@@ -118,9 +142,13 @@ func (q *Queries) GetRefreshTokenByID(ctx context.Context, id uuid.UUID) (AuthRe
 	return i, err
 }
 
-const markRefreshTokenReplaced = `-- name: MarkRefreshTokenReplaced :exec
+const markRefreshTokenReplaced = `-- name: MarkRefreshTokenReplaced :one
 UPDATE auth.refresh_tokens SET replaced_by = $2
 WHERE id = $1
+  AND replaced_by IS NULL
+  AND revoked_at IS NULL
+  AND expires_at > now()
+RETURNING id, user_id, token_hash, issued_at, expires_at, revoked_at, replaced_by
 `
 
 type MarkRefreshTokenReplacedParams struct {
@@ -128,9 +156,42 @@ type MarkRefreshTokenReplacedParams struct {
 	ReplacedBy pgtype.UUID `json:"replaced_by"`
 }
 
-func (q *Queries) MarkRefreshTokenReplaced(ctx context.Context, arg MarkRefreshTokenReplacedParams) error {
-	_, err := q.db.Exec(ctx, markRefreshTokenReplaced, arg.ID, arg.ReplacedBy)
-	return err
+// The claim that makes rotation single-use (tracker #83, review finding
+// N-A2 / #57).
+//
+// # WHAT THE MISSING GUARD COST
+//
+// This was `WHERE id = $1` and nothing else, with the "is this token
+// still live?" check done earlier, in Go, on a row read outside the
+// transaction. Two refreshes presenting the SAME token concurrently both
+// passed that check, both inserted a child, and both marked the parent
+// replaced: one parent, two live children, two session chains descended
+// from one token. Reuse detection keys on replaced_by being set, so
+// neither chain ever looks stolen — the fork is permanent and invisible.
+//
+// The three conditions are the whole check, moved to where it can be
+// trusted: the row's own UPDATE. A second transaction blocks on this
+// row's lock, then re-evaluates against the committed version and
+// matches nothing, so it gets zero rows instead of a second child.
+//
+// expires_at > now() is here as well as in Go for the same reason — the
+// Go check reads a snapshot, this one reads the row being written.
+//
+// :one, so zero rows surfaces as pgx.ErrNoRows rather than a silent
+// success. The caller turns that into reuse, which revokes the family.
+func (q *Queries) MarkRefreshTokenReplaced(ctx context.Context, arg MarkRefreshTokenReplacedParams) (AuthRefreshToken, error) {
+	row := q.db.QueryRow(ctx, markRefreshTokenReplaced, arg.ID, arg.ReplacedBy)
+	var i AuthRefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.ReplacedBy,
+	)
+	return i, err
 }
 
 const revokeAllRefreshTokensForUser = `-- name: RevokeAllRefreshTokensForUser :execrows

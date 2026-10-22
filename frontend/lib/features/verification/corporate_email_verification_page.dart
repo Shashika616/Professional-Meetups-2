@@ -5,7 +5,8 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/validation/validators.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/verification/widgets/otp_entry.dart';
 import 'package:professional_connections_platform/features/verification/widgets/verification_scaffold.dart';
@@ -140,13 +141,10 @@ class _CorporateEmailVerificationPageState
   @override
   Widget build(BuildContext context) {
     return VerificationScaffold(
-      icon: Icons.work_outline_rounded,
+      icon: AppIcons.work,
       headline: _isChangingExisting
-          ? 'Change Work Email'
-          : 'Verify Your Work Email',
-      trustBenefit:
-          'Verifying a work email is the strongest trust signal short of '
-          'KYC. It unlocks a verified badge other members can see.',
+          ? 'Change work email'
+          : 'Verify your work email',
       onSkip: () => Navigator.pop(context),
       child: !_showOtpEntry
           ? Column(
@@ -162,15 +160,15 @@ class _CorporateEmailVerificationPageState
                   ),
                   const SizedBox(height: 8),
                 ],
-                GlassTextField(
+                AppTextField(
                   controller: _companyNameController,
-                  icon: Icons.apartment_outlined,
+                  icon: AppIcons.building,
                   hint: 'Company or organization name',
                 ),
                 const SizedBox(height: 12),
-                GlassTextField(
+                AppTextField(
                   controller: _emailController,
-                  icon: Icons.work_outline_rounded,
+                  icon: AppIcons.work,
                   hint: 'firstname.lastname@company.com',
                   keyboardType: TextInputType.emailAddress,
                   validator: (_) => Validators.email(_email),
@@ -186,30 +184,24 @@ class _CorporateEmailVerificationPageState
                     ),
                   ),
                 ],
-                // ADR-019 §3's required copy — (a) directly under the
-                // field, we never store the raw address; (b) near the
-                // send/verify action, the reuse-abuse warning.
+                // ADR-019 §3 asked for two paragraphs here: a privacy
+                // note and a one-account-per-work-email warning. The
+                // warning is a rule the backend enforces, so it now
+                // surfaces in the error a user sees if they actually hit
+                // it, rather than as standing text every user reads. The
+                // privacy note stays, as one line: it is a data-handling
+                // disclosure, not an explanation of a feature.
                 const SizedBox(height: 8),
                 Text(
-                  'We don’t store this email, only that it proved you '
-                  'have access to an inbox at this company’s domain.',
+                  'We don’t store this address, only that you verified it.',
                   style: TextStyle(
-                    fontSize: 11,
-                    color: AppPalette.textSecondary.withValues(alpha: 0.85),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Verifying the same company email on more than one '
-                  'account harms that company’s standing on the platform.',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppPalette.textSecondary.withValues(alpha: 0.85),
+                    fontSize: 11.5,
+                    color: AppPalette.textTertiary,
                   ),
                 ),
                 const SizedBox(height: 16),
                 PrimaryButton(
-                  label: 'SEND CODE',
+                  label: 'Send code',
                   onPressed:
                       Validators.email(_email) == null &&
                           _companyName.isNotEmpty

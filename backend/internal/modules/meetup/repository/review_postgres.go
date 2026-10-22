@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,6 +60,30 @@ func (r *postgresRatingRepository) SubmitReview(ctx context.Context, review Revi
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := r.q.WithTx(tx)
+
+	// Every person about to be rated is locked here, before anything is
+	// written, so a concurrent reviewer of the same meetup queues behind
+	// this transaction rather than computing an aggregate that misses its
+	// rows (tracker #86). See LockUserRatingAggregate's own comment.
+	//
+	// IN SORTED ORDER, WHICH IS THE WHOLE REASON THIS IS A SEPARATE LOOP.
+	// Two reviewers of the same meetup rate the same set of people, and
+	// the participant lists arrive in whatever order each client sent
+	// them. Locking in list order lets one transaction hold A and wait for
+	// B while the other holds B and waits for A — a deadlock Postgres
+	// resolves by killing one of them, turning a correctness fix into an
+	// intermittent 500. A total order on the key removes the cycle, the
+	// same reason the accept path locks its two meetups in a fixed order.
+	lockOrder := make([]string, 0, len(rated))
+	for _, id := range rated {
+		lockOrder = append(lockOrder, id.String())
+	}
+	slices.Sort(lockOrder)
+	for _, id := range lockOrder {
+		if err := q.LockUserRatingAggregate(ctx, id); err != nil {
+			return fmt.Errorf("repository: lock user rating aggregate: %w", err)
+		}
+	}
 
 	// The feedback row first: for a meetup that happened it carries
 	// happened=true, the eligibility fact the ratings below depend on (a

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
@@ -172,7 +173,7 @@ class _ContactList extends StatelessWidget {
             child: TextButton(
               onPressed: () => onSelectAll(selectable),
               child: Text(
-                'SELECT ALL',
+                'Select all',
                 style: TextStyle(
                   color: AppPalette.candyBlue,
                   fontSize: 11,
@@ -191,7 +192,7 @@ class _ContactList extends StatelessWidget {
           ),
         const SizedBox(height: 16),
         PrimaryButton(
-          label: 'SHARE THIS MEETUP',
+          label: 'Share this meetup',
           // Disabled AND greyed — a live-looking button that does nothing
           // reads as broken rather than as "pick someone first".
           onPressed: selected.isEmpty
@@ -221,8 +222,13 @@ class _ContactRow extends StatelessWidget {
     // Someone who already knows is shown, not hidden: the user needs to see
     // who was told, and hiding them would make the list change shape between
     // visits for no visible reason.
+    // A contact who has not agreed yet (#80) is listed but cannot be picked:
+    // the server will not text them.
+    final confirmed = contact.status == TrustedContactStatus.confirmed;
     final subtitle = alreadyShared
         ? 'Already told'
+        : !confirmed
+        ? 'Waiting for confirmation'
         : (contact.phoneNumber.isNotEmpty
               ? contact.phoneNumber
               : contact.email);
@@ -230,18 +236,16 @@ class _ContactRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: InkWell(
-        onTap: alreadyShared ? null : onToggle,
+        onTap: alreadyShared || !confirmed ? null : onToggle,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
           child: Row(
             children: [
-              Icon(
+              AppIcon(
                 alreadyShared
-                    ? Icons.check_circle_rounded
-                    : (selected
-                          ? Icons.check_box_rounded
-                          : Icons.check_box_outline_blank_rounded),
+                    ? AppIcons.checkCircle
+                    : (selected ? AppIcons.checkboxChecked : AppIcons.checkbox),
                 size: 22,
                 color: alreadyShared
                     ? AppPalette.verified
@@ -295,11 +299,7 @@ class _NoContactsYet extends StatelessWidget {
       children: [
         Row(
           children: [
-            Icon(
-              Icons.contact_emergency_outlined,
-              color: AppPalette.textSecondary,
-              size: 20,
-            ),
+            AppIcon(AppIcons.idCard, color: AppPalette.textSecondary, size: 20),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -316,7 +316,7 @@ class _NoContactsYet extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         PrimaryButton(
-          label: 'ADD A TRUSTED CONTACT',
+          label: 'Add a trusted contact',
           onPressed: () {
             // Pops the sheet first so returning from the page lands back on
             // the meetup rather than under a stale sheet.
@@ -348,7 +348,7 @@ class _ErrorRow extends StatelessWidget {
           style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
         ),
         const SizedBox(height: 12),
-        SecondaryButton(label: 'RETRY', height: 42, onPressed: onRetry),
+        SecondaryButton(label: 'Retry', height: 42, onPressed: onRetry),
       ],
     );
   }

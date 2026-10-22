@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// A one-line caption under a skeleton that says what the wait is for.
 ///
@@ -25,7 +26,7 @@ class SlowLoadNotice extends StatefulWidget {
   });
 
   final Duration delay;
-  final IconData icon;
+  final String icon;
   final String message;
 
   @override
@@ -60,7 +61,7 @@ class _SlowLoadNoticeState extends State<SlowLoadNotice> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(widget.icon, size: 15, color: AppPalette.textSecondary),
+          AppIcon(widget.icon, size: 15, color: AppPalette.textSecondary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

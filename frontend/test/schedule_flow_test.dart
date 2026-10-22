@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/maps/map_provider.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -10,6 +12,8 @@ import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart'
     show ScheduleFlowPage, debugScheduleFlowNowOverride;
+
+import 'support/app_icon_finder.dart';
 
 import 'support/scripted_meetup_service.dart';
 
@@ -42,7 +46,7 @@ Widget _appWith({ScriptedMeetupService? service}) {
 }
 
 /// Types a strict 24-hour time into the Timing step's FROM or TO field.
-/// The fields are plain `TextField`s keyed `time24h-FROM` / `time24h-TO`
+/// The fields are plain `TextField`s keyed `time24h-From` / `time24h-To`
 /// (see `TimeField24h`), so this is a single `enterText` — no dialog, no
 /// keyboard-mode toggle, no OK button. The formatter inserts the colon.
 Future<void> _enterTime(
@@ -84,23 +88,23 @@ Future<void> _reachCapacityStep(WidgetTester tester) async {
   await tester.pumpWidget(_appWith());
   await tester.pumpAndSettle();
 
-  await tester.tap(find.text('COFFEE'));
+  await tester.tap(find.text('Coffee'));
   await tester.pumpAndSettle();
 
   expect(find.text('When should it happen?'), findsOneWidget);
 
   // Accept the default date (today) unchanged.
-  await tester.tap(find.text('DATE'));
+  await tester.tap(find.text('Date'));
   await tester.pumpAndSettle();
   await tester.tap(find.text('OK'));
   await tester.pumpAndSettle();
 
-  await _enterTime(tester, field: 'FROM', hhmm: '1500');
+  await _enterTime(tester, field: 'From', hhmm: '1500');
 
-  await _enterTime(tester, field: 'TO', hhmm: '1700');
+  await _enterTime(tester, field: 'To', hhmm: '1700');
 
-  await tester.ensureVisible(find.text('CONTINUE'));
-  await tester.tap(find.text('CONTINUE'));
+  await tester.ensureVisible(find.text('Continue'));
+  await tester.tap(find.text('Continue'));
   await tester.pumpAndSettle();
 
   expect(find.text('Where?'), findsOneWidget);
@@ -109,8 +113,14 @@ Future<void> _reachCapacityStep(WidgetTester tester) async {
     'Test Cafe',
   );
   await tester.pump();
-  await tester.ensureVisible(find.text('CONTINUE'));
-  await tester.tap(find.text('CONTINUE'));
+  // Typing opens the suggestions panel over the map, with a scrim that
+  // deliberately covers the sheet: CONTINUE must not be reachable
+  // through an open dropdown. Dismiss it the way a person does before
+  // reaching the sheet underneath.
+  await tester.tapAt(const Offset(200, 400));
+  await tester.pump();
+  await tester.ensureVisible(find.text('Continue'));
+  await tester.tap(find.text('Continue'));
   await tester.pump();
 
   expect(find.text('How many people?'), findsOneWidget);
@@ -130,24 +140,24 @@ void main() {
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('COFFEE'));
+        await tester.tap(find.text('Coffee'));
         await tester.pumpAndSettle();
 
         // Through the Timing step first — every meetup requires a real
         // window now (ADR-016), there's no more "today" path that skips it.
-        await tester.tap(find.text('DATE'));
+        await tester.tap(find.text('Date'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('OK'));
         await tester.pumpAndSettle();
-        await _enterTime(tester, field: 'FROM', hhmm: '1500');
-        await _enterTime(tester, field: 'TO', hhmm: '1700');
-        await tester.ensureVisible(find.text('CONTINUE'));
-        await tester.tap(find.text('CONTINUE'));
+        await _enterTime(tester, field: 'From', hhmm: '1500');
+        await _enterTime(tester, field: 'To', hhmm: '1700');
+        await tester.ensureVisible(find.text('Continue'));
+        await tester.tap(find.text('Continue'));
         await tester.pumpAndSettle();
 
         expect(find.textContaining('isn\'t configured'), findsOneWidget);
         expect(find.byType(TextField), findsNothing);
-        expect(find.text('CONTINUE'), findsNothing);
+        expect(find.text('Continue'), findsNothing);
       },
     );
   });
@@ -160,7 +170,7 @@ void main() {
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('COFFEE'));
+        await tester.tap(find.text('Coffee'));
         await tester.pumpAndSettle();
 
         expect(find.text('When should it happen?'), findsOneWidget);
@@ -172,7 +182,7 @@ void main() {
       await tester.pumpWidget(_appWith());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('COFFEE'));
+      await tester.tap(find.text('Coffee'));
       await tester.pumpAndSettle();
 
       // Human-readable now ("Today · Fri 11 Sep"), not the ISO form the
@@ -187,7 +197,7 @@ void main() {
       await tester.pumpWidget(_appWith());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('COFFEE'));
+      await tester.tap(find.text('Coffee'));
       await tester.pumpAndSettle();
 
       expect(
@@ -196,7 +206,7 @@ void main() {
         isFalse,
       );
 
-      await _enterTime(tester, field: 'FROM', hhmm: '1500');
+      await _enterTime(tester, field: 'From', hhmm: '1500');
 
       // Still disabled — TO not picked yet.
       expect(
@@ -205,7 +215,7 @@ void main() {
         isFalse,
       );
 
-      await _enterTime(tester, field: 'TO', hhmm: '1700');
+      await _enterTime(tester, field: 'To', hhmm: '1700');
 
       expect(
         tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
@@ -223,17 +233,17 @@ void main() {
       await tester.pumpWidget(_appWith());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('COFFEE'));
+      await tester.tap(find.text('Coffee'));
       await tester.pumpAndSettle();
 
-      await _enterTime(tester, field: 'FROM', hhmm: '0000');
+      await _enterTime(tester, field: 'From', hhmm: '0000');
 
       // Midnight was accepted and reads back as strict 24-hour "00:00" —
       // never a locale-dependent "12:00 AM", which is the ambiguity this
       // entry mode exists to remove.
       expect(find.text('00:00'), findsOneWidget);
 
-      await _enterTime(tester, field: 'TO', hhmm: '0100');
+      await _enterTime(tester, field: 'To', hhmm: '0100');
 
       expect(
         tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
@@ -251,11 +261,11 @@ void main() {
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('COFFEE'));
+        await tester.tap(find.text('Coffee'));
         await tester.pumpAndSettle();
 
-        await _enterTime(tester, field: 'FROM', hhmm: '2200');
-        await _enterTime(tester, field: 'TO', hhmm: '0100');
+        await _enterTime(tester, field: 'From', hhmm: '2200');
+        await _enterTime(tester, field: 'To', hhmm: '0100');
 
         expect(find.text('Ends the next day at 01:00.'), findsOneWidget);
         expect(
@@ -265,8 +275,8 @@ void main() {
         );
 
         // And the window handed to the next step really does end tomorrow.
-        await tester.ensureVisible(find.text('CONTINUE'));
-        await tester.tap(find.text('CONTINUE'));
+        await tester.ensureVisible(find.text('Continue'));
+        await tester.tap(find.text('Continue'));
         await tester.pumpAndSettle();
         expect(find.text('Where?'), findsOneWidget);
       },
@@ -280,11 +290,11 @@ void main() {
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('COFFEE'));
+        await tester.tap(find.text('Coffee'));
         await tester.pumpAndSettle();
 
-        await _enterTime(tester, field: 'FROM', hhmm: '1500');
-        await _enterTime(tester, field: 'TO', hhmm: '1500');
+        await _enterTime(tester, field: 'From', hhmm: '1500');
+        await _enterTime(tester, field: 'To', hhmm: '1500');
 
         expect(
           find.text('End time must be different from the start time.'),
@@ -310,11 +320,11 @@ void main() {
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('COFFEE'));
+        await tester.tap(find.text('Coffee'));
         await tester.pumpAndSettle();
 
-        await _enterTime(tester, field: 'FROM', hhmm: '0900');
-        await _enterTime(tester, field: 'TO', hhmm: '1100');
+        await _enterTime(tester, field: 'From', hhmm: '0900');
+        await _enterTime(tester, field: 'To', hhmm: '1100');
 
         expect(find.textContaining('has already passed today'), findsOneWidget);
         expect(
@@ -324,7 +334,7 @@ void main() {
         );
 
         // Moving the start to the current minute clears it.
-        await _enterTime(tester, field: 'FROM', hhmm: '1030');
+        await _enterTime(tester, field: 'From', hhmm: '1030');
         expect(find.textContaining('has already passed today'), findsNothing);
         expect(
           tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed !=
@@ -341,14 +351,14 @@ void main() {
         await tester.pumpWidget(_appWith());
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('COFFEE'));
+        await tester.tap(find.text('Coffee'));
         await tester.pumpAndSettle();
 
         // 25:00 — the "5" is refused after a leading "2", leaving "2".
-        await _enterTime(tester, field: 'FROM', hhmm: '2500');
+        await _enterTime(tester, field: 'From', hhmm: '2500');
         expect(
           tester
-              .widget<TextField>(find.byKey(const ValueKey('time24h-FROM')))
+              .widget<TextField>(find.byKey(const ValueKey('time24h-From')))
               .controller!
               .text,
           '2',
@@ -356,10 +366,10 @@ void main() {
 
         // 12:60 — the "6" is refused as a first minute digit, leaving "12"
         // (the colon only appears once a minute digit follows it).
-        await _enterTime(tester, field: 'TO', hhmm: '1260');
+        await _enterTime(tester, field: 'To', hhmm: '1260');
         expect(
           tester
-              .widget<TextField>(find.byKey(const ValueKey('time24h-TO')))
+              .widget<TextField>(find.byKey(const ValueKey('time24h-To')))
               .controller!
               .text,
           '12',
@@ -387,12 +397,12 @@ void main() {
 
     Future<void> pickTimes(WidgetTester tester) async {
       _pinClockToStartOfToday();
-      await tester.tap(find.text('COFFEE'));
+      await tester.tap(find.text('Coffee'));
       await tester.pumpAndSettle();
-      await _enterTime(tester, field: 'FROM', hhmm: '1500');
-      await _enterTime(tester, field: 'TO', hhmm: '1700');
-      await tester.ensureVisible(find.text('CONTINUE'));
-      await tester.tap(find.text('CONTINUE'));
+      await _enterTime(tester, field: 'From', hhmm: '1500');
+      await _enterTime(tester, field: 'To', hhmm: '1700');
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
       await tester.pumpAndSettle();
     }
 
@@ -416,12 +426,12 @@ void main() {
       await tester.pumpAndSettle();
       await pickTimes(tester);
 
-      expect(find.text('ONE MEETUP AT A TIME'), findsOneWidget);
+      expect(find.text('One meetup at a time'), findsOneWidget);
       expect(
         find.text("You're already hosting a meetup at that time"),
         findsOneWidget,
       );
-      await tester.tap(find.text("I'LL WAIT"));
+      await tester.tap(find.text("I'll wait"));
       await tester.pumpAndSettle();
       expect(find.text('When should it happen?'), findsOneWidget);
       expect(find.text('Where?'), findsNothing);
@@ -446,20 +456,20 @@ void main() {
       await _reachCapacityStep(tester);
 
       // Draft starts at 2 — one tap down reaches the floor.
-      await tester.tap(find.byIcon(Icons.remove_rounded));
+      await tester.tap(findAppIcon(AppIcons.minus));
       await tester.pumpAndSettle();
       expect(find.text('1'), findsOneWidget);
 
       final minusButton = tester.widget<GestureDetector>(
         find.ancestor(
-          of: find.byIcon(Icons.remove_rounded),
+          of: findAppIcon(AppIcons.minus),
           matching: find.byType(GestureDetector),
         ),
       );
       expect(minusButton.onTap, isNull);
 
       // Tapping again must not go below 1.
-      await tester.tap(find.byIcon(Icons.remove_rounded));
+      await tester.tap(findAppIcon(AppIcons.minus));
       await tester.pumpAndSettle();
       expect(find.text('1'), findsOneWidget);
     });
@@ -471,21 +481,21 @@ void main() {
 
         // Draft starts at 2 — 18 taps reaches the cap.
         for (var i = 0; i < 18; i++) {
-          await tester.tap(find.byIcon(Icons.add_rounded));
+          await tester.tap(findAppIcon(AppIcons.plus));
           await tester.pumpAndSettle();
         }
         expect(find.text('20'), findsOneWidget);
 
         final plusButton = tester.widget<GestureDetector>(
           find.ancestor(
-            of: find.byIcon(Icons.add_rounded),
+            of: findAppIcon(AppIcons.plus),
             matching: find.byType(GestureDetector),
           ),
         );
         expect(plusButton.onTap, isNull);
 
         // Tapping again must not go above 20.
-        await tester.tap(find.byIcon(Icons.add_rounded));
+        await tester.tap(findAppIcon(AppIcons.plus));
         await tester.pumpAndSettle();
         expect(find.text('20'), findsOneWidget);
       },

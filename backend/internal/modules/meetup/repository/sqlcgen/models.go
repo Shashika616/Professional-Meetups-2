@@ -105,6 +105,7 @@ const (
 	AuthVerificationPurposeCorporateEmail AuthVerificationPurpose = "corporate_email"
 	AuthVerificationPurposeEmailSignup    AuthVerificationPurpose = "email_signup"
 	AuthVerificationPurposeEmailLogin     AuthVerificationPurpose = "email_login"
+	AuthVerificationPurposeAccountClaim   AuthVerificationPurpose = "account_claim"
 )
 
 func (e *AuthVerificationPurpose) Scan(src interface{}) error {
@@ -277,11 +278,24 @@ func (ns NullMeetupMeetupStatus) Value() (driver.Value, error) {
 	return string(ns.MeetupMeetupStatus), nil
 }
 
+type AuthContactInvitesSent struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	PhoneHash string             `json:"phone_hash"`
+	SentAt    pgtype.Timestamptz `json:"sent_at"`
+}
+
 type AuthKnownCompany struct {
 	ID             uuid.UUID          `json:"id"`
 	NameNormalized string             `json:"name_normalized"`
 	Domains        []string           `json:"domains"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type AuthPendingTrustedContact struct {
+	ContactID uuid.UUID          `json:"contact_id"`
+	TokenHash string             `json:"token_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
 type AuthRefreshToken struct {
@@ -310,10 +324,12 @@ type AuthSosEvent struct {
 	ID               uuid.UUID          `json:"id"`
 	UserID           uuid.UUID          `json:"user_id"`
 	ContextMessage   pgtype.Text        `json:"context_message"`
-	Latitude         float64            `json:"latitude"`
-	Longitude        float64            `json:"longitude"`
+	Latitude         pgtype.Float8      `json:"latitude"`
+	Longitude        pgtype.Float8      `json:"longitude"`
 	TriggeredAt      pgtype.Timestamptz `json:"triggered_at"`
 	ContactsNotified int32              `json:"contacts_notified"`
+	ClientRequestID  pgtype.Text        `json:"client_request_id"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
 }
 
 type AuthTrustedContact struct {
@@ -387,14 +403,15 @@ type AuthUserIdentity struct {
 }
 
 type AuthVerificationCode struct {
-	ID        uuid.UUID               `json:"id"`
-	UserID    pgtype.UUID             `json:"user_id"`
-	Purpose   AuthVerificationPurpose `json:"purpose"`
-	Target    string                  `json:"target"`
-	CodeHash  string                  `json:"code_hash"`
-	Attempts  int16                   `json:"attempts"`
-	ExpiresAt pgtype.Timestamptz      `json:"expires_at"`
-	CreatedAt pgtype.Timestamptz      `json:"created_at"`
+	ID               uuid.UUID               `json:"id"`
+	UserID           pgtype.UUID             `json:"user_id"`
+	Purpose          AuthVerificationPurpose `json:"purpose"`
+	Target           string                  `json:"target"`
+	CodeHash         string                  `json:"code_hash"`
+	Attempts         int16                   `json:"attempts"`
+	ExpiresAt        pgtype.Timestamptz      `json:"expires_at"`
+	CreatedAt        pgtype.Timestamptz      `json:"created_at"`
+	TargetNormalized pgtype.Text             `json:"target_normalized"`
 }
 
 type MeetupDeviceToken struct {

@@ -112,8 +112,8 @@ void main() {
       }
       // Distinct from the EVENTS bottom tab, which shares Home with the
       // intent filter chips. The wire value is 'outing' too (migration 0011).
-      expect(IntentType.outing.label, 'OUTING');
-      expect(IntentType.outing.label, isNot('EVENTS'));
+      expect(IntentType.outing.label, 'Outing');
+      expect(IntentType.outing.label, isNot('Events'));
       expect(IntentType.outing.imageAsset, 'assets/images/landing/l05.jpg');
     });
 

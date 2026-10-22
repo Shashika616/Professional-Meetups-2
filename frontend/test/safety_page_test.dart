@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
 import 'package:professional_connections_platform/core/models/auth_session.dart';
@@ -16,10 +18,23 @@ import 'package:professional_connections_platform/features/safety/manage_trusted
 import 'package:professional_connections_platform/features/safety/safety_page.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 
+import 'support/app_icon_finder.dart';
+
 import 'support/fake_geolocator_platform.dart';
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -48,6 +63,14 @@ class _FakeAuthService implements AuthService {
 
   int triggerSosCallCount = 0;
 
+  /// What the dialog actually sent. null/null is the #78 case: no usable
+  /// fix, alert sent anyway.
+  double? lastLatitude;
+  double? lastLongitude;
+
+  /// When true, triggerSosError applies to the first attempt only.
+  bool failOnlyFirstAttempt = false;
+
   /// Proves a gated tap never reaches the service at all, rather than being
   /// refused after the call.
   int listContactsCallCount = 0;
@@ -63,11 +86,18 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async {
     triggerSosCallCount++;
-    if (triggerSosError != null) throw triggerSosError!;
+    lastLatitude = latitude;
+    lastLongitude = longitude;
+    final error = triggerSosError;
+    // Only the FIRST attempt fails when failOnlyFirstAttempt is set, so a
+    // test can prove Retry actually retries rather than just redrawing.
+    if (error != null && !(failOnlyFirstAttempt && triggerSosCallCount > 1)) {
+      throw error;
+    }
     return triggerSosResult!;
   }
 
@@ -244,6 +274,8 @@ void main() {
     );
   });
 
+  _sosFailurePathTests();
+
   testWidgets(
     'zero contacts routes to the manage-contacts screen instead of the '
     'confirm dialog',
@@ -255,11 +287,11 @@ void main() {
       await tester.pumpWidget(_appWith(container));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('TRIGGER SOS'));
+      await tester.tap(find.text('Trigger SOS'));
       await tester.pumpAndSettle();
 
       expect(find.byType(ManageTrustedContactsPage), findsOneWidget);
-      expect(find.text('EMERGENCY SOS'), findsNothing);
+      expect(find.text('Emergency SOS'), findsNothing);
       expect(auth.triggerSosCallCount, 0);
     },
   );
@@ -290,11 +322,11 @@ void main() {
     await tester.pumpWidget(_appWith(container));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('TRIGGER SOS'));
+    await tester.tap(find.text('Trigger SOS'));
     await tester.pumpAndSettle();
-    expect(find.text('EMERGENCY SOS'), findsOneWidget);
+    expect(find.text('Emergency SOS'), findsOneWidget);
 
-    await tester.tap(find.text('CONFIRM'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
 
     expect(auth.triggerSosCallCount, 1);
@@ -319,9 +351,9 @@ void main() {
     await tester.pumpWidget(_appWith(container));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('TRIGGER SOS'));
+    await tester.tap(find.text('Trigger SOS'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('CONFIRM'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
 
     expect(auth.triggerSosCallCount, 1);
@@ -348,17 +380,17 @@ void main() {
       await tester.pumpWidget(_appWith(container));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('TRIGGER SOS'));
+      await tester.tap(find.text('Trigger SOS'));
       await tester.pumpAndSettle();
 
       // Present before CONFIRM is even tapped...
-      expect(find.text('CALL EMERGENCY SERVICES'), findsOneWidget);
+      expect(find.text('Call emergency services'), findsOneWidget);
 
-      await tester.tap(find.text('CONFIRM'));
+      await tester.tap(find.text('Confirm'));
       await tester.pumpAndSettle();
 
       // ...and still present after a failed trigger.
-      expect(find.text('CALL EMERGENCY SERVICES'), findsOneWidget);
+      expect(find.text('Call emergency services'), findsOneWidget);
     },
   );
 
@@ -377,9 +409,9 @@ void main() {
         await tester.pumpAndSettle();
 
         // The button is present, not hidden — the lock is explained on tap.
-        expect(find.text('TRIGGER SOS'), findsOneWidget);
+        expect(find.text('Trigger SOS'), findsOneWidget);
 
-        await tester.tap(find.text('TRIGGER SOS'));
+        await tester.tap(find.text('Trigger SOS'));
         await tester.pumpAndSettle();
 
         expect(
@@ -388,7 +420,7 @@ void main() {
           reason: 'the toast must say what is locked and why',
         );
         expect(find.byType(VerificationChecklistPage), findsOneWidget);
-        expect(find.text('UNLOCK SAFETY FEATURES'), findsOneWidget);
+        expect(find.text('Unlock safety features'), findsOneWidget);
         // Safety-specific framing, not the meetup-joining default.
         expect(find.textContaining('trusted contacts and SOS'), findsWidgets);
 
@@ -407,7 +439,7 @@ void main() {
       await tester.pumpWidget(_appWith(container));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('TRIGGER SOS'));
+      await tester.tap(find.text('Trigger SOS'));
       await tester.pumpAndSettle();
 
       expect(find.byType(VerificationChecklistPage), findsNothing);
@@ -429,11 +461,11 @@ void main() {
       await tester.pumpWidget(_appWith(container));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('TRIGGER SOS'));
+      await tester.tap(find.text('Trigger SOS'));
       await tester.pumpAndSettle();
 
       expect(find.byType(VerificationChecklistPage), findsOneWidget);
-      expect(find.text('UNLOCK SAFETY FEATURES'), findsOneWidget);
+      expect(find.text('Unlock safety features'), findsOneWidget);
 
       // Let the locked toast's own auto-dismiss timer run out, so it does
       // not outlive the widget tree.
@@ -479,12 +511,14 @@ void main() {
     ) async {
       await pump(tester, _FakeAuthService(contacts: [grace, ada]));
 
-      expect(find.text('TRUSTED CONTACTS'), findsOneWidget);
+      expect(find.text('Trusted contacts'), findsOneWidget);
       expect(find.text('Grace Hopper'), findsOneWidget);
       expect(find.text('Ada Lovelace'), findsOneWidget);
-      // Whichever detail the contact actually has.
-      expect(find.text('+94771111111'), findsOneWidget);
-      expect(find.text('ada@example.com'), findsOneWidget);
+      // Names only on this summary — the number or address each contact
+      // was added with belongs on the Trusted contacts page the section
+      // leads to, not under every name here.
+      expect(find.text('+94771111111'), findsNothing);
+      expect(find.text('ada@example.com'), findsNothing);
       // The cap is stated before it is hit, not discovered by being refused.
       expect(find.textContaining('2 of 3 added'), findsOneWidget);
     });
@@ -545,5 +579,231 @@ void main() {
       expect(find.byType(VerificationChecklistPage), findsOneWidget);
       await tester.pump(const Duration(seconds: 5));
     });
+
+    // UI review #20: the checklist rows carried green check_circle icons,
+    // which claim the user has already done these things. They are advice,
+    // and nothing in the app knows whether they were followed.
+    testWidgets('the pre-meetup checklist does not claim to be completed', (
+      tester,
+    ) async {
+      final auth = _FakeAuthService(contacts: [grace]);
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final container = _containerWith(auth, trustLevel: 2);
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(_appWith(container));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Pre meetup checklist'), findsOneWidget);
+      expect(
+        findAppIcon(AppIcons.checkCircle),
+        findsNothing,
+        reason: 'a tick says the user has done these; nothing knows that',
+      );
+      expect(
+        findAppIcon(AppIcons.checkbox),
+        findsNothing,
+        reason: 'an empty box implies these are tickable; they are not',
+      );
+      // The repeated lightbulb went too: five identical glyphs down one
+      // list carry no information. The advice itself is what has to be
+      // on screen.
+      expect(find.text('Meet in a public place'), findsOneWidget);
+      expect(find.text('Never share OTP codes'), findsOneWidget);
+    });
+
+    // UI review #21. The card always routed to the unlock screen — the test
+    // above proves that — but a lock icon over a grey sentence reads as a
+    // disabled state, and the one thing a disabled state tells you is not to
+    // bother tapping. So the affordance was missing, not the action.
+    testWidgets('the locked card says that tapping it leads somewhere', (
+      tester,
+    ) async {
+      final auth = _FakeAuthService(contacts: [grace]);
+      tester.view.physicalSize = const Size(1000, 2600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      final container = _containerWith(auth, trustLevel: 1);
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(_appWith(container));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Verify'),
+        findsOneWidget,
+        reason: 'the locked card offers no visible way forward',
+      );
+      expect(
+        findAppIcon(AppIcons.forward),
+        findsWidgets,
+        reason: 'nothing marks the card as leading anywhere',
+      );
+
+      // And it still costs nothing: adding the affordance must not have
+      // turned a locked card into a request for a list it cannot use.
+      expect(auth.listContactsCallCount, 0);
+    });
+  });
+}
+
+// Tracker #78 (review findings N-D1, N-D2, N-D3): the SOS sheet must
+// always reach a state the user can act on, and a missing location must
+// never be the reason an alert is not sent.
+//
+// These five are the cases the plan named: offline, timeout, no
+// location, 5xx and session expired.
+void _sosFailurePathTests() {
+  List<TrustedContact> oneContact() => const [
+    TrustedContact(
+      id: 'c1',
+      name: 'Grace',
+      phoneNumber: '+94771111111',
+      email: '',
+    ),
+  ];
+
+  Future<void> openAndConfirm(
+    WidgetTester tester,
+    _FakeAuthService auth,
+  ) async {
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Trigger SOS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('no location fix: the alert is still sent, without coordinates', (
+    tester,
+  ) async {
+    // The whole point of #78. Indoors, permission denied, or the read
+    // timed out — SOS used to refuse to send at all.
+    GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+      permission: LocationPermission.denied,
+      position: null,
+    );
+    final auth = _FakeAuthService(contacts: oneContact(), triggerSosResult: 1);
+
+    await openAndConfirm(tester, auth);
+
+    expect(
+      auth.triggerSosCallCount,
+      1,
+      reason: 'the alert was suppressed because there was no GPS fix',
+    );
+    expect(auth.lastLatitude, isNull);
+    expect(auth.lastLongitude, isNull);
+    expect(find.text('1 trusted contact was alerted.'), findsOneWidget);
+    // And the sender is told, because their contact was told.
+    expect(
+      find.textContaining('location could not be determined'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'offline: a failure state with Retry and Call emergency services',
+    (tester) async {
+      final auth = _FakeAuthService(
+        contacts: oneContact(),
+        triggerSosError: const AuthNetworkException(
+          'Could not reach the server. Check your connection and try again.',
+        ),
+      );
+
+      await openAndConfirm(tester, auth);
+
+      expect(find.textContaining('Could not reach the server'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
+      expect(find.text('Call emergency services'), findsOneWidget);
+    },
+  );
+
+  testWidgets('Retry actually retries', (tester) async {
+    final auth = _FakeAuthService(
+      contacts: oneContact(),
+      triggerSosResult: 1,
+      triggerSosError: const AuthNetworkException('Offline.'),
+    )..failOnlyFirstAttempt = true;
+
+    await openAndConfirm(tester, auth);
+    expect(find.text('Retry'), findsOneWidget);
+
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+
+    expect(auth.triggerSosCallCount, 2);
+    expect(find.text('1 trusted contact was alerted.'), findsOneWidget);
+  });
+
+  testWidgets('an unexpected error does not strand the sheet on "sending"', (
+    tester,
+  ) async {
+    // N-D3: anything that was not an AuthException used to escape
+    // _confirm entirely, leaving the sheet spinning forever — during an
+    // emergency.
+    final auth = _FakeAuthService(
+      contacts: oneContact(),
+      triggerSosError: StateError('something nobody predicted'),
+    );
+
+    await openAndConfirm(tester, auth);
+
+    expect(
+      find.textContaining('Getting your location'),
+      findsNothing,
+      reason: 'the sheet is still claiming to be sending',
+    );
+    expect(find.textContaining('Could not send the alert'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.text('Call emergency services'), findsOneWidget);
+  });
+
+  testWidgets('a 5xx is a retryable failure, not a crash', (tester) async {
+    final auth = _FakeAuthService(
+      contacts: oneContact(),
+      triggerSosError: const AuthNetworkException(
+        'Something went wrong. Please try again.',
+      ),
+    );
+
+    await openAndConfirm(tester, auth);
+
+    expect(find.textContaining('Something went wrong'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+  });
+
+  testWidgets('a session that expired signs out instead of offering Retry', (
+    tester,
+  ) async {
+    final auth = _FakeAuthService(
+      contacts: oneContact(),
+      triggerSosError: const SessionExpiredException('Please sign in again.'),
+    );
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Trigger SOS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+
+    // pump, not pumpAndSettle: forceSignOut tears the session down and
+    // the sign-out route animates, so settling here waits on work this
+    // test is not about. A bounded pump is enough to run _confirm's
+    // SessionExpiredException branch.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // Nothing to retry against: the session is gone, so the sheet must
+    // not invite the user to try the same call again.
+    expect(find.text('Retry'), findsNothing);
+    expect(auth.triggerSosCallCount, 1);
   });
 }

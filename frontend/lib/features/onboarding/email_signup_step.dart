@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/verification/widgets/otp_entry.dart';
 
@@ -92,7 +93,7 @@ class _EmailSignupStepState extends ConsumerState<EmailSignupStep> {
       // so the SafeArea below still pushes content clear of the title row.
       // Same fix as profile_setup_screen.dart's identical Scaffold shape.
       extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('SIGN UP WITH EMAIL')),
+      appBar: AppBar(title: const Text('Sign up with email')),
       body: AppBackground(
         child: SafeArea(
           child: SingleChildScrollView(
@@ -121,15 +122,15 @@ class _EmailSignupStepState extends ConsumerState<EmailSignupStep> {
           ),
         ),
         const SizedBox(height: 20),
-        GlassTextField(
+        AppTextField(
           controller: _emailController,
-          icon: Icons.alternate_email_rounded,
+          icon: AppIcons.atSign,
           hint: 'you@example.com',
           keyboardType: TextInputType.emailAddress,
         ),
         const SizedBox(height: 16),
         PrimaryButton(
-          label: 'SEND CODE',
+          label: 'Send code',
           onPressed: _emailLooksValid ? _showOtp : null,
         ),
       ],

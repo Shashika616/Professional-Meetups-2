@@ -7,7 +7,8 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/verification/widgets/verification_scaffold.dart';
 
@@ -51,7 +52,7 @@ class _PersonalDetailsPageState extends ConsumerState<PersonalDetailsPage> {
           ? profile.legalName
           : profile.fullName;
     }
-    // GlassTextField doesn't expose onChanged — listening on the
+    // AppTextField doesn't expose onChanged — listening on the
     // controller directly is what makes CONTINUE react as the user types.
     _legalNameController.addListener(_onFieldChanged);
   }
@@ -102,19 +103,15 @@ class _PersonalDetailsPageState extends ConsumerState<PersonalDetailsPage> {
   @override
   Widget build(BuildContext context) {
     return VerificationScaffold(
-      icon: Icons.badge_outlined,
-      headline: 'Personal Details',
-      trustBenefit:
-          'Your legal name is never shown to other members. It helps '
-          'confirm you\'re a real professional and supports incident '
-          'response if it\'s ever needed.',
+      icon: AppIcons.idCard,
+      headline: 'Personal details',
       onSkip: () => Navigator.pop(context),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          GlassTextField(
+          AppTextField(
             controller: _legalNameController,
-            icon: Icons.badge_outlined,
+            icon: AppIcons.idCard,
             hint: 'Legal name',
           ),
           if (_error != null) ...[
@@ -127,7 +124,7 @@ class _PersonalDetailsPageState extends ConsumerState<PersonalDetailsPage> {
           ],
           const SizedBox(height: 16),
           PrimaryButton(
-            label: 'CONTINUE',
+            label: 'Continue',
             isLoading: _submitting,
             onPressed: _canSubmit ? _submit : null,
           ),

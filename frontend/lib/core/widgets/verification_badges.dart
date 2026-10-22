@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// Compact "Professional"/"Official" chips shown wherever another user's
 /// trust level is displayed (request cards, browse cards) — a friendlier
@@ -46,13 +47,13 @@ class VerificationBadges extends StatelessWidget {
     final badges = <Widget>[
       if (trustLevel >= 1)
         _Badge(
-          icon: Icons.work_outline_rounded,
+          icon: AppIcons.work,
           label: 'Professional',
           color: AppPalette.verified,
         ),
       if (official)
         _Badge(
-          icon: Icons.verified_rounded,
+          icon: AppIcons.verifiedBadge,
           label: 'Official',
           color: AppPalette.gold,
         ),
@@ -65,7 +66,7 @@ class VerificationBadges extends StatelessWidget {
 class _Badge extends StatelessWidget {
   const _Badge({required this.icon, required this.label, required this.color});
 
-  final IconData icon;
+  final String icon;
   final String label;
   final Color color;
 
@@ -81,7 +82,7 @@ class _Badge extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 11, color: color),
+          AppIcon(icon, size: 11, color: color),
           const SizedBox(width: 4),
           Text(
             label,

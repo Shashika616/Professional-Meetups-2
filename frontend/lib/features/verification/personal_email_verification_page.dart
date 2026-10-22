@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/validation/validators.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/verification/widgets/otp_entry.dart';
 import 'package:professional_connections_platform/features/verification/widgets/verification_scaffold.dart';
@@ -40,7 +41,7 @@ class _PersonalEmailVerificationPageState
     if (widget.currentValue != null) {
       _emailController.text = widget.currentValue!;
     }
-    // GlassTextField doesn't expose onChanged — listening on the
+    // AppTextField doesn't expose onChanged — listening on the
     // controller directly is what makes SEND CODE react as the user types.
     _emailController.addListener(_onFieldChanged);
   }
@@ -103,26 +104,23 @@ class _PersonalEmailVerificationPageState
   @override
   Widget build(BuildContext context) {
     return VerificationScaffold(
-      icon: Icons.email_outlined,
-      headline: 'Verify Your Email',
-      trustBenefit:
-          'A verified personal email gives you an account-recovery path '
-          'that doesn\'t depend on LinkedIn or your phone.',
+      icon: AppIcons.mail,
+      headline: 'Verify your email',
       onSkip: () => Navigator.pop(context),
       child: !_showOtpEntry
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                GlassTextField(
+                AppTextField(
                   controller: _emailController,
-                  icon: Icons.email_outlined,
+                  icon: AppIcons.mail,
                   hint: 'you@example.com',
                   keyboardType: TextInputType.emailAddress,
                   validator: (_) => Validators.email(_email),
                 ),
                 const SizedBox(height: 16),
                 PrimaryButton(
-                  label: 'SEND CODE',
+                  label: 'Send code',
                   onPressed: Validators.email(_email) == null ? _showOtp : null,
                 ),
               ],

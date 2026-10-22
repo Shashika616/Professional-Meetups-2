@@ -84,6 +84,17 @@ class _UninitializedYieldsNullPushService implements PushNotificationService {
 /// under test never needs the others, and UnimplementedError makes it
 /// obvious if that assumption ever stops holding.
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -230,8 +241,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -300,6 +311,71 @@ void main() {
       expect(state.session!.accessToken, 'fresh-access-token');
     },
   );
+
+  // V-17a at launch. Opening the app offline after the access token had
+  // expired used to land on the sign-in screen, because every refresh
+  // failure was read as "no session". The refresh token was never rejected.
+  test(
+    'an offline launch with an expired access token stays signed in',
+    () async {
+      final expired = _sessionExpiringIn(const Duration(minutes: -5));
+      await storage.saveSession(expired);
+
+      final container = ProviderContainer(
+        overrides: [
+          sessionStorageProvider.overrideWithValue(storage),
+          tokenRefresherProvider.overrideWithValue(
+            TokenRefresher(
+              storage: storage,
+              refreshSession: (token) async =>
+                  throw const AuthNetworkException('no connection'),
+            ),
+          ),
+          authServiceProvider.overrideWithValue(
+            _FakeAuthService(
+              const UserProfile(id: 'user-1', fullName: 'Ada Lovelace'),
+            ),
+          ),
+          meetupServiceProvider.overrideWithValue(ScriptedMeetupService()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final state = await container.read(authSessionProvider.future);
+      expect(
+        state.isLoggedIn,
+        isTrue,
+        reason: 'an offline launch showed the sign-in screen',
+      );
+      expect(state.session!.refreshToken, expired.refreshToken);
+      expect(state.profile?.fullName, expired.fullName);
+    },
+  );
+
+  // The other side of the same line: a refresh token the server REJECTS
+  // still means signed out.
+  test('a rejected refresh token at launch still signs out', () async {
+    await storage.saveSession(_sessionExpiringIn(const Duration(minutes: -5)));
+
+    final container = ProviderContainer(
+      overrides: [
+        sessionStorageProvider.overrideWithValue(storage),
+        tokenRefresherProvider.overrideWithValue(
+          TokenRefresher(
+            storage: storage,
+            refreshSession: (token) async =>
+                throw const SessionExpiredException('rejected'),
+          ),
+        ),
+        meetupServiceProvider.overrideWithValue(ScriptedMeetupService()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final state = await container.read(authSessionProvider.future);
+    expect(state.isLoggedIn, isFalse);
+    expect(await storage.loadSession(), isNull);
+  });
 
   test(
     'signOut() signs out locally at once and, in the background, sends '

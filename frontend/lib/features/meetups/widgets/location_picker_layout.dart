@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:professional_connections_platform/core/maps/map_canvas.dart';
 import 'package:professional_connections_platform/core/maps/map_sheet_scaffold.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/place_search_ui.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/selected_place_banner.dart';
@@ -43,6 +44,7 @@ class LocationPickerLayout extends StatelessWidget {
     required this.searchController,
     required this.searching,
     required this.suggestions,
+    required this.searchPending,
     required this.selectedLabel,
     required this.canContinue,
     required this.locating,
@@ -61,8 +63,16 @@ class LocationPickerLayout extends StatelessWidget {
   final TextEditingController searchController;
   final bool searching;
 
-  /// Empty hides the dropdown and its scrim entirely.
+  /// What the geocoder returned. Empty no longer hides the panel — see
+  /// [searchPending] — because "nothing found" and "still looking" both
+  /// have to be sayable.
   final List<PlaceSuggestion> suggestions;
+
+  /// There is a query on screen that the step is answering or has just
+  /// answered: the panel stays open across it, so a slow geocoder shows
+  /// progress instead of an empty map, and a query that matched nothing
+  /// says so rather than looking like a field that ignored the typing.
+  final bool searchPending;
 
   /// What CONTINUE will submit as the label. Empty means the place came
   /// from the device's own position, which the panel says out loud rather
@@ -86,7 +96,7 @@ class LocationPickerLayout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final showSuggestions = suggestions.isNotEmpty;
+    final showSuggestions = suggestions.isNotEmpty || searchPending;
     return MapSheetScaffold(
       map: map,
       // Lifted while the dropdown is open, so the pin reads as parked
@@ -112,6 +122,7 @@ class LocationPickerLayout extends StatelessWidget {
       overlay: showSuggestions
           ? _SuggestionsOverlay(
               suggestions: suggestions,
+              searching: searching,
               onSelect: onSelectSuggestion,
               onDismiss: onDismissSuggestions,
               top:
@@ -164,11 +175,7 @@ class _PickerSheet extends StatelessWidget {
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.shield_outlined,
-              size: 14,
-              color: AppPalette.textSecondary,
-            ),
+            AppIcon(AppIcons.shield, size: 14, color: AppPalette.textSecondary),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
@@ -204,7 +211,7 @@ class _PickerSheet extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         PrimaryButton(
-          label: 'CONTINUE',
+          label: 'Continue',
           onPressed: canContinue ? onContinue : null,
         ),
       ],
@@ -222,15 +229,19 @@ class _PickerSheet extends StatelessWidget {
 /// submits whatever the map happened to be centred on. Dimming also stops
 /// the map's own detail reading through a list of place names.
 ///
-/// The ClipRect is load-bearing, not decorative: a BackdropFilter is not
-/// clipped to its own bounds by default, so its blur samples and paints
-/// across the whole layer behind it — the reason an earlier version of
-/// this bled upward over the search field and made the text being typed
-/// unreadable. Clipping it to the scrim's own rectangle is what keeps the
-/// field crisp while everything under it is dimmed.
+/// # EDGE TO EDGE, NOT FROM THE FIELD DOWN
+///
+/// It used to start below the search bar, leaving a sharp band of map
+/// across the top of a blurred screen: a blur with a seam in it reads as
+/// something half-drawn, not as a material. [MapSheetScaffold] now paints
+/// the search field above this layer, so the frost can cover the whole
+/// screen and the field still sits crisp on top of it, which is also the
+/// behaviour the field needs — it stays readable and tappable while the
+/// list is open.
 class _SuggestionsOverlay extends StatelessWidget {
   const _SuggestionsOverlay({
     required this.suggestions,
+    required this.searching,
     required this.onSelect,
     required this.onDismiss,
     required this.top,
@@ -238,6 +249,7 @@ class _SuggestionsOverlay extends StatelessWidget {
   });
 
   final List<PlaceSuggestion> suggestions;
+  final bool searching;
   final void Function(int index) onSelect;
   final VoidCallback onDismiss;
   final double top;
@@ -247,19 +259,22 @@ class _SuggestionsOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        Positioned(
-          top: top,
-          left: 0,
-          right: 0,
-          bottom: 0,
+        Positioned.fill(
+          // The ClipRect is still load-bearing: a BackdropFilter is not
+          // clipped to its own bounds, so its blur otherwise samples and
+          // paints across the whole layer behind it.
           child: ClipRect(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: onDismiss,
               child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                // Heavier than the 8 it covered four fifths of the screen
+                // with: a full-screen material should read as frosted
+                // glass, and at 8 the map's road grid stayed legible
+                // enough to compete with the place names on top of it.
+                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
                 child: ColoredBox(
-                  color: AppPalette.onyx.withValues(alpha: 0.6),
+                  color: AppPalette.onyx.withValues(alpha: 0.55),
                 ),
               ),
             ),
@@ -271,6 +286,7 @@ class _SuggestionsOverlay extends StatelessWidget {
           right: sideInset,
           child: PlaceSuggestionsDropdown(
             suggestions: suggestions,
+            searching: searching,
             onSelect: onSelect,
           ),
         ),

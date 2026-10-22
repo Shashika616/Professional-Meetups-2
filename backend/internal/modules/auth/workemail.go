@@ -23,8 +23,23 @@ func hashWorkEmail(key []byte, email string) string {
 // normalizeEmailForHash lowercases and trims the address before hashing —
 // so "Jane@AcmeCorp.com" and "jane@acmecorp.com " collide to the same
 // hash, matching how a person would actually type the same mailbox twice.
+//
+// It also drops a +tag (#91). The hash is what enforces "one work mailbox,
+// one account", and jane+1@acme.com, jane+2@acme.com and jane@acme.com are
+// all the same inbox: without this, one person could verify as many
+// accounts as they could invent tags.
+//
+// Hashes stored before this change were taken without stripping, and the
+// raw addresses were never stored, so they cannot be recomputed. That only
+// matters for an address that already carried a tag; every untagged
+// address hashes exactly as it did.
 func normalizeEmailForHash(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
+	email = strings.ToLower(strings.TrimSpace(email))
+	at := strings.LastIndexByte(email, '@')
+	if at <= 0 {
+		return email
+	}
+	return stripPlusTag(email[:at]) + email[at:]
 }
 
 // normalizeCompanyName lowercases and collapses internal whitespace —

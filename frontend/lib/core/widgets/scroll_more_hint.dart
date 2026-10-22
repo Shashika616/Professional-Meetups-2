@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// "There is more below" — a chevron that appears over the bottom of a
 /// list and goes away once you reach the end.
@@ -162,8 +163,8 @@ class _ScrollMoreHintState extends State<ScrollMoreHint> {
                           child: SizedBox(
                             width: 36,
                             height: 36,
-                            child: Icon(
-                              Icons.keyboard_arrow_down_rounded,
+                            child: AppIcon(
+                              AppIcons.chevronDown,
                               size: 22,
                               color: AppPalette.textSecondary,
                             ),

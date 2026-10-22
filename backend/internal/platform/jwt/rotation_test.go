@@ -197,8 +197,14 @@ func TestVerify_TokenWithNoKIDFallsBackToTheCurrentKey(t *testing.T) {
 		UserID:     "legacy-user",
 		TrustLevel: 2,
 		RegisteredClaims: jwtlib.RegisteredClaims{
-			Issuer:    issuer,
-			Subject:   "legacy-user",
+			Issuer:  issuer,
+			Subject: "legacy-user",
+			// Carries the audience: this test is about the MISSING kid
+			// header and nothing else, and a token without `aud` is
+			// rejected on its own grounds since #93. A token predating
+			// both is covered by TestVerify_RejectsTokenWithoutAudience,
+			// which asserts that rejection deliberately.
+			Audience:  jwtlib.ClaimStrings{audience},
 			IssuedAt:  jwtlib.NewNumericDate(now),
 			ExpiresAt: jwtlib.NewNumericDate(now.Add(AccessTokenTTL)),
 		},

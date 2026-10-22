@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// The five points of "How was your experience?", each with its own face,
 /// colour and word.
@@ -81,63 +82,43 @@ class ExperienceFace extends StatelessWidget {
     return Semantics(
       image: true,
       label: level?.label ?? 'No rating picked yet',
-      child: SizedBox(
-        width: width,
-        height: height,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 280),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              layoutBuilder: (current, previous) => Stack(
-                fit: StackFit.expand,
-                children: [...previous, ?current],
+      // A rounded rectangle, which is what the screen set specifies for
+      // `.scene` (150px tall, radius 20) — nothing else.
+      //
+      // This used to be a full-bleed picture with a radial vignette to the
+      // page ground, on the idea that the scene would "dissolve into the
+      // page". It did not. A radial fade is weakest at the mid-points of
+      // the edges, which is exactly where the picture's own straight sides
+      // are, so the rectangle stayed visible — just with darkened corners
+      // — and it was the one element on the page with no corner radius
+      // while everything around it had 18 or 22.
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: SizedBox(
+          width: width,
+          height: height,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 280),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                layoutBuilder: (current, previous) => Stack(
+                  fit: StackFit.expand,
+                  children: [...previous, ?current],
+                ),
+                child: Image.asset(
+                  asset,
+                  key: ValueKey(asset),
+                  fit: BoxFit.cover,
+                  cacheWidth: (width * dpr).round(),
+                  gaplessPlayback: true,
+                  excludeFromSemantics: true,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
               ),
-              child: Image.asset(
-                asset,
-                key: ValueKey(asset),
-                fit: BoxFit.cover,
-                cacheWidth: (width * dpr).round(),
-                gaplessPlayback: true,
-                excludeFromSemantics: true,
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              ),
-            ),
-            // No border, no card: the scene dissolves into the page instead
-            // of sitting in a box. An elliptical vignette to the page ground
-            // takes the corners with it — two straight edge fades left a
-            // rectangle you could still see. A plain gradient, no saveLayer.
-            const _Vignette(),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Elliptical fade from clear at the centre to the page background at
-/// the edges, so the illustration has no visible boundary.
-class _Vignette extends StatelessWidget {
-  const _Vignette();
-
-  @override
-  Widget build(BuildContext context) {
-    final ground = AppPalette.onyx;
-    return IgnorePointer(
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: RadialGradient(
-            center: Alignment.center,
-            radius: 0.72,
-            colors: [
-              ground.withValues(alpha: 0.0),
-              ground.withValues(alpha: 0.0),
-              ground.withValues(alpha: 0.85),
-              ground,
             ],
-            stops: const [0.0, 0.50, 0.90, 1.0],
           ),
         ),
       ),
@@ -311,8 +292,8 @@ class _Stop extends StatelessWidget {
                   ],
                 ),
                 child: selected
-                    ? const Icon(
-                        Icons.check_rounded,
+                    ? const AppIcon(
+                        AppIcons.check,
                         size: 18,
                         color: Colors.white,
                       )

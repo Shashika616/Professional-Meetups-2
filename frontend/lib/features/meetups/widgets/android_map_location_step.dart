@@ -75,6 +75,33 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   // not dependent on `animateCamera`'s async settle timing on a real
   // device either.
   MapPoint _pickedLocation = _defaultCenter;
+
+  // Built ONCE and reused, instead of constructed inside build().
+  //
+  // Typing in the search field rebuilds this widget on every keystroke
+  // (the banner and CONTINUE both derive from the field's text), and a
+  // MapCanvas created inside build() is a new widget instance each time.
+  // maplibre_gl's MapLibreMap has no didUpdateWidget guard, so each of
+  // those rebuilds pushed its whole option set back across the platform
+  // channel to the native view — per character, while the user types.
+  // That was the lag on this page.
+  //
+  // Holding one instance makes the child identical between builds, which
+  // Flutter short-circuits: the map subtree is not rebuilt at all. Safe
+  // because none of these arguments ever change — the centre and zoom are
+  // compile-time constants, and both callbacks only assign fields.
+  // Camera movement goes through _canvas.moveTo(), never through props.
+  late final Widget _mapCanvas = MapCanvas(
+    initialCentre: _defaultCenter,
+    initialZoom: 13,
+    onReady: (canvas) => _canvas = canvas,
+    // Keeps the picked point in step with a map the user dragged by
+    // hand. Search and current-location set it directly and
+    // synchronously (see their own comments), so this matters for the
+    // "no search, just move the map" path.
+    onCameraMove: (point) => _pickedLocation = point,
+  );
+
   final _searchController = TextEditingController();
   List<PlaceResult> _results = [];
   bool _searching = false;
@@ -104,6 +131,12 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   bool _locationPicked = false;
   // A fix is being fetched: the button shows it and ignores taps.
   bool _locating = false;
+  // There is a query on screen worth answering, so the suggestions panel
+  // stays open across the whole lookup rather than appearing only once
+  // results land. Set the moment the field holds two characters — before
+  // the debounce has even fired — and cleared when the query is answered,
+  // dismissed or emptied.
+  bool _suggestionsOpen = false;
 
   @override
   void initState() {
@@ -140,9 +173,20 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
     // One character cannot rank anything useful and the geocoder is a
     // shared, fair-use service; nothing is sent until there are two.
     if (text.trim().length < 2) {
-      setState(() => _results = []);
+      setState(() {
+        _results = [];
+        _suggestionsOpen = false;
+        _searching = false;
+      });
       return;
     }
+    // Open and spinning immediately, including through the debounce
+    // window: the alternative is a panel that reads "No places found" for
+    // 300ms before it has asked anybody anything.
+    setState(() {
+      _suggestionsOpen = true;
+      _searching = true;
+    });
     // ~300ms is the usual floor for typeahead debouncing (frontend/
     // meetup-scheduling-PLAN.md's 2026-08-18 platform-split addendum,
     // Step 2) — enough to collapse a burst of keystrokes into one request.
@@ -193,6 +237,8 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
     setState(() {
       _searchController.text = result.label;
       _results = [];
+      _suggestionsOpen = false;
+      _searching = false;
       _pickedLocation = target;
     });
     await _canvas?.moveTo(target, zoom: 15);
@@ -220,6 +266,7 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
       );
       if (generation != _requestGeneration || !mounted) return;
       if (result == null) {
+        setState(() => _suggestionsOpen = false);
         _showError('No results for "$text".');
         return;
       }
@@ -228,6 +275,7 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
       _suppressNextSearch = true;
       setState(() {
         _searchController.text = result.label;
+        _suggestionsOpen = false;
         _pickedLocation = target;
       });
       await _canvas?.moveTo(target, zoom: 15);
@@ -288,31 +336,31 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
 
     return LocationPickerLayout(
       // MapLibre against whichever tiles MapConfig selected — the only
-      // thing this file still says about rendering.
-      map: MapCanvas(
-        initialCentre: _defaultCenter,
-        initialZoom: 13,
-        onReady: (canvas) => _canvas = canvas,
-        // Keeps the picked point in step with a map the user dragged by
-        // hand. Search and current-location set it directly and
-        // synchronously (see their own comments), so this matters for the
-        // "no search, just move the map" path.
-        onCameraMove: (point) => _pickedLocation = point,
-      ),
+      // thing this file still says about rendering. Built once; see the
+      // field's comment for why it must not be constructed here.
+      map: _mapCanvas,
       searchController: _searchController,
       searching: _searching,
       suggestions: [
         for (final r in _results) PlaceSuggestion.fromLabel(r.label),
       ],
+      searchPending: _suggestionsOpen,
       selectedLabel: _searchController.text.trim(),
       canContinue: _canContinue,
       locating: _locating,
       onSubmitted: _directSearch,
-      onCleared: () => setState(() => _results = []),
+      onCleared: () => setState(() {
+        _results = [];
+        _suggestionsOpen = false;
+        _searching = false;
+      }),
       // The layout speaks in list positions (it never sees a PlaceResult);
       // this side owns the objects behind them.
       onSelectSuggestion: (index) => _selectResult(_results[index]),
-      onDismissSuggestions: () => setState(() => _results = []),
+      onDismissSuggestions: () => setState(() {
+        _results = [];
+        _suggestionsOpen = false;
+      }),
       onUseCurrentLocation: _useCurrentLocation,
       onContinue: _submit,
     );
@@ -331,7 +379,7 @@ class _NotConfiguredNotice extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         FlatCard(
-          radius: 12,
+          radius: 18,
           padding: const EdgeInsets.all(16),
           tint: AppPalette.danger.withValues(alpha: 0.08),
           border: AppPalette.danger.withValues(alpha: 0.3),

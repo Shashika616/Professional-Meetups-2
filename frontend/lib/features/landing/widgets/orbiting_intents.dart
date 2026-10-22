@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// Intent chips slowly orbiting the brand core with a subtle depth effect.
 /// Optimized for low-end devices using RepaintBoundary and pre-calculated values.
@@ -126,7 +127,7 @@ class _ChipContent extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(intent.icon, size: 17, color: AppPalette.candyBlue),
+          AppIcon(intent.iconPath, size: 17, color: AppPalette.candyBlue),
           const SizedBox(height: 4),
           Text(
             intent.label,

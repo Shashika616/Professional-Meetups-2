@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 
 class SafetyTipCard extends StatelessWidget {
@@ -11,13 +12,13 @@ class SafetyTipCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
       child: FlatCard(
-        radius: 12,
+        radius: 18,
         tint: AppPalette.verified.withValues(alpha: 0.06),
         border: AppPalette.verified.withValues(alpha: 0.25),
         padding: const EdgeInsets.all(16),
         child: Row(
           children: [
-            Icon(Icons.shield_outlined, color: AppPalette.verified, size: 20),
+            AppIcon(AppIcons.shield, color: AppPalette.verified, size: 20),
             const SizedBox(width: 12),
             Expanded(
               child: Text(

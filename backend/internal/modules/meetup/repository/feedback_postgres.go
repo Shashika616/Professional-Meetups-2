@@ -23,8 +23,11 @@ func NewFeedbackRepository(pool *pgxpool.Pool) FeedbackRepository {
 	return &postgresFeedbackRepository{q: sqlcgen.New(pool)}
 }
 
+// Upsert stores the safety answers. notes is accepted and IGNORED (#90): the
+// only notes column is the public review comment, and a private safety note
+// must never land there. See UpsertMeetupFeedback.
 func (r *postgresFeedbackRepository) Upsert(
-	ctx context.Context, meetupID, userID string, happened bool, feltSafe, profileAccurate, wouldMeetAgain *bool, notes *string,
+	ctx context.Context, meetupID, userID string, happened bool, feltSafe, profileAccurate, wouldMeetAgain *bool, _ *string,
 ) error {
 	meetup, err := parseUUID(meetupID)
 	if err != nil {
@@ -42,7 +45,6 @@ func (r *postgresFeedbackRepository) Upsert(
 		FeltSafe:        boolPtrOrNull(feltSafe),
 		ProfileAccurate: boolPtrOrNull(profileAccurate),
 		WouldMeetAgain:  boolPtrOrNull(wouldMeetAgain),
-		Notes:           stringPtrOrNull(notes),
 	}); err != nil {
 		return fmt.Errorf("repository: upsert meetup feedback: %w", err)
 	}

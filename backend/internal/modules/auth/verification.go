@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/email"
+	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 )
@@ -46,7 +47,40 @@ func (s *service) requireLinkedIn(ctx context.Context, userID string) (repositor
 }
 
 // StartPhoneVerification generates and sends a phone OTP.
+// normalizeVerificationTarget folds a typed phone number or email address
+// into the one string every OTP budget, cooldown, limiter bucket and
+// stored value is keyed on (tracker #82, review finding N-A1).
+//
+// # WHY THIS IS AT THE TOP OF EVERY ENTRY POINT
+//
+// The budget, the one-minute cooldown and the per-target rate limiter
+// were all keyed on the raw string the caller typed, while login looks
+// accounts up case-insensitively. So `Victim@x.com` and `victim@x.com`
+// were the same ACCOUNT but two different verification rows: five
+// attempts each, a cooldown each, a limiter bucket each, and every code
+// delivered to the same inbox. That is the V-1 attempt-limit fix undone
+// by pressing shift. Phone numbers had the same hole through spacing and
+// punctuation.
+//
+// Applied at the public method rather than deeper down so that the value
+// which gets PERSISTED — users.phone_number, users.personal_email — is
+// the same one that was verified. Normalising only inside the code store
+// would fix the budget and leave the stored number in whatever shape it
+// was typed.
+//
+// The purpose decides the rule because the two differ and one would
+// break the other: a hyphen is punctuation in a phone number and part of
+// the address in `foo-bar@x.com`. Migration 0020 applies exactly this
+// split in SQL so the database enforces it too.
+func normalizeVerificationTarget(purpose VerificationPurpose, target string) string {
+	if purpose == VerificationPurposePhone {
+		return identity.NormalizePhone(target)
+	}
+	return identity.NormalizeEmail(target)
+}
+
 func (s *service) StartPhoneVerification(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposePhone, req.Target)
 	if req.Purpose != VerificationPurposePhone {
 		return StartVerificationResult{}, fmt.Errorf("purpose mismatch for StartPhoneVerification: %w", apperror.ErrInvalidInput)
 	}
@@ -65,6 +99,7 @@ func (s *service) StartPhoneVerification(ctx context.Context, req StartVerificat
 // VerifyPhoneCode verifies a phone OTP and, on success, persists
 // phone_number and returns a fresh session reflecting the new trust level.
 func (s *service) VerifyPhoneCode(ctx context.Context, req VerifyCodeRequest) (SessionResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposePhone, req.Target)
 	if req.Purpose != VerificationPurposePhone {
 		return SessionResult{}, fmt.Errorf("purpose mismatch for VerifyPhoneCode: %w", apperror.ErrInvalidInput)
 	}
@@ -89,6 +124,7 @@ func (s *service) VerifyPhoneCode(ctx context.Context, req VerifyCodeRequest) (S
 
 // StartPersonalEmailVerification generates and sends a personal-email OTP.
 func (s *service) StartPersonalEmailVerification(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposePersonalEmail, req.Target)
 	if req.Purpose != VerificationPurposePersonalEmail {
 		return StartVerificationResult{}, fmt.Errorf("purpose mismatch for StartPersonalEmailVerification: %w", apperror.ErrInvalidInput)
 	}
@@ -104,6 +140,7 @@ func (s *service) StartPersonalEmailVerification(ctx context.Context, req StartV
 // VerifyPersonalEmailCode verifies a personal-email OTP and, on success,
 // persists personal_email and returns a fresh session.
 func (s *service) VerifyPersonalEmailCode(ctx context.Context, req VerifyCodeRequest) (SessionResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposePersonalEmail, req.Target)
 	if req.Purpose != VerificationPurposePersonalEmail {
 		return SessionResult{}, fmt.Errorf("purpose mismatch for VerifyPersonalEmailCode: %w", apperror.ErrInvalidInput)
 	}
@@ -158,6 +195,7 @@ func (s *service) SubmitPersonalDetails(ctx context.Context, req SubmitPersonalD
 // connected. The Profile-page-reachable path this also serves is unaffected
 // — a Level 2+ caller there already has LinkedIn by definition.
 func (s *service) StartCorporateEmailVerification(ctx context.Context, req StartVerificationRequest) (StartVerificationResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposeCorporateEmail, req.Target)
 	if req.Purpose != VerificationPurposeCorporateEmail {
 		return StartVerificationResult{}, fmt.Errorf("purpose mismatch for StartCorporateEmailVerification: %w", apperror.ErrInvalidInput)
 	}
@@ -204,6 +242,7 @@ var (
 //     domain) but is additionally flagged into unverified_company_claims for
 //     manual review.
 func (s *service) VerifyCorporateEmailCode(ctx context.Context, req VerifyCodeRequest) (SessionResult, error) {
+	req.Target = normalizeVerificationTarget(VerificationPurposeCorporateEmail, req.Target)
 	if req.Purpose != VerificationPurposeCorporateEmail {
 		return SessionResult{}, fmt.Errorf("purpose mismatch for VerifyCorporateEmailCode: %w", apperror.ErrInvalidInput)
 	}
@@ -449,7 +488,84 @@ func (s *service) dispatchVerificationCode(ctx context.Context, purpose reposito
 // doesn't linger — a minimal-retention requirement for the corporate-email
 // case, applied uniformly to all purposes here rather than as a special
 // case).
+// # WHY THE ATTEMPT IS SPENT BEFORE THE CODE IS LOOKED AT (V-1)
+//
+// This used to read the row, check `Attempts >= otpMaxAttempts` in Go,
+// compare the code, and increment only on a mismatch. Every concurrent
+// guess read the same pre-increment value, so the five-attempt cap bounded
+// one caller taking five turns and nothing else: a hundred parallel
+// requests got a hundred guesses at a six-digit code, and a fresh code
+// could be requested every sixty seconds. For the unauthenticated email
+// purposes that is a takeover path, not a hardening nicety.
+//
+// The order is now: spend an attempt atomically, and only then look at the
+// code. ClaimAttempt's own UPDATE carries `attempts < max`, so Postgres
+// decides how many guesses exist, per row, under its own serialisation of
+// concurrent updates. A caller that gets nothing back never reaches the
+// comparison.
+//
+// Every user-facing message below is the one this function has always
+// returned, including which cases delete the row. The atomic claim collapses
+// "no row", "expired" and "cap spent" into one zero-row answer, so
+// explainUnclaimableAttempt reads the row back to tell them apart. That read
+// decides wording only — it can never grant an attempt.
 func (s *service) verifyAndConsumeCode(ctx context.Context, userID string, purpose repository.VerificationPurpose, target, code string) error {
+	claimed, err := s.verificationCodes.ClaimAttempt(ctx, userID, purpose, otpMaxAttempts)
+	if err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return s.explainUnclaimableAttempt(ctx, userID, purpose)
+		}
+		return err
+	}
+
+	// Checked on the claimed row rather than before claiming it, which means
+	// a mismatched target now costs an attempt. That is the right cost: it
+	// is a failed verification attempt, and it was already possible to burn
+	// attempts with wrong codes, so nothing new is exposed.
+	if claimed.Target != target {
+		return fmt.Errorf("target does not match the pending verification: %w", apperror.ErrInvalidInput)
+	}
+
+	if !otpMatches(claimed.CodeHash, code, purpose, target) {
+		// Same as before: the guess that spends the last attempt clears the
+		// row, so the next request is told to ask for a new code rather than
+		// being told off for attempts it cannot see.
+		if claimed.Attempts >= otpMaxAttempts {
+			_ = s.verificationCodes.Delete(ctx, userID, purpose)
+		}
+		return fmt.Errorf("invalid code: %w", apperror.ErrInvalidInput)
+	}
+
+	// Conditional on the hash, so a correct code submitted twice at once is
+	// spent once: the loser is told the code is invalid, which by then it is.
+	if err := s.verificationCodes.Consume(ctx, userID, purpose, claimed.CodeHash); err != nil {
+		if errors.Is(err, apperror.ErrNotFound) {
+			return fmt.Errorf("invalid code: %w", apperror.ErrInvalidInput)
+		}
+		return err
+	}
+	return nil
+}
+
+// explainUnclaimableAttempt says WHY no attempt could be claimed, so the
+// three messages this function has always returned survive the collapse of
+// three Go-side checks into one atomic UPDATE.
+//
+// Wording only. It runs after the cap has already refused, and nothing it
+// does can hand back an attempt.
+//
+// ONE DELIBERATE DIFFERENCE FROM THE OLD CODE, and it is a correctness fix
+// rather than an oversight: the old "too many attempts" branch deleted the
+// row. Doing that here would be a live bug. This path is now reachable
+// while OTHER requests are mid-comparison — that is exactly what a spent cap
+// under parallel load means — and deleting the row under them would make
+// their Consume find nothing and report a correct code as invalid. The row
+// is still cleared on the ordinary path (the guess that spends the last
+// attempt does it) and on expiry, so nothing leaks; it just is not cleared
+// by a bystander.
+func (s *service) explainUnclaimableAttempt(
+	ctx context.Context, userID string, purpose repository.VerificationPurpose,
+) error {
 	pending, err := s.verificationCodes.Get(ctx, userID, purpose)
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {
@@ -457,26 +573,9 @@ func (s *service) verifyAndConsumeCode(ctx context.Context, userID string, purpo
 		}
 		return err
 	}
-
 	if time.Now().After(pending.ExpiresAt) {
 		_ = s.verificationCodes.Delete(ctx, userID, purpose)
 		return fmt.Errorf("code expired, please request a new one: %w", apperror.ErrInvalidInput)
 	}
-	if pending.Target != target {
-		return fmt.Errorf("target does not match the pending verification: %w", apperror.ErrInvalidInput)
-	}
-	if pending.Attempts >= otpMaxAttempts {
-		_ = s.verificationCodes.Delete(ctx, userID, purpose)
-		return fmt.Errorf("too many attempts, please request a new code: %w", apperror.ErrInvalidInput)
-	}
-
-	if !otpMatches(pending.CodeHash, code, purpose, target) {
-		updated, incErr := s.verificationCodes.IncrementAttempts(ctx, userID, purpose)
-		if incErr == nil && updated.Attempts >= otpMaxAttempts {
-			_ = s.verificationCodes.Delete(ctx, userID, purpose)
-		}
-		return fmt.Errorf("invalid code: %w", apperror.ErrInvalidInput)
-	}
-
-	return s.verificationCodes.Delete(ctx, userID, purpose)
+	return fmt.Errorf("too many attempts, please request a new code: %w", apperror.ErrInvalidInput)
 }

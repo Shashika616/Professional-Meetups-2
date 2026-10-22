@@ -3,13 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 enum ToastType { success, info, warning, error, locked }
 
 class _ToastMeta {
   const _ToastMeta(this.icon, this.color);
 
-  final IconData icon;
+  final String icon;
   final Color color;
 }
 
@@ -91,16 +92,13 @@ class _ToastCardState extends State<_ToastCard>
 
   _ToastMeta _meta(ToastType type) => switch (type) {
     ToastType.success => _ToastMeta(
-      Icons.verified_rounded,
+      AppIcons.verifiedBadge,
       AppPalette.verified,
     ),
-    ToastType.info => _ToastMeta(Icons.info_rounded, AppPalette.candyBlue),
-    ToastType.warning => const _ToastMeta(
-      Icons.warning_amber_rounded,
-      Color(0xFFF2B84B),
-    ),
-    ToastType.error => _ToastMeta(Icons.error_rounded, AppPalette.danger),
-    ToastType.locked => _ToastMeta(Icons.lock_rounded, AppPalette.steelBlue),
+    ToastType.info => _ToastMeta(AppIcons.info, AppPalette.candyBlue),
+    ToastType.warning => const _ToastMeta(AppIcons.warning, Color(0xFFF2B84B)),
+    ToastType.error => _ToastMeta(AppIcons.warning, AppPalette.danger),
+    ToastType.locked => _ToastMeta(AppIcons.lock, AppPalette.steelBlue),
   };
 
   @override
@@ -148,7 +146,7 @@ class _ToastCardState extends State<_ToastCard>
                         color: meta.color.withValues(alpha: 0.15),
                         shape: BoxShape.circle,
                       ),
-                      child: Icon(meta.icon, size: 16, color: meta.color),
+                      child: AppIcon(meta.icon, size: 16, color: meta.color),
                     ),
                     const SizedBox(width: 10),
                     Expanded(

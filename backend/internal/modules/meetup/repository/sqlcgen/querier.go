@@ -18,6 +18,23 @@ type Querier interface {
 	// host_user_id column of its own, so this goes through a subquery against
 	// meetups, the same relationship the Go check already enforces. The
 	// Go-level check stays, this doesn't replace it.
+	//
+	// `status = 'pending'` added for V-2 (security review 2026-10-01). The
+	// comment above used to claim the call site re-checked pending. It did read
+	// it — but BEFORE it took the meetup's row lock, so two accepts of the same
+	// request both read 'pending', both waited on the lock, and both ran this
+	// UPDATE. The second one re-accepted an already-accepted row, and the seat
+	// was counted twice: on a capacity-2 meetup with one real acceptance the
+	// meetup flipped to 'full' and every other pending request was
+	// auto-rejected with a push. The same gap let an accept resurrect a request
+	// that had just been rejected or withdrawn.
+	//
+	// The predicate is what makes that impossible rather than unlikely. The
+	// call site now locks the meetup first and re-reads this row FOR UPDATE,
+	// so by the time this runs the status it checked is the committed one; this
+	// clause is the backstop that holds even if that ordering is ever lost
+	// again. Zero rows means "not pending any more", which the repository maps
+	// to a conflict.
 	AcceptMeetupRequest(ctx context.Context, arg AcceptMeetupRequestParams) (MeetupMeetupRequest, error)
 	// Meetups the deleted person hosted are kept (they are every attendee's
 	// history, and deleting one would cascade away other members' requests,
@@ -94,6 +111,22 @@ type Querier interface {
 	// Go-level ownership check in service.go's CancelMeetup — mirrors
 	// CloseMeetup's own ownership clause exactly; the Go-level check stays,
 	// this doesn't replace it.
+	//
+	// `status IN ('open','full')` added for V-10 (security review 2026-10-01).
+	// Without it the only conditions were "right meetup, right host", so a host
+	// could cancel a meetup that had already COMPLETED: it flipped to
+	// cancelled, which erased it from their public history, re-notified every
+	// participant about a meetup that had already happened, and opened the
+	// cancellation-review path on an event nobody was wronged by. Cancelling an
+	// already-cancelled meetup re-notified everyone a second time too.
+	//
+	// No window check here, deliberately. CloseMeetup owns the past-window case
+	// (`status IN ('open','full') AND now() >= window_start` -> completed), and
+	// a host whose window has started but whose meetup is still open has a
+	// legitimate reason to cancel — nobody came, or they cannot make it. The
+	// auto-close sweep moves those to completed, and this guard then protects
+	// them. Adding `window_end > now()` would block the honest case and protect
+	// nothing the status does not already cover.
 	CancelMeetup(ctx context.Context, arg CancelMeetupParams) (MeetupMeetup, error)
 	// A requester taking back a request the host has not acted on yet. This
 	// is a DELETE, not a status change, and deliberately so: nothing happened
@@ -261,6 +294,9 @@ type Querier interface {
 	// dependency on the lifecycle sweep having run (see ListOpenMeetupsFirstPage's
 	// comment for the production incident behind that rule).
 	CountActiveCommitments(ctx context.Context, userID uuid.UUID) (CountActiveCommitmentsRow, error)
+	// How many meetups one host has created recently, for the nearby-notify
+	// cap (#89). idx_meetups_host narrows to the host; a host's rows are few.
+	CountMeetupsCreatedByHostSince(ctx context.Context, arg CountMeetupsCreatedByHostSinceParams) (int64, error)
 	// Backs the pending gauge. Same predicate as the claimable partial index, so
 	// it is an index-only scan over the pending set rather than a table scan.
 	CountPendingMeetupsCompleted(ctx context.Context) (int64, error)
@@ -270,6 +306,33 @@ type Querier interface {
 	CountPendingNotifications(ctx context.Context) (int64, error)
 	CreateMeetup(ctx context.Context, arg CreateMeetupParams) (MeetupMeetup, error)
 	CreateMeetupRating(ctx context.Context, arg CreateMeetupRatingParams) (MeetupMeetupUserRating, error)
+	// One live request per person per meetup, and no second ask after a
+	// rejection (tracker #79, plan decision D1).
+	//
+	// Two different rules, enforced in two different places, because they are
+	// not the same shape:
+	//
+	//   * "one live request" is the partial unique index from migration 0019
+	//     — (meetup_id, requester_id) WHERE status IN ('pending','accepted').
+	//     A second live row raises 23505, which the caller maps to
+	//     ErrConflict. The index is the right home for it: it holds against
+	//     concurrent inserts, which no application check can.
+	//
+	//   * "a rejected user may not re-request, a withdrawn user may" is the
+	//     NOT EXISTS below. It cannot be an index: expressing it would mean
+	//     including 'rejected' in the uniqueness, which is precisely the
+	//     mistake 0019 removes — it is what made the host's reject and the
+	//     final-seat accept collide with an old rejected row.
+	//
+	// Conditional INSERT rather than SELECT-then-INSERT so the check and the
+	// write are one statement. Zero rows back means "previously rejected",
+	// which the caller separates from a plain 23505 because the two want
+	// different words: one is "the host already said no", the other is "you
+	// have already asked".
+	//
+	// Withdrawing and asking again stays open on purpose. Backing out of a
+	// meetup is not misconduct and should not be a permanent bar, and the
+	// host sees the withdrawal in the request's own history either way.
 	CreateMeetupRequest(ctx context.Context, arg CreateMeetupRequestParams) (MeetupMeetupRequest, error)
 	// Retention for dead-lettered rows, kept longer than successes on purpose.
 	DeleteDeadLetteredMeetupsCompleted(ctx context.Context, arg DeleteDeadLetteredMeetupsCompletedParams) (int64, error)
@@ -416,6 +479,17 @@ type Querier interface {
 	// Reject/Withdraw) RETURNING against. Callers needing display info should
 	// use GetMeetupRequestWithRequesterInfoByID instead.
 	GetMeetupRequestByID(ctx context.Context, id uuid.UUID) (MeetupMeetupRequest, error)
+	// The request row, locked until the transaction ends (V-2).
+	//
+	// Taken AFTER the meetup's own lock, never before: meetups-then-requests is
+	// the order every transaction that touches both uses, and taking them the
+	// other way round is how two transactions end up each holding what the
+	// other needs.
+	//
+	// This is what makes the accept path's status check true rather than
+	// hopeful. The unlocked read it replaced happened before the meetup lock,
+	// so a concurrent accept could resolve the row in the window between.
+	GetMeetupRequestByIDForUpdate(ctx context.Context, id uuid.UUID) (MeetupMeetupRequest, error)
 	// See meetup.meetups.sql's GetMeetupByID for why user_display_cache/
 	// meetup_user_ratings are both LEFT JOINed (not JOIN) here.
 	GetMeetupRequestWithRequesterInfoByID(ctx context.Context, id uuid.UUID) (GetMeetupRequestWithRequesterInfoByIDRow, error)
@@ -445,6 +519,11 @@ type Querier interface {
 	// pgx.ErrNoRows to false (free/not-entitled), which is the safe default,
 	// not an error.
 	IsSubscriptionEntitled(ctx context.Context, userID uuid.UUID) (bool, error)
+	// Whether a user's last known location is within 50 km of a point — the
+	// same ST_DWithin on geography, and the same 50000 m, as browse uses, so
+	// the join rule (D4) is exactly the rule that decided what they could see.
+	// No row means the location is unknown, which the caller decides about.
+	IsUserLocationWithinRadius(ctx context.Context, arg IsUserLocationWithinRadiusParams) (bool, error)
 	ListDeviceTokensForUser(ctx context.Context, userID uuid.UUID) ([]MeetupDeviceToken, error)
 	// Batched form of ListDeviceTokensForUser (2026-08-31 round-3 hardening,
 	// internal/notifications.BatchSender) — one query for all of a fan-out's
@@ -535,6 +614,18 @@ type Querier interface {
 	// (m.host_user_id = requester_id) are exempt from the 50km radius — the exemption
 	// must stay identical in both queries, or a host's own out-of-range meetup
 	// would appear on page 1 and then vanish from page 2 onward.
+	// Only the page's rows are decorated. The per-row lookups below — the
+	// host's cached name, their rating aggregate, the accepted count and the
+	// viewer's own latest request — used to run for EVERY open meetup in range
+	// before the page was cut (#87): at 100k meetups, 20,000 times to return
+	// 20 rows, 195 ms. The page is chosen first now, and the result is the same
+	// rows with the same columns.
+	// The viewer's most recent request on this meetup, if any — what the old
+	// DISTINCT ON (m.id) ... ORDER BY r.created_at DESC picked. A plain LEFT
+	// JOIN to the table rather than a LATERAL, because sqlc only knows a
+	// LEFT-JOINed TABLE column can be NULL; through a LATERAL it generates a
+	// non-nullable field, and a meetup the viewer never requested would fail
+	// to scan.
 	ListOpenMeetupsAfterCursor(ctx context.Context, arg ListOpenMeetupsAfterCursorParams) ([]ListOpenMeetupsAfterCursorRow, error)
 	// DISTINCT ON (m.id) + a wrapping SELECT to re-sort by recency: DISTINCT ON
 	// requires its own ORDER BY to start with the same expression(s), which
@@ -567,6 +658,18 @@ type Querier interface {
 	// Scoped to hosts only; a meetup the viewer merely has an accepted request
 	// for is NOT exempted here (it already surfaces distance-unfiltered via
 	// "Your Meetups"/Active Meetups).
+	// Only the page's rows are decorated. The per-row lookups below — the
+	// host's cached name, their rating aggregate, the accepted count and the
+	// viewer's own latest request — used to run for EVERY open meetup in range
+	// before the page was cut (#87): at 100k meetups, 20,000 times to return
+	// 20 rows, 195 ms. The page is chosen first now, and the result is the same
+	// rows with the same columns.
+	// The viewer's most recent request on this meetup, if any — what the old
+	// DISTINCT ON (m.id) ... ORDER BY r.created_at DESC picked. A plain LEFT
+	// JOIN to the table rather than a LATERAL, because sqlc only knows a
+	// LEFT-JOINed TABLE column can be NULL; through a LATERAL it generates a
+	// non-nullable field, and a meetup the viewer never requested would fail
+	// to scan.
 	ListOpenMeetupsFirstPage(ctx context.Context, arg ListOpenMeetupsFirstPageParams) ([]ListOpenMeetupsFirstPageRow, error)
 	// Host + accepted requesters of meetupID, excluding viewerID, each flagged
 	// with whether viewerID has already rated them for this meetup. Also
@@ -622,7 +725,37 @@ type Querier interface {
 	// real GiST index doing the heavy lifting: a single meetup notifying more
 	// than 500 nearby users in one fan-out is worth capping regardless of how
 	// fast the lookup itself is.
+	// NEAREST FIRST (#89). The 500 cap used to keep an arbitrary 500 of the
+	// people in range; in a dense area that could leave out the people next
+	// door and notify someone 49 km away. <-> is the GiST index's own distance
+	// operator, so the ordering is an index walk, not a sort of every match.
 	ListUserLocationCacheWithinRadius(ctx context.Context, arg ListUserLocationCacheWithinRadiusParams) ([]ListUserLocationCacheWithinRadiusRow, error)
+	// Serialises everyone rating ONE person, so the aggregate each rater
+	// computes includes every rating committed before it (tracker #86, review
+	// finding N-B4).
+	//
+	// Without it, two people rating the same participant at the same time each
+	// INSERT their own row and then each run ComputeUserRatingAggregate inside
+	// their own transaction. Neither sees the other's uncommitted row, so both
+	// compute N+1 when the truth after both commits is N+2, and both publish
+	// that count as rating-updated. The auth module's consumer is guarded on
+	// OccurredAt, so the LATER event wins — and it carries the wrong number.
+	// The cache then disagrees with the ratings table until something else
+	// happens to that user.
+	//
+	// Taken as the first statement of the transaction that will insert and
+	// then compute, so the second rater queues behind the first and reads a
+	// state that includes it. Transaction-scoped: released at commit or
+	// rollback, no row and no constraint involved.
+	//
+	// The two-argument form puts this in a different lock space from
+	// LockUserSchedule's single-argument hashtext(user_id) — Postgres keeps
+	// (int, int) keys and bigint keys separate — so a person being rated and
+	// the same person scheduling cannot block each other. 2 is this module's
+	// rating namespace; hashtext folds the UUID into int4. A hash collision
+	// between two different users costs a brief false serialisation and
+	// nothing else.
+	LockUserRatingAggregate(ctx context.Context, ratedUserID string) error
 	// Serialises one person's schedule writes (Plan 19). Taken as the first
 	// statement of the transaction that will read FindScheduleConflict and
 	// then insert, so two concurrent creates or requests from the same person
@@ -681,6 +814,11 @@ type Querier interface {
 	// One statement rather than "list participants, then count per participant":
 	// the fan-out is small (a meetup's capacity), but the 1+N version would run
 	// inside the close transaction and hold it open for the round trips.
+	// Two indexed counts joined by UNION, not one scan with an OR (#87). The
+	// old `host_user_id = p.user_id OR EXISTS (...)` could use neither index,
+	// so it read every meetup in the table once per participant: 1.2 s for a
+	// 20-meetup batch at 100k meetups, on every completion. UNION also keeps a
+	// meetup from counting twice, exactly as the OR did.
 	RecomputeMeetupsCompletedForParticipants(ctx context.Context, meetupIds []uuid.UUID) ([]RecomputeMeetupsCompletedForParticipantsRow, error)
 	// Records that contact_id was told about this meetup by user_id.
 	//
@@ -695,6 +833,25 @@ type Querier interface {
 	// host_user_id scoping (Round 11) added the same way as AcceptMeetupRequest
 	// above — defense-in-depth alongside the existing Go-level check.
 	RejectMeetupRequest(ctx context.Context, arg RejectMeetupRequestParams) (MeetupMeetupRequest, error)
+	// A seat came back, so the meetup is joinable again (tracker #85,
+	// finding N-B3).
+	//
+	// A meetup goes 'full' when the last seat is taken, and nothing ever put
+	// it back: an accepted participant withdrawing left a meetup with a free
+	// seat that still said 'full', dropped out of browse, and refused new
+	// requests. The seat was simply lost, permanently, and the host had no
+	// way to get it back.
+	//
+	// Runs in the withdrawal's own transaction, after the row above and
+	// under the meetup lock that transaction already holds, so the count
+	// below cannot race a concurrent accept: the accept path takes the same
+	// lock before it decides whether the meetup is full.
+	//
+	// Conditional in one statement rather than read-then-write, and
+	// re-checking status = 'full' inside it, so a meetup that is already
+	// 'open' (the withdrawer was merely pending) is untouched and reports
+	// zero rows.
+	ReopenMeetupIfSeatFreed(ctx context.Context, meetupID uuid.UUID) (int64, error)
 	SetCheckedIn(ctx context.Context, arg SetCheckedInParams) (MeetupSafetyState, error)
 	SetChecklistAck(ctx context.Context, arg SetChecklistAckParams) (MeetupSafetyState, error)
 	// ADR-024 §4 — mutual exclusion with check-in is enforced at the service
@@ -717,6 +874,16 @@ type Querier interface {
 	// install; re-registering it under a different account reassigns
 	// ownership rather than leaving a stale row.
 	UpsertDeviceToken(ctx context.Context, arg UpsertDeviceTokenParams) (MeetupDeviceToken, error)
+	// The safety questions. Deliberately does NOT write `notes` (#90).
+	//
+	// `notes` is the PUBLIC review comment, shown on the meetup to other
+	// people (ListMeetupReviewComments). This path used to write its own
+	// free text into the same column, so a private "did you feel safe?" note
+	// could be published: directly, and again when the review was completed
+	// without a note of its own, because SetMeetupOverallReview keeps the
+	// existing value. The request's notes field is accepted and ignored; no
+	// screen in the app sends it, and production held no such note when this
+	// changed (2026-10-22).
 	UpsertMeetupFeedback(ctx context.Context, arg UpsertMeetupFeedbackParams) (MeetupMeetupFeedback, error)
 	// The subscription-activated/subscription-deactivated consumer's
 	// idempotent, order-guarded upsert — same shape as user_display_cache.sql's
@@ -751,13 +918,32 @@ type Querier interface {
 	// *after* being accepted is exactly the case the withdrawal-rating path
 	// exists for ("the meetup continues for everyone else," ADR-020's own
 	// framing — only meaningful if they'd actually been accepted into it).
-	// note is optional (may be NULL). Does not touch the meetup's own
-	// capacity/status — a freed-up slot on a full meetup reopening is a
-	// separate, not-yet-built concern. requester_id scoping (Round 11,
+	// note is optional (may be NULL). requester_id scoping (Round 11,
 	// docs/00-project/action-tracker.md § 4b-26) is defense-in-depth
 	// alongside the existing Go-level check in service.go's WithdrawRequest —
 	// scoped to the *requester*, not the host, unlike Accept/Reject/Cancel.
 	// The Go-level check stays, this doesn't replace it.
+	//
+	// # THE MEETUP HAS TO STILL BE RUNNING (tracker #84, finding N-B2)
+	//
+	// The join to meetups and the two conditions on it are the fix. Without
+	// them an accepted participant could withdraw from a meetup that had
+	// already ENDED or been CANCELLED, which is not "backing out" — it is
+	// editing history after the fact, and it had a real consequence: the
+	// people who were there lose the right to rate them (eligibility is
+	// keyed on being an accepted participant), while the host keeps it
+	// through the separate withdrawal-rating path. Someone could attend,
+	// behave badly and then delete everyone's ability to say so.
+	//
+	// 'open' and 'full' are the live states; 'cancelled' and 'completed' are
+	// over. window_end > now() additionally catches the meetup that has
+	// physically happened but whose auto-close has not run yet, which is
+	// exactly the window the abuse above lives in.
+	//
+	// A request that is live but whose meetup is not returns zero rows,
+	// which the caller already maps to ErrConflict — the same answer an
+	// already-resolved request gets, and the right one: the state the caller
+	// believed in is gone.
 	WithdrawMeetupRequest(ctx context.Context, arg WithdrawMeetupRequestParams) (MeetupMeetupRequest, error)
 }
 

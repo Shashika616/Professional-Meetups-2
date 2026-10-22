@@ -15,7 +15,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,7 +23,6 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
@@ -34,11 +32,9 @@ import (
 	"professional-meetups-monolith/backend/internal/grpcapi"
 	"professional-meetups-monolith/backend/internal/modules/auth"
 	authconfig "professional-meetups-monolith/backend/internal/modules/auth/config"
-	"professional-meetups-monolith/backend/internal/modules/auth/email"
 	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"professional-meetups-monolith/backend/internal/modules/auth/linkedin"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
-	"professional-meetups-monolith/backend/internal/modules/auth/sms"
 	"professional-meetups-monolith/backend/internal/modules/meetup"
 	meetuprepo "professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/modules/notification"
@@ -46,10 +42,11 @@ import (
 	"professional-meetups-monolith/backend/internal/platform/geocoding"
 	"professional-meetups-monolith/backend/internal/platform/internalauth"
 	"professional-meetups-monolith/backend/internal/platform/logging"
-	"professional-meetups-monolith/backend/internal/platform/metrics"
 	"professional-meetups-monolith/backend/internal/platform/outbox"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
 	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
+	opsv1 "professional-meetups-monolith/backend/internal/proto/ops/v1"
+	"professional-meetups-monolith/backend/migrations"
 )
 
 func main() {
@@ -118,6 +115,12 @@ func run(logger *slog.Logger) error {
 	// This must never be true outside local development; the warning fires
 	// on every single startup for as long as the flag is set, specifically
 	// so it can't go unnoticed in a deployed environment's logs.
+	if err := refuseGlobalOTPBypassOnCloudRun(os.Getenv); err != nil {
+		return err
+	}
+	if err := requireRealSendersInProduction(os.Getenv, cfg); err != nil {
+		return err
+	}
 	if os.Getenv("ALLOW_TEST_OTP_BYPASS") == "true" {
 		logger.Warn("ALLOW_TEST_OTP_BYPASS is enabled — the fixed code \"123456\" is accepted for every OTP purpose in addition to the real one. This MUST NOT be true outside local development. See TESTING-NOTES.md.")
 	}
@@ -137,6 +140,18 @@ func run(logger *slog.Logger) error {
 			}
 		}
 		logger.Warn("TEST_OTP_BYPASS_PHONES is set — the fixed code \"123456\" is accepted for phone verification on specific allowlisted numbers, and the real SMS send is skipped for them. Scoped to phone purpose only. See TESTING-NOTES.md.", "allowlisted_numbers", n)
+
+		// A malformed entry is a silent dud: it can never match a
+		// normalised target, so the number it was meant to cover keeps
+		// failing verification and the cause is invisible (#92). The
+		// entry is named here because it is a typo in configuration,
+		// not a real person's number — and if it DOES look like one,
+		// the regex would have accepted it and this line would not
+		// fire.
+		if invalid := auth.ValidateTestOTPBypassPhones(); len(invalid) > 0 {
+			logger.Warn("TEST_OTP_BYPASS_PHONES contains entries that are not E.164 phone numbers — they will never match and the numbers they were meant to cover still cannot verify",
+				"invalid_entries", invalid)
+		}
 	}
 
 	// The email twin, again a separate line rather than a branch of either
@@ -170,6 +185,15 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+
+	// Before anything is wired: a schema behind this build must stop the
+	// revision here, not on the first request that needs the newer schema.
+	if have, err := checkSchemaVersion(ctx, pool, migrations.Latest()); err != nil {
+		return err
+	} else if have > migrations.Latest() {
+		logger.Info("schema is newer than this build; continuing (migrations are backward compatible)",
+			"schema_version", have, "build_expects", migrations.Latest())
+	}
 
 	// One bus for the whole process (ADR-001 §4). Modules publish and
 	// subscribe on it; nothing else exists between them.
@@ -221,6 +245,7 @@ func run(logger *slog.Logger) error {
 		Email:                   emailSender,
 		SMS:                     smsSender,
 		WorkEmailHMACKey:        workEmailHMACKey,
+		PublicBaseURL:           cfg.PublicBaseURL,
 		Logger:                  logger,
 	})
 
@@ -296,114 +321,15 @@ func run(logger *slog.Logger) error {
 		Logger:          logger,
 	})
 
-	// --- event subscriptions ---
-	//
-	// Every handler below is idempotent and order-guarded on the payload's
-	// own OccurredAt (never time.Now()), so a redelivered or out-of-order
-	// event no-ops rather than regressing newer data. A handler returning an
-	// error is logged and swallowed by the bus (ADR-001 §4) — a consumer
-	// problem must never fail the business write that triggered it.
-
-	// auth -> meetup: keep the display cache current. Both topics carry the
-	// same payload shape and mean the same thing to this cache ("here is
-	// this user's current display info"), so they share one handler.
-	displayCacheHandler := func(ctx context.Context, e eventbus.Event) error {
-		switch payload := e.Payload.(type) {
-		case eventbus.UserOnboardedPayload:
-			_, err := userDisplayCache.Upsert(ctx, payload.UserID, payload.FullName, payload.ProfilePhotoURL, payload.TrustLevel, payload.OccurredAt)
-			return err
-		case eventbus.UserProfileUpdatedPayload:
-			_, err := userDisplayCache.Upsert(ctx, payload.UserID, payload.FullName, payload.ProfilePhotoURL, payload.TrustLevel, payload.OccurredAt)
-			return err
-		default:
-			return fmt.Errorf("user display cache: unexpected payload type %T on %s", e.Payload, e.Topic)
-		}
-	}
-	bus.Subscribe(eventbus.TopicUserOnboarded, displayCacheHandler)
-	bus.Subscribe(eventbus.TopicUserProfileUpdated, displayCacheHandler)
-
-	// auth -> meetup: last-known location, which backs the nearby-notify
-	// fan-out (never the browse-screen radius filter — that uses the
-	// caller's own fresh coordinate, passed per request).
-	bus.Subscribe(eventbus.TopicUserLocationUpdated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.UserLocationUpdatedPayload)
-		if !ok {
-			return fmt.Errorf("user location cache: unexpected payload type %T", e.Payload)
-		}
-		_, err := userLocationCache.Upsert(ctx, payload.UserID, payload.Lat, payload.Lng, payload.OccurredAt)
-		return err
+	registerSubscriptions(subscriptionDeps{
+		bus:               bus,
+		userDisplayCache:  userDisplayCache,
+		userLocationCache: userLocationCache,
+		subscriptionCache: subscriptionCache,
+		meetupService:     meetupService,
+		authService:       authService,
+		logger:            logger,
 	})
-
-	// billing -> meetup: entitlement cache. NOTHING PUBLISHES THESE UNTIL
-	// PHASE 3 — wired now anyway, the same bootstrapping pattern Phase 1
-	// used for publishing events nothing consumed yet, so Phase 3 adds a
-	// publisher rather than also having to add plumbing here.
-	bus.Subscribe(eventbus.TopicSubscriptionActivated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.SubscriptionActivatedPayload)
-		if !ok {
-			return fmt.Errorf("subscription cache: unexpected payload type %T", e.Payload)
-		}
-		_, err := subscriptionCache.Upsert(ctx, payload.UserID, payload.Tier, true, payload.OccurredAt)
-		return err
-	})
-	bus.Subscribe(eventbus.TopicSubscriptionDeactivated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.SubscriptionDeactivatedPayload)
-		if !ok {
-			return fmt.Errorf("subscription cache: unexpected payload type %T", e.Payload)
-		}
-		_, err := subscriptionCache.Upsert(ctx, payload.UserID, payload.Tier, false, payload.OccurredAt)
-		return err
-	})
-
-	// meetup -> meetup: the nearby-notify fan-out. The one same-module,
-	// different-subscription consumer — CreateMeetup publishes it, and this
-	// handler notifies everyone with a non-stale cached location within 40km.
-	bus.Subscribe(eventbus.TopicMeetupCreated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.MeetupCreatedPayload)
-		if !ok {
-			return fmt.Errorf("nearby notify: unexpected payload type %T", e.Payload)
-		}
-		return meetupService.HandleMeetupCreated(ctx, meetup.NearbyNotifyPayload{
-			MeetupID:    payload.MeetupID,
-			HostUserID:  payload.HostUserID,
-			Intent:      payload.Intent,
-			LocationLat: payload.LocationLat,
-			LocationLng: payload.LocationLng,
-		})
-	})
-
-	// meetup -> auth: the rating cache Phase 1 deliberately left unwired,
-	// because only the meetup module publishes this and it didn't exist yet.
-	// Its publisher exists as of this phase, so the subscription does too.
-	bus.Subscribe(eventbus.TopicRatingUpdated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.RatingUpdatedPayload)
-		if !ok {
-			return fmt.Errorf("rating cache: unexpected payload type %T", e.Payload)
-		}
-		_, err := authService.ApplyRatingUpdate(ctx, payload.UserID, payload.RatingAverage, payload.RatingCount, payload.OccurredAt)
-		return err
-	})
-
-	// meetup -> auth: the profile's "meetups completed" figure, on exactly
-	// the same terms as the rating cache above — the meetup module owns the
-	// meetups and recomputes the total whenever one completes, this is the
-	// only writer of auth.users.meetups_completed.
-	bus.Subscribe(eventbus.TopicMeetupsCompletedUpdated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.MeetupsCompletedUpdatedPayload)
-		if !ok {
-			return fmt.Errorf("meetups-completed cache: unexpected payload type %T", e.Payload)
-		}
-		_, err := authService.ApplyMeetupsCompletedUpdate(ctx, payload.UserID, payload.MeetupsCompleted, payload.OccurredAt)
-		return err
-	})
-
-	// push-notification-requested is NO LONGER AN EVENT-BUS TOPIC at all.
-	// The meetup module writes those notifications into
-	// meetup.notification_outbox inside the same transaction as the business
-	// write that implies them, and the poller started below delivers them
-	// (ADR-001's durable-notification-delivery correction, §F). Every other
-	// topic above is unchanged: still the in-memory bus, still synchronous,
-	// still the ADR-001 §4 trade-off as originally reasoned.
 
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
@@ -499,12 +425,51 @@ func run(logger *slog.Logger) error {
 	// type serves both outboxes — it takes a store, not a table name, so the
 	// second table needed a second instance rather than a second copy of the
 	// job.
-	go notification.NewRetention(notificationOutbox, logger).Run(ctx)
-	go notification.NewRetentionFor("meetups-completed outbox", meetupsCompletedOutbox, logger).Run(ctx)
+	notificationRetention := notification.NewRetention(notificationOutbox, logger)
+	meetupsCompletedRetention := notification.NewRetentionFor("meetups-completed outbox", meetupsCompletedOutbox, logger)
+	go notificationRetention.Run(ctx)
+	go meetupsCompletedRetention.Run(ctx)
 	// User-deleted delivery and its retention, same shape as the two above.
 	go userDeletedPoller.Run(ctx)
-	go notification.NewRetentionFor("user-deleted outbox", userDeletedOutbox, logger).Run(ctx)
+	userDeletedRetention := notification.NewRetentionFor("user-deleted outbox", userDeletedOutbox, logger)
+	go userDeletedRetention.Run(ctx)
 	go auth.NewRefreshTokenSweeper(authService, logger).Run(ctx)
+
+	// The same work, driven from outside the process.
+	//
+	// Every loop above needs an instance that is alive and has CPU. On Cloud
+	// Run that means minScale "1" with cpu-throttling "false" — a reserved,
+	// continuously billed instance, about US$120-130/mo for this container
+	// pair against a free allowance of 180,000 vCPU-seconds a month. This
+	// project stays inside the free tier (Shashika, 2026-10-22), so the
+	// service scales to zero and Cloud Scheduler calls RunScheduledWork
+	// instead (service.yaml, runbook §10).
+	//
+	// The tickers stay. When an instance IS alive they do the work sooner
+	// than the next scheduled tick would, and running both paths is harmless:
+	// every sweep below claims its rows with FOR UPDATE SKIP LOCKED, so the
+	// two paths take disjoint sets rather than doubling up.
+	//
+	// Order matters in one place only, and it is preserved here: the refresh
+	// token sweep must run before the abandoned-guest sweep, because a guest
+	// becomes eligible only once its last token row is gone.
+	opsServer := grpcapi.NewOpsServer(logger,
+		grpcapi.Sweep{Name: "lifecycle: starting-soon", Run: countedInt(meetupService.NotifyStartingSoonSweep)},
+		grpcapi.Sweep{Name: "lifecycle: auto-close", Run: countedInt(meetupService.AutoCloseSweep)},
+		grpcapi.Sweep{Name: "outbox: notifications", Run: countedInt(notificationPoller.Drain)},
+		grpcapi.Sweep{Name: "outbox: meetups-completed", Run: countedInt(meetupsCompletedPoller.Drain)},
+		grpcapi.Sweep{Name: "outbox: user-deleted", Run: countedInt(userDeletedPoller.Drain)},
+		grpcapi.Sweep{Name: "retention: notifications", Run: retentionSweep(notificationRetention)},
+		grpcapi.Sweep{Name: "retention: meetups-completed", Run: retentionSweep(meetupsCompletedRetention)},
+		grpcapi.Sweep{Name: "retention: user-deleted", Run: retentionSweep(userDeletedRetention)},
+		grpcapi.Sweep{Name: "auth: expired refresh tokens", Run: countedInt(authService.SweepExpiredRefreshTokens)},
+		grpcapi.Sweep{Name: "auth: abandoned guests", Run: countedInt(authService.SweepAbandonedGuests)},
+		grpcapi.Sweep{Name: "auth: expired safety holds", Run: countedInt(authService.SweepExpiredSafetyHolds)},
+		grpcapi.Sweep{Name: "auth: contact invitation log", Run: countedInt(authService.SweepContactInvites)},
+	)
+	// Same server, same port, same interceptor chain as the two services
+	// above, so the shared-secret check already covers it.
+	opsv1.RegisterOpsServiceServer(grpcServer, opsServer)
 
 	serveErrCh := make(chan error, 1)
 	go func() {
@@ -528,164 +493,6 @@ func run(logger *slog.Logger) error {
 		// load balancer) stops sending new work while in-flight calls drain.
 		healthServer.Shutdown()
 		shutdownGRPCServer(grpcServer, logger)
-		return nil
-	}
-}
-
-// shutdownGracePeriod bounds how long GracefulStop may take before the
-// server is stopped outright (§D7).
-//
-// Matches the gateway's own 10s shutdown budget. Unbounded GracefulStop —
-// what this was before — waits for EVERY in-flight RPC to finish, so one
-// stuck call (the exact scenario §B2's deadline interceptor exists to
-// prevent, but which the interceptor cannot cover for a handler that ignores
-// its context) holds shutdown open indefinitely, until the orchestrator's
-// own patience runs out and SIGKILLs the process mid-write instead.
-func shutdownGRPCServer(server *grpc.Server, logger *slog.Logger) {
-	const shutdownGracePeriod = 10 * time.Second
-
-	stopped := make(chan struct{})
-	go func() {
-		server.GracefulStop()
-		close(stopped)
-	}()
-
-	select {
-	case <-stopped:
-		return
-	case <-time.After(shutdownGracePeriod):
-		// Deliberately loud: forcing a stop means at least one RPC was
-		// killed mid-flight, which is worth knowing about rather than
-		// absorbing silently.
-		logger.Warn("graceful shutdown exceeded its grace period, forcing stop",
-			"grace_period", shutdownGracePeriod)
-		server.Stop()
-	}
-}
-
-// contactNotifier adapts the auth module's trusted-contact fan-out to the
-// narrow interface the meetup module declares. Both modules run in this one
-// process, so this is a direct call rather than an event — but it stays an
-// interface so neither package imports the other.
-type contactNotifier struct{ auth auth.Service }
-
-func (c contactNotifier) NotifyMeetupShare(ctx context.Context, userID string, share meetup.ContactShare) (int, error) {
-	return c.auth.NotifyMeetupShare(ctx, userID, auth.MeetupShare{
-		ContactIDs:    share.ContactIDs,
-		LocationLabel: share.LocationLabel,
-		Latitude:      share.Latitude,
-		Longitude:     share.Longitude,
-		WindowStart:   share.WindowStart,
-		WindowEnd:     share.WindowEnd,
-	})
-}
-
-// outboxObserver adapts the generic poller's Observer to this process's
-// Prometheus counters. It lives here rather than in internal/platform/outbox
-// so that package stays usable, and testable, without a metrics registry.
-type outboxObserver struct{}
-
-func (outboxObserver) Delivered()    { metrics.Default.OutboxDelivered.Inc() }
-func (outboxObserver) Failed()       { metrics.Default.OutboxFailed.Inc() }
-func (outboxObserver) DeadLettered() { metrics.Default.OutboxDeadLettered.Inc() }
-func (outboxObserver) Pending(n int) { metrics.Default.OutboxPending.Set(float64(n)) }
-
-// newPushSender chooses the delivery mechanism, same env-var-gated pattern
-// as the auth module's email and SMS senders (§E2).
-//
-// An empty FIREBASE_SERVICE_ACCOUNT_JSON means LoggingPushSender, which is
-// the normal, expected state for local development and CI — hence Info, not
-// Warn. It is not a bypass of anything; there is simply no credential to
-// talk to FCM with, and the alternative (failing to start) would make the
-// backend unrunnable without a Firebase project.
-//
-// The variable holds the service account's RAW JSON CONTENT, not a path —
-// confirmed against the source's own config, and already the shape of the
-// value in backend/.env.
-//
-// A credential that is PRESENT but unusable fails the process at startup
-// rather than falling back: silently logging notifications instead of
-// sending them, in an environment that was configured to send them, is the
-// kind of failure nobody notices until users report missing notifications.
-func newPushSender(ctx context.Context, logger *slog.Logger) notification.Sender {
-	raw := os.Getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-	if raw == "" {
-		logger.Info("push notification delivery: LoggingPushSender (FIREBASE_SERVICE_ACCOUNT_JSON not set)")
-		return notification.NewLoggingPushSender(logger)
-	}
-
-	sender, err := notification.NewFCMPushSender(ctx, []byte(raw))
-	if err != nil {
-		// The error is logged, never the credential — a service-account JSON
-		// contains a private key.
-		logger.Error("push notification delivery: FIREBASE_SERVICE_ACCOUNT_JSON is set but unusable", "error", err)
-		panic("monolith: FIREBASE_SERVICE_ACCOUNT_JSON is set but could not be used; fix it or unset it to fall back to logging")
-	}
-	logger.Info("push notification delivery: FCM", "project_id", sender.ProjectID())
-	return sender
-}
-
-// newEmailSender prefers Gmail SMTP when GMAIL_ADDRESS/GMAIL_APP_PASSWORD
-// are both set — a Gmail account can send to any recipient immediately,
-// unlike a Resend sandbox account (limited to the account owner's own inbox
-// until a domain is verified there), which makes it the better default for
-// testing signup with arbitrary addresses. Falls back to Resend if only that
-// is configured, then to LoggingEmailSender if neither is, so local dev and
-// tests keep working before either exists.
-func newEmailSender(cfg authconfig.Config, logger *slog.Logger) email.EmailSender {
-	if cfg.GmailAddress != "" && cfg.GmailAppPassword != "" {
-		logger.Info("verification email delivery: Gmail SMTP")
-		return email.NewGmailSMTPEmailSender(cfg.GmailAddress, cfg.GmailAppPassword)
-	}
-	if cfg.ResendAPIKey != "" && cfg.ResendFromEmail != "" {
-		logger.Info("verification email delivery: Resend")
-		return email.NewResendEmailSender(cfg.ResendAPIKey, cfg.ResendFromEmail)
-	}
-	logger.Info("verification email delivery: LoggingEmailSender (GMAIL_ADDRESS/GMAIL_APP_PASSWORD and RESEND_API_KEY/RESEND_FROM_EMAIL not set)")
-	return email.NewLoggingEmailSender()
-}
-
-// newSmsSender uses Twilio only once all three TWILIO_* vars are non-empty —
-// LoggingSmsSender otherwise, same fallback pattern as email.
-func newSmsSender(cfg authconfig.Config, logger *slog.Logger) sms.SmsSender {
-	if cfg.TwilioAccountSID != "" && cfg.TwilioAuthToken != "" && cfg.TwilioPhoneNumber != "" {
-		logger.Info("verification SMS delivery: Twilio")
-		return sms.NewTwilioSmsSender(cfg.TwilioAccountSID, cfg.TwilioAuthToken, cfg.TwilioPhoneNumber)
-	}
-	logger.Info("verification SMS delivery: LoggingSmsSender (TWILIO_* not fully set)")
-	return sms.NewLoggingSmsSender()
-}
-
-// userDeletedProcess is the user-deleted outbox's delivery step: decode the
-// row, then hand the payload to each consumer in turn.
-//
-// A named function rather than a closure at the wiring site because this is
-// the SEAM between two modules that never call each other, and a seam that
-// nothing can execute in a test is a seam that can break silently. The
-// payload crosses it as JSON; if that round trip broke, UserID would arrive
-// empty and every consumer would run happily against "no such user",
-// deleting nothing and reporting success. See the pipeline test beside this
-// file, which drives this exact function.
-//
-// Consumers are called DIRECTLY, not through bus.Publish. That is
-// load-bearing: Publish always returns nil and only logs a failing handler,
-// so routing through it would let the outbox mark a failed purge as
-// delivered, with no retry ever coming. Returning the first error instead
-// leaves the row for the poller to retry; every consumer is idempotent, so
-// re-running all of them after a partial failure is safe.
-func userDeletedProcess(
-	consumers []func(context.Context, eventbus.UserDeletedPayload) error,
-) func(context.Context, outbox.Row) error {
-	return func(ctx context.Context, row outbox.Row) error {
-		var payload eventbus.UserDeletedPayload
-		if err := json.Unmarshal(row.Payload, &payload); err != nil {
-			return fmt.Errorf("decode user-deleted payload: %w", err)
-		}
-		for _, consume := range consumers {
-			if err := consume(ctx, payload); err != nil {
-				return err
-			}
-		}
 		return nil
 	}
 }

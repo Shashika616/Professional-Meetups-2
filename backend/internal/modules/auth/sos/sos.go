@@ -12,6 +12,10 @@ package sos
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,6 +23,7 @@ import (
 	"time"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/email"
+	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/modules/auth/sms"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
@@ -47,7 +52,52 @@ type TrustedContact struct {
 	PhoneNumber          string
 	Email                string
 	CreatedAtUnixSeconds int64
+	// Status is StatusConfirmed, StatusPending or StatusExpired (#80).
+	Status string
 }
+
+// A trusted contact's consent state (#80). Only a confirmed contact is ever
+// alerted.
+const (
+	StatusConfirmed = "confirmed"
+	// StatusPending: texted a link, has not used it yet.
+	StatusPending = "pending"
+	// StatusExpired: the link lapsed unused. The only way on is to remove
+	// the contact and add them again, which sends a fresh link.
+	StatusExpired = "expired"
+)
+
+// Consent and abuse limits (#80).
+//
+// Every number here bounds something that costs money or reaches a person
+// who did not ask for it. Adding a contact texts a stranger, so the per-user
+// and per-number invitation caps are what stop "remove, re-add, repeat"
+// from being a free way to spam someone at this project's Twilio expense.
+const (
+	contactConfirmTTL         = 24 * time.Hour
+	maxInvitesPerUserPerDay   = 5
+	maxInvitesPerNumberPerDay = 3
+	inviteCapWindow           = 24 * time.Hour
+	// contactInviteRetention keeps the invitation log a little past the
+	// one-day window the caps read, then the auth sweeper drops it.
+	contactInviteRetention = 7 * 24 * time.Hour
+
+	// maxSOSPerDay bounds alerts per user. Generous for real use — an
+	// emergency is not ten emergencies — and small enough that SOS is no
+	// longer a way to text the same people without limit. The message a
+	// capped user sees tells them to call emergency services.
+	maxSOSPerDay = 10
+	sosCapWindow = 24 * time.Hour
+
+	// sosDuplicateWait is how long a retry waits for the attempt it
+	// duplicates to finish, so it can report that attempt's real outcome.
+	// Under the app's 10 s per-attempt deadline.
+	sosDuplicateWait = 8 * time.Second
+	sosDuplicatePoll = 250 * time.Millisecond
+
+	// MaxClientRequestIDLength bounds the retry key a client may send.
+	MaxClientRequestIDLength = 64
+)
 
 // AddTrustedContactRequest adds one contact. UserID always comes from the
 // gateway's verified JWT, never a client-supplied field.
@@ -81,8 +131,15 @@ type RemoveTrustedContactRequest struct {
 type TriggerSOSRequest struct {
 	UserID         string
 	ContextMessage string // optional — meetup title/location/time, or empty
-	Latitude       float64
-	Longitude      float64
+	// ClientRequestID is the same for an attempt and its automatic retry,
+	// so the retry reports the first attempt's outcome instead of alerting
+	// everyone twice. Empty from app builds that predate it.
+	ClientRequestID string
+	// OPTIONAL (tracker #78, finding N-D2). nil means the device had no
+	// usable fix: indoors, permission denied, or the read timed out. The
+	// alert still goes, and says so.
+	Latitude  *float64
+	Longitude *float64
 	// CallerTrustLevel — see AddTrustedContactRequest.CallerTrustLevel.
 	CallerTrustLevel int
 }
@@ -113,6 +170,9 @@ type Service struct {
 	email           email.EmailSender
 	validate        Validator
 	logger          *slog.Logger
+	// confirmBaseURL is the public origin the invitation link points at
+	// (the gateway), e.g. https://meetups-backend-….run.app.
+	confirmBaseURL string
 
 	// smsBreaker/emailBreaker — one breaker per CHANNEL, not per call and not
 	// per contact. A breaker's entire purpose is remembering consecutive
@@ -138,6 +198,7 @@ func New(
 	smsSender sms.SmsSender,
 	emailSender email.EmailSender,
 	validate Validator,
+	confirmBaseURL string,
 	logger *slog.Logger,
 ) *Service {
 	if logger == nil {
@@ -151,6 +212,7 @@ func New(
 		email:           emailSender,
 		validate:        validate,
 		logger:          logger,
+		confirmBaseURL:  strings.TrimRight(confirmBaseURL, "/"),
 		smsBreaker:      breaker.New(sosBreakerFailureThreshold, sosBreakerResetTimeout),
 		emailBreaker:    breaker.New(sosBreakerFailureThreshold, sosBreakerResetTimeout),
 	}
@@ -202,21 +264,96 @@ func (s *Service) AddTrustedContact(ctx context.Context, req AddTrustedContactRe
 		}
 	}
 
-	count, err := s.trustedContacts.CountForUser(ctx, req.UserID)
+	user, err := s.users.GetByID(ctx, req.UserID)
 	if err != nil {
 		return TrustedContact{}, err
 	}
-	if count >= MaxTrustedContactsPerUser {
+
+	token, err := newConfirmToken()
+	if err != nil {
+		return TrustedContact{}, err
+	}
+	contact, err := s.trustedContacts.InsertPending(ctx, repository.NewPendingContact{
+		UserID:             req.UserID,
+		Name:               name,
+		PhoneNumber:        phone,
+		Email:              emailAddr,
+		PhoneHash:          sha256Hex(identity.NormalizePhone(phone)),
+		TokenHash:          sha256Hex(token),
+		ExpiresAt:          time.Now().Add(contactConfirmTTL),
+		MaxContacts:        MaxTrustedContactsPerUser,
+		MaxInvitesPerUser:  maxInvitesPerUserPerDay,
+		MaxInvitesPerPhone: maxInvitesPerNumberPerDay,
+		CapWindow:          inviteCapWindow,
+	})
+	switch {
+	case errors.Is(err, repository.ErrTooManyTrustedContacts):
 		return TrustedContact{}, fmt.Errorf(
 			"auth: at most %d trusted contacts are allowed: %w", MaxTrustedContactsPerUser, apperror.ErrInvalidInput,
 		)
-	}
-
-	contact, err := s.trustedContacts.Insert(ctx, req.UserID, name, phone, emailAddr)
-	if err != nil {
+	case errors.Is(err, repository.ErrContactInviteLimit):
+		return TrustedContact{}, fmt.Errorf(
+			"auth: too many contact invitations today, try again tomorrow: %w", apperror.ErrRateLimited,
+		)
+	case err != nil:
 		return TrustedContact{}, err
 	}
+
+	// The invitation goes out after the commit, so a number is never texted
+	// for a contact that does not exist. A failed send leaves the contact
+	// pending; the app shows it as waiting, and removing and re-adding it
+	// sends a fresh link (within the caps).
+	link := s.confirmBaseURL + "/c/" + token
+	if err := s.sendWithResilience(ctx, s.smsBreaker, func() error {
+		return s.sms.SendAlert(ctx, phone, InviteMessage(user.FullName, link))
+	}); err != nil {
+		// Never the number or the link: the link is a credential.
+		s.logger.Error("send trusted contact invitation", "error", err)
+	}
 	return trustedContactFromRepo(contact), nil
+}
+
+// ConfirmTrustedContact records a contact's consent from the token in the
+// link they were texted, and returns whose contact they have become. It
+// needs no signed-in user: the token is the proof, single-use and
+// short-lived. Unknown, expired and already-used tokens are all
+// ErrNotFound, so the page cannot be used to probe which is which.
+func (s *Service) ConfirmTrustedContact(ctx context.Context, token string) (string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" || len(token) > 64 {
+		return "", fmt.Errorf("auth: confirmation link: %w", apperror.ErrNotFound)
+	}
+	return s.trustedContacts.Confirm(ctx, sha256Hex(token))
+}
+
+// SweepContactInvites trims the invitation log the caps read.
+func (s *Service) SweepContactInvites(ctx context.Context, batchSize int) (int, error) {
+	return s.trustedContacts.DeleteInvitesSentBefore(ctx, time.Now().Add(-contactInviteRetention), batchSize)
+}
+
+// InviteMessage is the one SMS a new contact receives. It names who is
+// asking, says what agreeing means, and carries the link. Nothing in it
+// comes from the client except the requester's own account name.
+func InviteMessage(requesterName, link string) string {
+	return fmt.Sprintf(
+		"%s wants you as their emergency contact on TieHere. To agree, open %s (expires in 24 hours). Ignore this to decline.",
+		requesterName, link,
+	)
+}
+
+// newConfirmToken is 128 random bits, URL-safe: short enough that the link
+// keeps the SMS to one segment, and far beyond guessing.
+func newConfirmToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("auth: confirmation token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
 }
 
 // ListTrustedContacts is self-scoped — userID comes from the verified JWT,
@@ -257,15 +394,35 @@ func (s *Service) RemoveTrustedContact(ctx context.Context, req RemoveTrustedCon
 // to a clear "add a contact first" state, not a raw error. Individual
 // contact-send failures don't fail the whole call: they're logged and
 // skipped.
+//
+// Four guarantees on top of that (#80, and the retry duplicate):
+//
+//   - Only CONFIRMED contacts are alerted. A pending contact has not agreed
+//     to receive these.
+//   - The event is claimed BEFORE anything is sent. A retry carrying the
+//     same ClientRequestID finds the claim and reports that attempt's
+//     outcome instead of alerting everyone a second time.
+//   - At most maxSOSPerDay per user, counted under a lock with the claim.
+//   - The text is a fixed template. Nothing the client sends reaches the
+//     message, so this cannot be used to text arbitrary words or links.
+//     The context string is still kept in the audit row.
 func (s *Service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (TriggerSOSResult, error) {
 	contextMessage := strings.TrimSpace(req.ContextMessage)
 	if len(contextMessage) > MaxContextMessageLength {
 		return TriggerSOSResult{}, fmt.Errorf("auth: context message is too long: %w", apperror.ErrInvalidInput)
 	}
+	if len(req.ClientRequestID) > MaxClientRequestIDLength {
+		return TriggerSOSResult{}, fmt.Errorf("auth: client request id is too long: %w", apperror.ErrInvalidInput)
+	}
 	// Garbage coordinates would otherwise flow straight into a real maps
-	// link sent to a real trusted contact.
-	if err := geo.ValidateLatLng(req.Latitude, req.Longitude); err != nil {
-		return TriggerSOSResult{}, fmt.Errorf("auth: %v: %w", err, apperror.ErrInvalidInput)
+	// link sent to a real trusted contact. Absent coordinates are not
+	// garbage, though — they are a legitimate state now (#78), and only a
+	// COMPLETE pair is validated or used.
+	hasLocation := req.Latitude != nil && req.Longitude != nil
+	if hasLocation {
+		if err := geo.ValidateLatLng(*req.Latitude, *req.Longitude); err != nil {
+			return TriggerSOSResult{}, fmt.Errorf("auth: %v: %w", err, apperror.ErrInvalidInput)
+		}
 	}
 
 	contacts, err := s.trustedContacts.ListForUser(ctx, req.UserID)
@@ -275,24 +432,65 @@ func (s *Service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (Trigge
 	if len(contacts) == 0 {
 		return TriggerSOSResult{}, fmt.Errorf("auth: add a trusted contact before triggering SOS: %w", apperror.ErrInvalidInput)
 	}
+	confirmed := make([]repository.TrustedContact, 0, len(contacts))
+	for _, c := range contacts {
+		if c.Confirmed() {
+			confirmed = append(confirmed, c)
+		}
+	}
+	if len(confirmed) == 0 {
+		return TriggerSOSResult{}, fmt.Errorf(
+			"auth: none of your trusted contacts has confirmed yet, so no alert could be sent. Call your local emergency number: %w",
+			apperror.ErrInvalidInput)
+	}
+
+	outcome, err := s.sosEvents.Claim(ctx, repository.SOSClaim{
+		Event: repository.SOSEvent{
+			UserID:         req.UserID,
+			ContextMessage: contextMessage,
+			Latitude:       req.Latitude,
+			Longitude:      req.Longitude,
+		},
+		ClientRequestID: req.ClientRequestID,
+		MaxPerWindow:    maxSOSPerDay,
+		Window:          sosCapWindow,
+	})
+	switch {
+	case errors.Is(err, repository.ErrSOSLimit):
+		return TriggerSOSResult{}, fmt.Errorf(
+			"auth: you have sent the maximum number of SOS alerts today. Call your local emergency number: %w",
+			apperror.ErrRateLimited)
+	case err != nil:
+		// The claim is bookkeeping and deduplication; the alert is the
+		// emergency. A database problem here must not stop it going out.
+		s.logger.Error("claim sos event, sending without a claim", "error", err)
+	case outcome.Duplicate:
+		return s.awaitDuplicate(ctx, req, outcome, len(confirmed)), nil
+	}
 
 	user, err := s.users.GetByID(ctx, req.UserID)
 	if err != nil {
 		return TriggerSOSResult{}, err
 	}
 
-	message := AlertMessage(user.FullName, contextMessage, req.Latitude, req.Longitude)
+	message := AlertMessage(user.FullName, req.Latitude, req.Longitude)
+	if !hasLocation {
+		// Worth a line in the logs: a run of these is the signal that
+		// location permission or the fix itself is broken on real
+		// devices, which is invisible from the alert alone.
+		s.logger.Warn("sos triggered without a location fix",
+			"event", "sos_without_location", "user_id", req.UserID)
+	}
 
 	notified := 0
-	for _, contact := range contacts {
+	for _, contact := range confirmed {
 		sent := false
 		if contact.PhoneNumber != "" {
 			if err := s.sendWithResilience(ctx, s.smsBreaker, func() error {
 				return s.sms.SendAlert(ctx, contact.PhoneNumber, message)
 			}); err != nil {
 				// Never logs the contact's number or the message body — an
-				// SOS alert carries a real name, free-text context and
-				// precise coordinates.
+				// SOS alert carries a real name and precise coordinates.
 				s.logger.Error("send sos alert sms", "error", err)
 			} else {
 				sent = true
@@ -312,21 +510,49 @@ func (s *Service) TriggerSOS(ctx context.Context, req TriggerSOSRequest) (Trigge
 		}
 	}
 
-	if err := s.sosEvents.Insert(ctx, repository.SOSEvent{
-		UserID:           req.UserID,
-		ContextMessage:   contextMessage,
-		Latitude:         req.Latitude,
-		Longitude:        req.Longitude,
-		ContactsNotified: notified,
-	}); err != nil {
-		// The alerts themselves already went out — a failure to write the
-		// audit row shouldn't make a real, already-sent emergency alert look
-		// like it failed to the caller. Logged, not propagated: "business
-		// action first, bookkeeping best-effort after".
-		s.logger.Error("write sos event", "error", err)
+	if outcome.EventID != "" {
+		// A detached context: the alerts are out, and the record of how
+		// many went must survive the caller hanging up — a retry is about
+		// to read it.
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := s.sosEvents.Complete(recordCtx, outcome.EventID, notified); err != nil {
+			s.logger.Error("complete sos event", "error", err)
+		}
 	}
-
 	return TriggerSOSResult{ContactsNotified: int32(notified)}, nil
+}
+
+// awaitDuplicate answers a retry of an SOS that is already claimed. It
+// sends nothing. If the original attempt has finished, its real count is
+// the answer. If it is still sending — the usual reason the client timed
+// out and retried — wait briefly for it, so the user is told what actually
+// happened.
+//
+// If it is STILL running when the wait runs out, report the contacts it is
+// sending to. That attempt is live and alerting exactly those people; the
+// alternative, an error, would invite the user to press SOS again and
+// alert them twice, which is the thing this exists to prevent.
+func (s *Service) awaitDuplicate(ctx context.Context, req TriggerSOSRequest, outcome repository.SOSOutcome, confirmed int) TriggerSOSResult {
+	waitCtx, cancel := context.WithTimeout(ctx, sosDuplicateWait)
+	defer cancel()
+	ticker := time.NewTicker(sosDuplicatePoll)
+	defer ticker.Stop()
+
+	for !outcome.Completed {
+		select {
+		case <-waitCtx.Done():
+			s.logger.Warn("sos retry arrived while the original was still sending",
+				"event", "sos_duplicate_still_sending", "user_id", req.UserID)
+			return TriggerSOSResult{ContactsNotified: int32(confirmed)}
+		case <-ticker.C:
+			latest, err := s.sosEvents.Outcome(waitCtx, req.UserID, req.ClientRequestID)
+			if err == nil {
+				outcome = latest
+			}
+		}
+	}
+	return TriggerSOSResult{ContactsNotified: int32(outcome.ContactsNotified)}
 }
 
 // sendMaxAttempts/sendRetryDelay bound each individual alert send.
@@ -379,24 +605,44 @@ func (s *Service) sendWithResilience(ctx context.Context, br *breaker.Breaker, s
 }
 
 // AlertMessage builds the alert body sent to each trusted contact: the
-// caller's name, "may need help," the optional context message, and a maps
-// link built from the coordinates. Exported for the module's tests.
-func AlertMessage(callerName, contextMessage string, lat, lng float64) string {
+// caller's name, "may need help," and a maps link built from the
+// coordinates. Exported for the module's tests.
+//
+// A FIXED TEMPLATE (#80). It used to append the client's context string,
+// which made SOS a way to send arbitrary text — links included — to anyone
+// entered as a contact. The app only ever sent a constant there, so
+// dropping it costs nothing; every field below is server-sourced.
+//
+// With no coordinates (#78) it says so outright instead of omitting the
+// line. A contact who has just been told someone may need help will look
+// for a location; silence there reads as "the message was cut off", while
+// "Location unavailable" tells them what they actually need to know —
+// that this one has to be answered by calling the person.
+func AlertMessage(callerName string, lat, lng *float64) string {
 	msg := fmt.Sprintf("%s may need help.", callerName)
-	if contextMessage != "" {
-		msg += " " + contextMessage
+	if lat == nil || lng == nil {
+		return msg + " Location unavailable."
 	}
-	msg += fmt.Sprintf(" Location: https://maps.google.com/?q=%f,%f", lat, lng)
+	msg += fmt.Sprintf(" Location: https://maps.google.com/?q=%f,%f", *lat, *lng)
 	return msg
 }
 
 func trustedContactFromRepo(c repository.TrustedContact) TrustedContact {
+	status := StatusConfirmed
+	switch {
+	case c.Confirmed():
+	case time.Now().Before(c.PendingUntil):
+		status = StatusPending
+	default:
+		status = StatusExpired
+	}
 	return TrustedContact{
 		ID:                   c.ID,
 		Name:                 c.Name,
 		PhoneNumber:          c.PhoneNumber,
 		Email:                c.Email,
 		CreatedAtUnixSeconds: c.CreatedAt.Unix(),
+		Status:               status,
 	}
 }
 
@@ -458,12 +704,22 @@ func (s *Service) NotifyMeetupShare(ctx context.Context, userID string, share Me
 		wanted[id] = true
 	}
 	selected := make([]repository.TrustedContact, 0, len(share.ContactIDs))
+	unconfirmed := 0
 	for _, c := range contacts {
-		if wanted[c.ID] {
-			selected = append(selected, c)
+		if !wanted[c.ID] {
+			continue
 		}
+		// Only a contact who agreed is texted (#80), here as for SOS.
+		if !c.Confirmed() {
+			unconfirmed++
+			continue
+		}
+		selected = append(selected, c)
 	}
 	if len(selected) == 0 {
+		if unconfirmed > 0 {
+			return 0, fmt.Errorf("auth: those contacts have not confirmed yet: %w", apperror.ErrInvalidInput)
+		}
 		return 0, fmt.Errorf("auth: none of those contacts belong to you: %w", apperror.ErrInvalidInput)
 	}
 

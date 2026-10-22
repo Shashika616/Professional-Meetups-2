@@ -4,10 +4,12 @@ import 'package:professional_connections_platform/core/models/meetup.dart'
     show formatMeetupWindow;
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/empty_section.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
+import 'package:professional_connections_platform/core/widgets/stat_tile.dart';
 import 'package:professional_connections_platform/core/widgets/star_rating.dart';
 import 'package:professional_connections_platform/core/widgets/trust_level_badge.dart';
 
@@ -65,35 +67,50 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = profile?.fullName ?? fallbackName ?? '';
-    return Column(
-      children: [
-        if (!compact) const SizedBox(height: 8),
-        ProfessionalAvatar(
-          size: compact ? 72 : 92,
-          name: name.isEmpty ? null : name,
-          imageUrl: (profile?.profilePhotoUrl.isNotEmpty ?? false)
-              ? profile!.profilePhotoUrl
-              : null,
-        ),
-        const SizedBox(height: 14),
-        if (name.isEmpty)
-          const SkeletonBox(width: 160, height: 22)
-        else
-          Text(
-            name,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: compact ? 20 : 22,
-              fontWeight: FontWeight.w800,
-              color: AppPalette.textPrimary,
-            ),
+    // On a card, not loose on the page. The screen set gives every
+    // profile header a surface of its own; without one the avatar and
+    // name floated above the stat tiles with nothing tying them together,
+    // and the page started at its emptiest point.
+    return FlatCard(
+      radius: 22,
+      padding: EdgeInsets.symmetric(
+        horizontal: 18,
+        vertical: compact ? 18 : 22,
+      ),
+      child: Column(
+        children: [
+          // Ringed, like the member's own avatar on the Profile tab and on
+          // the Home header. The ring is the app's mark for a person, so
+          // dropping it here made a member read as a placeholder.
+          ProfessionalAvatar(
+            size: compact ? 72 : 84,
+            ring: true,
+            showPresenceDot: true,
+            name: name.isEmpty ? null : name,
+            imageUrl: (profile?.profilePhotoUrl.isNotEmpty ?? false)
+                ? profile!.profilePhotoUrl
+                : null,
           ),
-        const SizedBox(height: 8),
-        if (profile == null)
-          const SkeletonBox(width: 64, height: 22)
-        else
-          TrustLevelBadge(trustLevel: profile!.trustLevel),
-      ],
+          const SizedBox(height: 14),
+          if (name.isEmpty)
+            const SkeletonBox(width: 160, height: 22)
+          else
+            Text(
+              name,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: compact ? 19 : 21,
+                fontWeight: FontWeight.w800,
+                color: AppPalette.textPrimary,
+              ),
+            ),
+          const SizedBox(height: 10),
+          if (profile == null)
+            const SkeletonBox(width: 64, height: 22)
+          else
+            TrustLevelBadge(trustLevel: profile!.trustLevel),
+        ],
+      ),
     );
   }
 }
@@ -101,6 +118,11 @@ class _Header extends StatelessWidget {
 /// Meetups completed and rating, side by side — the two numbers a host
 /// weighs when deciding whether to accept someone, and a would-be joiner
 /// weighs about a host.
+///
+/// Two [StatTile]s, the same tiles the member's own profile uses, rather
+/// than one card split by a rule: this was the odd one out, and it stacked
+/// its caption above the number and a second caption below it, so "0"
+/// arrived between the words "Meetups" and "completed".
 class _RecordCard extends StatelessWidget {
   const _RecordCard({required this.profile});
 
@@ -109,91 +131,27 @@ class _RecordCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = profile;
-    return FlatCard(
-      radius: 14,
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      child: Row(
-        children: [
-          Expanded(
-            child: _Stat(
-              label: 'MEETUPS',
-              value: p == null ? null : '${p.meetupsCompleted}',
-              caption: 'completed',
-            ),
-          ),
-          Container(width: 1, height: 40, color: AppPalette.hairline),
-          Expanded(
-            child: p == null
-                ? const _Stat(label: 'RATING', value: null, caption: '')
-                : Column(
-                    children: [
-                      const _StatLabel('RATING'),
-                      const SizedBox(height: 6),
-                      if (p.ratingCount == 0)
-                        Text(
-                          'No ratings yet',
-                          style: TextStyle(
-                            color: AppPalette.textSecondary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        )
-                      else
-                        StarRating(
-                          average: p.ratingAverage,
-                          count: p.ratingCount,
-                          size: 16,
-                        ),
-                    ],
-                  ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat({
-    required this.label,
-    required this.value,
-    required this.caption,
-  });
-
-  final String label;
-  final String? value;
-  final String caption;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _StatLabel(label),
-        const SizedBox(height: 6),
-        if (value == null)
-          const SkeletonBox(width: 40, height: 24)
-        else
-          Text(
-            value!,
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontSize: 24,
-              fontWeight: FontWeight.w800,
-              height: 1,
-            ),
-          ),
-        if (caption.isNotEmpty) ...[
-          const SizedBox(height: 2),
-          Text(
-            caption,
-            style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
-          ),
-        ],
+    return StatTileRow(
+      tiles: [
+        StatTile(
+          value: p == null ? '—' : '${p.meetupsCompleted}',
+          label: 'Meetups completed',
+        ),
+        StatTile(
+          value: p == null
+              ? '—'
+              : p.ratingCount == 0
+              ? 'No ratings yet'
+              : p.ratingAverage.toStringAsFixed(1),
+          label: 'Rating',
+        ),
       ],
     );
   }
 }
 
+/// The small all-caps-weight label over a section ("Verified", "Recent
+/// meetups").
 class _StatLabel extends StatelessWidget {
   const _StatLabel(this.text);
 
@@ -206,14 +164,14 @@ class _StatLabel extends StatelessWidget {
       color: AppPalette.textSecondary,
       fontSize: 10.5,
       fontWeight: FontWeight.w800,
-      letterSpacing: 1.3,
+      letterSpacing: 0.3,
     ),
   );
 }
 
-/// The three verifications as facts. Each row says WHAT was verified and
-/// what that earns them in the app's vocabulary ("Professional",
-/// "Official"), and nothing about the value that was checked.
+/// The three verifications as facts. Each row says WHAT was verified in
+/// the app's vocabulary ("Professional", "Official"), and nothing about
+/// the value that was checked.
 class _VerificationCard extends StatelessWidget {
   const _VerificationCard({required this.profile});
 
@@ -223,33 +181,27 @@ class _VerificationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = profile;
     return FlatCard(
-      radius: 14,
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 6),
+      radius: 18,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _StatLabel('VERIFIED'),
-          const SizedBox(height: 4),
+          const _StatLabel('Verified'),
+          const SizedBox(height: 6),
           _VerificationRow(
-            icon: Icons.work_outline_rounded,
+            icon: AppIcons.work,
             title: 'Professional',
-            detail: 'LinkedIn identity linked',
             verified: p?.linkedInConnected,
-            color: AppPalette.verified,
           ),
           _VerificationRow(
-            icon: Icons.verified_rounded,
+            icon: AppIcons.verifiedBadge,
             title: 'Official',
-            detail: 'Company email verified',
             verified: p?.workEmailVerified,
-            color: AppPalette.gold,
           ),
           _VerificationRow(
-            icon: Icons.phone_iphone_rounded,
+            icon: AppIcons.phone,
             title: 'Phone verified',
-            detail: 'Reachable on a confirmed number',
             verified: p?.phoneVerified,
-            color: AppPalette.candyBlue,
           ),
         ],
       ),
@@ -257,79 +209,79 @@ class _VerificationCard extends StatelessWidget {
   }
 }
 
+/// # NO SUBTITLE, AND NOTHING RED
+///
+/// Each row used to carry a second line explaining the first ("LinkedIn
+/// identity linked" under "Professional"), and an unverified one was
+/// drawn in the app's danger colour with a red cross. Three rows of that
+/// made a member's profile look like an incident report. The screen set
+/// states the fact and its status, nothing else, and keeps red for
+/// cancelling and for safety — an unverified row is simply not yet true,
+/// so it says so in the secondary colour.
 class _VerificationRow extends StatelessWidget {
   const _VerificationRow({
     required this.icon,
     required this.title,
-    required this.detail,
     required this.verified,
-    required this.color,
   });
 
-  final IconData icon;
+  final String icon;
   final String title;
-  final String detail;
 
   /// Null while loading.
   final bool? verified;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
     final on = verified == true;
-    final off = verified == false;
-    // Verified rows keep their own colour; an unverified one is called out
-    // in a soft red rather than greyed out — grey reads as "disabled" and
-    // gets skipped, and the absence of a verification is exactly the fact
-    // a host or joiner is here to notice.
-    final tint = on
-        ? color
-        : off
-        ? AppPalette.danger.withValues(alpha: 0.85)
-        : AppPalette.textSecondary;
+    final Color tint = on ? AppPalette.verified : AppPalette.textSecondary;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(vertical: 9),
       child: Row(
         children: [
           Container(
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: tint.withValues(alpha: on ? 0.14 : 0.08),
+              color: AppPalette.tintedSurface(
+                tint.withValues(alpha: on ? 0.14 : 0.08),
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(icon, size: 18, color: tint),
+            child: AppIcon(icon, size: 17, color: tint),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 13),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: on ? AppPalette.textPrimary : tint,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  off ? 'Not verified' : detail,
-                  style: TextStyle(
-                    color: off ? tint : AppPalette.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+            child: Text(
+              title,
+              style: TextStyle(
+                color: on ? AppPalette.textPrimary : AppPalette.textSecondary,
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
           if (verified == null)
-            const SkeletonBox(width: 20, height: 20)
+            const SkeletonBox(width: 62, height: 16)
           else
-            Icon(
-              on ? Icons.check_circle_rounded : Icons.cancel_outlined,
-              size: 20,
-              color: tint,
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppIcon(
+                  on ? AppIcons.check : AppIcons.minus,
+                  size: 14,
+                  color: tint,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  on ? 'Verified' : 'Not yet',
+                  style: TextStyle(
+                    color: tint,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -354,16 +306,13 @@ class _RecentMeetups extends StatelessWidget {
       children: [
         const Padding(
           padding: EdgeInsets.only(left: 2, bottom: 10),
-          child: _StatLabel('RECENT MEETUPS'),
+          child: _StatLabel('Recent meetups'),
         ),
         if (meetups.isEmpty)
           // No message under the title: nothing the VIEWER can do puts a
           // meetup in someone else's history, so a "do this to fix it"
           // line would be addressed to the wrong person.
-          const EmptySection(
-            icon: Icons.event_note_outlined,
-            title: 'No meetups yet',
-          )
+          const EmptySection(icon: AppIcons.calendar, title: 'No meetups yet')
         else
           for (final m in meetups) ...[
             _MemberMeetupCard(meetup: m),
@@ -384,7 +333,7 @@ class _MemberMeetupCard extends StatelessWidget {
     final m = meetup;
     final roleColor = m.hosted ? AppPalette.brandGreen : AppPalette.candyBlue;
     return FlatCard(
-      radius: 14,
+      radius: 18,
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,8 +347,8 @@ class _MemberMeetupCard extends StatelessWidget {
                   color: AppPalette.candyBlue.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  m.intent.icon,
+                child: AppIcon(
+                  m.intent.iconPath,
                   size: 18,
                   color: AppPalette.candyBlue,
                 ),
@@ -438,7 +387,7 @@ class _MemberMeetupCard extends StatelessWidget {
                   border: Border.all(color: roleColor.withValues(alpha: 0.35)),
                 ),
                 child: Text(
-                  m.hosted ? 'HOSTED' : 'JOINED',
+                  m.hosted ? 'Hosted' : 'Joined',
                   style: TextStyle(
                     color: roleColor,
                     fontSize: 9.5,
@@ -454,8 +403,8 @@ class _MemberMeetupCard extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.place_outlined,
+                AppIcon(
+                  AppIcons.pin,
                   size: 14,
                   color: AppPalette.textSecondary,
                 ),
@@ -475,8 +424,8 @@ class _MemberMeetupCard extends StatelessWidget {
           const SizedBox(height: 12),
           Row(
             children: [
-              Icon(
-                Icons.people_outline,
+              AppIcon(
+                AppIcons.people,
                 size: 14,
                 color: AppPalette.textSecondary,
               ),
@@ -539,16 +488,13 @@ class _CommentRow extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
       decoration: BoxDecoration(
-        color: AppPalette.candyBlue.withValues(alpha: 0.06),
-        // Only the right corners are rounded: a non-uniform Border (the
-        // left rule) cannot coexist with rounded corners on its own side.
-        borderRadius: const BorderRadius.horizontal(right: Radius.circular(10)),
-        border: Border(
-          left: BorderSide(
-            color: AppPalette.candyBlue.withValues(alpha: 0.6),
-            width: 3,
-          ),
+        // The 3px blue rule down the left is gone, so the corners can all
+        // be rounded again — the old comment here explained a constraint
+        // that only existed because of the rule.
+        color: AppPalette.tintedSurface(
+          AppPalette.candyBlue.withValues(alpha: 0.08),
         ),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

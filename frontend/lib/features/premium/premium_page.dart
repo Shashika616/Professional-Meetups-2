@@ -9,6 +9,8 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_tag.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
@@ -62,21 +64,11 @@ const PremiumTier featuredTier = PremiumTier.yearly;
 /// not made yet, so this is a deliberate placeholder in the same spirit as
 /// the price placeholder it replaces. Do not invent different perks per
 /// tier here; when the decision lands, key this by [PremiumTier].
-const List<(IconData, String, String, String)> premiumPerks = [
-  (Icons.event_available_rounded, 'Host up to ', 'three meetups a day', '.'),
-  (
-    Icons.tune_rounded,
-    'Filter Happening Soon by ',
-    'company and industry',
-    '.',
-  ),
-  (
-    Icons.verified_user_rounded,
-    'A ',
-    'Premium mark',
-    ' on your profile and cards.',
-  ),
-  (Icons.support_agent_rounded, '', 'Priority help', ' from the TieHere team.'),
+const List<(String, String, String, String)> premiumPerks = [
+  (AppIcons.calendarCheck, 'Host up to ', 'three meetups a day', '.'),
+  (AppIcons.filter, 'Filter Happening Soon by ', 'company and industry', '.'),
+  (AppIcons.verifiedBadge, 'A ', 'Premium mark', ' on your profile and cards.'),
+  (AppIcons.support, '', 'Priority help', ' from the TieHere team.'),
 ];
 
 /// The Premium screen (ADR-031, Slice B; consolidated by Plan 20 Fix 3),
@@ -187,17 +179,6 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
     final products = _products;
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
 
-    // The card shows the featured tier when the store has it, otherwise
-    // whichever tier is selected, so a store with only one product still
-    // gets the full treatment for that product.
-    final featured = products == null
-        ? null
-        : (products[featuredTier] != null
-              ? featuredTier
-              : (_selected != null && products[_selected] != null
-                    ? _selected
-                    : null));
-
     final selectedProduct = _selected == null ? null : products?[_selected!];
     final canBuy =
         !entitled &&
@@ -218,7 +199,7 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
       // so leaving is where nothing else puts it. Consistency wins over the
       // modal flavour a close button implies; this is a pushed route like
       // any other (profile_page.dart pushes it).
-      appBar: AppBar(title: const Text('PREMIUM')),
+      appBar: AppBar(title: const Text('Premium')),
       body: AppBackground(
         child: SafeArea(
           child: Column(
@@ -227,34 +208,24 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
                   children: [
+                    // ONE card: where the account stands, what the page
+                    // is offering, and what Premium gets you. These were
+                    // three stacked blocks — a status card, a centred
+                    // 24px headline, and a green-tinted plan card with a
+                    // second card inset inside it — so the screen opened
+                    // on three competing surfaces before a single price.
+                    // The screen set draws one plain card holding all of
+                    // it, and prices where prices belong: on the tiers.
                     statusAsync.when(
-                      data: (status) => _StatusCard(status: status),
+                      data: (status) => _PerksCard(status: status),
                       loading: () => const SkeletonLoader(
-                        child: SkeletonBox(width: double.infinity, height: 88),
-                      ),
-                      error: (_, _) => const SizedBox.shrink(),
-                    ),
-                    const SizedBox(height: 20),
-                    Center(
-                      child: Text(
-                        entitled ? 'Your plan' : 'Unlock all features',
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
+                        child: SkeletonBox(
+                          width: double.infinity,
+                          height: 260,
+                          radius: 20,
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 20),
-                    // The card with the perks is always here: what Premium
-                    // gets you does not depend on the store answering.
-                    // Prices, tier rows and the button do, so they follow
-                    // the store's reply below.
-                    _FeaturedPlanCard(
-                      tier: featured ?? featuredTier,
-                      product: featured == null ? null : products?[featured],
-                      isCurrent: featured != null && currentTier == featured,
+                      error: (_, _) => const _PerksCard(status: null),
                     ),
                     const SizedBox(height: 16),
                     if (_loadError != null)
@@ -323,7 +294,7 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                             ? null
                             : () => _controller.restore(),
                         child: Text(
-                          'Restore Purchases',
+                          'Restore purchases',
                           style: TextStyle(
                             color: AppPalette.candyBlue,
                             fontSize: 13,
@@ -345,7 +316,7 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                   // as a different app's button.
                   child: PrimaryButton(
                     key: const Key('premiumSubscribe'),
-                    label: entitled ? 'CURRENT PLAN' : 'SUBSCRIBE',
+                    label: entitled ? 'Current plan' : 'Subscribe',
                     isLoading: _controller.busy,
                     onPressed: canBuy
                         ? () => _controller.buy(selectedProduct)
@@ -360,65 +331,77 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
   }
 }
 
-/// Where the account stands, from the backend. The one place on the screen
-/// that says FREE / PREMIUM / ENTERPRISE.
-class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.status});
+/// What Premium gets you, with the account's standing as a tag at the top
+/// — the shape the screen set draws: a `Free` chip, the page's one
+/// headline, and the perks as check lines.
+///
+/// # NO GREEN SLAB, NO CARD INSIDE A CARD
+///
+/// This card used to be a green-tinted, green-bordered, elevated surface
+/// with a second bordered panel inset inside it, the perks in that panel,
+/// each with an outlined circle icon joined by a vertical hairline. Four
+/// surfaces deep for a list of four sentences, and the only page in the
+/// app with a colour-washed card. It is the ordinary card now, and the
+/// green appears where it appears everywhere else: at glyph size.
+class _PerksCard extends StatelessWidget {
+  const _PerksCard({required this.status});
 
-  final SubscriptionStatus status;
+  /// Null when the backend has not answered — the perks are a fact about
+  /// the product, so they are shown regardless, under the Free chip that
+  /// an unconfirmed account is treated as anyway.
+  final SubscriptionStatus? status;
 
   @override
   Widget build(BuildContext context) {
-    final label = switch (status.tier) {
-      SubscriptionTier.enterprise => 'ENTERPRISE',
-      SubscriptionTier.premium when status.isEntitled => 'PREMIUM',
-      _ => 'FREE',
+    final entitled = status?.isEntitled ?? false;
+    final label = switch (status?.tier) {
+      SubscriptionTier.enterprise => 'Enterprise',
+      SubscriptionTier.premium when entitled => 'Premium',
+      _ => 'Free',
     };
-    final tier = PremiumTier.forProductId(status.productId);
-    final subtitle = status.isEntitled
-        ? [
+    final tier = PremiumTier.forProductId(status?.productId);
+    final renewal = !entitled
+        ? null
+        : [
             if (tier != null) '${tier.label} plan',
-            if (status.currentPeriodEnd != null)
-              'Renews ${_formatDate(status.currentPeriodEnd!)}'
-            else
-              'Active',
-          ].join(' · ')
-        : 'Upgrade to unlock Premium features';
+            if (status?.currentPeriodEnd != null)
+              'Renews ${_formatDate(status!.currentPeriodEnd!)}',
+          ].join(' · ');
+
     return FlatCard(
-      radius: 12,
-      padding: const EdgeInsets.all(18),
-      child: Row(
+      radius: 20,
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.workspace_premium_rounded,
-            color: AppPalette.gold,
-            size: 30,
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: AppPalette.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(
-                    color: AppPalette.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AppTag(
+              label,
+              tone: entitled ? AppTone.success : AppTone.neutral,
+              icon: entitled ? AppIcons.premium : null,
+              compact: true,
             ),
           ),
+          const SizedBox(height: 12),
+          Text(
+            entitled ? 'Your plan' : 'Unlock all features',
+            style: TextStyle(
+              color: AppPalette.textPrimary,
+              fontSize: 19,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.2,
+            ),
+          ),
+          if (renewal != null && renewal.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(
+              renewal,
+              style: TextStyle(color: AppPalette.textSecondary, fontSize: 12.5),
+            ),
+          ],
+          const SizedBox(height: 14),
+          for (final perk in premiumPerks) _PerkRow(perk: perk),
         ],
       ),
     );
@@ -426,215 +409,6 @@ class _StatusCard extends StatelessWidget {
 
   static String _formatDate(DateTime date) =>
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-}
-
-/// The featured plan: the brand green, a faint dot texture, the store's
-/// price and title for that tier, and the perks in a white inset card with
-/// a thin line joining their icons.
-class _FeaturedPlanCard extends StatelessWidget {
-  const _FeaturedPlanCard({
-    required this.tier,
-    required this.product,
-    required this.isCurrent,
-  });
-
-  final PremiumTier tier;
-
-  /// Null while the store has not answered, or has nothing: the card then
-  /// shows the perks under a generic title and no price at all, rather
-  /// than a made-up one.
-  final ProductDetails? product;
-  final bool isCurrent;
-
-  @override
-  Widget build(BuildContext context) {
-    // # WHY THIS IS NOT A GREEN SLAB ANY MORE
-    //
-    // It used to be the whole card: a full-bleed AppPalette.brandGreen fill
-    // with a coloured glow under it, a white inset panel and white dot
-    // texture. It was the one surface in the app that belonged to no palette
-    // — every other card is the onyx/surface/card ramp with a hairline, and
-    // the brand's blue/green only ever appears as a MARK (a verified tick,
-    // the logo, a selected radio), never as a page-sized fill. At that size
-    // the green stopped reading as the brand and started reading as a
-    // sticker, and the white panel inside it glared out of an otherwise
-    // near-black page.
-    //
-    // So the surface is the shared one now, and the green does what it does
-    // everywhere else in the app: it marks. The hairline, the perk icons and
-    // the CURRENT PLAN pill carry it; the type is the theme's own ink, which
-    // is also what finally makes this card correct in light mode. The glow
-    // is gone for the same reason ADR-032 removed every other one.
-    final accent = AppPalette.brandGreen;
-    // The tint has to be STRONGER on light, not equal. The dark page is
-    // near-black, so a 5% green wash on a #181D24 card is already a visible
-    // shift; the light page is #F3F6F9 with white cards, where that same 5%
-    // lands between two near-whites and the card dissolves into the page.
-    // One number for both themes would be "consistent" and would look
-    // unfinished in one of them — the same reason FlatCard's own elevation
-    // and SkeletonBox's tint each carry a per-theme value.
-    final light = AppPalette.isLight;
-    return FlatCard(
-      radius: 20,
-      // The one card on this screen meant to be read first — FlatCard lifts
-      // it the way each theme actually reads (a real shadow on light, a
-      // lighter surface on dark), instead of a coloured halo.
-      elevated: true,
-      tint: accent.withValues(alpha: light ? 0.14 : 0.05),
-      border: accent.withValues(alpha: light ? 0.55 : 0.35),
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: product == null
-                    ? Text(
-                        'TieHere Premium',
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.4,
-                        ),
-                      )
-                    : _Price(
-                        amount: product!.price,
-                        period: '/${tier.period}',
-                        large: true,
-                      ),
-              ),
-              if (isCurrent)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    // Tinted ONTO the card rather than laid over it at
-                    // alpha — the house rule for accents on an opaque
-                    // surface (AppPalette.tintedSurface's own comment).
-                    color: AppPalette.tintedSurface(
-                      accent.withValues(alpha: 0.18),
-                    ),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: accent.withValues(alpha: 0.5)),
-                  ),
-                  child: Text(
-                    'CURRENT PLAN',
-                    style: TextStyle(
-                      color: accent,
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            product == null
-                ? 'Everything TieHere has'
-                : (product!.title.isEmpty
-                      ? 'Premium ${tier.label} Plan'
-                      : product!.title),
-            style: TextStyle(
-              color: AppPalette.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          if (product != null && product!.description.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              product!.description,
-              style: TextStyle(
-                color: AppPalette.textSecondary,
-                fontSize: 12.5,
-                height: 1.4,
-              ),
-            ),
-          ],
-          const SizedBox(height: 16),
-          Text(
-            'This plan gets',
-            style: TextStyle(
-              color: AppPalette.textSecondary,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 1.2,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
-            decoration: BoxDecoration(
-              // A step away from the card it sits on, in whichever direction
-              // that theme reads as nearer: the plain white card colour
-              // against the tinted ground on light, a lighter surface on
-              // dark (FlatCard's own elevated cue).
-              color: light
-                  ? AppPalette.card
-                  : AppPalette.tintedSurface(
-                      AppPalette.textPrimary.withValues(alpha: 0.04),
-                    ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: AppPalette.hairline),
-            ),
-            child: Column(
-              children: [
-                for (var i = 0; i < premiumPerks.length; i++)
-                  _PerkRow(
-                    perk: premiumPerks[i],
-                    last: i == premiumPerks.length - 1,
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Price extends StatelessWidget {
-  const _Price({
-    required this.amount,
-    required this.period,
-    this.large = false,
-  });
-
-  final String amount;
-  final String period;
-  final bool large;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text.rich(
-      TextSpan(
-        text: amount,
-        style: TextStyle(
-          color: AppPalette.textPrimary,
-          fontSize: large ? 30 : 18,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.5,
-        ),
-        children: [
-          TextSpan(
-            text: period,
-            style: TextStyle(
-              color: AppPalette.textSecondary,
-              fontSize: large ? 15 : 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 /// One perk: an outlined round icon, the sentence with its key phrase in
@@ -645,55 +419,42 @@ class _Price extends StatelessWidget {
 /// icon is the one thing still carrying the brand green, which is the size
 /// green is supposed to appear at.
 class _PerkRow extends StatelessWidget {
-  const _PerkRow({required this.perk, required this.last});
+  const _PerkRow({required this.perk});
 
-  final (IconData, String, String, String) perk;
-  final bool last;
+  final (String, String, String, String) perk;
 
   @override
   Widget build(BuildContext context) {
-    final ink = AppPalette.textPrimary;
     final (icon, before, strong, after) = perk;
-    return IntrinsicHeight(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppPalette.hairline),
-                ),
-                child: Icon(icon, size: 16, color: AppPalette.brandGreen),
-              ),
-              if (!last)
-                Expanded(
-                  child: SizedBox(
-                    width: 1,
-                    child: ColoredBox(color: AppPalette.hairline),
-                  ),
-                ),
-            ],
+          // A tick at glyph size, not an outlined circle with a hairline
+          // running down to the next one. The connector drew a process —
+          // four steps in an order — where this is four unordered facts.
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: AppIcon(icon, size: 17, color: AppPalette.brandGreen),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 11),
           Expanded(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(0, 6, 0, last ? 8 : 18),
-              child: Text.rich(
-                TextSpan(
-                  text: before,
-                  style: TextStyle(color: ink, fontSize: 13.5, height: 1.35),
-                  children: [
-                    TextSpan(
-                      text: strong,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    TextSpan(text: after),
-                  ],
+            child: Text.rich(
+              TextSpan(
+                text: before,
+                style: TextStyle(
+                  color: AppPalette.textPrimary,
+                  fontSize: 13.5,
+                  height: 1.4,
                 ),
+                children: [
+                  TextSpan(
+                    text: strong,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  TextSpan(text: after),
+                ],
               ),
             ),
           ),
@@ -733,7 +494,7 @@ class _TierRow extends StatelessWidget {
     );
     final highlighted = selected || isCurrent;
     final badge = isCurrent
-        ? 'CURRENT PLAN'
+        ? 'Current plan'
         : featured
         ? 'Popular'
         : null;
@@ -767,11 +528,7 @@ class _TierRow extends StatelessWidget {
                 ),
               ),
               child: highlighted
-                  ? const Icon(
-                      Icons.check_rounded,
-                      size: 14,
-                      color: Colors.white,
-                    )
+                  ? const AppIcon(AppIcons.check, size: 14, color: Colors.white)
                   : null,
             ),
             const SizedBox(width: 12),

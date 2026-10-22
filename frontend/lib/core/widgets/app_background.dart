@@ -26,11 +26,18 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 /// desaturated stock photo behind it fought the brand rather than supporting
 /// it.
 ///
-/// What replaced it is [AppPalette.onyx] itself - the same near-black the
-/// surface ramp is already built from, so the ground and the cards on it come
-/// from one scale instead of two. A brand-navy ground was tried first and
-/// looked wrong: the mark is a saturated blue/green, and a blue ground behind
-/// it muddied both.
+/// What replaced it is [AppPalette.backgroundGradient] - the same blue-black
+/// the surface ramp is built from, so the ground and the cards on it come
+/// from one scale instead of two.
+///
+/// # IT IS A GRADIENT NOW, BY ABOUT 3%
+///
+/// It was a single flat `AppPalette.onyx` fill. The 2026-10 redesign makes it
+/// a two-stop vertical fade, lighter at the top. The gap between the stops is
+/// deliberately almost nothing: a flat fill made tall scrolling pages read as
+/// a wall, and anything you could actually SEE would compete with the cards
+/// sitting on it. The cost is the same one `Container(color:)` had - one
+/// decoration, no `saveLayer`, no decoded image.
 ///
 /// It is also cheaper by construction. An `Opacity` over a full-screen
 /// subtree forces a `saveLayer`, and so does a colour filter; both are gone,
@@ -79,7 +86,10 @@ class AppBackground extends StatelessWidget {
     return RepaintBoundary(
       key: layerKey,
       child: SizedBox.expand(
-        child: ColoredBox(color: AppPalette.onyx, child: child),
+        child: DecoratedBox(
+          decoration: BoxDecoration(gradient: AppPalette.backgroundGradient),
+          child: child,
+        ),
       ),
     );
   }

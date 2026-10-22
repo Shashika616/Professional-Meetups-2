@@ -4,13 +4,17 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"math/big"
 	"os"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 )
 
@@ -68,11 +72,56 @@ func allowTestOTPBypass() bool {
 // testOTPBypassPhones parses TEST_OTP_BYPASS_PHONES — a comma-separated
 // allowlist of exact phone-number strings, matched against
 // VerificationCode.Target the same way pending.Target is already compared
-// in verifyAndConsumeCode (verification.go). Not normalized — the entry
-// must match byte-for-byte what the client actually sends. Empty/unset
-// means the allowlist is empty, i.e. this mechanism is off.
+// in verifyAndConsumeCode (verification.go). Empty/unset means the
+// allowlist is empty, i.e. this mechanism is off.
+//
+// # NORMALISED THE SAME WAY THE TARGET IS (tracker #82, then #92)
+//
+// This used to be strings.TrimSpace, which was correct while targets were
+// stored exactly as typed. Since #82 every phone target is run through
+// identity.NormalizePhone before it is stored or compared, so an entry
+// written `+94 77 123 4567` in the environment would no longer match the
+// `+94771234567` the lookup presents — the bypass would simply stop
+// working, and would read as "the allowlist is broken" rather than as a
+// deliberate rejection.
+//
+// Using the same function on both halves is what parseOTPBypassAllowlist's
+// own comment calls the structural property: the two sides of the
+// comparison cannot drift apart.
 func testOTPBypassPhones() map[string]bool {
-	return parseOTPBypassAllowlist("TEST_OTP_BYPASS_PHONES", strings.TrimSpace)
+	return parseOTPBypassAllowlist("TEST_OTP_BYPASS_PHONES", identity.NormalizePhone)
+}
+
+// e164 is the shape a real phone number has: a leading +, a non-zero
+// country code, and 7 to 15 digits in total.
+var e164 = regexp.MustCompile(`^\+[1-9]\d{6,14}$`)
+
+// ValidateTestOTPBypassPhones reports the entries of TEST_OTP_BYPASS_PHONES
+// that are not phone numbers (tracker #92, review finding N-A6).
+//
+// The list was accepted verbatim, so a typo — a missing +, a name pasted
+// by accident, an email address — became a silent, permanent allowlist
+// entry that nothing would ever match and nobody would notice. Worse in
+// the other direction: a mistake broad enough to match something real
+// would hand out the fixed code on it.
+//
+// This REPORTS rather than refuses, and the caller logs it at startup.
+// Refusing would mean a typo in a test convenience could take the
+// service down, which is a worse failure than a warning naming the bad
+// entry. The entries themselves are still used as-is; a malformed one
+// simply cannot match a normalised target.
+//
+// Returns nil when every entry is well-formed, which is the only case
+// that should ever reach a deployed service.
+func ValidateTestOTPBypassPhones() []string {
+	var invalid []string
+	for entry := range testOTPBypassPhones() {
+		if !e164.MatchString(entry) {
+			invalid = append(invalid, entry)
+		}
+	}
+	sort.Strings(invalid)
+	return invalid
 }
 
 // parseOTPBypassAllowlist reads a comma-separated allowlist out of the named
@@ -207,7 +256,7 @@ func isEmailOTPPurpose(purpose repository.VerificationPurpose) bool {
 // startTargetKeyedVerification for signup/login), they must stay greppable as
 // one thing in `gcloud run services logs read`, and two copies of a sentence
 // this long drift the first time anyone rewords one of them.
-const testEmailBypassSkipLogMsg = "TEST_OTP_BYPASS_EMAILS: real email send skipped for allowlisted test address; fixed test code and the real generated code (below) both work"
+const testEmailBypassSkipLogMsg = "TEST_OTP_BYPASS_EMAILS: real email send skipped for allowlisted test address; fixed test code and the real generated code (below) both work" // #nosec G101 -- a log message, not a credential
 
 // normalizeBypassEmail matches testOTPBypassEmails' own treatment of an
 // allowlist entry, so the comparison is symmetric. Kept as a named function
@@ -324,14 +373,23 @@ func otpMatches(hash, code string, purpose repository.VerificationPurpose, targe
 // existing lists (ADR-012: kept in for this MVP even though the rest of §
 // 5's fraud-detection flow — domain age/SPF/DKIM/DMARC, the company
 // verification database, manual review — is deferred).
-var freeEmailDomains = map[string]bool{
-	"gmail.com":      true,
-	"yahoo.com":      true,
-	"hotmail.com":    true,
-	"outlook.com":    true,
-	"protonmail.com": true,
-	"zoho.com":       true,
-	"icloud.com":     true,
+// freeEmailDomains is free_email_domains.txt, read once at start-up.
+var freeEmailDomains = parseDomainList(freeEmailDomainsFile)
+
+//go:embed free_email_domains.txt
+var freeEmailDomainsFile string
+
+// parseDomainList reads one domain per line, ignoring blanks and # comments.
+func parseDomainList(file string) map[string]bool {
+	out := map[string]bool{}
+	for _, line := range strings.Split(file, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out[strings.ToLower(line)] = true
+	}
+	return out
 }
 
 var roleBasedLocalParts = map[string]bool{
@@ -358,7 +416,19 @@ func isRejectedCorporateEmail(email string) bool {
 	if freeEmailDomains[strings.ToLower(domain)] {
 		return true
 	}
-	return roleBasedLocalParts[strings.ToLower(local)]
+	// "info+anything@" is still the shared info@ mailbox (#91).
+	return roleBasedLocalParts[strings.ToLower(stripPlusTag(local))]
+}
+
+// stripPlusTag drops a "+tag" from the local part of an address. Most
+// providers, Google Workspace and Microsoft 365 included, deliver
+// jane+anything@acme.com to jane@acme.com, so the tag says nothing about
+// which mailbox it is.
+func stripPlusTag(local string) string {
+	if i := strings.IndexByte(local, '+'); i > 0 {
+		return local[:i]
+	}
+	return local
 }
 
 // domainFromEmail extracts the domain half of a corporate email for storage

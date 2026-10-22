@@ -4,6 +4,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
+import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 
 import 'package:professional_connections_platform/core/models/auth_session.dart';
@@ -15,9 +19,22 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
 import 'package:professional_connections_platform/features/safety/manage_trusted_contacts_page.dart';
 
+import 'support/app_icon_finder.dart';
+
 import 'support/fake_secure_storage_platform.dart';
 
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -66,8 +83,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -206,6 +223,45 @@ void main() {
     FlutterSecureStoragePlatform.instance = FakeSecureStoragePlatform();
   });
 
+  // #80. A new contact is texted a link and is not alerted until they use
+  // it, so the list must say which contacts are actually protecting you.
+  testWidgets('shows which contacts have not confirmed yet', (tester) async {
+    final auth = _FakeAuthService(
+      contacts: const [
+        TrustedContact(
+          id: 'a',
+          name: 'Amma',
+          phoneNumber: '+94771111111',
+          email: '',
+        ),
+        TrustedContact(
+          id: 'b',
+          name: 'Nimal',
+          phoneNumber: '+94772222222',
+          email: '',
+          status: TrustedContactStatus.pending,
+        ),
+        TrustedContact(
+          id: 'c',
+          name: 'Kumari',
+          phoneNumber: '+94773333333',
+          email: '',
+          status: TrustedContactStatus.expired,
+        ),
+      ],
+    );
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Waiting for confirmation'), findsOneWidget);
+    expect(find.text('Link expired. Remove and add again.'), findsOneWidget);
+    // The confirmed contact carries no label at all.
+    expect(find.text('Amma'), findsOneWidget);
+  });
+
   testWidgets('empty state shows a prompt to add a contact', (tester) async {
     final auth = _FakeAuthService();
     final container = _containerWith(auth);
@@ -219,7 +275,7 @@ void main() {
     expect(find.text('Nobody on your list yet'), findsOneWidget);
     expect(find.textContaining('trigger SOS'), findsOneWidget);
     // The way out is the page's own ADD CONTACT button, still there.
-    expect(find.text('ADD CONTACT'), findsOneWidget);
+    expect(find.text('Add contact'), findsOneWidget);
   });
 
   testWidgets(
@@ -248,7 +304,7 @@ void main() {
     await tester.pumpWidget(_appWith(container));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('ADD CONTACT'));
+    await tester.tap(find.text('Add contact'));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Grace');
@@ -258,7 +314,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('SAVE'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(auth.addCallCount, 1);
@@ -275,7 +331,7 @@ void main() {
     await tester.pumpWidget(_appWith(container));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('ADD CONTACT'));
+    await tester.tap(find.text('Add contact'));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Grace');
@@ -285,7 +341,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('SAVE'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(auth.addCallCount, 0);
 
@@ -295,7 +351,7 @@ void main() {
       '+94771234567',
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('SAVE'));
+    await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(auth.addCallCount, 1);
   });
@@ -318,19 +374,19 @@ void main() {
     await tester.pumpWidget(_appWith(container));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await tester.tap(findAppIcon(AppIcons.trash));
     await tester.pumpAndSettle();
 
-    expect(find.text('REMOVE CONTACT'), findsOneWidget);
+    expect(find.text('Remove contact?'), findsOneWidget);
 
-    await tester.tap(find.text('CANCEL'));
+    await tester.tap(find.widgetWithText(SecondaryButton, 'Cancel'));
     await tester.pumpAndSettle();
     expect(auth.removeCallCount, 0);
     expect(find.text('Grace'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.delete_outline_rounded));
+    await tester.tap(findAppIcon(AppIcons.trash));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('REMOVE'));
+    await tester.tap(find.widgetWithText(PrimaryButton, 'Remove contact'));
     await tester.pumpAndSettle();
 
     expect(auth.removeCallCount, 1);
@@ -358,8 +414,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // Disabled — tapping ADD CONTACT does not reveal the add-contact form.
-    await tester.tap(find.text('ADD CONTACT'));
+    await tester.tap(find.text('Add contact'));
     await tester.pumpAndSettle();
-    expect(find.text('SAVE'), findsNothing);
+    expect(find.text('Save'), findsNothing);
   });
 }

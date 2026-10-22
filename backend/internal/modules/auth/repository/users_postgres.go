@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -96,7 +97,12 @@ func (r *postgresUserRepository) GetByID(ctx context.Context, id string) (User, 
 }
 
 func (r *postgresUserRepository) GetByPersonalEmail(ctx context.Context, email string) (User, error) {
-	row, err := r.q.GetUserByPersonalEmail(ctx, textOrNull(email))
+	// A plain string, not textOrNull: the query compares lower() on both
+	// sides (0017), so there is no NULL case to carry — a lookup of "" can
+	// never match, because personal_email IS NULL rows are excluded by the
+	// index's own predicate and an empty stored string is not a thing this
+	// schema writes.
+	row, err := r.q.GetUserByPersonalEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return User{}, fmt.Errorf("repository: user with personal_email %q: %w", email, apperror.ErrNotFound)
@@ -142,10 +148,22 @@ func (r *postgresUserRepository) Create(ctx context.Context, u NewUser) (User, e
 		TrustLevel:         int16(u.TrustLevel),
 		AgeConfirmedOver18: u.AgeConfirmedOver18,
 		IsGuest:            u.IsGuest,
+		PersonalEmail:      u.PersonalEmail,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
+			// Two unique constraints can land here now, and which one it was
+			// matters to the caller: linkedin_sub is a genuine race between
+			// two signups for the same LinkedIn member, while
+			// idx_users_personal_email_lower means the service's own
+			// pre-check missed an account that was created in the gap and
+			// the caller should be sent through the claim flow instead of
+			// shown a collision. Both are ErrConflict; only the message
+			// differs, and it is the message an operator reads at 3am.
+			if strings.Contains(pgErr.ConstraintName, "personal_email") {
+				return User{}, fmt.Errorf("repository: an account already uses this email address: %w", apperror.ErrConflict)
+			}
 			return User{}, fmt.Errorf("repository: user with linkedin_sub %q already exists: %w", u.LinkedInSub, apperror.ErrConflict)
 		}
 		return User{}, fmt.Errorf("repository: create user: %w", err)

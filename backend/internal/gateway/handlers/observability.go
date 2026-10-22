@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -40,7 +41,7 @@ const readinessTimeout = 2 * time.Second
 // outage. /readyz is readiness: "should traffic be routed here right now?"
 // It does check the monolith, because a gateway that cannot reach it can
 // serve nothing but errors and should be taken out of rotation until it can.
-func RegisterObservability(mux *http.ServeMux, monolith MonolithHealthChecker) {
+func RegisterObservability(mux *http.ServeMux, monolith MonolithHealthChecker, metricsAccess MetricsAccess) {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeStatusJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -63,7 +64,48 @@ func RegisterObservability(mux *http.ServeMux, monolith MonolithHealthChecker) {
 		writeStatusJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
-	mux.Handle("GET /metrics", metrics.Handler())
+	switch {
+	case metricsAccess.Token != "":
+		mux.Handle("GET /metrics", requireBearer(metricsAccess.Token, metrics.Handler()))
+	case metricsAccess.Public:
+		mux.Handle("GET /metrics", metrics.Handler())
+	}
+	// Neither: not mounted, so the route 404s like any unknown path.
+}
+
+// MetricsAccess decides who may read /metrics (#93).
+//
+// /metrics was public on the production URL: anyone could read the Go
+// runtime, every route's request counts and latencies, and the outbox
+// depths. None of that is user data, but it is a free map of the service
+// and its load for someone deciding what to hammer.
+//
+//   - Token set: the route requires `Authorization: Bearer <token>`.
+//   - No token, Public: open. Only for local and test stacks, where the
+//     caller is the developer and nothing is exposed.
+//   - Neither: the route does not exist. This is the production default,
+//     and it costs nothing — no extra secret to store — because nothing
+//     scrapes /metrics in production today. Setting a token later turns it
+//     back on for whoever holds it.
+type MetricsAccess struct {
+	Token  string
+	Public bool
+}
+
+// requireBearer admits only a request carrying exactly the expected bearer
+// token, compared in constant time. Anything else gets 404, not 401: this
+// route's existence is not something an unauthenticated caller needs
+// confirmed.
+func requireBearer(token string, next http.Handler) http.Handler {
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := []byte(r.Header.Get("Authorization"))
+		if len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeStatusJSON(w http.ResponseWriter, status int, body map[string]string) {

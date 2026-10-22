@@ -100,7 +100,22 @@ func run(logger *slog.Logger) error {
 	// /metrics. Mounted on the same mux but outside the /v1 API surface and
 	// outside authentication: a probe that needs a bearer token is a probe
 	// that cannot run.
-	handlers.RegisterObservability(mux, monolith)
+	handlers.RegisterObservability(mux, monolith, handlers.MetricsAccess{
+		Token:  cfg.MetricsToken,
+		Public: !cfg.OnCloudRun,
+	})
+
+	// The scheduled-work route (runbook §10). Mounted only when the secret
+	// is set, which is how local and test stacks end up without it: there
+	// the in-process tickers do this work, and nothing needs to drive it
+	// from outside. On Cloud Run the service scales to zero, so this route
+	// is the only thing that runs the sweeps at all.
+	if handlers.RegisterCron(mux, monolith, cfg.CronSharedSecret, logger) {
+		logger.Info("scheduled work endpoint mounted", "route", "POST /internal/cron/tick")
+	} else {
+		logger.Warn("scheduled work endpoint NOT mounted: CRON_SHARED_SECRET is unset. " +
+			"Periodic sweeps will only run while an instance is alive with CPU.")
+	}
 
 	logger.Info("jwt signing key in use", "kid", signer.KeyID(), "accepted_kids", verifier.KeyIDs())
 
@@ -117,7 +132,7 @@ func run(logger *slog.Logger) error {
 	// Metrics sit inside rate limiting so a 429 is still counted — knowing
 	// that a route is shedding load is the whole reason to have the metric.
 	handler = middleware.Metrics(handler)
-	handler = middleware.RateLimit(limiter)(handler)
+	handler = middleware.RateLimit(limiter, middleware.WithTrustedProxyHops(cfg.TrustedProxyHops))(handler)
 	handler = middleware.RequestLogging(logger)(handler)
 	handler = logging.HTTPMiddleware(handler)
 	handler = middleware.Recover(logger)(handler)

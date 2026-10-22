@@ -1,11 +1,15 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'package:apple_maps_flutter/apple_maps_flutter.dart' as apple;
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:maplibre_gl/maplibre_gl.dart' as libre;
 
 import 'package:professional_connections_platform/core/maps/map_provider.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// A coordinate, without belonging to either map SDK.
 ///
@@ -60,15 +64,30 @@ abstract interface class MapCanvasController {
 /// # STATIC VERSUS INTERACTIVE
 ///
 /// [interactive] false turns off every gesture, the compass and the
-/// my-location button, which is what a preview wants: a picture of one
-/// place that cannot be dragged away from it. The read-only location view
-/// passes false; the pickers pass true.
+/// my-location button, which is what a thumbnail wants. Everything the
+/// user can actually look at passes true.
+///
+/// # A PIN AT THE CENTRE OF THE SCREEN VERSUS A PIN ON A PLACE
+///
+/// There are two different pins here and they are not interchangeable.
+///
+/// [MapCentrePin] is drawn over the middle of the viewport and never
+/// moves; on a PICKER that is exactly right, because the thing being
+/// picked IS the camera centre. On a VIEWER it is only right while the
+/// map cannot move — the moment you let someone drag, a fixed centre pin
+/// stops pointing at the meetup and starts pointing at wherever they
+/// dragged to, while still looking authoritative.
+///
+/// [marker] is the other one: a real annotation the platform anchors to
+/// a coordinate, so it stays on the place through any pan, zoom or
+/// rotate. A viewer that is draggable needs this, not the overlay.
 class MapCanvas extends StatefulWidget {
   const MapCanvas({
     super.key,
     required this.initialCentre,
     this.initialZoom = 13,
     this.interactive = true,
+    this.marker,
     this.onReady,
     this.onCameraMove,
     this.onCameraIdle,
@@ -77,6 +96,10 @@ class MapCanvas extends StatefulWidget {
   final MapPoint initialCentre;
   final double initialZoom;
   final bool interactive;
+
+  /// A point the platform pins to the map itself. See the class doc for
+  /// why this is not the same thing as [MapCentrePin].
+  final MapPoint? marker;
 
   /// Handed the controller once the platform view is up. Null for a
   /// preview that never moves the camera itself.
@@ -105,6 +128,7 @@ class _MapCanvasState extends State<MapCanvas> {
             centre: widget.initialCentre,
             zoom: widget.initialZoom,
             interactive: widget.interactive,
+            marker: widget.marker,
             onReady: widget.onReady,
             onCameraMove: widget.onCameraMove,
             onCameraIdle: widget.onCameraIdle,
@@ -113,6 +137,7 @@ class _MapCanvasState extends State<MapCanvas> {
             centre: widget.initialCentre,
             zoom: widget.initialZoom,
             interactive: widget.interactive,
+            marker: widget.marker,
             onReady: widget.onReady,
             onCameraMove: widget.onCameraMove,
             onCameraIdle: widget.onCameraIdle,
@@ -127,6 +152,7 @@ class _AppleCanvas extends StatefulWidget {
     required this.centre,
     required this.zoom,
     required this.interactive,
+    required this.marker,
     this.onReady,
     this.onCameraMove,
     this.onCameraIdle,
@@ -135,6 +161,7 @@ class _AppleCanvas extends StatefulWidget {
   final MapPoint centre;
   final double zoom;
   final bool interactive;
+  final MapPoint? marker;
   final ValueChanged<MapCanvasController>? onReady;
   final ValueChanged<MapPoint>? onCameraMove;
   final ValueChanged<MapPoint>? onCameraIdle;
@@ -163,6 +190,13 @@ class _AppleCanvasState extends State<_AppleCanvas> {
       zoomGesturesEnabled: widget.interactive,
       pitchGesturesEnabled: widget.interactive,
       myLocationButtonEnabled: false,
+      annotations: {
+        if (widget.marker != null)
+          apple.Annotation(
+            annotationId: apple.AnnotationId('marker'),
+            position: apple.LatLng(widget.marker!.lat, widget.marker!.lng),
+          ),
+      },
       onMapCreated: (controller) =>
           widget.onReady?.call(_AppleController(controller, widget.zoom)),
       onCameraMove: (position) {
@@ -199,6 +233,7 @@ class _LibreCanvas extends StatefulWidget {
     required this.centre,
     required this.zoom,
     required this.interactive,
+    required this.marker,
     this.onReady,
     this.onCameraMove,
     this.onCameraIdle,
@@ -207,6 +242,7 @@ class _LibreCanvas extends StatefulWidget {
   final MapPoint centre;
   final double zoom;
   final bool interactive;
+  final MapPoint? marker;
   final ValueChanged<MapCanvasController>? onReady;
   final ValueChanged<MapPoint>? onCameraMove;
   final ValueChanged<MapPoint>? onCameraIdle;
@@ -215,8 +251,73 @@ class _LibreCanvas extends StatefulWidget {
   State<_LibreCanvas> createState() => _LibreCanvasState();
 }
 
+/// MapLibre takes colours as CSS hex strings, not Dart [Color]s.
+String _hex(Color c) {
+  int ch(double v) => (v * 255).round().clamp(0, 255);
+  return '#'
+      '${ch(c.r).toRadixString(16).padLeft(2, '0')}'
+      '${ch(c.g).toRadixString(16).padLeft(2, '0')}'
+      '${ch(c.b).toRadixString(16).padLeft(2, '0')}';
+}
+
+/// The style-local name the pin sprite is registered under.
+const String _pinImage = 'tiehere-pin';
+
 class _LibreCanvasState extends State<_LibreCanvas> {
   libre.MapLibreMapController? _controller;
+
+  /// The pin as PNG bytes, for [libre.MapLibreMapController.addImage].
+  ///
+  /// MapLibre takes a raster sprite, not an SVG, so the same markup
+  /// [AppIcon] draws is rendered once into a bitmap at 3x and handed over.
+  /// Rendered here rather than shipped as an asset so the marker cannot
+  /// drift from the icon set: there is one definition of the pin.
+  /// # WHY THE MARKER IS NOT [AppIcons.pin]
+  ///
+  /// The first version rasterised the UI pin straight from the icon set,
+  /// on the reasoning that one definition of a pin beats two. On the map
+  /// it disappeared. The icon set is drawn for UI chrome: a 1.6px stroke,
+  /// no fill, 13-20px, on a surface whose colour this app picks. A map
+  /// marker is none of those — it sits on tiles dense with roads, labels
+  /// and parks that the app does not control, and it has to be the most
+  /// findable thing on the screen.
+  ///
+  /// So this is drawn for the job rather than scaled up from the icon
+  /// set: a solid teardrop in the brand green, a 3px white keyline so it
+  /// separates from whatever tile is under it, the white centre hole that
+  /// reads as "map pin" in every map anyone has used, and a contact
+  /// shadow at the tip so it stands ON the map instead of being printed
+  /// into it. Generated rather than shipped as an asset so it follows the
+  /// palette, and rasterised at the device pixel ratio so it stays crisp.
+  Future<Uint8List?> _pinSprite(double dpr) async {
+    const double w = 48, h = 60;
+    final fill = _hex(AppPalette.brandGreen);
+
+    final svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 60">'
+        '<ellipse cx="24" cy="55.5" rx="7.5" ry="2.6" '
+        'fill="#000000" fill-opacity="0.22"/>'
+        '<path d="M24 3a17.5 17.5 0 0 0-17.5 17.5C6.5 33.6 24 52 24 52'
+        's17.5-18.4 17.5-31.5A17.5 17.5 0 0 0 24 3z" '
+        'fill="$fill" stroke="#FFFFFF" stroke-width="3" '
+        'stroke-linejoin="round"/>'
+        '<circle cx="24" cy="20.5" r="6.4" fill="#FFFFFF"/>'
+        '</svg>';
+
+    final info = await vg.loadPicture(SvgStringLoader(svg), null);
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    canvas.scale(w * dpr / info.size.width, h * dpr / info.size.height);
+    canvas.drawPicture(info.picture);
+    final image = await recorder.endRecording().toImage(
+      (w * dpr).round(),
+      (h * dpr).round(),
+    );
+    info.picture.dispose();
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    return data?.buffer.asUint8List();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -238,6 +339,39 @@ class _LibreCanvasState extends State<_LibreCanvas> {
       onMapCreated: (controller) {
         _controller = controller;
         widget.onReady?.call(_LibreController(controller, widget.zoom));
+      },
+      // The marker is the app's own pin, rasterised once and registered
+      // with the style, then placed as a symbol anchored to the point.
+      //
+      // A circle was the first attempt, because addCircle needs no image.
+      // It was wrong: the pin is the mark this app uses for a place
+      // everywhere else, and a blue dot on the map while a pin sits
+      // beside the address underneath is two names for one thing.
+      onStyleLoadedCallback: () async {
+        final marker = widget.marker;
+        final controller = _controller;
+        if (marker == null || controller == null) return;
+        // Read before the first await: MediaQuery is not safe to touch
+        // across an async gap, and this is used twice below.
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        final sprite = await _pinSprite(dpr);
+        if (sprite == null || !mounted) return;
+        await controller.addImage(_pinImage, sprite);
+        await controller.addSymbol(
+          libre.SymbolOptions(
+            geometry: libre.LatLng(marker.lat, marker.lng),
+            iconImage: _pinImage,
+            // The pin's POINT is at its bottom, so that is what has to
+            // sit on the coordinate; anchoring by centre would put the
+            // place half a pin north of where it is.
+            iconAnchor: 'bottom',
+            // 1, not 1/dpr. MapLibre maps the registered bitmap's
+            // pixels to SCREEN pixels, so rasterising at the device
+            // pixel ratio already lands the sprite at its intended
+            // logical size; dividing again shrank it to a speck.
+            iconSize: 1,
+          ),
+        );
       },
       onCameraIdle: () {
         final target = _controller?.cameraPosition?.target;
@@ -300,17 +434,13 @@ class MapCentrePin extends StatelessWidget {
             duration: const Duration(milliseconds: 160),
             curve: Curves.easeOut,
             offset: Offset(0, lifted ? -0.18 : 0),
-            child: Icon(
-              Icons.location_on,
-              color: colour,
-              size: 40,
-              shadows: [
-                Shadow(
-                  color: AppPalette.onyx.withValues(alpha: 0.55),
-                  blurRadius: 8,
-                ),
-              ],
-            ),
+            // Just the pin. The Material glyph this replaced carried a
+            // `shadows:` list, and porting it to a BoxShadow on a wrapper
+            // was wrong twice over: a BoxShadow follows the BOX, not the
+            // glyph, so it painted a soft rectangular smudge behind the
+            // marker rather than a shadow under it. The stroke pin is
+            // legible on the map on its own.
+            child: AppIcon(AppIcons.pin, color: colour, size: 40),
           ),
           // The point actually being picked, so a lifted pin still shows
           // exactly which spot it refers to.

@@ -23,6 +23,7 @@ import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
 import 'package:professional_connections_platform/features/meetups/events_page.dart';
 import 'package:professional_connections_platform/features/profile/profile_page.dart';
+import 'package:professional_connections_platform/features/splash/splash_screen.dart';
 
 import 'support/fake_geolocator_platform.dart';
 import 'support/fake_meetup_service.dart';
@@ -64,6 +65,17 @@ class _FakePushService implements PushNotificationService {
 /// assumption ever stops holding. Avoids a real HTTP attempt from
 /// HttpAuthService during a widget test.
 class _FakeAuthService implements AuthService {
+  // Not exercised here: no test in this file drives the claim-an-existing-
+  // account ceremony. Present because AuthService declares it.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) => throw UnimplementedError('not exercised by this test');
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) =>
+      throw UnimplementedError('not exercised by this test');
   @override
   Future<PublicProfile> getPublicProfile(String userId) =>
       throw UnimplementedError('not exercised by this test');
@@ -189,8 +201,8 @@ class _FakeAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async => throw UnimplementedError();
 
   @override
@@ -242,6 +254,41 @@ void main() {
     // flutter_tester (no real Keychain/Keystore channel available), same
     // setup every other test touching session storage already needs.
     FlutterSecureStoragePlatform.instance = FakeSecureStoragePlatform();
+  });
+
+  // The splash's one decision, for a signed-in user: straight into the app,
+  // never the landing page (which would read as having been signed out).
+  testWidgets('the splash takes a signed-in user to the app shell', (
+    tester,
+  ) async {
+    final container = ProviderContainer(
+      overrides: [
+        authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
+        authServiceProvider.overrideWithValue(_FakeAuthService()),
+        meetupServiceProvider.overrideWithValue(ImmediateMeetupService()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: SplashScreen()),
+      ),
+    );
+    await tester.pump(const Duration(seconds: 2));
+    // Until the splash's own route is gone, not just until the shell
+    // appears: pushReplacement animates with both in the tree.
+    await _pumpUntil(
+      tester,
+      () =>
+          find.byType(AppShell).evaluate().isNotEmpty &&
+          find.byType(SplashScreen).evaluate().isEmpty,
+    );
+
+    expect(find.byType(AppShell), findsOneWidget);
+    expect(find.byType(LandingPage), findsNothing);
+    expect(find.byType(SplashScreen), findsNothing);
   });
 
   testWidgets(
@@ -451,7 +498,7 @@ void main() {
     // the point the tap's own effect has already landed can't be
     // distinguished from "still animating," so it isn't a reliable
     // termination condition on the way back to it.
-    await tester.tap(find.text('HOME'));
+    await tester.tap(find.text('Home'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
 
@@ -860,7 +907,7 @@ void main() {
         expect(homeActiveCalls, 1, reason: 'Home loaded once on first mount');
 
         // 2. Home -> Events.
-        await tapTab(tester, 'EVENTS');
+        await tapTab(tester, 'Events');
         expect(find.byType(EventsPage), findsOneWidget);
         expect(
           service.listMyMeetupsCallCount,
@@ -885,13 +932,13 @@ void main() {
         );
 
         // 3. Events -> Safety.
-        await tapTab(tester, 'SAFETY');
+        await tapTab(tester, 'Safety');
         expect(skeletonCount(), 0);
 
         // 4. Safety -> Events. The second visit — the step round 08's
         //    single round trip never exercised. Checked at ONE frame, which
         //    is where a transient flash would be.
-        await tapTabOneFrame(tester, 'EVENTS');
+        await tapTabOneFrame(tester, 'Events');
         expect(
           skeletonCount(),
           0,
@@ -911,7 +958,7 @@ void main() {
         expect(skeletonCount(), 0);
 
         // 5. Events -> Home.
-        await tapTabOneFrame(tester, 'HOME');
+        await tapTabOneFrame(tester, 'Home');
         expect(
           skeletonCount(),
           0,
@@ -977,7 +1024,7 @@ void main() {
 
         expect(paintedLayers(), 1, reason: 'AppShell paints the only one');
 
-        await tapTab(tester, 'EVENTS');
+        await tapTab(tester, 'Events');
         expect(find.byType(EventsPage), findsOneWidget);
         expect(
           paintedLayers(),
@@ -989,9 +1036,9 @@ void main() {
 
         // And it stays one across the whole reported sequence, including
         // while every intermediate page is built.
-        await tapTab(tester, 'SAFETY');
-        await tapTab(tester, 'EVENTS');
-        await tapTab(tester, 'HOME');
+        await tapTab(tester, 'Safety');
+        await tapTab(tester, 'Events');
+        await tapTab(tester, 'Home');
         expect(paintedLayers(), 1);
       },
     );
@@ -1030,10 +1077,10 @@ void main() {
         await tester.pump(const Duration(milliseconds: 100));
 
         for (var lap = 0; lap < 3; lap++) {
-          await tapTab(tester, 'EVENTS');
-          await tapTab(tester, 'SAFETY');
-          await tapTab(tester, 'EVENTS');
-          await tapTab(tester, 'HOME');
+          await tapTab(tester, 'Events');
+          await tapTab(tester, 'Safety');
+          await tapTab(tester, 'Events');
+          await tapTab(tester, 'Home');
           expect(skeletonCount(), 0, reason: 'skeleton reappeared on lap $lap');
         }
 

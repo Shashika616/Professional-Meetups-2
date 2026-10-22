@@ -163,10 +163,10 @@ func (q *Queries) SetMeetupOverallReview(ctx context.Context, arg SetMeetupOvera
 }
 
 const upsertMeetupFeedback = `-- name: UpsertMeetupFeedback :one
-INSERT INTO meetup.meetup_feedback (meetup_id, user_id, happened, felt_safe, profile_accurate, would_meet_again, notes)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO meetup.meetup_feedback (meetup_id, user_id, happened, felt_safe, profile_accurate, would_meet_again)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (meetup_id, user_id) DO UPDATE SET
-  happened = $3, felt_safe = $4, profile_accurate = $5, would_meet_again = $6, notes = $7, submitted_at = now()
+  happened = $3, felt_safe = $4, profile_accurate = $5, would_meet_again = $6, submitted_at = now()
 RETURNING meetup_id, user_id, happened, felt_safe, profile_accurate, would_meet_again, submitted_at, notes, overall_score, review_completed_at
 `
 
@@ -177,9 +177,18 @@ type UpsertMeetupFeedbackParams struct {
 	FeltSafe        pgtype.Bool `json:"felt_safe"`
 	ProfileAccurate pgtype.Bool `json:"profile_accurate"`
 	WouldMeetAgain  pgtype.Bool `json:"would_meet_again"`
-	Notes           pgtype.Text `json:"notes"`
 }
 
+// The safety questions. Deliberately does NOT write `notes` (#90).
+//
+// `notes` is the PUBLIC review comment, shown on the meetup to other
+// people (ListMeetupReviewComments). This path used to write its own
+// free text into the same column, so a private "did you feel safe?" note
+// could be published: directly, and again when the review was completed
+// without a note of its own, because SetMeetupOverallReview keeps the
+// existing value. The request's notes field is accepted and ignored; no
+// screen in the app sends it, and production held no such note when this
+// changed (2026-10-22).
 func (q *Queries) UpsertMeetupFeedback(ctx context.Context, arg UpsertMeetupFeedbackParams) (MeetupMeetupFeedback, error) {
 	row := q.db.QueryRow(ctx, upsertMeetupFeedback,
 		arg.MeetupID,
@@ -188,7 +197,6 @@ func (q *Queries) UpsertMeetupFeedback(ctx context.Context, arg UpsertMeetupFeed
 		arg.FeltSafe,
 		arg.ProfileAccurate,
 		arg.WouldMeetAgain,
-		arg.Notes,
 	)
 	var i MeetupMeetupFeedback
 	err := row.Scan(

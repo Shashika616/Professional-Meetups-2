@@ -5,6 +5,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -45,6 +46,33 @@ type Config struct {
 	// INTERNAL_GRPC_SHARED_SECRET — docker-compose.yml feeds both from the
 	// same .env value so they cannot drift.
 	MonolithSharedSecret string
+
+	// CronSharedSecret authenticates Cloud Scheduler to
+	// POST /internal/cron/tick. DELIBERATELY OPTIONAL: empty means the
+	// route is not mounted at all, which is the right default for local
+	// development and for the test stack, where the in-process tickers
+	// already run and nothing needs to drive them from outside.
+	//
+	// On Cloud Run it is required in practice — the service scales to zero,
+	// so without it no periodic work ever runs — but that is enforced by
+	// the deployment (runbook §10), not here. A gateway that refused to
+	// start without it would break every local `docker compose up`.
+	CronSharedSecret string
+
+	// TrustedProxyHops is how many proxies in front of the gateway append to
+	// X-Forwarded-For, so the rate limiter can find the real client (#81).
+	// 0 (unset) ignores the header — right locally, where nothing sits in
+	// front. Cloud Run needs 1: see middleware.WithTrustedProxyHops.
+	TrustedProxyHops int
+
+	// MetricsToken, when set, is the bearer token GET /metrics requires.
+	// Unset on Cloud Run means /metrics is not served at all (#93); unset
+	// locally means it is open. See handlers.MetricsAccess.
+	MetricsToken string
+
+	// OnCloudRun is true when K_SERVICE is set, which Cloud Run always sets
+	// and nothing else here does.
+	OnCloudRun bool
 }
 
 // Load reads Config from the environment, failing fast if any required
@@ -59,6 +87,17 @@ func Load() (Config, error) {
 		JWTPreviousPublicKeyPaths: splitPaths(os.Getenv("JWT_PREVIOUS_PUBLIC_KEY_PATHS")),
 
 		MonolithSharedSecret: os.Getenv("MONOLITH_SHARED_SECRET"),
+		CronSharedSecret:     os.Getenv("CRON_SHARED_SECRET"),
+		MetricsToken:         os.Getenv("METRICS_TOKEN"),
+		OnCloudRun:           os.Getenv("K_SERVICE") != "",
+	}
+
+	if raw := os.Getenv("TRUSTED_PROXY_HOPS"); raw != "" {
+		hops, err := strconv.Atoi(raw)
+		if err != nil || hops < 0 || hops > 5 {
+			return Config{}, fmt.Errorf("config: TRUSTED_PROXY_HOPS must be an integer from 0 to 5, got %q", raw)
+		}
+		cfg.TrustedProxyHops = hops
 	}
 
 	required := []struct {

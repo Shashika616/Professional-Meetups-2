@@ -9,7 +9,7 @@
 # `context: .` for this service), not this cmd/monolith/ folder, so the whole
 # module (internal/, go.mod, go.sum) is visible to the build.
 
-FROM golang:1.26.6-alpine AS build
+FROM golang:1.26.10-alpine AS build
 WORKDIR /workspace
 
 # Copy go.mod/go.sum before source so dependency downloads are cached across

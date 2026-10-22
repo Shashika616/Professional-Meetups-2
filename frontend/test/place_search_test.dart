@@ -43,19 +43,84 @@ void main() {
       expect(seen.queryParameters['q'], 'colombo');
       expect(seen.queryParameters['lat'], '6.9');
       expect(seen.queryParameters['lon'], '79.8');
-      expect(seen.queryParameters['limit'], '6');
+      // Over-fetched, then ranked and cut to six on this side.
+      expect(seen.queryParameters['limit'], '12');
+      // Boxed to roughly 40km around the map's centre, so a search for
+      // "coffee" in Colombo cannot answer with Ohio.
+      expect(seen.queryParameters['bbox'], '79.4500,6.5500,80.1500,7.2500');
       // Identified traffic, as both OSM services ask.
       expect(headers['User-Agent'], contains('TieHere'));
 
       expect(results, hasLength(2));
+      // Ranked: the result whose name IS what was typed comes first, the
+      // cafe that merely contains it follows. "Colombo" appears as name
+      // AND city on that first one, and is written once.
+      expect(results.first.label, 'Colombo, Sri Lanka');
       expect(
-        results.first.label,
+        results[1].label,
         'Colombo Fort Cafe, Chatham Street 12, Colombo, Sri Lanka',
       );
-      expect(results.first.latitude, 6.9271);
-      expect(results.first.longitude, 79.8612);
-      // "Colombo" appears as name AND city: once in the label.
-      expect(results[1].label, 'Colombo, Sri Lanka');
+      expect(results[1].latitude, 6.9271);
+      expect(results[1].longitude, 79.8612);
+    });
+
+    test('suggestions are local first: nearest wins, duplicates collapse, '
+        'and an empty local answer retries unbounded', () async {
+      // Four places called "Barista" at increasing distance from the map
+      // centre, two of them with byte-identical labels, plus one far
+      // landmark. This is the real shape of the bug: the live service
+      // answered "coffee" over Colombo with five results in the United
+      // States, and a chain name with four identical rows.
+      String feature(String name, double lat, double lng) =>
+          '{"type":"Feature","geometry":{"type":"Point","coordinates":'
+          '[$lng,$lat]},"properties":{"name":"$name","city":"Colombo"}}';
+      final body =
+          '{"type":"FeatureCollection","features":['
+          '${feature('Barista', 7.20, 79.86)},'
+          '${feature('Barista', 7.10, 79.86)},'
+          '${feature('Barista Lavazza', 6.93, 79.86)},'
+          '${feature('Barista', 6.95, 79.86)}'
+          ']}';
+      final client = MockClient((_) async => http.Response(body, 200));
+
+      final results = await PhotonPlaceSearch(
+        client,
+      ).suggest('barista', focusLat: 6.9271, focusLng: 79.8612);
+
+      // Three identical "Barista, Colombo" rows became one, and it is the
+      // nearest of the three.
+      expect(results.map((r) => r.label), [
+        'Barista, Colombo',
+        'Barista Lavazza, Colombo',
+      ]);
+      expect(results.first.latitude, 6.95);
+    });
+
+    test('nothing nearby falls back to an unbounded search rather than '
+        'claiming the place does not exist', () async {
+      final boxes = <String?>[];
+      final client = MockClient((request) async {
+        boxes.add(request.url.queryParameters['bbox']);
+        // Empty inside the box, a hit outside it.
+        if (request.url.queryParameters.containsKey('bbox')) {
+          return http.Response('{"features":[]}', 200);
+        }
+        return http.Response(
+          '{"features":[{"type":"Feature","geometry":{"type":"Point",'
+          '"coordinates":[80.6337,7.2906]},"properties":{"name":"Kandy",'
+          '"country":"Sri Lanka"}}]}',
+          200,
+        );
+      });
+
+      final results = await PhotonPlaceSearch(
+        client,
+      ).suggest('kandy', focusLat: 6.9271, focusLng: 79.8612);
+
+      expect(boxes, hasLength(2));
+      expect(boxes.first, isNotNull);
+      expect(boxes.last, isNull);
+      expect(results.single.label, 'Kandy, Sri Lanka');
     });
 
     test('a non-200 gives an empty suggestion list, never a throw', () async {

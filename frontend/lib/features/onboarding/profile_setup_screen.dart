@@ -5,7 +5,8 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/features/verification/widgets/otp_entry.dart';
@@ -184,7 +185,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
         // visible instead of the default ellipsis truncation.
         title: const FittedBox(
           fit: BoxFit.scaleDown,
-          child: Text('COMPLETE YOUR PROFILE'),
+          child: Text('Complete your profile'),
         ),
         actions: [
           TextButton(
@@ -213,47 +214,35 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                GlassTextField(
+                AppTextField(
                   controller: _fullNameController,
-                  icon: Icons.badge_outlined,
+                  icon: AppIcons.idCard,
                   hint: 'Full name',
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  'COMPANY OR ORGANIZATION (OPTIONAL)',
+                  'Company or organization (optional)',
                   style: TextStyle(
                     fontSize: 10,
-                    letterSpacing: 2.2,
+                    letterSpacing: 0.6,
                     fontWeight: FontWeight.w600,
                     color: AppPalette.textSecondary,
                   ),
                 ),
                 const SizedBox(height: 12),
-                GlassTextField(
+                AppTextField(
                   controller: _companyNameController,
-                  icon: Icons.apartment_outlined,
+                  icon: AppIcons.building,
                   hint: 'Company or organization name',
                 ),
                 const SizedBox(height: 12),
                 _companyEmailField(),
-                const SizedBox(height: 8),
-                Text(
-                  'We don’t store this email, only that it proved you '
-                  'have access to an inbox at this company’s domain.',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppPalette.textSecondary.withValues(alpha: 0.85),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Verifying the same company email on more than one '
-                  'account harms that company’s standing on the platform.',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: AppPalette.textSecondary.withValues(alpha: 0.85),
-                  ),
-                ),
+                // Two explanatory paragraphs used to sit here — a privacy
+                // note and a one-account-per-work-email warning. The first
+                // restated what the verified state already shows; the
+                // second is a rule the backend enforces, so it belongs in
+                // the error the user sees if they hit it, not as standing
+                // text every user reads to learn a rule most never break.
                 if (_showOtpEntry) ...[
                   const SizedBox(height: 16),
                   OtpEntry(
@@ -271,7 +260,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
                 ],
                 const SizedBox(height: 24),
                 PrimaryButton(
-                  label: 'CONTINUE',
+                  label: 'Continue',
                   isLoading: _submitting,
                   onPressed: _canContinue ? _onContinue : null,
                 ),
@@ -287,11 +276,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
     if (_companyEmailVerified) {
       return Row(
         children: [
-          Icon(
-            Icons.check_circle_rounded,
-            color: AppPalette.verified,
-            size: 18,
-          ),
+          AppIcon(AppIcons.checkCircle, color: AppPalette.verified, size: 18),
           SizedBox(width: 8),
           Text(
             'Work email verified',
@@ -309,9 +294,9 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(
-          child: GlassTextField(
+          child: AppTextField(
             controller: _companyEmailController,
-            icon: Icons.work_outline_rounded,
+            icon: AppIcons.work,
             hint: 'firstname.lastname@company.com',
             keyboardType: TextInputType.emailAddress,
             enabled: _companyName.isNotEmpty && !_showOtpEntry,
@@ -322,7 +307,7 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
           SizedBox(
             width: 90,
             child: SecondaryButton(
-              label: 'VERIFY',
+              label: 'Verify',
               height: 48,
               onPressed: _companyEmail.isNotEmpty
                   ? _startCompanyEmailVerification

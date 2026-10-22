@@ -127,6 +127,14 @@ func (r *postgresRatingRepository) Submit(ctx context.Context, meetupID, raterID
 
 	q := r.q.WithTx(tx)
 
+	// First statement in the transaction: everyone rating this one person
+	// queues here, so the aggregate computed below includes every rating
+	// committed before it rather than racing a concurrent rater to the
+	// same count (tracker #86). See the query's own comment.
+	if err := q.LockUserRatingAggregate(ctx, rated.String()); err != nil {
+		return fmt.Errorf("repository: lock user rating aggregate: %w", err)
+	}
+
 	if _, err := q.CreateMeetupRating(ctx, sqlcgen.CreateMeetupRatingParams{
 		MeetupID:    meetup,
 		RaterUserID: rater,

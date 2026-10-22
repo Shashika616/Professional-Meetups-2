@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 enum IntentType {
   coffee,
@@ -13,15 +13,15 @@ enum IntentType {
   /// [IntentType.lunch] that is MEAL; where a start time is known, use
   /// [labelFor] so the sitting (breakfast, dinner...) is named as well.
   String get label => switch (this) {
-    IntentType.coffee => 'COFFEE',
-    IntentType.lunch => 'MEAL',
-    IntentType.networking => 'NETWORKING',
-    IntentType.mentorship => 'MENTORSHIP',
+    IntentType.coffee => 'Coffee',
+    IntentType.lunch => 'Meal',
+    IntentType.networking => 'Networking',
+    IntentType.mentorship => 'Mentorship',
     // Not 'EVENTS': the bottom tab already carries that word, and the
     // Home filter chips render every label on the same screen as it.
-    IntentType.outing => 'OUTING',
-    IntentType.rideShare => 'RIDE SHARE',
-    IntentType.dating => 'DATING',
+    IntentType.outing => 'Outing',
+    IntentType.rideShare => 'Ride share',
+    IntentType.dating => 'Dating',
   };
 
   /// One line of intent, shown under the name on the Schedule flow's
@@ -57,7 +57,11 @@ enum IntentType {
   /// vehicle scene at all, so ride share gets a window onto the street and
   /// lets its icon do the talking.
   String get imageAsset => switch (this) {
-    IntentType.coffee => 'assets/images/landing/l13.jpg',
+    // l26 (a cafe terrace), not l13. l13 had a laptop with a visible
+    // Apple logo on the lid — someone else's trademark, drawn into an
+    // asset this app ships and shows on its own picker. It is gone from
+    // the bundle entirely. l26 is also what the screen set names here.
+    IntentType.coffee => 'assets/images/landing/l26.jpg',
     IntentType.lunch => 'assets/images/landing/l11.jpg',
     IntentType.networking => 'assets/images/landing/l14.jpg',
     IntentType.mentorship => 'assets/images/landing/l10.jpg',
@@ -66,14 +70,25 @@ enum IntentType {
     IntentType.dating => 'assets/images/landing/l28.jpg',
   };
 
-  IconData get icon => switch (this) {
-    IntentType.coffee => Icons.local_cafe_outlined,
-    IntentType.lunch => Icons.restaurant_outlined,
-    IntentType.networking => Icons.work_outline,
-    IntentType.mentorship => Icons.school_outlined,
-    IntentType.outing => Icons.celebration_outlined,
-    IntentType.rideShare => Icons.directions_car_outlined,
-    IntentType.dating => Icons.favorite_border,
+  /// The intent's glyph, from the app's own 1.6px stroke set.
+  ///
+  /// # THERE USED TO BE TWO OF THESE
+  ///
+  /// `icon` (Material glyphs) and `iconPath` (stroke) existed side by
+  /// side, and they did not agree: networking was a briefcase in one and
+  /// two people in the other, a ride share was a car here and a compass
+  /// there. Which one a screen got depended only on whether the redesign
+  /// had reached it, so the same meetup could carry two different marks on
+  /// two screens. There is one now, and the more literal glyph won each
+  /// disagreement.
+  String get iconPath => switch (this) {
+    IntentType.coffee => AppIcons.coffee,
+    IntentType.lunch => AppIcons.meal,
+    IntentType.networking => AppIcons.people,
+    IntentType.mentorship => AppIcons.mentorship,
+    IntentType.outing => AppIcons.celebration,
+    IntentType.rideShare => AppIcons.car,
+    IntentType.dating => AppIcons.heart,
   };
 
   // Hosting and joining no longer share one bar (ADR-002 § 4, canonical
@@ -180,11 +195,11 @@ enum IntentType {
 /// a late-night meal from 22:00 to 03:59. Half-open, so 11:00 is lunch and
 /// 18:00 is dinner.
 enum MealSitting {
-  breakfast('BREAKFAST'),
-  lunch('LUNCH'),
-  eveningMeal('EVENING MEAL'),
-  dinner('DINNER'),
-  lateNight('LATE NIGHT MEAL');
+  breakfast('Breakfast'),
+  lunch('Lunch'),
+  eveningMeal('Evening meal'),
+  dinner('Dinner'),
+  lateNight('Late night meal');
 
   const MealSitting(this.label);
 

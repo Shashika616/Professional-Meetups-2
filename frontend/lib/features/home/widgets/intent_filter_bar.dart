@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/intent_type.dart';
-import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_chip.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 /// The single-row, horizontally scrollable intent filter on Home.
 ///
@@ -14,8 +15,19 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 /// the row IS the complete list, and an overflow affordance for a list with
 /// no overflow is just another thing to tap.
 ///
-/// The chip shape is carried over from the deleted browse page's own filter
-/// row, which was already this shape.
+/// # THEY ARE PILLS AGAIN (2026-10 redesign)
+///
+/// These were pills, then became text tabs with an underline, on the
+/// reasoning that "the words are navigation, not buttons, so they carry no
+/// box of their own". That holds on a page whose content is a plain list.
+/// It stopped holding here: Home's cards now carry tags that are
+/// themselves small tinted pills, so an underlined word above a row of
+/// pills read as a different KIND of control than the one it filters, and
+/// the selected state — a 3px bar under one word — was the least visible
+/// thing in a screen full of surfaces.
+///
+/// Pills put the filter in the same visual language as the content, and
+/// the selected one is a filled shape rather than a line.
 ///
 /// # "ALL" IS A REAL OPTION, NOT AN ABSENCE
 ///
@@ -62,7 +74,7 @@ class IntentFilterBar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 20),
         itemCount: options.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 14),
+        separatorBuilder: (context, index) => const SizedBox(width: 7),
         itemBuilder: (context, index) {
           final intent = options[index];
           final isSelected = intent == selected;
@@ -70,88 +82,20 @@ class IntentFilterBar extends StatelessWidget {
           // can already see, and the server redacts per-meetup regardless.
           final locked = intent != null && !intent.canJoin(trustLevel);
 
-          return _FilterChip(
-            key: ValueKey(intent?.name ?? 'all'),
-            label: intent?.label ?? 'ALL',
-            icon: intent == null
-                ? Icons.apps_rounded
-                : (locked ? Icons.lock_outline : intent.icon),
-            selected: isSelected,
-            locked: locked,
-            onTap: () => onSelect(intent),
+          return Padding(
+            // The row is 40 high and the chip is 32: this is what turns
+            // the rest of it into tap area rather than dead space.
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: AppChip(
+              key: ValueKey(intent?.name ?? 'all'),
+              label: intent?.label ?? 'All',
+              icon: intent == null ? AppIcons.grid : intent.iconPath,
+              selected: isSelected,
+              locked: locked,
+              onTap: () => onSelect(intent),
+            ),
           );
         },
-      ),
-    );
-  }
-}
-
-/// One tab: the icon in front of the word, and a short bar under the
-/// chosen one in the accent colour. Text tabs rather than pills, the way
-/// a shop's category row reads: the words are navigation, not buttons, so
-/// they carry no box of their own. The bar is what says which is on. A
-/// locked intent is dimmed with its lock in place of its icon.
-class _FilterChip extends StatelessWidget {
-  const _FilterChip({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.selected,
-    required this.locked,
-    required this.onTap,
-  });
-
-  final String label;
-  final IconData icon;
-  final bool selected;
-  final bool locked;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = AppPalette.brandGreen;
-    final foreground = locked
-        ? AppPalette.textSecondary.withValues(alpha: 0.7)
-        : (selected ? accent : AppPalette.textSecondary);
-
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 15, color: foreground),
-                const SizedBox(width: 6),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                    letterSpacing: 0.6,
-                    color: foreground,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              height: 3,
-              width: selected ? 28 : 0,
-              decoration: BoxDecoration(
-                color: accent,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }

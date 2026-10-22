@@ -61,7 +61,10 @@ type fakeMonolith struct {
 	gotRefreshToken     string
 	gotContextMessage   string
 	gotContactID        string
-	gotLat, gotLng      float64
+	gotLat, gotLng      *float64
+	// UpdateLastKnownLocation still requires a real fix, so it keeps
+	// plain values; only SOS may arrive without one (#78).
+	gotLocationLat, gotLocationLng float64
 
 	// account deletion: what each step returns, and the order they ran in
 	deletableErr error
@@ -134,8 +137,11 @@ func (f *fakeMonolith) RemoveTrustedContact(_ context.Context, userID, contactID
 	return f.err
 }
 
-func (f *fakeMonolith) TriggerSOS(_ context.Context, userID, contextMessage string, lat, lng float64, callerTrustLevel int32) (int32, error) {
-	f.gotUserID, f.gotContextMessage, f.gotLat, f.gotLng = userID, contextMessage, lat, lng
+func (f *fakeMonolith) TriggerSOS(_ context.Context, userID, contextMessage, clientRequestID string, lat, lng *float64, callerTrustLevel int32) (int32, error) {
+	f.gotUserID, f.gotContextMessage = userID, contextMessage
+	// Recorded as pointers so a test can tell "no location" from 0,0
+	// (#78); the existing assertions compare the dereferenced values.
+	f.gotLat, f.gotLng = lat, lng
 	f.gotCallerTrustLevel = callerTrustLevel
 	return 2, f.err
 }
@@ -151,7 +157,7 @@ func (f *fakeMonolith) DeleteAccount(_ context.Context, userID string) error {
 }
 
 func (f *fakeMonolith) UpdateLastKnownLocation(_ context.Context, userID string, lat, lng float64) error {
-	f.gotUserID, f.gotLat, f.gotLng = userID, lat, lng
+	f.gotUserID, f.gotLocationLat, f.gotLocationLng = userID, lat, lng
 	return f.err
 }
 
@@ -742,7 +748,9 @@ func TestTriggerSOS_ForwardsBodyAndTokenIdentity(t *testing.T) {
 	if s.monolith.gotUserID != "user-7" {
 		t.Errorf("user id = %q, want user-7 (from the token)", s.monolith.gotUserID)
 	}
-	if s.monolith.gotContextMessage != "Coffee at 3pm" || s.monolith.gotLat != 6.9271 || s.monolith.gotLng != 79.8612 {
+	if s.monolith.gotContextMessage != "Coffee at 3pm" ||
+		s.monolith.gotLat == nil || *s.monolith.gotLat != 6.9271 ||
+		s.monolith.gotLng == nil || *s.monolith.gotLng != 79.8612 {
 		t.Errorf("forwarded (%q, %v, %v), want the request body's values",
 			s.monolith.gotContextMessage, s.monolith.gotLat, s.monolith.gotLng)
 	}

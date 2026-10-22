@@ -189,7 +189,7 @@ class _MarkInRing extends StatelessWidget {
               ],
             ),
           ),
-          const AppIcon(size: _mark, radius: 14),
+          const BrandMarkTile(size: _mark, radius: 14),
         ],
       ),
     );

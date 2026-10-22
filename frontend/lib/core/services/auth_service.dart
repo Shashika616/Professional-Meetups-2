@@ -54,6 +54,23 @@ abstract interface class AuthService {
   /// flag on its own and the next session is Level 1.
   Future<AuthSession> guestSignup({required bool ageConfirmedOver18});
 
+  /// Finishes what an [AccountClaimRequiredException] started: spends the
+  /// code mailed to that address and returns a session for the account that
+  /// already held it, with the provider just signed in with attached.
+  ///
+  /// Takes only the ticket and the code. The address is inside the ticket,
+  /// signed, so there is nothing here that could point a code earned for
+  /// one mailbox at a different account.
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  });
+
+  /// Sends another code for a claim in progress. Returns the new cooldown
+  /// in seconds; throws [ResendCooldownException] while the previous one is
+  /// still in force.
+  Future<int> resendAccountClaimCode(String ticket);
+
   /// Sends the OTP [loginWithEmail] verifies, as the first step of
   /// passwordless email login (ADR-019 §1) — every return visit sends a
   /// fresh code, there is no stored credential to check. Same convention
@@ -157,10 +174,16 @@ abstract interface class AuthService {
   /// Returns how many trusted contacts were actually alerted — displayed
   /// verbatim, never inferred client-side (the "client never decides, only
   /// displays" principle applies here too).
+  /// [latitude] and [longitude] are NULLABLE (tracker #78). SOS is the
+  /// one feature whose whole purpose is to work when things have gone
+  /// wrong, and it used to refuse to send at all without a GPS fix — so
+  /// being indoors, denying the permission once, or simply waiting out a
+  /// slow read disabled it. Null means "no usable fix": the alert goes
+  /// out anyway and tells the contact the location is unavailable.
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   });
 
   /// The browse screen's on-demand location read (Slice D, ADR-021) — its
@@ -277,6 +300,43 @@ class AccountDeletionBlockedException extends AuthException {
   const AccountDeletionBlockedException(super.message);
 }
 
+/// 409 with `code: account_claim_required` from a federated signup: the
+/// address this provider just verified is already on an account, so no
+/// second one can be made for it (the server's `personal_email` is unique,
+/// case-insensitively).
+///
+/// This is not a failure to show and stop at. It is the start of a
+/// ceremony: a code has already been mailed to [email], and sending it back
+/// with [ticket] hands over the existing account with this provider
+/// attached to it.
+///
+/// Carries nothing about the existing account, because the server sends
+/// nothing about it. The person has proved to Apple, Google or LinkedIn
+/// that they hold this mailbox and nothing more; who else may have used it
+/// is not theirs to be told until they prove they still hold it.
+class AccountClaimRequiredException extends AuthException {
+  const AccountClaimRequiredException({
+    required this.ticket,
+    required this.email,
+    required this.resendAfterSeconds,
+    required String message,
+  }) : super(message);
+
+  /// Opaque. Handed straight back to [AuthService.completeAccountClaim] and
+  /// never parsed here: it is signed server-side, and treating it as
+  /// structured data on this side would invite reading fields out of it
+  /// that the server has not promised.
+  final String ticket;
+
+  /// Where the code went, so the popup can say so. The person's own
+  /// address, out of their own provider token.
+  final String email;
+
+  /// How long before a resend will be accepted, so the popup can disable
+  /// its own control rather than discovering the limit by being refused.
+  final int resendAfterSeconds;
+}
+
 /// Anything else: network failure, unexpected status code, malformed
 /// response.
 class AuthNetworkException extends AuthException {
@@ -321,6 +381,33 @@ class MockAuthService implements AuthService {
       fullName: 'Guest-MockOtter1234',
       profilePhotoUrl: '',
     );
+  }
+
+  /// The mock never produces an [AccountClaimRequiredException], so the only
+  /// way to reach this is a test driving it directly. It returns an ordinary
+  /// session, which is what a successful claim is.
+  @override
+  Future<AuthSession> completeAccountClaim({
+    required String ticket,
+    required String code,
+  }) async {
+    await Future<void>.delayed(latency);
+    return AuthSession(
+      userId: 'mock-user-1',
+      accessToken: 'mock-access-token',
+      refreshToken: 'mock-refresh-token',
+      trustLevel: 1,
+      isNewUser: false,
+      accessTokenExpiresAt: DateTime.now().add(const Duration(minutes: 15)),
+      fullName: 'Mock User',
+      profilePhotoUrl: '',
+    );
+  }
+
+  @override
+  Future<int> resendAccountClaimCode(String ticket) async {
+    await Future<void>.delayed(latency);
+    return 60;
   }
 
   @override
@@ -580,8 +667,8 @@ class MockAuthService implements AuthService {
   @override
   Future<int> triggerSos({
     required String contextMessage,
-    required double latitude,
-    required double longitude,
+    double? latitude,
+    double? longitude,
   }) async {
     await Future<void>.delayed(latency);
     if (_mockTrustedContacts.isEmpty) {

@@ -28,24 +28,47 @@ spec:
         # Raise it only together with a smaller MaxConns or a paid Supabase
         # tier with a higher pooler limit.
         autoscaling.knative.dev/maxScale: "8"
-        # Scale to zero when idle. This is a deliberate cost choice
-        # (2026-09-25), not a default left unexamined.
+        # ONE RESERVED INSTANCE, AND CPU THAT IS ALWAYS THERE.
         #
-        # At "0" you pay only while a request is being served. At "1" a
-        # reserved instance bills continuously at the idle rate, about
-        # US$10-15/mo for this 2 vCPU / 1.5 GiB pair.
+        # Changed from "0" on 2026-10-21 (tracker #77, review N-C1). The
+        # cost reasoning below still holds and is still the reason this is
+        # 1 and not 2; what it missed is that this service is not only a
+        # request handler. It runs background loops: the notification
+        # outbox poller, the lifecycle poller (reminders, auto-close), the
+        # user-deleted purge and the retention sweeps.
         #
-        # What "0" costs instead: the first caller after an idle gap
-        # waits out a cold start (measured 6.2s cold vs 0.27s warm), and
-        # anyone else arriving inside that window is SHED by Cloud Run
-        # with a plain-text 429 "no available instance". That reads like
-        # rate limiting and is not — this app's own limiter answers
-        # {"error":"rate limited"} with a Retry-After header. See §7 of
-        # the runbook before concluding you are being throttled.
+        # Cloud Run gives an idle instance NO CPU unless cpu-throttling is
+        # off, and at minScale 0 there is no instance at all between
+        # requests. Both together meant those loops ran only while someone
+        # happened to be using the app: reminders fired late or not at
+        # all, auto-close left meetups open past their window, and the
+        # account-deletion purge — which has a legal deadline — had an
+        # unbounded one.
         #
-        # Whichever value is chosen, keep it IN THIS FILE. Applying it
-        # with `gcloud run services update --min-instances=N` alone
-        # leaves a manifest that silently reverts it on the next
+        # The driver for those loops is Cloud Scheduler, NOT a reserved
+        # instance: one always-free job calls POST /internal/cron/tick,
+        # which runs every sweep once. See cmd/monolith/cron.go and §10 of
+        # the runbook.
+        #
+        # Keep this at "0". It is a cost guarantee, not a tuning knob:
+        # this project must stay inside Cloud Run's always-free tier
+        # (Shashika, 2026-10-22). At "1" a reserved instance bills
+        # continuously, and adding cpu-throttling "false" bills its CPU at
+        # the always-allocated rate — together about US$120-130/mo for
+        # this 2 vCPU / 1.5 GiB pair, against a free allowance of 180k
+        # vCPU-seconds a month. cmd/monolith/deploy_manifest_test.go
+        # fails if either creeps back.
+        #
+        # The cost of "0" is a cold start for the first caller after an
+        # idle gap (measured 6.2s cold vs 0.27s warm); anyone arriving
+        # inside that window is SHED by Cloud Run with a plain-text 429
+        # "no available instance". That reads like rate limiting and is
+        # not — this app's own limiter answers {"error":"rate limited"}
+        # with a Retry-After header. See §7 of the runbook.
+        #
+        # Keep this value IN THIS FILE. Applying it with
+        # `gcloud run services update --min-instances=N` alone leaves a
+        # manifest that silently reverts it on the next
         # `services replace`.
         autoscaling.knative.dev/minScale: "0"
         run.googleapis.com/cloudsql-instances: project-285b9289-549d-4fef-92c:asia-south1:meetups-db
@@ -69,6 +92,12 @@ spec:
         - name: MONOLITH_SHARED_SECRET
           valueFrom:
             secretKeyRef: { name: internal-grpc-secret, key: latest }
+        # The real client is the LAST X-Forwarded-For entry, which Cloud Run's
+        # proxy appends. Without this the rate limiter keys every user on
+        # that proxy's address: one shared bucket per route for the whole
+        # user base (#81). See middleware.WithTrustedProxyHops.
+        - name: TRUSTED_PROXY_HOPS
+          value: "1"
         resources:
           limits: { memory: 512Mi, cpu: "1" }
         volumeMounts:
@@ -99,6 +128,12 @@ spec:
         env:
         - name: MONOLITH_PORT
           value: "9090"
+        # Where the link texted to a new trusted contact points (#80): the
+        # gateway's public URL, which serves the confirmation page at /c/.
+        # Unset, it defaults to http://localhost:8080 for local stacks, and
+        # every production invitation would be a dead link.
+        - name: PUBLIC_BASE_URL
+          value: "<SERVICE_URL>"
         # REQUIRED at startup, not optional. The plan doc claims these are
         # "deliberately omitted ... fail closed rather than blocking
         # startup" — that is wrong: internal/modules/auth/config/config.go

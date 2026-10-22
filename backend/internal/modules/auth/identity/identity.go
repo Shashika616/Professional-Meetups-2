@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/MicahParks/jwkset"
@@ -102,13 +103,54 @@ type Provider interface {
 // under these exact JSON keys.
 type idTokenClaims struct {
 	Email string `json:"email"`
-	Name  string `json:"name"`
+	// EmailVerified is the provider's own statement that it has checked
+	// this mailbox belongs to this subject. It decides whether the address
+	// is allowed to become an identity anchor, so it is NOT optional:
+	// treating an unverified address as one would let anyone who can put a
+	// string in a provider profile claim somebody else's account.
+	//
+	// Apple is why this is a custom type rather than a bool. Google sends a
+	// JSON boolean; Apple has historically sent the STRING "true" on the
+	// same claim, and a plain `bool` field silently decodes that to false —
+	// which would quietly discard every Apple email instead of failing
+	// loudly.
+	EmailVerified FlexibleBool `json:"email_verified"`
+	Name          string       `json:"name"`
 	// Nonce is the value the client generated for this sign-in attempt and
 	// passed to Apple/Google, echoed back by the provider inside the signed
 	// token. Both providers populate this claim under this exact key when
 	// the client supplies one.
 	Nonce string `json:"nonce"`
 	jwtlib.RegisteredClaims
+}
+
+// FlexibleBool decodes a JSON value that is a boolean in the spec and,
+// from Apple, sometimes the string "true" or "false" instead.
+//
+// Exported because the LinkedIn client needs the same tolerance on the same
+// claim. LinkedIn documents a proper boolean, but the cost of being wrong
+// is asymmetric: a provider that quietly changes shape would stop yielding
+// emails with no error anywhere, and a silently email-less signup is the
+// precise failure this feature exists to remove. Anything
+// else — a number, null, a missing claim — decodes to false, which is the
+// safe direction: an address we cannot prove the provider verified is
+// treated as unverified.
+type FlexibleBool bool
+
+func (b *FlexibleBool) UnmarshalJSON(data []byte) error {
+	switch string(data) {
+	case "true", `"true"`:
+		*b = true
+	case "false", `"false"`, "null":
+		*b = false
+	default:
+		// Not a shape either provider documents. Rather than fail the whole
+		// sign-in over a display-only claim, decode to false: the caller
+		// then treats the email as absent, which costs the user an email
+		// prompt and costs nobody their account.
+		*b = false
+	}
+	return nil
 }
 
 // jwksProvider is the shared verification engine behind AppleProvider and
@@ -220,7 +262,17 @@ func (p *jwksProvider) Verify(_ context.Context, idToken, rawNonce string) (Veri
 		return VerifiedIdentity{}, fmt.Errorf("identity: %s: id_token has no subject", p.name)
 	}
 
-	return VerifiedIdentity{Subject: claims.Subject, Email: claims.Email, Name: claims.Name}, nil
+	// An address the provider has not verified is not returned at all. It
+	// is about to become this account's unique identity anchor (ADR-009),
+	// and an unverified one is just a string the user typed into someone
+	// else's console. Callers see "" and treat the signup as email-less,
+	// exactly as they already must for Apple's later authorizations.
+	email := ""
+	if bool(claims.EmailVerified) {
+		email = NormalizeEmail(claims.Email)
+	}
+
+	return VerifiedIdentity{Subject: claims.Subject, Email: email, Name: claims.Name}, nil
 }
 
 // HashNonce is the one definition of how a raw sign-in nonce maps to the
@@ -234,4 +286,50 @@ func (p *jwksProvider) Verify(_ context.Context, idToken, rawNonce string) (Veri
 func HashNonce(rawNonce string) string {
 	sum := sha256.Sum256([]byte(rawNonce))
 	return hex.EncodeToString(sum[:])
+}
+
+// NormalizeEmail is the single definition of what makes two addresses "the
+// same address" in this system: trimmed, and lowercased.
+//
+// It has to be one function because it is applied in two places that MUST
+// agree — the value written to auth.users.personal_email, and the value
+// looked up when deciding whether an account already exists. If they ever
+// disagreed, "Ada@Gmail.com" would create a second account for someone who
+// already has one, which is the entire failure this is here to prevent.
+//
+// Only case and surrounding space are touched. Gmail's dot-and-plus
+// aliasing is deliberately NOT collapsed: that rule is Gmail's alone, it
+// does not hold for other providers, and applying it would merge two
+// addresses that some other mail host considers genuinely different.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// NormalizePhone folds the ways one phone number gets typed into the one
+// string every budget, cooldown and limiter bucket is keyed on (tracker
+// #82, review finding N-A1).
+//
+// `+94 77 123 4567`, `+94-77-123-4567` and `+94771234567` are the same
+// number to every carrier on earth and were three different OTP budgets
+// here — three sets of five attempts, three cooldowns, three buckets, all
+// delivering to the same handset. Spaces, hyphens, brackets and dots are
+// presentation; they carry no meaning in E.164.
+//
+// Everything else is left exactly as typed, including the leading `+` and
+// every digit. This is a canonicaliser, not a validator and not a
+// formatter: it must never turn one real number into another, so it does
+// not guess country codes, does not strip leading zeros, and does not
+// reject what it does not recognise. Shape checking belongs to the
+// validator that already runs on these paths.
+func NormalizePhone(phone string) string {
+	var b strings.Builder
+	b.Grow(len(phone))
+	for _, r := range strings.TrimSpace(phone) {
+		switch r {
+		case ' ', '\t', '-', '(', ')', '.', ' ':
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

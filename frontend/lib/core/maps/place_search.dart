@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:http/http.dart' as http;
 
@@ -17,6 +18,81 @@ class PlaceResult {
   final String label;
   final double latitude;
   final double longitude;
+}
+
+/// How long any one geocoder request may take before it is abandoned.
+///
+/// These are free, shared, fair-use services and a slow one used to hang
+/// the dropdown open on a spinner with no end: there was no timeout at
+/// all. Ten seconds is past the point where a person has already decided
+/// the feature is broken, so it is the outer bound, not the target.
+const geocoderTimeout = Duration(seconds: 10);
+
+/// Half the side of the box a suggestion search is confined to, in
+/// degrees — about 39km north/south, and the same at Colombo's latitude.
+///
+/// # WHY SUGGESTIONS ARE BOXED AND NOT MERELY BIASED
+///
+/// Photon takes `lat`/`lon` as a *bias*, which in practice it applies
+/// weakly: typing "coffee" with the map on Colombo returned five places
+/// in the United States and Iraq before a single Sri Lankan one. A person
+/// picking somewhere to meet is picking somewhere they can get to, so the
+/// box is a filter, not a hint — and when it catches nothing the search
+/// runs again unbounded, so looking up another city still works.
+const _suggestHalfSpanDegrees = 0.35;
+
+/// Nearest first, with a strong thumb on the scale for a name that
+/// actually matches what was typed.
+///
+/// Distance alone would float an unnamed corner shop above the landmark
+/// someone is typing the name of; relevance alone is what produced the
+/// results-in-Iraq ranking above. So: a result whose name equals the
+/// query, or starts with it, is credited the equivalent of several
+/// kilometres, and everything else sorts by how far away it is.
+List<PlaceResult> rankPlacesByProximity(
+  List<PlaceResult> results,
+  String query,
+  double focusLat,
+  double focusLng,
+) {
+  final q = query.trim().toLowerCase();
+  double score(PlaceResult r) {
+    final name = r.label.split(',').first.trim().toLowerCase();
+    var s = _distanceKm(focusLat, focusLng, r.latitude, r.longitude);
+    if (name == q) {
+      s -= 15;
+    } else if (name.startsWith(q)) {
+      s -= 8;
+    }
+    return s;
+  }
+
+  final ranked = [...results]..sort((a, b) => score(a).compareTo(score(b)));
+  // One row per place. Several branches of the same chain come back with
+  // byte-identical labels ("Barista, Colombo" four times over), which is
+  // a list the user cannot choose from: they all look like the same
+  // place. The nearest of each label survives, which after the sort above
+  // is simply the first.
+  final seen = <String>{};
+  return [
+    for (final r in ranked)
+      if (seen.add(r.label.toLowerCase())) r,
+  ];
+}
+
+/// Great-circle distance in kilometres (haversine).
+double _distanceKm(double lat1, double lng1, double lat2, double lng2) {
+  const earthRadiusKm = 6371.0;
+  double rad(double d) => d * math.pi / 180;
+  final dLat = rad(lat2 - lat1);
+  final dLng = rad(lng2 - lng1);
+  final a =
+      math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.cos(rad(lat1)) *
+          math.cos(rad(lat2)) *
+          math.sin(dLng / 2) *
+          math.sin(dLng / 2);
+  return earthRadiusKm * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
 }
 
 /// Type-ahead suggestions and a direct one-shot search, biased toward a
@@ -77,9 +153,60 @@ class PhotonPlaceSearch implements PlaceSearch {
     required double focusLat,
     required double focusLng,
   }) async {
-    final response = await _get(text, focusLat, focusLng, limit: 6);
-    if (response.statusCode != 200) return const [];
+    // Local first. The over-fetch (12, not 6) is deliberate: the ranking
+    // below reorders and de-duplicates before the list is cut to size, so
+    // it needs more than a screenful to work with.
+    var results = await _suggestWithin(
+      text,
+      focusLat,
+      focusLng,
+      bbox: _bboxAround(focusLat, focusLng),
+    );
+    // An ANSWERED search that found nothing nearby means the person is
+    // looking somewhere else — another city, another country — so ask
+    // again without the box rather than telling them there is no such
+    // place. A failed search (null) is not retried: the service is down,
+    // and a second request to a service that just refused the first is
+    // traffic nobody benefits from.
+    if (results != null && results.isEmpty) {
+      results = await _suggestWithin(text, focusLat, focusLng, bbox: null);
+    }
+    return rankPlacesByProximity(
+      results ?? const [],
+      text,
+      focusLat,
+      focusLng,
+    ).take(6).toList();
+  }
+
+  /// The matches inside [bbox], or null when the service did not answer.
+  Future<List<PlaceResult>?> _suggestWithin(
+    String text,
+    double focusLat,
+    double focusLng, {
+    required String? bbox,
+  }) async {
+    final response = await _get(
+      text,
+      focusLat,
+      focusLng,
+      // Over-fetched on purpose: the ranking reorders and de-duplicates
+      // before the list is cut to size, so it needs more than a
+      // screenful to work with.
+      limit: 12,
+      bbox: bbox,
+    );
+    if (response.statusCode != 200) return null;
     return _parse(response.body);
+  }
+
+  /// `minLon,minLat,maxLon,maxLat`, Photon's order. Fixed to four
+  /// decimals (about 11m, far finer than a 40km box needs) so binary
+  /// floating point does not put `6.550000000000001` in a URL.
+  static String _bboxAround(double lat, double lng) {
+    const d = _suggestHalfSpanDegrees;
+    String f(double v) => v.toStringAsFixed(4);
+    return '${f(lng - d)},${f(lat - d)},${f(lng + d)},${f(lat + d)}';
   }
 
   @override
@@ -107,6 +234,7 @@ class PhotonPlaceSearch implements PlaceSearch {
     double lat,
     double lng, {
     required int limit,
+    String? bbox,
   }) {
     final uri = Uri.parse(_endpoint).replace(
       queryParameters: {
@@ -115,9 +243,12 @@ class PhotonPlaceSearch implements PlaceSearch {
         'lon': '$lng',
         'limit': '$limit',
         'lang': 'en',
+        'bbox': ?bbox,
       },
     );
-    return _client.get(uri, headers: const {'User-Agent': osmUserAgent});
+    return _client
+        .get(uri, headers: const {'User-Agent': osmUserAgent})
+        .timeout(geocoderTimeout);
   }
 
   static List<PlaceResult> _parse(String body) {
@@ -197,10 +328,9 @@ class NominatimPlaceSearch implements PlaceSearch {
         'bounded': '0',
       },
     );
-    final response = await _client.get(
-      uri,
-      headers: const {'User-Agent': osmUserAgent},
-    );
+    final response = await _client
+        .get(uri, headers: const {'User-Agent': osmUserAgent})
+        .timeout(geocoderTimeout);
     if (response.statusCode != 200) return null;
     final decoded = jsonDecode(response.body) as List<dynamic>;
     if (decoded.isEmpty) return null;
@@ -231,11 +361,16 @@ class StadiaPlaceSearch implements PlaceSearch {
     required double focusLat,
     required double focusLng,
   }) async {
-    final response = await _client.get(
-      _uri(_autocomplete, text, focusLat, focusLng),
-    );
+    final response = await _client
+        .get(_uri(_autocomplete, text, focusLat, focusLng))
+        .timeout(geocoderTimeout);
     if (response.statusCode != 200) return const [];
-    return _parse(response.body);
+    return rankPlacesByProximity(
+      _parse(response.body),
+      text,
+      focusLat,
+      focusLng,
+    ).take(6).toList();
   }
 
   @override
@@ -244,9 +379,9 @@ class StadiaPlaceSearch implements PlaceSearch {
     required double focusLat,
     required double focusLng,
   }) async {
-    final response = await _client.get(
-      _uri(_search, text, focusLat, focusLng, size: 1),
-    );
+    final response = await _client
+        .get(_uri(_search, text, focusLat, focusLng, size: 1))
+        .timeout(geocoderTimeout);
     if (response.statusCode != 200) return null;
     final results = _parse(response.body);
     return results.isEmpty ? null : results.first;

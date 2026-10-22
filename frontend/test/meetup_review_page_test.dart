@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+
 import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart';
@@ -9,6 +11,8 @@ import 'package:professional_connections_platform/core/providers/app_providers.d
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/features/meetups/review/experience_scale.dart';
 import 'package:professional_connections_platform/features/meetups/review/meetup_review_page.dart';
+
+import 'support/app_icon_finder.dart';
 
 import 'support/scripted_meetup_service.dart';
 
@@ -53,7 +57,7 @@ Future<void> _openSheetFor(WidgetTester tester, String name) async {
 }
 
 Future<void> _closeSheet(WidgetTester tester) async {
-  await tester.tap(find.text('DONE'));
+  await tester.tap(find.text('Done'));
   await tester.pumpAndSettle();
 }
 
@@ -62,7 +66,7 @@ Future<void> _closeSheet(WidgetTester tester) async {
 /// two the moment a second person is opened.
 Finder _sheetStars() => find.descendant(
   of: find.byType(AppSheet),
-  matching: find.byIcon(Icons.star_outline_rounded),
+  matching: findAppIcon(AppIcons.star),
 );
 
 /// Opens [name], gives them [score] stars, and leaves the sheet open so
@@ -89,7 +93,7 @@ void main() {
 
     // Tapping a disabled NEXT must not advance — otherwise someone lands on
     // a Confirm that can never succeed.
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
     expect(find.text('How was your experience?'), findsOneWidget);
     expect(find.text('Who did you meet?'), findsNothing);
@@ -130,16 +134,16 @@ void main() {
     await tester.pumpAndSettle();
 
     await _pickOverall(tester, ExperienceLevel.good);
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
 
     expect(find.text('Who did you meet?'), findsOneWidget);
     expect(find.text('Grace Hopper'), findsOneWidget);
     expect(find.text('Ada Lovelace'), findsOneWidget);
     // The host is badged so a participant knows who they are rating.
-    expect(find.text('HOST'), findsOneWidget);
+    expect(find.text('Host'), findsOneWidget);
 
-    await tester.tap(find.text('CONFIRM'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
     expect(
       service.submitReviewCallCount,
@@ -150,7 +154,7 @@ void main() {
     // Rate only one of the two, in their own sheet.
     await _scoreInSheet(tester, 'Grace Hopper', 5);
     await _closeSheet(tester);
-    await tester.tap(find.text('CONFIRM'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
     expect(
       service.submitReviewCallCount,
@@ -171,7 +175,7 @@ void main() {
 
     await tester.enterText(find.byType(TextField), 'Great conversation.');
     await _pickOverall(tester, ExperienceLevel.excellent);
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
 
     await _scoreInSheet(tester, 'Grace Hopper', 4);
@@ -182,7 +186,7 @@ void main() {
     await tester.pumpAndSettle();
     await _closeSheet(tester);
 
-    await tester.tap(find.text('CONFIRM'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
 
     expect(service.submitReviewCallCount, 1);
@@ -206,7 +210,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await _pickOverall(tester, ExperienceLevel.good);
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
 
     // Twelve chips opening by default would bury the thing actually being
@@ -228,7 +232,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await _pickOverall(tester, ExperienceLevel.good);
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
     await _scoreInSheet(tester, 'Grace Hopper', 2);
 
@@ -256,7 +260,7 @@ void main() {
     await tester.pumpAndSettle();
     await _closeSheet(tester);
 
-    await tester.tap(find.text('CONFIRM'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
 
     expect(service.submitReviewCallCount, 1);
@@ -285,7 +289,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await _pickOverall(tester, ExperienceLevel.good);
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
     await _scoreInSheet(tester, 'Grace Hopper', 2);
 
@@ -306,7 +310,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await _pickOverall(tester, ExperienceLevel.good);
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
     await _scoreInSheet(tester, 'Grace Hopper', 5);
 
@@ -314,7 +318,7 @@ void main() {
     await _closeSheet(tester);
     // And the rating itself still works, so a missing vocabulary degrades
     // rather than blocking.
-    await tester.tap(find.text('CONFIRM'));
+    await tester.tap(find.text('Confirm'));
     await tester.pumpAndSettle();
     expect(service.submitReviewCallCount, 1);
     expect(service.lastReviewParticipants.single.traits, isEmpty);
@@ -333,10 +337,10 @@ void main() {
 
     await _pickOverall(tester, ExperienceLevel.good);
 
-    expect(find.text('NEXT'), findsOneWidget);
-    expect(find.text('SUBMIT'), findsNothing);
+    expect(find.text('Next'), findsOneWidget);
+    expect(find.text('Submit'), findsNothing);
 
-    await tester.tap(find.text('NEXT'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
 
     expect(find.text('Who did you meet?'), findsOneWidget);
@@ -359,11 +363,11 @@ void main() {
 
     await _pickOverall(tester, ExperienceLevel.okay);
     // There is no second step to offer, so the button says what it does.
-    expect(find.text('SUBMIT'), findsOneWidget);
-    expect(find.text('NEXT'), findsNothing);
+    expect(find.text('Submit'), findsOneWidget);
+    expect(find.text('Next'), findsNothing);
 
-    await tester.ensureVisible(find.text('SUBMIT'));
-    await tester.tap(find.text('SUBMIT'));
+    await tester.ensureVisible(find.text('Submit'));
+    await tester.tap(find.text('Submit'));
     await tester.pumpAndSettle();
 
     expect(service.submitReviewCallCount, 1);
@@ -384,8 +388,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await _pickOverall(tester, ExperienceLevel.good);
-    await tester.ensureVisible(find.text('SUBMIT'));
-    await tester.tap(find.text('SUBMIT'));
+    await tester.ensureVisible(find.text('Submit'));
+    await tester.tap(find.text('Submit'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
@@ -415,13 +419,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('THIS MEETUP WAS CANCELLED BY THE HOST'), findsOneWidget);
+    expect(find.text('This meetup was cancelled by the host'), findsOneWidget);
     expect(find.text('\u201CFamily emergency.\u201D'), findsOneWidget);
     expect(find.text('How was this for you?'), findsOneWidget);
 
     await _pickOverall(tester, ExperienceLevel.bad);
-    await tester.ensureVisible(find.text('NEXT'));
-    await tester.tap(find.text('NEXT'));
+    await tester.ensureVisible(find.text('Next'));
+    await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
 
     expect(find.text('Rate the host'), findsOneWidget);

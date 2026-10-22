@@ -14,7 +14,9 @@ import (
 
 const acceptMeetupRequest = `-- name: AcceptMeetupRequest :one
 UPDATE meetup.meetup_requests SET status = 'accepted', resolved_at = now()
-WHERE meetup.meetup_requests.id = $1 AND meetup.meetup_requests.meetup_id IN (SELECT m.id FROM meetup.meetups m WHERE m.host_user_id = $2)
+WHERE meetup.meetup_requests.id = $1
+  AND meetup.meetup_requests.status = 'pending'
+  AND meetup.meetup_requests.meetup_id IN (SELECT m.id FROM meetup.meetups m WHERE m.host_user_id = $2)
 RETURNING id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_at, withdrawal_note
 `
 
@@ -29,6 +31,23 @@ type AcceptMeetupRequestParams struct {
 // host_user_id column of its own, so this goes through a subquery against
 // meetups, the same relationship the Go check already enforces. The
 // Go-level check stays, this doesn't replace it.
+//
+// `status = 'pending'` added for V-2 (security review 2026-10-01). The
+// comment above used to claim the call site re-checked pending. It did read
+// it — but BEFORE it took the meetup's row lock, so two accepts of the same
+// request both read 'pending', both waited on the lock, and both ran this
+// UPDATE. The second one re-accepted an already-accepted row, and the seat
+// was counted twice: on a capacity-2 meetup with one real acceptance the
+// meetup flipped to 'full' and every other pending request was
+// auto-rejected with a push. The same gap let an accept resurrect a request
+// that had just been rejected or withdrawn.
+//
+// The predicate is what makes that impossible rather than unlikely. The
+// call site now locks the meetup first and re-reads this row FOR UPDATE,
+// so by the time this runs the status it checked is the committed one; this
+// clause is the backstop that holds even if that ordering is ever lost
+// again. Zero rows means "not pending any more", which the repository maps
+// to a conflict.
 func (q *Queries) AcceptMeetupRequest(ctx context.Context, arg AcceptMeetupRequestParams) (MeetupMeetupRequest, error) {
 	row := q.db.QueryRow(ctx, acceptMeetupRequest, arg.ID, arg.HostUserID)
 	var i MeetupMeetupRequest
@@ -131,7 +150,14 @@ func (q *Queries) CountAcceptedRequests(ctx context.Context, meetupID uuid.UUID)
 
 const createMeetupRequest = `-- name: CreateMeetupRequest :one
 INSERT INTO meetup.meetup_requests (meetup_id, requester_id)
-VALUES ($1, $2)
+SELECT $1::uuid, $2::uuid
+WHERE NOT EXISTS (
+    SELECT 1
+      FROM meetup.meetup_requests prior
+     WHERE prior.meetup_id = $1::uuid
+       AND prior.requester_id = $2::uuid
+       AND prior.status = 'rejected'
+)
 RETURNING id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_at, withdrawal_note
 `
 
@@ -140,6 +166,33 @@ type CreateMeetupRequestParams struct {
 	RequesterID uuid.UUID `json:"requester_id"`
 }
 
+// One live request per person per meetup, and no second ask after a
+// rejection (tracker #79, plan decision D1).
+//
+// Two different rules, enforced in two different places, because they are
+// not the same shape:
+//
+//   - "one live request" is the partial unique index from migration 0019
+//     — (meetup_id, requester_id) WHERE status IN ('pending','accepted').
+//     A second live row raises 23505, which the caller maps to
+//     ErrConflict. The index is the right home for it: it holds against
+//     concurrent inserts, which no application check can.
+//
+//   - "a rejected user may not re-request, a withdrawn user may" is the
+//     NOT EXISTS below. It cannot be an index: expressing it would mean
+//     including 'rejected' in the uniqueness, which is precisely the
+//     mistake 0019 removes — it is what made the host's reject and the
+//     final-seat accept collide with an old rejected row.
+//
+// Conditional INSERT rather than SELECT-then-INSERT so the check and the
+// write are one statement. Zero rows back means "previously rejected",
+// which the caller separates from a plain 23505 because the two want
+// different words: one is "the host already said no", the other is "you
+// have already asked".
+//
+// Withdrawing and asking again stays open on purpose. Backing out of a
+// meetup is not misconduct and should not be a permanent bar, and the
+// host sees the withdrawal in the request's own history either way.
 func (q *Queries) CreateMeetupRequest(ctx context.Context, arg CreateMeetupRequestParams) (MeetupMeetupRequest, error) {
 	row := q.db.QueryRow(ctx, createMeetupRequest, arg.MeetupID, arg.RequesterID)
 	var i MeetupMeetupRequest
@@ -166,6 +219,36 @@ SELECT id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_
 // use GetMeetupRequestWithRequesterInfoByID instead.
 func (q *Queries) GetMeetupRequestByID(ctx context.Context, id uuid.UUID) (MeetupMeetupRequest, error) {
 	row := q.db.QueryRow(ctx, getMeetupRequestByID, id)
+	var i MeetupMeetupRequest
+	err := row.Scan(
+		&i.ID,
+		&i.MeetupID,
+		&i.RequesterID,
+		&i.Status,
+		&i.AutoRejected,
+		&i.CreatedAt,
+		&i.ResolvedAt,
+		&i.WithdrawalNote,
+	)
+	return i, err
+}
+
+const getMeetupRequestByIDForUpdate = `-- name: GetMeetupRequestByIDForUpdate :one
+SELECT id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_at, withdrawal_note FROM meetup.meetup_requests WHERE id = $1 FOR UPDATE
+`
+
+// The request row, locked until the transaction ends (V-2).
+//
+// Taken AFTER the meetup's own lock, never before: meetups-then-requests is
+// the order every transaction that touches both uses, and taking them the
+// other way round is how two transactions end up each holding what the
+// other needs.
+//
+// This is what makes the accept path's status check true rather than
+// hopeful. The unlocked read it replaced happened before the meetup lock,
+// so a concurrent accept could resolve the row in the window between.
+func (q *Queries) GetMeetupRequestByIDForUpdate(ctx context.Context, id uuid.UUID) (MeetupMeetupRequest, error) {
+	row := q.db.QueryRow(ctx, getMeetupRequestByIDForUpdate, id)
 	var i MeetupMeetupRequest
 	err := row.Scan(
 		&i.ID,
@@ -354,10 +437,55 @@ func (q *Queries) RejectMeetupRequest(ctx context.Context, arg RejectMeetupReque
 	return i, err
 }
 
+const reopenMeetupIfSeatFreed = `-- name: ReopenMeetupIfSeatFreed :execrows
+UPDATE meetup.meetups m
+SET status = 'open'
+WHERE m.id = $1
+  AND m.status = 'full'
+  AND (
+    SELECT count(*)
+    FROM meetup.meetup_requests r
+    WHERE r.meetup_id = m.id AND r.status = 'accepted'
+  ) < m.capacity
+`
+
+// A seat came back, so the meetup is joinable again (tracker #85,
+// finding N-B3).
+//
+// A meetup goes 'full' when the last seat is taken, and nothing ever put
+// it back: an accepted participant withdrawing left a meetup with a free
+// seat that still said 'full', dropped out of browse, and refused new
+// requests. The seat was simply lost, permanently, and the host had no
+// way to get it back.
+//
+// Runs in the withdrawal's own transaction, after the row above and
+// under the meetup lock that transaction already holds, so the count
+// below cannot race a concurrent accept: the accept path takes the same
+// lock before it decides whether the meetup is full.
+//
+// Conditional in one statement rather than read-then-write, and
+// re-checking status = 'full' inside it, so a meetup that is already
+// 'open' (the withdrawer was merely pending) is untouched and reports
+// zero rows.
+func (q *Queries) ReopenMeetupIfSeatFreed(ctx context.Context, meetupID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, reopenMeetupIfSeatFreed, meetupID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const withdrawMeetupRequest = `-- name: WithdrawMeetupRequest :one
-UPDATE meetup.meetup_requests SET status = 'withdrawn', resolved_at = now(), withdrawal_note = $2
-WHERE id = $1 AND requester_id = $3 AND status IN ('pending', 'accepted')
-RETURNING id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_at, withdrawal_note
+UPDATE meetup.meetup_requests r
+SET status = 'withdrawn', resolved_at = now(), withdrawal_note = $2
+FROM meetup.meetups m
+WHERE r.id = $1
+  AND r.requester_id = $3
+  AND r.status IN ('pending', 'accepted')
+  AND m.id = r.meetup_id
+  AND m.status IN ('open', 'full')
+  AND m.window_end > now()
+RETURNING r.id, r.meetup_id, r.requester_id, r.status, r.auto_rejected, r.created_at, r.resolved_at, r.withdrawal_note
 `
 
 type WithdrawMeetupRequestParams struct {
@@ -371,13 +499,32 @@ type WithdrawMeetupRequestParams struct {
 // *after* being accepted is exactly the case the withdrawal-rating path
 // exists for ("the meetup continues for everyone else," ADR-020's own
 // framing — only meaningful if they'd actually been accepted into it).
-// note is optional (may be NULL). Does not touch the meetup's own
-// capacity/status — a freed-up slot on a full meetup reopening is a
-// separate, not-yet-built concern. requester_id scoping (Round 11,
+// note is optional (may be NULL). requester_id scoping (Round 11,
 // docs/00-project/action-tracker.md § 4b-26) is defense-in-depth
 // alongside the existing Go-level check in service.go's WithdrawRequest —
 // scoped to the *requester*, not the host, unlike Accept/Reject/Cancel.
 // The Go-level check stays, this doesn't replace it.
+//
+// # THE MEETUP HAS TO STILL BE RUNNING (tracker #84, finding N-B2)
+//
+// The join to meetups and the two conditions on it are the fix. Without
+// them an accepted participant could withdraw from a meetup that had
+// already ENDED or been CANCELLED, which is not "backing out" — it is
+// editing history after the fact, and it had a real consequence: the
+// people who were there lose the right to rate them (eligibility is
+// keyed on being an accepted participant), while the host keeps it
+// through the separate withdrawal-rating path. Someone could attend,
+// behave badly and then delete everyone's ability to say so.
+//
+// 'open' and 'full' are the live states; 'cancelled' and 'completed' are
+// over. window_end > now() additionally catches the meetup that has
+// physically happened but whose auto-close has not run yet, which is
+// exactly the window the abuse above lives in.
+//
+// A request that is live but whose meetup is not returns zero rows,
+// which the caller already maps to ErrConflict — the same answer an
+// already-resolved request gets, and the right one: the state the caller
+// believed in is gone.
 func (q *Queries) WithdrawMeetupRequest(ctx context.Context, arg WithdrawMeetupRequestParams) (MeetupMeetupRequest, error) {
 	row := q.db.QueryRow(ctx, withdrawMeetupRequest, arg.ID, arg.WithdrawalNote, arg.RequesterID)
 	var i MeetupMeetupRequest

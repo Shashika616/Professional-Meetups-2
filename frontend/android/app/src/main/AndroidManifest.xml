@@ -5,6 +5,14 @@
          manifest declaration is still required. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Declared HERE, not only in the debug and profile manifests
+         (tracker #94, review finding N-D7). The release build reached the
+         network anyway, but only because a plugin's own manifest happened
+         to merge INTERNET in — an accident of the dependency list, not a
+         decision. Remove that plugin and the release build silently loses
+         networking while debug keeps working, which is the worst shape a
+         bug can have. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- android:icon is @mipmap/ic_launcher, NOT @drawable/app_icon.
          The generated project pointed it at a plain drawable, which meant
          every density bucket in mipmap-* and the adaptive icon in
@@ -14,9 +22,22 @@
 
          XML comments cannot sit inside a start tag, which is why this one is
          here rather than beside the attribute it describes. -->
+    <!-- allowBackup=false and the extraction rules below are tracker #94
+         (review finding N-D4). Android's default is to back the app's
+         private data up to Google Drive and to transfer it device to
+         device. This app's private data includes the secure-storage
+         session and trusted-contact details, so the default quietly
+         copies authentication material off the device to a place with a
+         different threat model and a different retention policy than the
+         one the app was designed against. dataExtractionRules says the
+         same thing in the Android 12+ form, which supersedes
+         allowBackup for cloud backup and D2D transfer. -->
     <application
         android:label="TieHere"
         android:name="${applicationName}"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher">
         <activity

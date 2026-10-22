@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/utils/debug_log.dart';
 import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/app_back_button.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/cafe_scene.dart';
 import 'package:professional_connections_platform/core/widgets/signing_in_overlay.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
@@ -100,6 +103,45 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     });
   }
 
+  /// The steps in the order they are shown. [_goBack] reads a predecessor
+  /// off this rather than naming one per step, so a third step added later
+  /// cannot quietly become another place with no way out.
+  static const List<_OnboardingStep> _sequence = [
+    _OnboardingStep.ageConfirmation,
+    _OnboardingStep.chooseMethod,
+  ];
+
+  /// The back control and the system back gesture, which have to do the
+  /// same thing.
+  ///
+  /// # WHY THIS EXISTS
+  ///
+  /// This flow had no back affordance at all. `_step` only ever moved
+  /// forward, and the Scaffold had no AppBar, so a user who confirmed
+  /// their age and then decided they did not want to sign up yet had
+  /// nothing to tap: on iOS, where the root route has no back gesture,
+  /// the only way out of the method picker was to kill the app.
+  void _goBack() {
+    // A sign-in is in flight. SigningInOverlay is already covering the
+    // buttons underneath, and leaving now would strand the user on
+    // LandingPage while a session was still materialising behind it.
+    if (_busy) return;
+    final index = _sequence.indexOf(_step);
+    if (index <= 0) {
+      Navigator.pop(context);
+      return;
+    }
+    setState(() {
+      _step = _sequence[index - 1];
+      // The attestation is dropped on the way back because the checkbox
+      // is dropped too: AgeConfirmationStep's State leaves the tree with
+      // it, so the box the user returns to is unchecked. Keeping this true
+      // would mean sending an attestation that the screen in front of the
+      // user says they have not given.
+      if (_step == _OnboardingStep.ageConfirmation) _ageConfirmed = false;
+    });
+  }
+
   // The provider buttons (Apple/Google/LinkedIn) live in
   // SocialSignInSection, shared with the sign-in page. Sign-up and sign-in
   // are the same server call (resolve-or-create), so the only thing this
@@ -168,7 +210,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     // AuthException.message is safe by construction and worth keeping —
     // it is the same string the toast below shows the user.
     final safeMessage = error is AuthException ? error.message : '';
-    debugPrint('$source failed: ${error.runtimeType} $safeMessage');
+    debugLog('$source failed: ${error.runtimeType} $safeMessage');
     if (!mounted) return;
     // A cancellation (backed out of the provider's picker, or closed the
     // browser without finishing LinkedIn) isn't really an "error" — a
@@ -244,20 +286,50 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
 
   @override
   Widget build(BuildContext context) {
-    // One page-level loader for every way in (provider, guest): the
-    // buttons underneath stop taking taps and stop competing to spin.
-    return SigningInOverlay(
-      busy: _busy,
-      message: 'Setting up your account',
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: AppBackground(
-          child: switch (_step) {
-            _OnboardingStep.ageConfirmation => AgeConfirmationStep(
-              onContinue: _onAgeConfirmed,
+    final index = _sequence.indexOf(_step);
+    // The system back gesture gets exactly the behaviour the arrow has:
+    // step back inside the flow while there is a step to go back to, and
+    // leave the flow only from the first one. Popping is also refused
+    // while a sign-in is in flight, for the reason in [_goBack].
+    //
+    // onPopInvokedWithResult, not onPopInvoked: the latter is deprecated
+    // in this SDK (Flutter 3.47.0) and WillPopScope is gone entirely —
+    // same shape as schedule_flow.dart, which solves the same problem.
+    return PopScope<void>(
+      canPop: !_busy && index == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _goBack();
+      },
+      // One page-level loader for every way in (provider, guest): the
+      // buttons underneath stop taking taps and stop competing to spin.
+      child: SigningInOverlay(
+        busy: _busy,
+        message: 'Setting up your account',
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: AppBackground(
+            // The bar sits OUTSIDE the switch, above whichever step is
+            // showing, so there is exactly one of it and no step can be
+            // added without it. Each step still wraps itself in its own
+            // SafeArea for when it is used on its own; nested inside this
+            // one those see zero insets and cost nothing.
+            child: SafeArea(
+              child: Column(
+                children: [
+                  _OnboardingBackBar(onBack: _busy ? null : _goBack),
+                  Expanded(
+                    child: switch (_step) {
+                      _OnboardingStep.ageConfirmation => AgeConfirmationStep(
+                        onContinue: _onAgeConfirmed,
+                      ),
+                      _OnboardingStep.chooseMethod => _chooseMethodStep(),
+                    },
+                  ),
+                ],
+              ),
             ),
-            _OnboardingStep.chooseMethod => _chooseMethodStep(),
-          },
+          ),
         ),
       ),
     );
@@ -326,8 +398,8 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             // controls; only one tier looks like the default.
             SecondaryButton(
               key: const Key('signUpWithEmail'),
-              label: 'SIGN UP WITH EMAIL',
-              icon: Icons.mail_outline_rounded,
+              label: 'Sign up with email',
+              icon: AppIcons.mail,
               height: 52,
               color: AppPalette.candyBlue,
               borderColor: AppPalette.candyBlue.withValues(alpha: 0.55),
@@ -336,8 +408,8 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
             const SizedBox(height: 10),
             SecondaryButton(
               key: const Key('continueAsGuest'),
-              label: 'CONTINUE AS GUEST',
-              icon: Icons.explore_outlined,
+              label: 'Continue as guest',
+              icon: AppIcons.explore,
               height: 52,
               color: AppPalette.textPrimary,
               onPressed: _busy ? null : _continueAsGuest,
@@ -400,6 +472,31 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
           ),
           const SizedBox(height: 8),
         ],
+      ),
+    );
+  }
+}
+
+/// The back arrow for [OnboardingFlow], shared by both of its steps.
+///
+/// A null [onBack] greys it out. That is the state while a sign-in is in
+/// flight: SigningInOverlay covers the sign-in buttons but not this, so
+/// without that it would be the one live control on a busy screen.
+class _OnboardingBackBar extends StatelessWidget {
+  const _OnboardingBackBar({required this.onBack});
+
+  final VoidCallback? onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 4, 0, 0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        // AppBackButton, not an inline icon: this used to hardcode the iOS
+        // chevron, so an Android user saw a different back arrow here than
+        // on every AppBar screen in the app.
+        child: AppBackButton(onPressed: onBack),
       ),
     );
   }

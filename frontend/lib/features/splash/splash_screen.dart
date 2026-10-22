@@ -71,7 +71,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const AppIcon(size: 170, radius: 40, glow: true),
+                    const BrandMarkTile(size: 170, radius: 40, glow: true),
                     const SizedBox(height: 30),
                     // The wordmark, set exactly as the landing hero and the
                     // brand sheet set it - mixed case, "Here" in the brand
@@ -131,7 +131,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
                           text: 'From ',
                           style: TextStyle(
                             fontSize: 11,
-                            letterSpacing: 1.4,
+                            letterSpacing: 0.3,
                             color: AppPalette.textSecondary.withValues(
                               alpha: 0.75,
                             ),

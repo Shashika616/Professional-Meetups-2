@@ -96,6 +96,9 @@ SELECT
 FROM meetup.meetup_feedback f
 LEFT JOIN meetup.user_display_cache u ON u.user_id = f.user_id
 WHERE f.meetup_id = ANY($1::uuid[])
+  -- Only a finished review is public (#90). A row can exist, and carry
+  -- text, before its author ever completed the review.
+  AND f.review_completed_at IS NOT NULL
   AND f.notes IS NOT NULL AND btrim(f.notes) <> ''
 ORDER BY f.meetup_id, f.review_completed_at
 `

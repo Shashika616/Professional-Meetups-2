@@ -78,12 +78,12 @@ class _JoinConfirmationSheetState
             // the weight: the intent in brand green, the window in the
             // primary colour, both bold.
             Text(
-              'YOUR HOST',
+              'Your host',
               style: TextStyle(
                 color: AppPalette.textSecondary,
                 fontSize: 11.5,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1.8,
+                letterSpacing: 0.3,
               ),
             ),
             const SizedBox(height: 6),
@@ -98,7 +98,7 @@ class _JoinConfirmationSheetState
                         color: AppPalette.brandGreen,
                         fontSize: 13.5,
                         fontWeight: FontWeight.w800,
-                        letterSpacing: 1.4,
+                        letterSpacing: 0.3,
                       ),
                     ),
                     TextSpan(
@@ -173,14 +173,14 @@ class _JoinConfirmationSheetState
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   PrimaryButton(
-                    label: 'CONFIRM YOUR INTEREST',
+                    label: 'Confirm your interest',
                     onPressed: () => Navigator.of(context).pop(true),
                   ),
                   const SizedBox(height: 6),
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(false),
                     child: Text(
-                      'NOT NOW',
+                      'Not now',
                       style: TextStyle(
                         color: AppPalette.textSecondary,
                         fontSize: 11,

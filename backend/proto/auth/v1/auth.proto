@@ -107,6 +107,26 @@ service AuthService {
   rpc StartEmailLogin(StartVerificationRequest) returns (StartVerificationResponse);
   rpc CompleteEmailLogin(VerifyCodeRequest) returns (SessionResponse);
 
+  // Claiming an account that already holds the caller's verified address.
+  //
+  // CompleteFederatedSignup and CompleteLinkedInOnboarding answer
+  // ALREADY_EXISTS with an AccountClaimRequired detail when the provider's
+  // verified email is already on an account (migration 0017 made
+  // lower(personal_email) unique, so the second account cannot be created).
+  // A code goes to that address as part of the same answer, so the app's
+  // popup opens with one already waiting rather than asking for it.
+  //
+  // CompleteAccountClaim spends that code and returns a session for the
+  // EXISTING account, with the new provider attached so the next sign-in
+  // resolves straight through. ResendAccountClaimCode sends another, under
+  // the same one-minute cooldown every other code send obeys.
+  //
+  // Both take the opaque ticket rather than an email: the address and the
+  // identity to attach are inside it, signed, so a code earned for one
+  // address cannot be pointed at a different account.
+  rpc CompleteAccountClaim(CompleteAccountClaimRequest) returns (SessionResponse);
+  rpc ResendAccountClaimCode(ResendAccountClaimCodeRequest) returns (StartVerificationResponse);
+
   // Rotates a refresh token for a new access/refresh token pair. The
   // presented refresh token is invalidated as part of this call, whether or
   // not it was already valid — see ADR-009 on rotation-as-theft-detection.
@@ -174,6 +194,12 @@ service AuthService {
   // Dispatch — a trusted contact isn't necessarily a registered app user).
   // Rejects with InvalidArgument if the caller has zero trusted contacts.
   rpc TriggerSOS(TriggerSOSRequest) returns (TriggerSOSResponse);
+  // ConfirmTrustedContact records a contact's own consent, from the link
+  // texted to them when they were added (#80). The ONE RPC here with no
+  // caller user: the gateway's public confirmation page calls it, and the
+  // single-use token is the proof. NotFound for a token that is unknown,
+  // expired or already used, deliberately not distinguished.
+  rpc ConfirmTrustedContact(ConfirmTrustedContactRequest) returns (ConfirmTrustedContactResponse);
 }
 
 // IdentityProviderProto — LINKEDIN is valid for LinkIdentityRequest (the
@@ -364,6 +390,43 @@ message StartVerificationResponse {
   int32 resend_after_seconds = 1;
 }
 
+// AccountClaimRequired rides on the ALREADY_EXISTS status the two federated
+// signup RPCs return when the provider's verified address is already on an
+// account — a status detail rather than a response field, because no
+// session was issued and the call did not succeed. Same shape as
+// meetup.v1's ScheduleConflict, for the same reason: the app needs more
+// than a sentence to show a usable next step.
+//
+// WHAT IS DELIBERATELY NOT IN HERE: anything about the existing account. No
+// name, no photo, no which provider created it, no when. The caller has
+// proved control of this mailbox to their identity provider and nothing
+// more, so they are told that an account exists for their own address and
+// are given a way to prove they still hold it. Everything else would be a
+// statement about a person who may not be them.
+message AccountClaimRequired {
+  // Opaque to the client, which only hands it back. It is an HMAC-signed
+  // {email, provider, subject, expiry} so the server does not have to
+  // remember a pending claim, and so a client cannot move a code onto a
+  // different address.
+  string ticket = 1;
+  // The address the code went to — the caller's own, out of their own
+  // provider token. The popup needs it to say where to look.
+  string email = 2;
+  // Cooldown before ResendAccountClaimCode will send another, so the popup
+  // can disable its own resend control instead of discovering the limit by
+  // being refused.
+  int32 resend_after_seconds = 3;
+}
+
+message CompleteAccountClaimRequest {
+  string ticket = 1;
+  string code = 2;
+}
+
+message ResendAccountClaimCodeRequest {
+  string ticket = 1;
+}
+
 message VerifyCodeRequest {
   string user_id = 1;
   VerificationPurpose purpose = 2;
@@ -492,6 +555,19 @@ message TrustedContactResponse {
   string phone_number = 3;
   string email = 4;
   int64 created_at_unix_seconds = 5;
+  // "confirmed", "pending" or "expired" (#80). Only a confirmed contact is
+  // alerted. A new field, so app builds that predate it simply ignore it.
+  string status = 6;
+}
+
+message ConfirmTrustedContactRequest {
+  string token = 1;
+}
+
+message ConfirmTrustedContactResponse {
+  // Whose emergency contact the person confirming has become, for the
+  // confirmation page.
+  string requester_name = 1;
 }
 
 message ListTrustedContactsRequest {
@@ -514,10 +590,31 @@ message RemoveTrustedContactResponse {
 message TriggerSOSRequest {
   string user_id = 1;         // set by the gateway from the verified JWT
   string context_message = 2; // optional — meetup title/location/time, or empty
-  double latitude = 3;
-  double longitude = 4;
+  // OPTIONAL, with explicit presence (tracker #78, review finding N-D2).
+  //
+  // These were plain doubles, which in proto3 have no presence: 0,0 is a
+  // real coordinate (in the Gulf of Guinea) and is indistinguishable from
+  // "not supplied". The client worked around that by REFUSING TO SEND AT
+  // ALL until it had a GPS fix — so SOS, the one feature whose whole
+  // purpose is to work when things have gone wrong, was blocked by being
+  // indoors, by a denied permission, and by a slow fix.
+  //
+  // `optional` on a proto3 scalar generates a pointer in Go and a
+  // presence bit on the wire. Field numbers and types are unchanged, so
+  // this is wire-compatible in both directions: an old client's value
+  // still decodes, and a new client omitting them is read as absent
+  // rather than as the equator.
+  //
+  // An alert without coordinates still goes out. It says the location is
+  // unavailable, which is strictly better than no alert at all.
+  optional double latitude = 3;
+  optional double longitude = 4;
   // ADR-003 — see AddTrustedContactRequest.caller_trust_level.
   int32 caller_trust_level = 5;
+  // The same for an attempt and its automatic retry, so the retry reports
+  // the first attempt's outcome instead of alerting everyone twice. Empty
+  // from app builds that predate it, which are not deduplicated.
+  string client_request_id = 6;
 }
 
 message TriggerSOSResponse {

@@ -67,13 +67,13 @@ void main() {
       'way out', (tester) async {
     await _pumpAndOpen(tester, _conflict(isHostedByMe: true));
 
-    expect(find.text('ONE MEETUP AT A TIME'), findsOneWidget);
+    expect(find.text('One meetup at a time'), findsOneWidget);
     expect(
       find.text("You're already hosting a meetup at that time"),
       findsOneWidget,
     );
-    expect(find.text('YOU HOSTED'), findsNothing);
-    expect(find.text("YOU'RE HOSTING"), findsOneWidget);
+    expect(find.text('You hosted'), findsNothing);
+    expect(find.text("You're hosting"), findsOneWidget);
     expect(find.text('Barefoot Cafe'), findsOneWidget);
     expect(find.textContaining('5:00 - 6:30 PM'), findsOneWidget);
     expect(
@@ -114,20 +114,20 @@ void main() {
   testWidgets('OPEN THAT MEETUP closes the sheet and opens the detail page '
       'for the meetup in the way', (tester) async {
     await _pumpAndOpen(tester, _conflict(isHostedByMe: true));
-    await tester.tap(find.text('OPEN THAT MEETUP'));
+    await tester.tap(find.text('Open that meetup'));
     await tester.pumpAndSettle();
 
-    expect(find.text('ONE MEETUP AT A TIME'), findsNothing);
+    expect(find.text('One meetup at a time'), findsNothing);
     final page = tester.widget<MeetupDetailPage>(find.byType(MeetupDetailPage));
     expect(page.meetupId, 'busy-1');
   });
 
   testWidgets("I'LL WAIT just closes the sheet", (tester) async {
     await _pumpAndOpen(tester, _conflict(isHostedByMe: true));
-    await tester.tap(find.text("I'LL WAIT"));
+    await tester.tap(find.text("I'll wait"));
     await tester.pumpAndSettle();
 
-    expect(find.text('ONE MEETUP AT A TIME'), findsNothing);
+    expect(find.text('One meetup at a time'), findsNothing);
     expect(find.byType(MeetupDetailPage), findsNothing);
   });
 }

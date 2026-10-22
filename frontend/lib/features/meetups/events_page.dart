@@ -9,6 +9,8 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
+import 'package:professional_connections_platform/core/widgets/app_tag.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/paginated_meetup_list.dart';
@@ -175,11 +177,11 @@ class _EventsPageState extends ConsumerState<EventsPage>
         child: Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
-            title: const Text('EVENTS'),
+            title: const Text('Events'),
             bottom: const TabBar(
               tabs: [
-                Tab(text: 'My Meetings'),
-                Tab(text: 'Requested Meetings'),
+                Tab(text: 'My meetings'),
+                Tab(text: 'Requested meetings'),
               ],
             ),
           ),
@@ -212,18 +214,14 @@ class _EventsPageState extends ConsumerState<EventsPage>
                   initialHasMore: result.hostedHasMore,
                   emptyState: EmptyStateDeck(
                     title: 'Nothing on your calendar yet',
-                    message:
-                        'Meetups you host show up here, with the people who '
-                        'asked to join. Put the first one on the calendar.',
+                    message: 'Meetups you host show up here.',
                     scenes: EmptyDeckScenes.meetups,
-                    actionLabel: 'HOST A MEETUP',
+                    actionLabel: 'Host a meetup',
                     onAction: () => _hostMeetup(context, ref),
                   ),
                   historyEmptyState: const EmptyStateDeck(
                     title: 'No past meetups yet',
-                    message:
-                        'Once a meetup you hosted has ended, it moves here '
-                        'so you can look back on it.',
+                    message: 'Meetups you hosted move here once they end.',
                     scenes: EmptyDeckScenes.meetups,
                   ),
                   // A finished meetup goes to the same past-meetup view a
@@ -254,8 +252,7 @@ class _EventsPageState extends ConsumerState<EventsPage>
                   emptyState: const EmptyStateDeck(
                     title: 'No requests yet',
                     message:
-                        'Meetups you ask to join show up here while the host '
-                        'decides. Find one on Home under Happening Soon.',
+                        'Meetups you ask to join show up here while the host decides.',
                     scenes: EmptyDeckScenes.requests,
                   ),
                   historyEmptyState: const EmptyStateDeck(
@@ -301,25 +298,50 @@ class _MyMeetupsSkeleton extends StatelessWidget {
       itemCount: 3,
       itemBuilder: (context, index) => Padding(
         padding: const EdgeInsets.only(bottom: 14),
+        // Traced from _MeetupCard above: same surface radius, same
+        // padding, and the 38px intent tile that card leads with. The
+        // placeholder drifted when the card lost its left bar and went up
+        // to radius 20, and a skeleton that no longer matches its card is
+        // just a differently-shaped flash.
         child: FlatCard(
-          radius: 12,
+          radius: 20,
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const SkeletonBox(width: 70, height: 11, opacity: 0.08),
+                  const SkeletonBox(width: 38, height: 38, radius: 13),
+                  const SizedBox(width: 10),
+                  const SkeletonBox(width: 96, height: 12, opacity: 0.08),
                   const Spacer(),
-                  const SkeletonBox(width: 28, height: 16, radius: 8),
+                  const SkeletonBox(width: 62, height: 20, radius: 10),
                 ],
               ),
-              const SizedBox(height: 10),
-              const SkeletonBox(width: 100, height: 15, opacity: 0.08),
-              const SizedBox(height: 6),
-              const SkeletonBox(width: 140, height: 12),
-              const SizedBox(height: 10),
-              const SkeletonBox(width: 90, height: 11),
+              const SizedBox(height: 14),
+              // Time, then the address line with its pin.
+              const SkeletonBox(width: 150, height: 15, opacity: 0.08),
+              const SizedBox(height: 8),
+              const SkeletonBox(width: 210, height: 11),
+              const SizedBox(height: 12),
+              // The two tags.
+              Row(
+                children: const [
+                  SkeletonBox(width: 86, height: 24, radius: 12),
+                  SizedBox(width: 8),
+                  SkeletonBox(width: 70, height: 24, radius: 12),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Divider(height: 1, color: AppPalette.hairline),
+              const SizedBox(height: 12),
+              Row(
+                children: const [
+                  SkeletonBox(width: 58, height: 11),
+                  Spacer(),
+                  SkeletonBox(width: 92, height: 11),
+                ],
+              ),
             ],
           ),
         ),
@@ -549,7 +571,7 @@ class _SubTabSelectorState extends State<_SubTabSelector> {
           children: [
             Expanded(
               child: _SubTabButton(
-                icon: Icons.event_available_outlined,
+                icon: AppIcons.calendarCheck,
                 label: 'Open meetups',
                 selected: index == 0,
                 onTap: () => widget.controller.animateTo(0),
@@ -557,7 +579,7 @@ class _SubTabSelectorState extends State<_SubTabSelector> {
             ),
             Expanded(
               child: _SubTabButton(
-                icon: Icons.history_rounded,
+                icon: AppIcons.history,
                 label: 'History',
                 selected: index == 1,
                 onTap: () => widget.controller.animateTo(1),
@@ -585,7 +607,7 @@ class _SubTabButton extends StatelessWidget {
     required this.onTap,
   });
 
-  final IconData icon;
+  final String icon;
   final String label;
   final bool selected;
   final VoidCallback onTap;
@@ -622,7 +644,7 @@ class _SubTabButton extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 15, color: foreground),
+              AppIcon(icon, size: 15, color: foreground),
               const SizedBox(width: 7),
               // Flexible, not a bare Text: "Open meetups" is the longer of
               // the two and the pills are equal width, so on a narrow
@@ -693,13 +715,13 @@ class _MyMeetupTile extends StatelessWidget {
   ({String label, Color color})? _outcome() {
     if (!_isFinished(meetup)) return null;
     if (meetup.status == MeetupStatus.cancelled) {
-      return (label: 'CANCELLED', color: AppPalette.cancelled);
+      return (label: 'Cancelled', color: AppPalette.cancelled);
     }
     if (!meetup.isHostedByMe &&
         meetup.myRequestStatus == MeetupRequestStatus.withdrawn) {
-      return (label: 'WITHDRAWN', color: AppPalette.textSecondary);
+      return (label: 'Withdrawn', color: AppPalette.textSecondary);
     }
-    return (label: 'COMPLETED', color: AppPalette.verified);
+    return (label: 'Completed', color: AppPalette.verified);
   }
 
   @override
@@ -711,136 +733,130 @@ class _MyMeetupTile extends StatelessWidget {
       child: Pressable(
         onTap: onTap,
         child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(20),
           child: FlatCard(
-            radius: 14,
-            padding: EdgeInsets.zero,
-            child: IntrinsicHeight(
-              child: Row(
-                children: [
-                  Container(width: 4, color: edge),
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // ONE line for identity, not three.
-                          //
-                          // This row used to carry the intent, a status chip,
-                          // a trust chip and a star rating, with a second row
-                          // of verification badges under it — five competing
-                          // pieces of chrome above the thing the card is
-                          // actually about. The status chip is now the edge,
-                          // and what is left is the intent and who is hosting.
-                          Row(
-                            children: [
-                              Container(
-                                width: 34,
-                                height: 34,
-                                decoration: BoxDecoration(
-                                  color: edge.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(9),
-                                ),
-                                child: Icon(
-                                  meetup.intent.icon,
-                                  size: 16,
-                                  color: edge,
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  meetup.intentLabel,
-                                  style: TextStyle(
-                                    color: AppPalette.textSecondary,
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 1.3,
-                                  ),
-                                ),
-                              ),
-                              // The star rating used to sit here too. On a
-                              // 375pt screen the icon tile plus the intent
-                              // label plus a trust badge plus a rating
-                              // overflowed the row by 15pt, and cramming four
-                              // things onto one line was the problem this
-                              // redesign set out to fix anyway. The rating
-                              // moved to the footer, beside the other
-                              // host-credibility signals it belongs with.
-                              TrustLevelBadge(
-                                trustLevel: meetup.hostTrustLevel,
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          // The when, as the headline. It is the single most
-                          // useful thing on a card about a meeting you already
-                          // belong to, and it used to sit below two rows of
-                          // badges at the same weight as everything else.
-                          Text(
-                            meetup.formattedWindow,
-                            style: TextStyle(
-                              color: AppPalette.textPrimary,
-                              fontSize: 16.5,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.2,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.place_outlined,
-                                size: 13,
-                                color: AppPalette.textSecondary,
-                              ),
-                              const SizedBox(width: 4),
-                              // locationLabel is only ever null for a locked
-                              // ListOpenMeetups result (ADR-028) — this page
-                              // loads via listMyMeetups, which never redacts,
-                              // so `!` is safe.
-                              Expanded(
-                                child: Text(
-                                  meetup.locationLabel!,
-                                  style: TextStyle(
-                                    color: AppPalette.textSecondary,
-                                    fontSize: 12,
-                                    height: 1.35,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          // Its own line: VerificationBadges is a Wrap, so
-                          // given the full width it reflows instead of
-                          // fighting whatever shares the row with it.
-                          VerificationBadges(trustLevel: meetup.hostTrustLevel),
-                          const SizedBox(height: 12),
-                          Divider(height: 1, color: AppPalette.hairline),
-                          const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              StarRating(
-                                average: meetup.hostRatingAverage,
-                                count: meetup.hostRatingCount,
-                              ),
-                              const Spacer(),
-                              Flexible(child: _statusRow(meetup)),
-                            ],
-                          ),
-                          if (onViewRequests != null) ...[
-                            const SizedBox(height: 12),
-                            _ViewRequestsButton(onPressed: onViewRequests!),
-                          ],
-                        ],
+            radius: 20,
+            // The 4px state bar down the left edge is gone, the same move
+            // the Home cards got. `edge` still colours the intent tile and
+            // the status text, which is where the eye already goes; a
+            // coloured rule on every card in the list said nothing because
+            // every card had one.
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ONE line for identity, not three.
+                //
+                // This row used to carry the intent, a status chip,
+                // a trust chip and a star rating, with a second row
+                // of verification badges under it — five competing
+                // pieces of chrome above the thing the card is
+                // actually about. The status chip is now the edge,
+                // and what is left is the intent and who is hosting.
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppPalette.tintedSurface(
+                          edge.withValues(alpha: 0.14),
+                        ),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: AppIcon(
+                        meetup.intent.iconPath,
+                        size: 18,
+                        color: edge,
                       ),
                     ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        meetup.intentLabel,
+                        style: TextStyle(
+                          color: AppPalette.textSecondary,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                    // The star rating used to sit here too. On a
+                    // 375pt screen the icon tile plus the intent
+                    // label plus a trust badge plus a rating
+                    // overflowed the row by 15pt, and cramming four
+                    // things onto one line was the problem this
+                    // redesign set out to fix anyway. The rating
+                    // moved to the footer, beside the other
+                    // host-credibility signals it belongs with.
+                    TrustLevelBadge(trustLevel: meetup.hostTrustLevel),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // The when, as the headline. It is the single most
+                // useful thing on a card about a meeting you already
+                // belong to, and it used to sit below two rows of
+                // badges at the same weight as everything else.
+                Text(
+                  meetup.formattedWindow,
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 16.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
                   ),
+                ),
+                const SizedBox(height: 5),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AppIcon(
+                      AppIcons.pin,
+                      size: 13,
+                      color: AppPalette.textSecondary,
+                    ),
+                    const SizedBox(width: 4),
+                    // locationLabel is only ever null for a locked
+                    // ListOpenMeetups result (ADR-028) — this page
+                    // loads via listMyMeetups, which never redacts,
+                    // so `!` is safe.
+                    Expanded(
+                      child: Text(
+                        meetup.locationLabel!,
+                        style: TextStyle(
+                          color: AppPalette.textSecondary,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // Its own line: VerificationBadges is a Wrap, so
+                // given the full width it reflows instead of
+                // fighting whatever shares the row with it.
+                VerificationBadges(trustLevel: meetup.hostTrustLevel),
+                const SizedBox(height: 12),
+                Divider(height: 1, color: AppPalette.hairline),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    StarRating(
+                      average: meetup.hostRatingAverage,
+                      count: meetup.hostRatingCount,
+                    ),
+                    const Spacer(),
+                    Flexible(child: _statusRow(meetup)),
+                  ],
+                ),
+                if (onViewRequests != null) ...[
+                  const SizedBox(height: 12),
+                  _ViewRequestsButton(onPressed: onViewRequests!),
                 ],
-              ),
+              ],
             ),
           ),
         ),
@@ -883,15 +899,15 @@ class _MyMeetupTile extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final (label, color) = switch (status) {
-      MeetupRequestStatus.pending => ('REQUEST PENDING', AppPalette.gold),
-      MeetupRequestStatus.accepted => ('YOU\'RE IN', AppPalette.verified),
+      MeetupRequestStatus.pending => ('Request pending', AppPalette.gold),
+      MeetupRequestStatus.accepted => ('You\'re in', AppPalette.verified),
       // The requester's own list never says rejected or declined; both
       // outcomes read as timing, in the same muted tone.
       MeetupRequestStatus.rejected =>
         meetup.myRequestAutoRejected
-            ? ('FILLED UP BEFORE YOUR TURN', AppPalette.textSecondary)
-            : ('NOT THIS TIME', AppPalette.textSecondary),
-      MeetupRequestStatus.withdrawn => ('WITHDRAWN', AppPalette.textSecondary),
+            ? ('Filled up before your turn', AppPalette.textSecondary)
+            : ('Not this time', AppPalette.textSecondary),
+      MeetupRequestStatus.withdrawn => ('Withdrawn', AppPalette.textSecondary),
     };
     return Text(
       label,
@@ -1021,12 +1037,12 @@ class RequestManagementPageState extends ConsumerState<RequestManagementPage> {
         child: Scaffold(
           backgroundColor: Colors.transparent,
           appBar: AppBar(
-            title: const Text('REQUESTS'),
+            title: const Text('Requests'),
             bottom: const TabBar(
               tabs: [
-                Tab(text: 'PENDING'),
-                Tab(text: 'ACCEPTED'),
-                Tab(text: 'REJECTED'),
+                Tab(text: 'Pending'),
+                Tab(text: 'Accepted'),
+                Tab(text: 'Rejected'),
               ],
             ),
           ),
@@ -1042,21 +1058,24 @@ class RequestManagementPageState extends ConsumerState<RequestManagementPage> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                   child: FlatCard(
-                    radius: 12,
+                    radius: 18,
                     padding: const EdgeInsets.all(14),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
+                            // The intent as a chip, the same one the
+                            // browse card and the meetup page use. It was
+                            // tracked uppercase type here, which is the
+                            // style this app no longer uses anywhere else.
                             Expanded(
-                              child: Text(
-                                _meetup.intentLabel,
-                                style: TextStyle(
-                                  color: AppPalette.candyBlue,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 1.2,
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: AppTag(
+                                  _meetup.intentLabel,
+                                  icon: _meetup.intent.iconPath,
+                                  compact: true,
                                 ),
                               ),
                             ),
@@ -1124,24 +1143,22 @@ class RequestManagementPageState extends ConsumerState<RequestManagementPage> {
 
     return TabBarView(
       children: [
+        // Title only, like the screen set's empty states. Each of these
+        // second lines restated its own title at greater length.
         _buildRequestList(pending, (
           title: 'No one has asked yet',
-          message:
-              'When someone taps I\'M INTERESTED on this meetup, their '
-              'request lands here for you to accept or decline.',
+          message: null,
         )),
         _buildRequestList(accepted, (
           title: 'No one confirmed yet',
-          message: 'People you accept show up here.',
+          message: null,
         )),
         Column(
           children: [
             Expanded(
               child: _buildRequestList(rejectedOrWithdrawn, (
                 title: 'Nothing declined',
-                message:
-                    'Requests you decline, and people who withdraw, are kept '
-                    'here for the record.',
+                message: null,
               )),
             ),
             // A withdrawn requester becomes ratable once — this reuses the
@@ -1174,7 +1191,7 @@ class RequestManagementPageState extends ConsumerState<RequestManagementPage> {
 
   Widget _buildRequestList(
     List<MeetupRequestModel> requests,
-    ({String title, String message}) empty,
+    ({String title, String? message}) empty,
   ) {
     if (requests.isEmpty) {
       return ListView(
@@ -1211,7 +1228,7 @@ class _RequestCard extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: FlatCard(
-        radius: 12,
+        radius: 18,
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1272,59 +1289,76 @@ class _RequestCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  Icon(
-                    Icons.chevron_right_rounded,
+                  AppIcon(
+                    AppIcons.forward,
                     size: 18,
                     color: AppPalette.textSecondary,
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            VerificationBadges(trustLevel: request.requesterTrustLevel),
+            // No verification chip row here. VerificationBadges takes
+            // nothing but the trust level, so down a list it restated the
+            // badge sitting 10px above it in three more chips per card.
+            // The tap target on the identity row opens the requester's
+            // profile, which is where the breakdown belongs.
             const SizedBox(height: 12),
             if (request.status == MeetupRequestStatus.pending)
               Row(
                 children: [
                   Expanded(
                     child: PrimaryButton(
-                      label: 'ACCEPT',
+                      label: 'Accept',
                       height: 40,
                       onPressed: () => onRespond(request, true),
                     ),
                   ),
                   const SizedBox(width: 10),
-                  // The softer red (the cancelled-meetup tone, border
-                  // eased), the same treatment as CANCEL REQUEST: a
-                  // decline, visibly a button, but not an alarm next to
-                  // ACCEPT.
+                  // Red, by the product owner's call, in the app's tinted
+                  // form rather than a full red fill: a danger label on a
+                  // faint danger wash with a danger hairline, the same
+                  // treatment Cancel meetup and Sign out carry. It reads
+                  // as the negative of Accept without shouting over it.
                   Expanded(
                     child: SecondaryButton(
-                      label: 'REJECT',
+                      label: 'Reject',
                       height: 40,
-                      color: AppPalette.cancelled,
-                      borderColor: AppPalette.cancelled.withValues(alpha: 0.55),
+                      color: AppPalette.danger,
+                      fillColor: AppPalette.danger.withValues(alpha: 0.08),
+                      borderColor: AppPalette.danger.withValues(alpha: 0.3),
                       onPressed: () => onRespond(request, false),
                     ),
                   ),
                 ],
               )
             else
-              Text(
-                switch (request.status) {
-                  MeetupRequestStatus.accepted => 'ACCEPTED',
-                  MeetupRequestStatus.rejected =>
-                    request.autoRejected
-                        ? 'AUTO-REJECTED (CAPACITY FULL)'
-                        : 'REJECTED',
-                  MeetupRequestStatus.withdrawn => 'WITHDRAWN',
-                  MeetupRequestStatus.pending => 'PENDING',
-                },
-                style: TextStyle(
-                  color: AppPalette.textSecondary,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.6,
-                  fontSize: 11,
+              // A chip, not tracked uppercase text. Every other settled
+              // state in the app (the browse card's "You're in", the
+              // meetup page's request status) is a chip; this was the one
+              // place the same information was a line of type.
+              //
+              // Accepted is the only one that takes a tone: it is the one
+              // outcome worth spotting while scanning a list. Rejected and
+              // withdrawn stay neutral — they are over, not alarming.
+              Align(
+                alignment: Alignment.centerLeft,
+                child: AppTag(
+                  switch (request.status) {
+                    MeetupRequestStatus.accepted => 'Accepted',
+                    MeetupRequestStatus.rejected =>
+                      request.autoRejected ? 'Full, auto-rejected' : 'Rejected',
+                    MeetupRequestStatus.withdrawn => 'Withdrawn',
+                    MeetupRequestStatus.pending => 'Pending',
+                  },
+                  icon: switch (request.status) {
+                    MeetupRequestStatus.accepted => AppIcons.check,
+                    MeetupRequestStatus.withdrawn => AppIcons.undo,
+                    _ => AppIcons.info,
+                  },
+                  tone: request.status == MeetupRequestStatus.accepted
+                      ? AppTone.success
+                      : AppTone.neutral,
+                  compact: true,
                 ),
               ),
             // The requester's own note left when withdrawing (ADR-020 §4) —
@@ -1362,13 +1396,9 @@ class _ViewRequestsButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return OutlinedButton.icon(
       onPressed: onPressed,
-      icon: Icon(
-        Icons.people_outline_rounded,
-        size: 16,
-        color: AppPalette.candyBlue,
-      ),
+      icon: AppIcon(AppIcons.people, size: 16, color: AppPalette.candyBlue),
       label: Text(
-        'VIEW REQUESTS',
+        'View requests',
         style: TextStyle(
           color: AppPalette.candyBlue,
           fontSize: 11,
@@ -1404,7 +1434,7 @@ class _RequestsSkeleton extends StatelessWidget {
       itemBuilder: (context, index) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: FlatCard(
-          radius: 12,
+          radius: 18,
           padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

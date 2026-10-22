@@ -154,6 +154,18 @@ var userMessageRewrites = []struct{ contains, say string }{
 	{"not a pending request of this user", "That request is no longer pending."},
 	{"neither pending nor accepted", "That request is no longer active."},
 	{"is not pending", "That request has already been answered."},
+
+	// Plan 26 (V-10). The repository names the state it found, which is what
+	// an operator wants in a log and not what a host wants in a toast:
+	// unrewritten these came out as "Meetup is completed and can no longer
+	// be cancelled." Two entries rather than one loose match, so each state
+	// gets the sentence that is actually true of it.
+	{"is completed and can no longer be cancelled", "That meetup has already finished, so it can't be cancelled."},
+	{"is cancelled and can no longer be cancelled", "That meetup is already cancelled."},
+
+	// Plan 26 (V-1). "No pending verification code" is accurate and mildly
+	// technical; the person just needs to know to ask for another.
+	{"no pending verification code", "We don't have a code waiting for you. Please request a new one."},
 	{"caller does not own trusted contact", "That contact isn't in your list."},
 	{"none of those contacts belong to you", "Those contacts aren't in your list."},
 	{"is full", "This meetup is full."},
@@ -200,6 +212,17 @@ var userMessageDeveloperMarkers = []string{
 	"purpose mismatch", "caller", "repository", "batch size", "unsupported",
 	"target ", " id ", " row ", "hash", "_", "%!", "token", "recipient",
 	"invalid rating", "invalid overall score", "pgx", "sql", "rpc",
+	// Concurrency and persistence vocabulary (added with Plan 26). The
+	// locking work added messages like "request ... changed meetup under the
+	// lock" — a can't-happen guard whose text, once the "repository: "
+	// prefix and the uuid were stripped, came out of this filter as
+	// "Request changed meetup under the lock." and went to a user.
+	//
+	// Checked before adding: every backend message containing any of these
+	// is an internal or repository-level error that is never meant to be
+	// read by a person, so dropping them for the per-code default loses
+	// nothing a user could have acted on.
+	"lock", "transaction", "constraint", "rollback", "deadlock",
 }
 
 func tidyUserMessage(raw string) string {

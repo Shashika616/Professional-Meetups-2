@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart' show LocationAccuracy;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:professional_connections_platform/core/widgets/secure_screen.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
@@ -9,9 +11,11 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/pressable.dart';
+import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
@@ -22,9 +26,14 @@ import 'package:professional_connections_platform/features/safety/manage_trusted
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 
 /// Emergency phone number dialed by "Call emergency services" — Sri Lanka's
-/// general emergency line (the launch market, see `docs/00-project/
-/// vision.md`; no country picker anywhere else in this app either, same
-/// reasoning as `PhoneVerificationPage`'s fixed `+94` prefix).
+/// general emergency line (the launch market, see
+/// `docs/00-project/vision.md`).
+///
+/// This is deliberately NOT a picker, unlike the phone-verification field,
+/// which now has one. The two are different problems: a member's own
+/// number can belong to any country, but the emergency line that reaches
+/// help depends on where the member physically is, and this app does not
+/// establish that reliably enough to dial on someone's behalf.
 const String _emergencyServicesNumber = '119';
 
 class SafetyPage extends ConsumerStatefulWidget {
@@ -66,8 +75,9 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
     // and a tap-time read on a provider nothing is watching yet returns
     // AsyncLoading — which would read as Level 0 and lock out a verified
     // user. Same shape meetup_detail_page.dart uses.
-    final trustLevel =
-        ref.watch(authSessionProvider).value?.profile?.trustLevel ?? 0;
+    final trustLevel = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.trustLevel ?? 0),
+    );
 
     final checklist = [
       'Meet in a public place',
@@ -90,7 +100,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
       // nothing. It only actually paints on the pushed route from Profile,
       // which is where the background was missing.
       extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('SAFETY CENTER')),
+      appBar: AppBar(title: const Text('Safety center')),
       body: AppBackground(
         // SafeArea is not optional alongside extendBodyBehindAppBar: the
         // flag makes the body start at y=0, under the bar and the status
@@ -103,7 +113,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SectionHeading('PRE MEETUP CHECKLIST'),
+                const SectionHeading('Pre meetup checklist'),
                 const SizedBox(height: 12),
                 // One scrolling column rather than a ListView of checklist
                 // items alone: the trusted-contacts section below has to share
@@ -113,38 +123,74 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
                   child: ListView(
                     padding: EdgeInsets.zero,
                     children: [
-                      for (final item in checklist)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: FlatCard(
-                            radius: 12,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.check_circle_outline,
-                                  size: 18,
-                                  color: AppPalette.verified,
+                      // ONE card with divided rows, not five cards each
+                      // carrying the same lightbulb.
+                      //
+                      // Two things were wrong with the old shape. Five
+                      // identical glyphs down the left edge is wallpaper:
+                      // an icon that never varies carries no information
+                      // and just widens the text column's left margin.
+                      // And five separate cards made five pieces of advice
+                      // look like five separate objects, when they are one
+                      // list — the Trusted contacts section directly below
+                      // was already one card with divided rows, so the page
+                      // disagreed with itself.
+                      //
+                      // (The icons were green check_circles before that,
+                      // which was worse: a tick says "done", and these are
+                      // advice to read, not steps the app can know anyone
+                      // took. Nothing here is tickable, so nothing here is
+                      // drawn as a checkbox either.)
+                      FlatCard(
+                        radius: 18,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Column(
+                          children: [
+                            for (final item in checklist) ...[
+                              if (item != checklist.first)
+                                Divider(height: 1, color: AppPalette.hairline),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
                                 ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    item,
-                                    style: TextStyle(
-                                      color: AppPalette.textPrimary,
-                                      fontSize: 13,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // A small dot, the one mark that can
+                                    // repeat down a list without becoming
+                                    // noise, because that is what a bullet
+                                    // is for.
+                                    Container(
+                                      margin: const EdgeInsets.only(
+                                        top: 6,
+                                        right: 12,
+                                      ),
+                                      width: 5,
+                                      height: 5,
+                                      decoration: BoxDecoration(
+                                        color: AppPalette.textTertiary,
+                                        shape: BoxShape.circle,
+                                      ),
                                     ),
-                                  ),
+                                    Expanded(
+                                      child: Text(
+                                        item,
+                                        style: TextStyle(
+                                          color: AppPalette.textPrimary,
+                                          fontSize: 13.5,
+                                          height: 1.35,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
-                          ),
+                              ),
+                            ],
+                          ],
                         ),
-                      const SizedBox(height: 14),
-                      const SectionHeading('TRUSTED CONTACTS'),
+                      ),
+                      const SizedBox(height: 20),
+                      const SectionHeading('Trusted contacts'),
                       const SizedBox(height: 12),
                       _TrustedContactsSection(trustLevel: trustLevel),
                     ],
@@ -154,25 +200,30 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
                 Pressable(
                   onTap: () => _onSosTapped(context, ref, trustLevel),
                   child: FlatCard(
-                    radius: 12,
+                    radius: 18,
                     tint: AppPalette.danger.withValues(alpha: 0.12),
                     border: AppPalette.danger.withValues(alpha: 0.5),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
-                          Icons.emergency_share,
-                          color: AppPalette.danger,
+                        // dangerOnTint, not danger: this is danger-coloured
+                        // content ON a danger tint, which measures 3.86:1
+                        // with the plain colour (UI review #23). The border
+                        // and the tint keep using `danger` — a 1px edge and
+                        // a wash are not text.
+                        AppIcon(
+                          AppIcons.broadcast,
+                          color: AppPalette.dangerOnTint,
                           size: 20,
                         ),
                         SizedBox(width: 10),
                         Text(
-                          'TRIGGER SOS',
+                          'Trigger SOS',
                           style: TextStyle(
-                            color: AppPalette.danger,
+                            color: AppPalette.dangerOnTint,
                             fontWeight: FontWeight.w800,
-                            letterSpacing: 2.4,
+                            letterSpacing: 0.6,
                             fontSize: 13,
                           ),
                         ),
@@ -264,7 +315,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => const VerificationChecklistPage(
-          title: 'UNLOCK SAFETY FEATURES',
+          title: 'Unlock safety features',
           description:
               'Complete these to reach Level 2 trust and unlock trusted '
               'contacts and SOS.',
@@ -317,10 +368,12 @@ class _TrustedContactsSection extends ConsumerWidget {
         onTap: () => _openManage(context, ref),
         children: [
           _ContactsHint(
-            icon: Icons.lock_outline_rounded,
+            icon: AppIcons.lock,
             text:
                 'Verify your account to add the people we should alert in an '
                 'emergency.',
+            // The card already routed here; now it says so.
+            action: 'Verify',
           ),
         ],
       );
@@ -356,7 +409,7 @@ class _TrustedContactsSection extends ConsumerWidget {
           children: [
             if (contacts.isEmpty)
               _ContactsHint(
-                icon: Icons.person_add_alt_1_rounded,
+                icon: AppIcons.personAdd,
                 text:
                     'No one yet. Add someone we should alert if you trigger '
                     'SOS.',
@@ -367,35 +420,23 @@ class _TrustedContactsSection extends ConsumerWidget {
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.person_outline_rounded,
-                        size: 17,
-                        color: AppPalette.candyBlue,
-                      ),
-                      const SizedBox(width: 10),
+                      // The person, as a person: initials in the app's
+                      // avatar rather than one generic glyph repeated
+                      // down the list. The number lives on the Trusted
+                      // contacts page, which this list leads to — here it
+                      // was a second line of small grey type against the
+                      // one name that matters.
+                      ProfessionalAvatar(name: contact.name, size: 32),
+                      const SizedBox(width: 11),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              contact.name,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: AppPalette.textPrimary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (_contactDetail(contact).isNotEmpty)
-                              Text(
-                                _contactDetail(contact),
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: AppPalette.textSecondary,
-                                  fontSize: 11.5,
-                                ),
-                              ),
-                          ],
+                        child: Text(
+                          contact.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppPalette.textPrimary,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ],
@@ -404,10 +445,8 @@ class _TrustedContactsSection extends ConsumerWidget {
             Divider(height: 18, color: AppPalette.hairline),
             Row(
               children: [
-                Icon(
-                  remaining > 0
-                      ? Icons.add_circle_outline_rounded
-                      : Icons.check_circle_outline_rounded,
+                AppIcon(
+                  remaining > 0 ? AppIcons.plusCircle : AppIcons.checkCircle,
                   size: 18,
                   color: remaining > 0
                       ? AppPalette.candyBlue
@@ -432,8 +471,8 @@ class _TrustedContactsSection extends ConsumerWidget {
                     ),
                   ),
                 ),
-                Icon(
-                  Icons.chevron_right_rounded,
+                AppIcon(
+                  AppIcons.forward,
                   size: 18,
                   color: AppPalette.textSecondary,
                 ),
@@ -444,13 +483,6 @@ class _TrustedContactsSection extends ConsumerWidget {
       },
     );
   }
-}
-
-/// Phone or email, whichever the contact actually has — at least one is
-/// guaranteed server-side, both is allowed.
-String _contactDetail(TrustedContact contact) {
-  if (contact.phoneNumber.isNotEmpty) return contact.phoneNumber;
-  return contact.email;
 }
 
 class _ContactsCard extends StatelessWidget {
@@ -466,7 +498,7 @@ class _ContactsCard extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: FlatCard(
-        radius: 12,
+        radius: 18,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -479,16 +511,31 @@ class _ContactsCard extends StatelessWidget {
 }
 
 class _ContactsHint extends StatelessWidget {
-  const _ContactsHint({required this.icon, required this.text});
+  const _ContactsHint({required this.icon, required this.text, this.action});
 
-  final IconData icon;
+  final String icon;
   final String text;
+
+  /// A label for what tapping does, shown with a chevron.
+  ///
+  /// # WHY THIS EXISTS (UI review #21)
+  ///
+  /// The review said the locked card "has no button or link". It was half
+  /// right in a way worth spelling out: the whole card has always been
+  /// tappable and routes to the unlock screen, so the ACTION was there —
+  /// nothing told the user about it. A lock icon above a grey sentence looks
+  /// exactly like a disabled state, and the one thing a disabled state
+  /// means is "do not bother tapping this".
+  ///
+  /// So this is not a new destination, just the affordance the existing one
+  /// never had. No new call, no new route, no new state.
+  final String? action;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 17, color: AppPalette.textSecondary),
+        AppIcon(icon, size: 17, color: AppPalette.textSecondary),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
@@ -496,6 +543,21 @@ class _ContactsHint extends StatelessWidget {
             style: TextStyle(color: AppPalette.textSecondary, fontSize: 12.5),
           ),
         ),
+        if (action != null) ...[
+          const SizedBox(width: 8),
+          Text(
+            action!,
+            style: TextStyle(
+              // candyBlue, the app's one action colour: this reads as a
+              // link, which is what it behaves like.
+              color: AppPalette.candyBlue,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
+            ),
+          ),
+          AppIcon(AppIcons.forward, size: 18, color: AppPalette.candyBlue),
+        ],
       ],
     );
   }
@@ -518,37 +580,74 @@ class _SosConfirmDialog extends StatefulWidget {
 enum _SosDialogPhase { confirming, sending, succeeded, failed }
 
 class _SosConfirmDialogState extends State<_SosConfirmDialog> {
+  /// Shorter than the map picker's, for the same reason the SOS request
+  /// itself is: somebody is waiting during an emergency. A fix that has
+  /// not arrived in eight seconds is not going to change the outcome,
+  /// and the alert is better sent without it.
+  static const Duration _sosLocationTimeout = Duration(seconds: 8);
+  static const Duration _sosLocationFallback = Duration(seconds: 5);
+
   _SosDialogPhase _phase = _SosDialogPhase.confirming;
   String _resultMessage = '';
 
+  /// True once an attempt has been made without a usable location, so
+  /// the success line can say so — a contact who gets "Location
+  /// unavailable" should not be a surprise to the person who sent it.
+  bool _sentWithoutLocation = false;
+
   Future<void> _confirm() async {
     setState(() => _phase = _SosDialogPhase.sending);
+
+    // # THE LOCATION IS BEST-EFFORT, AND NEVER A REASON NOT TO SEND
+    //
+    // This used to await requestCurrentLocation() in the same try as the
+    // alert, so LocationUnavailableException ended the whole thing in a
+    // failure state (tracker #78, review finding N-D2). Being indoors,
+    // having denied the permission once, or simply a slow fix therefore
+    // disabled the one feature whose entire purpose is to work when
+    // things have gone wrong.
+    //
+    // Now a failed read costs the coordinates and nothing else: the
+    // alert goes out saying the location is unavailable, which a trusted
+    // contact can act on. Silence is not.
+    double? latitude;
+    double? longitude;
     try {
-      final position = await requestCurrentLocation();
+      final position = await requestCurrentLocation(
+        accuracy: LocationAccuracy.medium,
+        timeLimit: _sosLocationTimeout,
+        gpsFallbackLimit: _sosLocationFallback,
+      );
+      latitude = position.latitude;
+      longitude = position.longitude;
+    } catch (_) {
+      // Deliberately bare. Permission denied, services off, a timeout,
+      // or a platform channel that threw something undocumented all mean
+      // the same thing here — no coordinates — and none of them is worth
+      // failing an emergency alert over.
+    }
+
+    try {
       final contactsNotified = await widget.ref
           .read(authServiceProvider)
           .triggerSos(
             contextMessage: 'Triggered from the Safety Center.',
-            latitude: position.latitude,
-            longitude: position.longitude,
+            latitude: latitude,
+            longitude: longitude,
           );
       if (!mounted) return;
       setState(() {
         _phase = _SosDialogPhase.succeeded;
+        _sentWithoutLocation = latitude == null || longitude == null;
         _resultMessage = contactsNotified == 1
             ? '1 trusted contact was alerted.'
             : '$contactsNotified trusted contacts were alerted.';
       });
-    } on LocationUnavailableException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _phase = _SosDialogPhase.failed;
-        _resultMessage = error.message;
-      });
     } on SessionExpiredException {
-      // SessionExpiredException is an AuthException, so without this clause
-      // first it fell into the one below and showed "failed" with a message
-      // the user could only retry — on a session that is already gone.
+      // SessionExpiredException is an AuthException, so without this
+      // clause first it fell into the one below and showed "failed" with
+      // a message the user could only retry — on a session that is
+      // already gone.
       if (mounted) {
         widget.ref.read(authSessionProvider.notifier).forceSignOut();
       }
@@ -558,6 +657,23 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
         _phase = _SosDialogPhase.failed;
         _resultMessage = error.message;
       });
+    } catch (error) {
+      // # NOTHING ESCAPES THIS METHOD (finding N-D3)
+      //
+      // Any throw that was not an AuthException used to propagate out of
+      // _confirm and leave the sheet sitting on "Getting your location
+      // and alerting your contacts…" forever, with no way to tell that
+      // it had failed. During an emergency.
+      //
+      // Whatever it was, the user has the same two things to do: try
+      // again, or call emergency services. Both are on the failure
+      // state.
+      if (!mounted) return;
+      setState(() {
+        _phase = _SosDialogPhase.failed;
+        _resultMessage =
+            'Could not send the alert. Try again, or call emergency services.';
+      });
     }
   }
 
@@ -565,10 +681,15 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
     await launchUrl(Uri(scheme: 'tel', path: _emergencyServicesNumber));
   }
 
+  // Kept out of screenshots, recordings and the app switcher (#94):
+  // the SOS sheet: where you are, and who is about to be told.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SecureScreen(child: _buildSecured(context));
+
+  Widget _buildSecured(BuildContext context) {
     return AppSheet(
-      title: 'EMERGENCY SOS',
+      title: 'Emergency SOS',
       titleColor: AppPalette.danger,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -614,24 +735,52 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
           ],
         );
       case _SosDialogPhase.succeeded:
-        return Row(
-          mainAxisSize: MainAxisSize.min,
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(Icons.check_circle, color: AppPalette.verified, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                _resultMessage,
-                style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppIcon(
+                  AppIcons.checkCircle,
+                  color: AppPalette.verified,
+                  size: 18,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _resultMessage,
+                    style: TextStyle(
+                      color: AppPalette.textPrimary,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
             ),
+            // Said out loud, because the contact's message says it too:
+            // they were told the location is unavailable, and the person
+            // who sent it should know that before they assume help is on
+            // its way to the right place.
+            if (_sentWithoutLocation) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Your location could not be determined, so the alert says so. '
+                'Call your contacts if they need to find you.',
+                style: TextStyle(
+                  color: AppPalette.textSecondary,
+                  fontSize: 12.5,
+                  height: 1.4,
+                ),
+              ),
+            ],
           ],
         );
       case _SosDialogPhase.failed:
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, color: AppPalette.danger, size: 18),
+            AppIcon(AppIcons.warning, color: AppPalette.danger, size: 18),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -651,7 +800,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
     final callAction = TextButton(
       onPressed: _callEmergencyServices,
       child: Text(
-        'CALL EMERGENCY SERVICES',
+        'Call emergency services',
         style: TextStyle(color: AppPalette.danger, fontWeight: FontWeight.w700),
       ),
     );
@@ -660,7 +809,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
       case _SosDialogPhase.confirming:
         return [
           PrimaryButton(
-            label: 'CONFIRM',
+            label: 'Confirm',
             height: 50,
             fillColor: AppPalette.danger,
             foregroundColor: Colors.white,
@@ -671,21 +820,44 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
-              'CANCEL',
+              'Cancel',
               style: TextStyle(color: AppPalette.textSecondary),
             ),
           ),
         ];
       case _SosDialogPhase.sending:
         return [callAction];
-      case _SosDialogPhase.succeeded:
       case _SosDialogPhase.failed:
+        // RETRY FIRST (#78). A failed alert has exactly two useful
+        // answers and this is the cheaper one: the common failure is a
+        // dropped connection, where pressing it again works. Calling
+        // emergency services sits directly under it for when it does
+        // not.
+        return [
+          PrimaryButton(
+            label: 'Retry',
+            height: 50,
+            fillColor: AppPalette.danger,
+            foregroundColor: Colors.white,
+            onPressed: _confirm,
+          ),
+          const SizedBox(height: 8),
+          callAction,
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Close',
+              style: TextStyle(color: AppPalette.textPrimary),
+            ),
+          ),
+        ];
+      case _SosDialogPhase.succeeded:
         return [
           callAction,
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: Text(
-              'CLOSE',
+              'Close',
               style: TextStyle(color: AppPalette.textPrimary),
             ),
           ),

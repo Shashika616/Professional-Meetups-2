@@ -193,6 +193,9 @@ type MeetupRepository interface {
 	// CountActiveCommitments in meetups.sql for why "active" is defined the
 	// same way the schedule-conflict rule defines it.
 	ActiveCommitments(ctx context.Context, userID string) (ActiveCommitments, error)
+	// CountCreatedByHostSince counts the meetups hostUserID created after
+	// since, for the nearby-notify cap (#89).
+	CountCreatedByHostSince(ctx context.Context, hostUserID string, since time.Time) (int, error)
 	// PurgeUser removes everything this schema holds ABOUT a user whose
 	// account is being deleted, and deliberately nothing that belongs to
 	// anyone else. See its implementation for the full list and for the two
@@ -635,6 +638,10 @@ type UserLocationCacheRepository interface {
 	// (centerLat, centerLng) whose updated_at is after notBefore (the
 	// staleness cutoff — Step 4: "non-stale... within 24 hours").
 	ListWithinRadius(ctx context.Context, centerLat, centerLng float64, notBefore time.Time) ([]UserLocation, error)
+	// WithinBrowseRadius reports whether userID's last known location is
+	// within the 50 km browse radius of the point. known is false when no
+	// location has ever been reported for them.
+	WithinBrowseRadius(ctx context.Context, userID string, centerLat, centerLng float64) (within, known bool, err error)
 }
 
 // SubscriptionCacheRepository is the persistence boundary for

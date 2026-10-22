@@ -22,11 +22,51 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 /// The options here are the ones `showJoinConfirmationSheet` already chose
 /// (card background, 22pt top radius, scroll-controlled, safe-area aware) —
 /// this is that presentation extracted, not a new one invented alongside it.
+/// # ONE TAP, ONE SHEET
+///
+/// A second tap landing before the first sheet has finished rising used to
+/// push a second copy of it. Two identical sheets then had to be dismissed
+/// one after the other, and on anything that acts on open — the SOS
+/// confirmation, a rating — the user was answering a question they had
+/// already answered. Flutter does not dedupe this; nothing in the app did
+/// either, at any of the twenty-odd call sites.
+///
+/// The guard lives here rather than at those call sites because it is the
+/// same guard every time, and a rule kept in twenty places is a rule that
+/// is wrong in at least one of them.
+///
+/// It reads the CALLER's route: pushing a sheet makes that route stop being
+/// the current one, so "my route is no longer on top" means a sheet (or a
+/// pushed page) is already covering this caller, and a tap that arrives now
+/// is one the user cannot have meant. A sheet opened from inside another
+/// sheet still works — there the caller's route IS the open sheet, which is
+/// current.
+///
+/// Returns null when it declines, which every call site already handles:
+/// null is what a dismissed sheet returns.
+///
+/// [minHeightFactor] opens the sheet at least that fraction of the screen
+/// tall instead of sizing to its content. A sheet you are going to WORK in
+/// — rate someone, pick from a long list — reads as a screen and should
+/// arrive as one; the ride-hailing apps' rating sheets all do this. A
+/// sheet that just asks one question still sizes to its content, which is
+/// why this is opt-in rather than the default.
 Future<T?> showAppSheet<T>(
   BuildContext context, {
   required WidgetBuilder builder,
   bool isDismissible = true,
+  double? minHeightFactor,
 }) {
+  final route = ModalRoute.of(context);
+  if (route != null && !route.isCurrent) return Future<T?>.value(null);
+  final WidgetBuilder wrapped = minHeightFactor == null
+      ? builder
+      : (ctx) => ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: MediaQuery.sizeOf(ctx).height * minHeightFactor,
+          ),
+          child: builder(ctx),
+        );
   return showModalBottomSheet<T>(
     context: context,
     // Both: the sheet sizes to its content, and it can grow past half the
@@ -39,7 +79,7 @@ Future<T?> showAppSheet<T>(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
-    builder: builder,
+    builder: wrapped,
   );
 }
 

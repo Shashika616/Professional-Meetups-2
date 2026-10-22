@@ -22,6 +22,33 @@ func (q *Queries) DeleteUserLocationCache(ctx context.Context, userID uuid.UUID)
 	return err
 }
 
+const isUserLocationWithinRadius = `-- name: IsUserLocationWithinRadius :one
+SELECT ST_DWithin(
+  location,
+  ST_SetSRID(ST_MakePoint($1::float8, $2::float8), 4326)::geography,
+  50000
+)::bool AS within
+FROM meetup.user_location_cache
+WHERE user_id = $3
+`
+
+type IsUserLocationWithinRadiusParams struct {
+	CenterLng float64   `json:"center_lng"`
+	CenterLat float64   `json:"center_lat"`
+	UserID    uuid.UUID `json:"user_id"`
+}
+
+// Whether a user's last known location is within 50 km of a point — the
+// same ST_DWithin on geography, and the same 50000 m, as browse uses, so
+// the join rule (D4) is exactly the rule that decided what they could see.
+// No row means the location is unknown, which the caller decides about.
+func (q *Queries) IsUserLocationWithinRadius(ctx context.Context, arg IsUserLocationWithinRadiusParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isUserLocationWithinRadius, arg.CenterLng, arg.CenterLat, arg.UserID)
+	var within bool
+	err := row.Scan(&within)
+	return within, err
+}
+
 const listUserLocationCacheWithinRadius = `-- name: ListUserLocationCacheWithinRadius :many
 SELECT user_id, lat, lng, updated_at
 FROM meetup.user_location_cache
@@ -31,6 +58,7 @@ WHERE updated_at > $1::timestamptz
     ST_SetSRID(ST_MakePoint($2::float8, $3::float8), 4326)::geography,
     50000
   )
+ORDER BY location <-> ST_SetSRID(ST_MakePoint($2::float8, $3::float8), 4326)::geography
 LIMIT 500
 `
 
@@ -61,6 +89,10 @@ type ListUserLocationCacheWithinRadiusRow struct {
 // real GiST index doing the heavy lifting: a single meetup notifying more
 // than 500 nearby users in one fan-out is worth capping regardless of how
 // fast the lookup itself is.
+// NEAREST FIRST (#89). The 500 cap used to keep an arbitrary 500 of the
+// people in range; in a dense area that could leave out the people next
+// door and notify someone 49 km away. <-> is the GiST index's own distance
+// operator, so the ordering is an index walk, not a sort of every match.
 func (q *Queries) ListUserLocationCacheWithinRadius(ctx context.Context, arg ListUserLocationCacheWithinRadiusParams) ([]ListUserLocationCacheWithinRadiusRow, error) {
 	rows, err := q.db.Query(ctx, listUserLocationCacheWithinRadius, arg.NotBefore, arg.CenterLng, arg.CenterLat)
 	if err != nil {

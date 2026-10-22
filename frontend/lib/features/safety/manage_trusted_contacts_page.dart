@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/widgets/secure_screen.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
@@ -9,11 +10,13 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/validation/validators.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_dialog.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
 import 'package:professional_connections_platform/core/widgets/empty_state_deck.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
-import 'package:professional_connections_platform/core/widgets/glass_text_field.dart';
+import 'package:professional_connections_platform/core/widgets/app_text_field.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
@@ -41,14 +44,19 @@ class ManageTrustedContactsPage extends ConsumerStatefulWidget {
 
 class _ManageTrustedContactsPageState
     extends ConsumerState<ManageTrustedContactsPage> {
+  // Kept out of screenshots, recordings and the app switcher (#94):
+  // the people a user relies on in an emergency, with their numbers.
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      SecureScreen(child: _buildSecured(context));
+
+  Widget _buildSecured(BuildContext context) {
     final contactsAsync = ref.watch(trustedContactsProvider);
 
     return AppBackground(
       child: Scaffold(
         backgroundColor: Colors.transparent,
-        appBar: AppBar(title: const Text('TRUSTED CONTACTS')),
+        appBar: AppBar(title: const Text('Trusted contacts')),
         // SafeArea (bottom only — the AppBar already consumes the top
         // inset) so ADD CONTACT never sits under the home-indicator strip.
         // Unlike SafetyPage, this page is reached via Navigator.push and so
@@ -64,14 +72,14 @@ class _ManageTrustedContactsPageState
               children: [
                 if (widget.explainSosPrompt) ...[
                   FlatCard(
-                    radius: 12,
+                    radius: 18,
                     tint: AppPalette.danger.withValues(alpha: 0.1),
                     border: AppPalette.danger.withValues(alpha: 0.4),
                     padding: const EdgeInsets.all(14),
                     child: Row(
                       children: [
-                        Icon(
-                          Icons.info_outline_rounded,
+                        AppIcon(
+                          AppIcons.info,
                           size: 18,
                           color: AppPalette.danger,
                         ),
@@ -119,8 +127,8 @@ class _ManageTrustedContactsPageState
                 // this button inline, in this same Column, which read as the
                 // form growing up from the bottom rather than as a modal.
                 PrimaryButton(
-                  label: 'ADD CONTACT',
-                  icon: Icons.person_add_alt_1_rounded,
+                  label: 'Add contact',
+                  icon: AppIcons.personAdd,
                   onPressed:
                       contactsAsync.maybeWhen(
                             data: (contacts) => contacts.length,
@@ -157,39 +165,13 @@ class _ManageTrustedContactsPageState
   }
 
   Future<void> _removeContact(TrustedContact contact) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppPalette.card,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'REMOVE CONTACT',
-          style: TextStyle(color: AppPalette.textPrimary, letterSpacing: 1.2),
-        ),
-        content: Text(
-          'Remove ${contact.name} from your trusted contacts?',
-          style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'CANCEL',
-              style: TextStyle(color: AppPalette.textSecondary),
-            ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(
-              'REMOVE',
-              style: TextStyle(
-                color: AppPalette.danger,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
+    final confirmed = await showConfirmDialog(
+      context,
+      title: 'Remove contact?',
+      message: '${contact.name} will no longer be alerted if you trigger SOS.',
+      confirmLabel: 'Remove contact',
+      cancelLabel: 'Cancel',
+      danger: true,
     );
     if (confirmed != true || !mounted) return;
 
@@ -233,67 +215,98 @@ class _ContactsList extends StatelessWidget {
         ),
       );
     }
-    return ListView.builder(
-      itemCount: contacts.length,
-      itemBuilder: (context, index) {
-        final contact = contacts[index];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: FlatCard(
-            radius: 12,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.person_outline_rounded,
-                  size: 18,
-                  color: AppPalette.candyBlue,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+    // One card, one row per contact — the shape the Safety tab already
+    // shows these in. A card each made the same three people look like
+    // three unrelated objects on one screen and one list on the other.
+    // There are at most three, so the card never needs to scroll.
+    return ListView(
+      children: [
+        FlatCard(
+          radius: 18,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Column(
+            children: [
+              for (final contact in contacts) ...[
+                if (contact != contacts.first)
+                  Divider(height: 1, color: AppPalette.hairline),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Row(
                     children: [
-                      Text(
-                        contact.name,
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                      AppIcon(
+                        AppIcons.person,
+                        size: 18,
+                        color: AppPalette.candyBlue,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              contact.name,
+                              style: TextStyle(
+                                color: AppPalette.textPrimary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (contact.phoneNumber.isNotEmpty)
+                              Text(
+                                contact.phoneNumber,
+                                style: TextStyle(
+                                  color: AppPalette.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            if (contact.email.isNotEmpty)
+                              Text(
+                                contact.email,
+                                style: TextStyle(
+                                  color: AppPalette.textSecondary,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            // #80: a new contact is texted a link and is
+                            // not alerted until they agree through it.
+                            if (contact.status !=
+                                TrustedContactStatus.confirmed)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  contact.status == TrustedContactStatus.pending
+                                      ? 'Waiting for confirmation'
+                                      : 'Link expired. Remove and add again.',
+                                  style: TextStyle(
+                                    color:
+                                        contact.status ==
+                                            TrustedContactStatus.pending
+                                        ? AppPalette.textSecondary
+                                        : AppPalette.danger,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                      if (contact.phoneNumber.isNotEmpty)
-                        Text(
-                          contact.phoneNumber,
-                          style: TextStyle(
-                            color: AppPalette.textSecondary,
-                            fontSize: 11,
-                          ),
+                      IconButton(
+                        icon: AppIcon(
+                          AppIcons.trash,
+                          color: AppPalette.danger,
+                          size: 20,
                         ),
-                      if (contact.email.isNotEmpty)
-                        Text(
-                          contact.email,
-                          style: TextStyle(
-                            color: AppPalette.textSecondary,
-                            fontSize: 11,
-                          ),
-                        ),
+                        onPressed: () => onRemove(contact),
+                      ),
                     ],
                   ),
                 ),
-                IconButton(
-                  icon: Icon(
-                    Icons.delete_outline_rounded,
-                    color: AppPalette.danger,
-                    size: 20,
-                  ),
-                  onPressed: () => onRemove(contact),
-                ),
               ],
-            ),
+            ],
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 }
@@ -318,7 +331,7 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
   @override
   void initState() {
     super.initState();
-    // GlassTextField doesn't expose onChanged — listening on each
+    // AppTextField doesn't expose onChanged — listening on each
     // controller directly is what makes SAVE react as the user types (same
     // pattern as the verification pages' own `_onFieldChanged`).
     _nameController.addListener(_onFieldChanged);
@@ -382,27 +395,27 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
     // (fields, validation, save/loading, error display) is exactly what it
     // was — only where it arrives from changed.
     return AppSheet(
-      title: 'ADD CONTACT',
+      title: 'Add contact',
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          GlassTextField(
+          AppTextField(
             controller: _nameController,
-            icon: Icons.badge_outlined,
+            icon: AppIcons.idCard,
             hint: 'Name',
           ),
           const SizedBox(height: 10),
-          GlassTextField(
+          AppTextField(
             controller: _phoneController,
-            icon: Icons.phone_iphone_rounded,
+            icon: AppIcons.phone,
             hint: 'Phone number',
             keyboardType: TextInputType.phone,
           ),
           const SizedBox(height: 10),
-          GlassTextField(
+          AppTextField(
             controller: _emailController,
-            icon: Icons.email_outlined,
+            icon: AppIcons.mail,
             hint: 'Email (optional)',
             keyboardType: TextInputType.emailAddress,
           ),
@@ -424,7 +437,7 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
             children: [
               Expanded(
                 child: SecondaryButton(
-                  label: 'CANCEL',
+                  label: 'Cancel',
                   onPressed: _saving ? null : widget.onCancel,
                   height: 48,
                 ),
@@ -432,7 +445,7 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
               const SizedBox(width: 10),
               Expanded(
                 child: PrimaryButton(
-                  label: 'SAVE',
+                  label: 'Save',
                   height: 48,
                   isLoading: _saving,
                   onPressed: (_canSave && !_saving) ? _save : null,

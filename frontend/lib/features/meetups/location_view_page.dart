@@ -9,7 +9,9 @@ import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/widgets/app_back_button.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
+import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
 
@@ -19,7 +21,7 @@ import 'package:professional_connections_platform/features/verification/verifica
 /// (no new gating concept, no participation check). No in-app routing —
 /// Get Directions only ever opens the user's own installed maps app via
 /// [launchUrl].
-class LocationViewPage extends StatelessWidget {
+class LocationViewPage extends StatefulWidget {
   const LocationViewPage({super.key, required this.meetup});
 
   final Meetup meetup;
@@ -78,6 +80,17 @@ class LocationViewPage extends StatelessWidget {
     ).push(MaterialPageRoute(builder: (_) => LocationViewPage(meetup: meetup)));
   }
 
+  @override
+  State<LocationViewPage> createState() => _LocationViewPageState();
+}
+
+class _LocationViewPageState extends State<LocationViewPage> {
+  /// Held so the recentre control can drive the camera. Null until the
+  /// platform view reports ready.
+  MapCanvasController? _map;
+
+  Meetup get meetup => widget.meetup;
+
   Future<void> _getDirections(BuildContext context) async {
     final lat = meetup.locationLat;
     final lng = meetup.locationLng;
@@ -114,7 +127,7 @@ class LocationViewPage extends StatelessWidget {
       return AppBackground(
         child: Scaffold(
           backgroundColor: Colors.transparent,
-          appBar: AppBar(title: const Text('LOCATION')),
+          appBar: AppBar(title: const Text('Location')),
           body: Center(
             child: Text(
               'Location isn\'t available for this meetup.',
@@ -130,37 +143,48 @@ class LocationViewPage extends StatelessWidget {
       // the app's photographic background.
       backgroundColor: AppPalette.onyx,
       body: MapSheetScaffold(
-        // Still read-only, and still every gesture off: this page shows
-        // where one meetup is, and ADR-029 chose a picture over a map you
-        // can wander away from. Full-bleed changes how big that picture
-        // is, not what it does.
+        // Pan, zoom and rotate are on. ADR-029 chose "a picture over a
+        // map you can wander away from", and the picture was the right
+        // call for a thumbnail — but this is the full-bleed page whose
+        // whole job is answering "where is this, and what is around it",
+        // and a map you cannot move cannot answer the second half. You
+        // cannot see which end of the street it is, or what the nearest
+        // junction is called, without moving.
+        //
+        // Wandering away is no longer a way to get lost, because the pin
+        // is anchored to the meetup rather than to the middle of the
+        // screen, and the control below recentres.
         map: MapCanvas(
           initialCentre: MapPoint(lat, lng),
           initialZoom: 16,
-          interactive: false,
+          marker: MapPoint(lat, lng),
+          onReady: (c) => _map = c,
         ),
-        centrePin: const MapCentrePin(),
         topOverlay: const _FloatingBackButton(),
+        // Now that the map moves, there has to be a way back. Without
+        // this, panning away from the meetup is a one-way trip that only
+        // leaving and reopening the page undoes.
+        mapActions: MapActionButton(
+          icon: AppIcons.locate,
+          semanticLabel: 'Recentre on the meetup',
+          onPressed: () => _map?.moveTo(MapPoint(lat, lng), zoom: 16),
+        ),
         sheet: MapSheet(
           children: [
             Text(
-              'MEETUP LOCATION',
+              'Meetup location',
               style: TextStyle(
                 color: AppPalette.textSecondary,
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1.4,
+                letterSpacing: 0.3,
               ),
             ),
             const SizedBox(height: 8),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  Icons.place_outlined,
-                  size: 18,
-                  color: AppPalette.candyBlue,
-                ),
+                AppIcon(AppIcons.pin, size: 18, color: AppPalette.candyBlue),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -177,8 +201,8 @@ class LocationViewPage extends StatelessWidget {
             ),
             const SizedBox(height: 18),
             PrimaryButton(
-              label: 'GET DIRECTIONS',
-              icon: Icons.directions_rounded,
+              label: 'Get directions',
+              icon: AppIcons.directions,
               onPressed: () => _getDirections(context),
             ),
           ],
@@ -205,8 +229,12 @@ class _FloatingBackButton extends StatelessWidget {
       child: Align(
         alignment: Alignment.centerLeft,
         child: MapActionButton(
-          icon: Icons.arrow_back_rounded,
-          semanticLabel: 'Back',
+          // The circular chrome stays — it has to read against a map — but
+          // the glyph inside it is now the platform's, so it matches every
+          // other back control in the app instead of showing the Android
+          // arrow to iOS users.
+          icon: backButtonIconPath(context),
+          semanticLabel: MaterialLocalizations.of(context).backButtonTooltip,
           onPressed: () => Navigator.of(context).maybePop(),
         ),
       ),

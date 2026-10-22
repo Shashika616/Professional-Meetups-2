@@ -12,8 +12,8 @@ class SectionLabel extends StatelessWidget {
     return Text(
       text,
       style: TextStyle(
-        fontSize: 10,
-        letterSpacing: 2.2,
+        fontSize: 10.5,
+        letterSpacing: 0.4,
         fontWeight: FontWeight.w600,
         color: AppPalette.textSecondary,
       ),
