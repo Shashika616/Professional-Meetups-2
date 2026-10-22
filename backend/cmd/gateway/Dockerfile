@@ -1,7 +1,7 @@
 # Same shape as ../monolith/Dockerfile — see the comments there. Build
 # context is `backend/` (see ../../docker-compose.yml), not this folder.
 
-FROM golang:1.26.10-alpine AS build
+FROM golang:1.27.2-alpine AS build
 WORKDIR /workspace
 
 COPY go.mod go.sum* ./
