@@ -40,7 +40,7 @@ dependencies:
   # LinkedIn OAuth (PKCE) session flow — ADR-011 frontend slice.
   flutter_secure_storage: ^9.2.4 # Keychain/Keystore-backed token storage (ADR-009)
   http: ^1.5.0 # REST calls to the gateway
-  app_links: ^6.4.1 # receives the professionalconnections:// redirect
+  app_links: ^7.2.2 # receives the professionalconnections:// redirect
   url_launcher: ^6.3.2 # opens LinkedIn's auth URL in the system browser
   crypto: ^3.0.6 # SHA-256 for the PKCE code_challenge
 
