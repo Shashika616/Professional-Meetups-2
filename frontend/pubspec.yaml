@@ -85,7 +85,7 @@ dependencies:
   # already in place. Versions confirmed against pub.dev at implementation
   # time (2026-09-02) via `dart pub add`, not guessed.
   firebase_core: ^4.14.0
-  firebase_messaging: ^16.6.0
+  firebase_messaging: ^16.7.0
 
   # Mobile Premium purchase (ADR-031, Slice B) — wraps StoreKit2 (iOS) and
   # Google Play Billing (Android) behind one Dart API. Version confirmed
