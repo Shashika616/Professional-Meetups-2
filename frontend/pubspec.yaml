@@ -34,27 +34,27 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  flutter_riverpod: ^3.4.2
+  flutter_riverpod: ^3.4.3
   riverpod: ^3.4.2
 
   # LinkedIn OAuth (PKCE) session flow — ADR-011 frontend slice.
-  flutter_secure_storage: ^9.2.4 # Keychain/Keystore-backed token storage (ADR-009)
+  flutter_secure_storage: ^11.2.0 # Keychain/Keystore-backed token storage (ADR-009)
   http: ^1.5.0 # REST calls to the gateway
   app_links: ^6.4.1 # receives the professionalconnections:// redirect
-  url_launcher: ^6.3.2 # opens LinkedIn's auth URL in the system browser
-  crypto: ^3.0.6 # SHA-256 for the PKCE code_challenge
+  url_launcher: ^6.3.3 # opens LinkedIn's auth URL in the system browser
+  crypto: ^3.0.8 # SHA-256 for the PKCE code_challenge
 
   # Schedule flow's location step (frontend/meetup-scheduling-PLAN.md's
   # 2026-08-18 testing addendum). maplibre_gl, not mapbox_maps_flutter — a
   # deliberate divergence from ADR-013's original dependency list, only for
   # this Stadia-Maps-backed testing pass (see TESTING-NOTES.md). Do not add
   # mapbox_maps_flutter alongside this speculatively.
-  maplibre_gl: ^0.26.2
+  maplibre_gl: ^0.27.1
   # Pinned to 14.0.2, not the newest 14.0.3 — 14.0.3's transitive
   # package_info_plus/win32 bump conflicts with flutter_secure_storage's
   # own win32 constraint (this app has no Windows target, but pub still
   # resolves across all platforms a federated plugin declares).
-  geolocator: ^14.0.2 # "Use my current location" on the same step
+  geolocator: ^14.1.2 # "Use my current location" on the same step
   # iOS-only map rendering (ADR-013 §4's third correction, frontend/
   # meetup-scheduling-PLAN.md's 2026-08-18 platform-split addendum) —
   # Apple MapKit, no API key/billing, settled as the iOS decision (not
@@ -70,12 +70,12 @@ dependencies:
   # not the older ones named in frontend/level0-federated-identity-PLAN.md's
   # own Step 1 — that plan explicitly says to reconfirm latest rather than
   # use its numbers verbatim.
-  sign_in_with_apple: ^8.1.0
+  sign_in_with_apple: ^8.2.0
   google_sign_in: ^7.2.0
 
   # Persists the light/dark theme toggle (Slice G) across app restarts —
   # not a dependency anywhere else in this app before this.
-  shared_preferences: ^2.5.3
+  shared_preferences: ^2.5.6
 
   # Real push notifications (ADR-030, round-10) — swaps
   # NoOpPushNotificationService for a real FirebasePushNotificationService
@@ -92,7 +92,7 @@ dependencies:
   # against pub.dev at implementation time via `dart pub add`, not
   # guessed. No separate platform-specific purchase package added
   # alongside this.
-  in_app_purchase: ^3.3.0
+  in_app_purchase: ^3.3.1
   font_awesome_flutter: ^11.0.0
   flutter_svg: ^2.3.0
 
@@ -105,13 +105,13 @@ dev_dependencies:
   # Lets tests fake flutter_secure_storage's platform channel in-memory
   # instead of touching a real Keychain/Keystore (unavailable under `flutter
   # test`) — see test/session_storage_test.dart.
-  flutter_secure_storage_platform_interface: ^1.1.2
+  flutter_secure_storage_platform_interface: ^2.1.1
 
   # Lets tests fake geolocator's platform channel (settable
   # GeolocatorPlatform.instance) instead of touching real device location
   # (unavailable under `flutter test`) — see
   # test/support/fake_geolocator_platform.dart, used by safety_page_test.dart.
-  geolocator_platform_interface: ^4.2.8
+  geolocator_platform_interface: ^4.4.1
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
