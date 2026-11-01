@@ -26,6 +26,22 @@ import (
 // requestsPerMinute is the fixed-window limit applied per key.
 const requestsPerMinute = 20
 
+// pathLimits raise the per-IP limit for routes a normal device calls more
+// often than 20 times a minute from one address. Analytics batches: many
+// phones share one carrier or office NAT, and each may send up to 30
+// batches a minute (its own per-user or per-install limit, in
+// handlers/analytics.go), so the IP budget is a coarse ceiling above that.
+//
+// The store webhooks (security review 2026-11-01, S-2) are authenticated by
+// signature and arrive in bursts from Apple's and Google's few addresses;
+// throttling them at 20 would delay renewals and refunds by the stores'
+// retry backoff.
+var pathLimits = map[string]int{
+	"/v1/analytics/events":        300,
+	"/v1/billing/webhooks/apple":  600,
+	"/v1/billing/webhooks/google": 600,
+}
+
 // emailKeyedPaths are the two email auth routes where a rotating set of IPs
 // hammering ONE account would sail past the IP-keyed limit below — an
 // extension of that limiter, not a second subsystem. Every other
@@ -109,7 +125,11 @@ func RateLimit(limiter ratelimit.Limiter, opts ...RateLimitOption) func(http.Han
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ipKey := fmt.Sprintf("ratelimit:%s:%s", clientIP(r), r.URL.Path)
-			if !limiter.Allow(ipKey, requestsPerMinute, time.Minute) {
+			limit := requestsPerMinute
+			if l, ok := pathLimits[r.URL.Path]; ok {
+				limit = l
+			}
+			if !limiter.Allow(ipKey, limit, time.Minute) {
 				writeRateLimited(w, time.Minute)
 				return
 			}

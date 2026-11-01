@@ -47,6 +47,8 @@ type fakeMonolith struct {
 	// meetupResponse is what GetMeetup hands back when a test needs to
 	// assert on the REST shape.
 	meetup         meetupRecorder
+	billing        billingRecorder
+	analytics      analyticsRecorder
 	meetupResponse monolithclient.Meetup
 
 	// captured arguments
@@ -676,62 +678,28 @@ func TestMalformedJSONBodyIs400(t *testing.T) {
 
 // --- Phase 2/3 routes ---------------------------------------------------
 
-// TestUnbuiltModuleRoutes_Return503 walks every route this phase registers
-// but does not implement. As of Phase 2 that is billing only — the meetup
-// routes are real (see TestMeetupRoutes_* below), which is itself the
-// assertion that they stopped being stubs.
-func TestUnbuiltModuleRoutes_Return503(t *testing.T) {
+// TestStoreRouteAuth: plan 29B built the billing store routes that used to
+// answer 503 here. The user routes need a session (401 without, never a
+// placeholder 503); the two webhooks need none, because Apple and Google
+// carry no session, and billing verifies them instead (billing_test.go).
+func TestStoreRouteAuth(t *testing.T) {
 	s := newTestServer(t)
-	token := s.tokenFor(t, "user-1", 3)
-
-	authenticated := []struct{ method, path string }{
+	for _, route := range []struct{ method, path string }{
 		{http.MethodPost, "/v1/billing/purchases/verify"},
 		{http.MethodGet, "/v1/billing/subscription"},
+	} {
+		if rec := s.do(route.method, route.path, `{}`, ""); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s without a token = %d, want 401", route.method, route.path, rec.Code)
+		}
 	}
-	for _, route := range authenticated {
-		t.Run(route.method+" "+route.path, func(t *testing.T) {
-			rec := s.do(route.method, route.path, `{}`, token)
-			if rec.Code != http.StatusServiceUnavailable {
-				t.Errorf("status = %d, want 503", rec.Code)
-			}
-			if got, ok := decodeBody(t, rec)["error"].(string); !ok || !strings.Contains(got, "not available") {
-				t.Errorf("error body = %v, want a \"not available\" message", got)
-			}
-		})
-
-		t.Run(route.method+" "+route.path+" (unauthenticated)", func(t *testing.T) {
-			// Auth precedence: an unauthenticated caller gets 401, not 503.
-			rec := s.do(route.method, route.path, `{}`, "")
-			if rec.Code != http.StatusUnauthorized {
-				t.Errorf("status = %d, want 401", rec.Code)
-			}
-		})
-	}
-
-	// The two webhook routes are deliberately NOT behind requireAuth —
-	// Apple/Google don't carry this app's session JWTs.
 	for _, path := range []string{"/v1/billing/webhooks/apple", "/v1/billing/webhooks/google"} {
-		t.Run("POST "+path, func(t *testing.T) {
-			rec := s.do(http.MethodPost, path, `{}`, "")
-			if rec.Code != http.StatusServiceUnavailable {
-				t.Errorf("status = %d, want 503 (webhooks are unauthenticated by design)", rec.Code)
-			}
-		})
-	}
-}
-
-// TestUnbuiltModuleRoutes_NeverReturnAFakeSuccessShape makes the "no stubbed
-// success" rule an assertion rather than a comment.
-func TestUnbuiltModuleRoutes_NeverReturnAFakeSuccessShape(t *testing.T) {
-	s := newTestServer(t)
-	rec := s.do(http.MethodGet, "/v1/billing/subscription", "", s.tokenFor(t, "user-1", 3))
-
-	body := decodeBody(t, rec)
-	if _, hasSubscription := body["subscription"]; hasSubscription {
-		t.Error("the 503 response carries a subscription field — a stubbed shape is indistinguishable from a real answer")
-	}
-	if len(body) != 1 || body["error"] == nil {
-		t.Errorf("body = %+v, want only an error field", body)
+		body := `{"signedPayload":"x"}`
+		if strings.HasSuffix(path, "google") {
+			body = `{"message":{"data":"e30=","messageId":"m"}}`
+		}
+		if rec := s.do(http.MethodPost, path, body, ""); rec.Code != http.StatusOK {
+			t.Errorf("POST %s without a session = %d, want it forwarded to billing (200)", path, rec.Code)
+		}
 	}
 }
 

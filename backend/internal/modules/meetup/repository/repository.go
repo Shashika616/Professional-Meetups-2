@@ -112,6 +112,25 @@ type NewMeetup struct {
 	LocationLng   float64
 	LocationLabel string
 	Capacity      int
+	// CreationKey is the client's Idempotency-Key, "" when it sent none. A
+	// second create with the same key for the same host returns
+	// *CreationKeyExistsError instead of inserting (plan 29 §3.5).
+	CreationKey string
+	// ChargeHoldID is the billing hold reserved for this creation, "" when
+	// it was free. When set, Create writes meetup.created to the billing
+	// outbox in the same transaction.
+	ChargeHoldID string
+}
+
+// CreationKeyExistsError is Create finding that an earlier request with the
+// same Idempotency-Key already created a meetup. The caller returns that
+// meetup as the result: it is a retry, not a conflict.
+type CreationKeyExistsError struct {
+	MeetupID string
+}
+
+func (e *CreationKeyExistsError) Error() string {
+	return "repository: a meetup was already created with this idempotency key: " + e.MeetupID
 }
 
 // Cursor is an opaque (to callers outside this package) keyset-pagination
@@ -183,6 +202,9 @@ type MeetupRepository interface {
 	// Create inserts the meetup. guard, when non-nil, runs under the host's
 	// schedule lock inside the same transaction (see ScheduleGuard).
 	Create(ctx context.Context, m NewMeetup, guard ScheduleGuard) (Meetup, error)
+	// FindByCreationKey returns the meetup hostUserID created with this
+	// Idempotency-Key, or apperror.ErrNotFound (wrapped).
+	FindByCreationKey(ctx context.Context, hostUserID, key string) (Meetup, error)
 	// FindScheduleConflict is ScheduleTx's read outside any transaction:
 	// the advisory answer the scheduling flow shows at its time step. Not
 	// the enforcement, which happens under the lock at create time.
@@ -645,11 +667,15 @@ type UserLocationCacheRepository interface {
 }
 
 // SubscriptionCacheRepository is the persistence boundary for
-// subscription_cache — the local, event-fed entitlement read-model
-// ADR-031 §2 step 5 exists for (Slice E's future paid-tier gating reads
-// this, never calls services/billing synchronously per request). Written
-// only by the Pub/Sub consumer (internal/events/consumer.go), never by
-// request-handling code — same shape as UserDisplayCacheRepository.
+// subscription_cache, the meetup module's read model of who has a plan.
+// Written only by billing's outbox (subscription.activated/deactivated,
+// cmd/monolith subscriptionCacheConsumer), never by request-handling code;
+// same shape as UserDisplayCacheRepository.
+//
+// It is for display, not for money: anything that consumes plan quota or
+// applies a plan's limits asks billing (CreationCharger), whose answer is
+// authoritative at that instant. A cache a few seconds behind must never
+// decide what a creation costs (plan 29B).
 type SubscriptionCacheRepository interface {
 	// Upsert applies a subscription-activated/subscription-deactivated
 	// event's values. occurredAt is the event's own timestamp, not
@@ -659,11 +685,8 @@ type SubscriptionCacheRepository interface {
 	// service already uses.
 	Upsert(ctx context.Context, userID, tier string, entitled bool, occurredAt time.Time) (applied bool, err error)
 	// IsEntitled reports whether userID's cached subscription counts as
-	// active (tier + whether the cached row exists at all — a user never
-	// seen by either event is free/not-entitled, the safe default). Not
-	// consumed by anything in this slice yet (Slice E, later) — exposed
-	// now so that future call site is a read against an existing,
-	// already-tested repository method, not new plumbing.
+	// active (a user never seen by either event is not entitled, the safe
+	// default). Display only; see the type comment.
 	IsEntitled(ctx context.Context, userID string) (bool, error)
 }
 

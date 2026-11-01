@@ -36,7 +36,12 @@ func ToGRPCStatus(err error) error {
 		slog.Default().Error("internal error", "error", err)
 		return status.Error(code, genericInternalMessage)
 	}
-	return status.Error(code, err.Error())
+	st := status.New(code, err.Error())
+	var coded *CodedError
+	if errors.As(err, &coded) {
+		st = withErrorInfo(st, coded)
+	}
+	return st.Err()
 }
 
 func grpcCode(err error) codes.Code {
@@ -53,6 +58,12 @@ func grpcCode(err error) codes.Code {
 		return codes.AlreadyExists
 	case errors.Is(err, ErrRateLimited):
 		return codes.ResourceExhausted
+	case errors.Is(err, ErrUnavailable):
+		return codes.Unavailable
+	// Both travel as FAILED_PRECONDITION; the CodedError's reason, when
+	// attached, is what tells the gateway 402 from 426 (HTTPStatus).
+	case errors.Is(err, ErrPaymentRequired), errors.Is(err, ErrUpgradeRequired):
+		return codes.FailedPrecondition
 	default:
 		return codes.Internal
 	}

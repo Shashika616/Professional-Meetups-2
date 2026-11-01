@@ -12,6 +12,7 @@ package meetup_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -303,7 +304,7 @@ func newHarness(t *testing.T) *harness {
 		         meetup.meetup_feedback, meetup.device_tokens, meetup.meetup_user_ratings,
 		         meetup.user_display_cache, meetup.user_location_cache, meetup.subscription_cache,
 		         meetup.notification_outbox, meetup.meetups_completed_outbox,
-		         meetup.safety_share,
+		         meetup.safety_share, meetup.billing_outbox, meetup.activity_outbox,
 		         auth.users
 		RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
@@ -2770,5 +2771,65 @@ func TestRequestToJoin_RefusesAMeetupBeyondTheBrowseRadius(t *testing.T) {
 	unknown := newUserID(t, h)
 	if err := join(unknown); err != nil {
 		t.Errorf("a requester with no known location was refused: %v", err)
+	}
+}
+
+// TestJoinAndAcceptAlwaysLeaveAnActivityRecord: plan 29D's analytics count
+// join requests and accepts from meetup.activity_outbox, written in the same
+// transaction. Nobody here has a registered device, so the notification
+// outbox gets nothing (the gap the activity outbox closes), but both facts
+// are still recorded, with ids only.
+func TestJoinAndAcceptAlwaysLeaveAnActivityRecord(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	m, err := h.svc.CreateMeetup(ctx, meetup.CreateMeetupRequest{
+		HostUserID: host, HostTrustLevel: 4, Intent: meetup.IntentCoffee,
+		WindowStart: time.Now().Add(time.Hour), WindowEnd: time.Now().Add(2 * time.Hour),
+		LocationLat: colomboLat, LocationLng: colomboLng, LocationLabel: "Cafe", Capacity: 3,
+	})
+	if err != nil {
+		t.Fatalf("CreateMeetup: %v", err)
+	}
+	guest := newUserID(t, h)
+	req, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: guest, RequesterTrustLevel: 2})
+	if err != nil {
+		t.Fatalf("RequestToJoin: %v", err)
+	}
+	if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{RequestID: req.ID, HostUserID: host, Accept: true}); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+
+	var notifications int
+	_ = h.pool.QueryRow(ctx, `SELECT count(*) FROM meetup.notification_outbox`).Scan(&notifications)
+	if notifications != 0 {
+		t.Fatalf("expected no notification rows without devices, got %d", notifications)
+	}
+	rows, err := h.pool.Query(ctx, `SELECT topic, payload FROM meetup.activity_outbox ORDER BY created_at`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var topic string
+		var e meetuprepo.ActivityEvent
+		var payload []byte
+		if err := rows.Scan(&topic, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(payload, &e); err != nil {
+			t.Fatal(err)
+		}
+		if e.Topic != topic || e.RequestID != req.ID || e.MeetupID != m.ID || e.RequesterID != guest || e.HostUserID != host || e.OccurredAt.IsZero() {
+			t.Errorf("%s payload = %+v", topic, e)
+		}
+		if strings.Contains(string(payload), "Cafe") {
+			t.Errorf("the payload carries meetup text: %s", payload)
+		}
+		got = append(got, topic)
+	}
+	if len(got) != 2 || got[0] != meetuprepo.ActivityTopicRequestCreated || got[1] != meetuprepo.ActivityTopicRequestAccepted {
+		t.Errorf("activity rows = %v, want request.created then request.accepted", got)
 	}
 }

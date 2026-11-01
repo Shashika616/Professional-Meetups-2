@@ -20,6 +20,7 @@
 package metrics
 
 import (
+	"bytes"
 	"net/http"
 	"strconv"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 )
 
 // Collectors is every metric this backend records. Grouped in one struct so
@@ -59,6 +61,18 @@ type Collectors struct {
 	OutboxFailed       prometheus.Counter
 	OutboxDeadLettered prometheus.Counter
 	OutboxPending      prometheus.Gauge
+
+	// Plan 29D business counters. Labels are low-cardinality on purpose:
+	// a platform, a kind, an event family, a drop reason; never a user,
+	// a product id or a meetup.
+	CreditsSpent            prometheus.Counter
+	PurchasesVerified       *prometheus.CounterVec
+	AnalyticsEventsIngested *prometheus.CounterVec
+	AnalyticsEventsDropped  *prometheus.CounterVec
+	AnalyticsBufferDepth    prometheus.Gauge
+	AnalyticsFlushedBatches prometheus.Counter
+	AnalyticsFlushFailures  prometheus.Counter
+	AnalyticsReports        *prometheus.CounterVec
 }
 
 // NewCollectors registers a fresh set of metrics on reg.
@@ -106,7 +120,57 @@ func NewCollectors(reg prometheus.Registerer) *Collectors {
 			Name: "notification_outbox_pending",
 			Help: "Rows claimed in the most recent outbox poll — a persistently non-zero value means delivery is not keeping up.",
 		}),
+		CreditsSpent: factory.counter(prometheus.CounterOpts{
+			Name: "credits_spent_total",
+			Help: "Credits captured for meetup creations.",
+		}),
+		PurchasesVerified: factory.counterVec(prometheus.CounterOpts{
+			Name: "purchases_verified_total",
+			Help: "Store purchases verified and granted, by platform and kind (consumable, subscription).",
+		}, []string{"platform", "kind"}),
+		AnalyticsEventsIngested: factory.counterVec(prometheus.CounterOpts{
+			Name: "analytics_events_ingested_total",
+			Help: "Analytics events accepted into the buffer, by family (session, screen, action, flow, friction, server).",
+		}, []string{"family"}),
+		AnalyticsEventsDropped: factory.counterVec(prometheus.CounterOpts{
+			Name: "analytics_events_dropped_total",
+			Help: "Analytics events or attributes dropped, by reason (unknown_event, unknown_attribute, bad_type, too_long, skew, buffer_full, opted_out, disabled, duplicate, flush_failed).",
+		}, []string{"reason"}),
+		AnalyticsBufferDepth: factory.gauge(prometheus.GaugeOpts{
+			Name: "analytics_buffer_depth",
+			Help: "Analytics events waiting in the in-process buffer.",
+		}),
+		AnalyticsFlushedBatches: factory.counter(prometheus.CounterOpts{
+			Name: "analytics_flushed_batches_total",
+			Help: "Buffer flushes written to Postgres.",
+		}),
+		AnalyticsFlushFailures: factory.counter(prometheus.CounterOpts{
+			Name: "analytics_flush_failures_total",
+			Help: "Buffer flushes that failed; their events are dropped and counted.",
+		}),
+		AnalyticsReports: factory.counterVec(prometheus.CounterOpts{
+			Name: "analytics_reports_total",
+			Help: "Daily report attempts, by outcome (done, failed) and part (build, email, upload).",
+		}, []string{"part", "outcome"}),
 	}
+}
+
+// Text is this process's registry in the Prometheus text format, for the
+// monolith's metrics to be served through the gateway (OpsService.
+// ScrapeMetrics; plan 29D).
+func Text() ([]byte, error) {
+	families, err := registry.Gather()
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	enc := expfmt.NewEncoder(&buf, expfmt.NewFormat(expfmt.TypeTextPlain))
+	for _, f := range families {
+		if err := enc.Encode(f); err != nil {
+			return nil, err
+		}
+	}
+	return buf.Bytes(), nil
 }
 
 // registry is the process-wide registry. Go runtime and process collectors

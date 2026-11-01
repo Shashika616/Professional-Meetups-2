@@ -14,13 +14,18 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
+	"professional-meetups-monolith/backend/internal/platform/clientinfo"
 	"professional-meetups-monolith/backend/internal/platform/internalauth"
+	"professional-meetups-monolith/backend/internal/platform/logging"
+	analyticsv1 "professional-meetups-monolith/backend/internal/proto/analytics/v1"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
+	billingv1 "professional-meetups-monolith/backend/internal/proto/billing/v1"
 	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
 	opsv1 "professional-meetups-monolith/backend/internal/proto/ops/v1"
 )
@@ -159,7 +164,7 @@ type Client interface {
 	ConfirmTrustedContact(ctx context.Context, token string) (requesterName string, err error)
 
 	// --- meetup module (Phase 2) — same connection, same interceptor ---
-	CreateMeetup(ctx context.Context, hostUserID string, hostTrustLevel int32, intent string, windowStart, windowEnd int64, lat, lng float64, label string, capacity int32) (Meetup, error)
+	CreateMeetup(ctx context.Context, hostUserID string, hostTrustLevel int32, intent string, windowStart, windowEnd int64, lat, lng float64, label string, capacity int32, charge CreateCharge) (Meetup, error)
 	// intent "" means every intent; withinDays 0 means no time restriction.
 	ListOpenMeetups(ctx context.Context, userID, intent, cursor string, pageSize int32, viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32) ([]Meetup, string, error)
 	GetMeetup(ctx context.Context, meetupID, userID string, viewerTrustLevel int32) (Meetup, error)
@@ -193,6 +198,30 @@ type Client interface {
 	CloseMeetup(ctx context.Context, meetupID, hostUserID string) (Meetup, error)
 	CancelMeetup(ctx context.Context, meetupID, hostUserID, reason string) error
 
+	// --- billing module (plan 29A) — same connection, same interceptors ---
+	GetWallet(ctx context.Context, userID string, trustLevel int32) (Wallet, error)
+	ListLedger(ctx context.Context, userID, cursor string, pageSize int32) (LedgerPage, error)
+	Quote(ctx context.Context, userID string, trustLevel, capacity int32, windowStart int64) (Quote, error)
+	GetEntitlements(ctx context.Context, userID string, trustLevel int32) (Entitlements, error)
+
+	// --- billing store routes (plan 29B) ---
+	VerifyPurchase(ctx context.Context, userID string, trustLevel int32, platform, productID, token string) (PurchaseResult, error)
+	GetSubscription(ctx context.Context, userID string) (Subscription, error)
+	// GetCatalog is filtered for userID ("" when not signed in).
+	GetCatalog(ctx context.Context, userID string) (Catalog, error)
+	// The webhooks pass the store's request through untouched; billing
+	// verifies it. processed is false for a repeat.
+	HandleAppleNotification(ctx context.Context, signedPayload string) (processed bool, err error)
+	HandleGoogleNotification(ctx context.Context, authorization, messageID, dataBase64 string) (processed bool, err error)
+
+	// ScrapeMonolithMetrics returns the monolith's Prometheus registry as
+	// text (plan 29D), for GET /metrics/monolith.
+	ScrapeMonolithMetrics(ctx context.Context) ([]byte, error)
+
+	// GetAppConfig evaluates the feature flags for userID ("" for an
+	// anonymous caller) — GET /v1/app-config (plan 29 §2).
+	GetAppConfig(ctx context.Context, userID string) (AppConfig, error)
+
 	// CheckHealth asks the monolith's gRPC health service whether it is
 	// serving — what the gateway's /readyz reports (§D3). Separate from the
 	// business RPCs because it must work (and be callable) without any user
@@ -208,6 +237,12 @@ type Client interface {
 	// Like CheckHealth, it carries no user context: it is operator work, not
 	// anybody's request.
 	RunScheduledWork(ctx context.Context) (ScheduledWorkReport, error)
+
+	// IngestAnalytics forwards one event batch (plan 29D). userID is from
+	// the verified token, "" when signed out.
+	IngestAnalytics(ctx context.Context, userID string, b AnalyticsBatch) (AnalyticsResult, error)
+	// SetAnalyticsConsent stores a signed-in user's opt-out.
+	SetAnalyticsConsent(ctx context.Context, userID string, optedOut bool) error
 
 	Close() error
 }
@@ -227,11 +262,14 @@ type SweepOutcome struct {
 }
 
 type grpcClient struct {
-	conn   *grpc.ClientConn
-	auth   authv1.AuthServiceClient
-	meetup meetupv1.MeetupServiceClient
-	health healthpb.HealthClient
-	ops    opsv1.OpsServiceClient
+	conn    *grpc.ClientConn
+	auth    authv1.AuthServiceClient
+	meetup  meetupv1.MeetupServiceClient
+	billing billingv1.BillingServiceClient
+	// analytics is plan 29D's ingest and consent.
+	analytics analyticsv1.AnalyticsServiceClient
+	health    healthpb.HealthClient
+	ops       opsv1.OpsServiceClient
 }
 
 // New connects to the monolith at addr (e.g. "monolith:9090"), blocking
@@ -245,7 +283,16 @@ type grpcClient struct {
 func New(addr, sharedSecret string) (Client, error) {
 	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithUnaryInterceptor(internalauth.UnaryClientInterceptor(sharedSecret)),
+		// Plan 29D: a client span per call, and W3C traceparent onto the
+		// wire, so the monolith's spans join the gateway's trace.
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithChainUnaryInterceptor(
+			internalauth.UnaryClientInterceptor(sharedSecret),
+			// X-App-Version / X-Platform, onto every call (plan 29 §2).
+			clientinfo.UnaryClientInterceptor(),
+			// X-Request-ID, so the monolith logs the gateway's id too.
+			logging.UnaryClientInterceptor(),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("monolithclient: create grpc client for %s: %w", addr, err)
@@ -267,11 +314,13 @@ func New(addr, sharedSecret string) (Client, error) {
 	}
 
 	return &grpcClient{
-		conn:   conn,
-		auth:   authv1.NewAuthServiceClient(conn),
-		meetup: meetupv1.NewMeetupServiceClient(conn),
-		health: healthpb.NewHealthClient(conn),
-		ops:    opsv1.NewOpsServiceClient(conn),
+		conn:      conn,
+		auth:      authv1.NewAuthServiceClient(conn),
+		meetup:    meetupv1.NewMeetupServiceClient(conn),
+		billing:   billingv1.NewBillingServiceClient(conn),
+		analytics: analyticsv1.NewAnalyticsServiceClient(conn),
+		health:    healthpb.NewHealthClient(conn),
+		ops:       opsv1.NewOpsServiceClient(conn),
 	}, nil
 }
 
@@ -713,4 +762,12 @@ type MemberMeetupComment struct {
 	AuthorName           string
 	Note                 string
 	WrittenAtUnixSeconds int64
+}
+
+func (c *grpcClient) ScrapeMonolithMetrics(ctx context.Context) ([]byte, error) {
+	resp, err := c.ops.ScrapeMetrics(ctx, &opsv1.ScrapeMetricsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.GetText(), nil
 }

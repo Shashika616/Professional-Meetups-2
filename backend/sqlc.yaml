@@ -38,3 +38,33 @@ sql:
         overrides:
           - db_type: "uuid"
             go_type: "github.com/google/uuid.UUID"
+  # Plan 29A. The billing module's own queries and generated package; it
+  # reads and writes only the billing schema (ADR-010).
+  - engine: "postgresql"
+    queries: "internal/modules/billing/repository/queries"
+    schema: "migrations"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/modules/billing/repository/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"
+  # Plan 29D. The analytics module's own queries and generated package; it
+  # reads and writes only the analytics schema (ADR-011).
+  - engine: "postgresql"
+    queries: "internal/modules/analytics/repository/queries"
+    schema: "migrations"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/modules/analytics/repository/sqlcgen"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        overrides:
+          - db_type: "uuid"
+            go_type: "github.com/google/uuid.UUID"

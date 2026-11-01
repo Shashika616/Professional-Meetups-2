@@ -100,7 +100,7 @@ func TestFederatedSignup_WhenTheAddressIsAlreadyTaken(t *testing.T) {
 		_, _, err := svc.ResolveOrCreateIdentity(
 			context.Background(), FederatedProviderApple, "apple-sub-1", "ADA@Example.com", "Ada", "", true,
 		)
-		claimRequired(t, err)
+		_ = claimRequired(t, err) // asserts the error is a claim; the value is not needed here
 	})
 
 	t.Run("an address-less provider is unaffected", func(t *testing.T) {

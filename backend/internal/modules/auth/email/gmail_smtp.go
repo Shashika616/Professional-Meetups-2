@@ -72,6 +72,26 @@ func (s *GmailSMTPEmailSender) SendAlert(ctx context.Context, to, message string
 // PlainAuth still refuses to send credentials unless STARTTLS succeeded
 // (or the host is localhost), so dropping SendMail gives up no protection.
 func (s *GmailSMTPEmailSender) send(ctx context.Context, to, subject, body string) error {
+	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s\r\n", s.address, to, subject, body)
+	return s.deliver(ctx, []string{to}, []byte(msg))
+}
+
+// SendWithAttachment sends a multipart/mixed message: the text body and one
+// base64 attachment (plan 29F). Validate runs first, so nothing that could
+// inject a header reaches the wire.
+func (s *GmailSMTPEmailSender) SendWithAttachment(ctx context.Context, to []string, subject, body string, att Attachment) error {
+	if err := Validate(to, subject, att); err != nil {
+		return err
+	}
+	msg, err := mimeWithAttachment(s.address, to, subject, body, att)
+	if err != nil {
+		return err
+	}
+	return s.deliver(ctx, to, msg)
+}
+
+// deliver runs one SMTP transaction for msg to every recipient.
+func (s *GmailSMTPEmailSender) deliver(ctx context.Context, to []string, msg []byte) error {
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
@@ -110,15 +130,16 @@ func (s *GmailSMTPEmailSender) send(ctx context.Context, to, subject, body strin
 	if err := c.Mail(s.address); err != nil {
 		return fmt.Errorf("email: gmail smtp mail from: %w", err)
 	}
-	if err := c.Rcpt(to); err != nil {
-		return fmt.Errorf("email: gmail smtp rcpt to: %w", err)
+	for _, rcpt := range to {
+		if err := c.Rcpt(rcpt); err != nil {
+			return fmt.Errorf("email: gmail smtp rcpt to: %w", err)
+		}
 	}
 	w, err := c.Data()
 	if err != nil {
 		return fmt.Errorf("email: gmail smtp data: %w", err)
 	}
-	msg := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s\r\n", s.address, to, subject, body)
-	if _, err := w.Write([]byte(msg)); err != nil {
+	if _, err := w.Write(msg); err != nil {
 		return fmt.Errorf("email: gmail smtp write: %w", err)
 	}
 	if err := w.Close(); err != nil {

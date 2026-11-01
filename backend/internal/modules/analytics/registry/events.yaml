@@ -1,0 +1,319 @@
+# The analytics event registry (plan 29 §4.1–4.2, ADR-011). The single
+# source of truth: the server validates every event against it, and
+# `go generate ./internal/modules/analytics/registry` writes the Dart
+# constants the app uses (frontend/lib/core/analytics/event_names.g.dart),
+# so client and server cannot drift.
+#
+# Adding an event or attribute is a change here, then `go generate`. Anything
+# not listed is dropped and counted, never stored.
+#
+# Attribute types:
+#   bool    true or false
+#   int     a whole number from 0 to max (default 86400000, a day in ms)
+#   enum    one of values
+#   id      an identifier: lowercase letters, digits, and _ . : - only,
+#           at most 100 characters. Never free text, never a name.
+#
+# source: app events come from the device; server events only from the
+# monolith's own outbox consumers. An app batch carrying a server event is
+# dropped (reason server_only), so the app cannot fake a purchase or a spend.
+#
+# family is the metrics label (analytics_events_ingested_total{family}).
+
+# The screen catalogue: the only values `screen` may take.
+screens:
+  - splash
+  - landing
+  - onboarding
+  - email_sign_in
+  - profile_setup
+  - home
+  - events
+  - meetup_detail
+  - location_view
+  - participants
+  - schedule_meetup
+  - meetup_review
+  - chats
+  - notifications
+  - profile
+  - public_profile
+  - privacy_controls
+  - safety
+  - trusted_contacts
+  - verification_checklist
+  - personal_details
+  - phone_verification
+  - personal_email_verification
+  - corporate_email_verification
+  - hosting_unlock
+  - credits
+  - buy_credits
+  - premium
+  - request_management
+  - email_signup
+  # Sheets and dialogs that are a screen in their own right (plan 29E).
+  - schedule_conflict
+  - join_confirmation
+  - share_with_contacts
+  - participant_review
+  - account_claim
+  - sos_confirm
+
+# The funnels and their steps, in order: the only values flow_id and
+# flow_step may take.
+flows:
+  onboarding: [age_confirmation, choose_method, email, otp, profile_setup]
+  verify_level_2: [personal_details, phone, personal_email]
+  hosting_unlock: [checklist, corporate_email, unlock]
+  schedule_meetup: [intent, timing, location, capacity, review]
+  join_meetup: [detail, request, accepted]
+  review_meetup: [experience, rating, submit]
+  buy_credits: [choose_pack, store_sheet, confirmed]
+  subscribe: [choose_plan, store_sheet, confirmed]
+  sos: [confirm, sending, sent]
+
+# The catalogued controls cta_tapped may name. Not every tap: the ones the
+# daily report's Features sheet lists.
+ctas:
+  - sign_in_apple
+  - sign_in_google
+  - sign_in_linkedin
+  - sign_in_email
+  - schedule_meetup
+  - join_meetup
+  - leave_meetup
+  - cancel_meetup
+  - accept_request
+  - decline_request
+  - open_map
+  - open_chat
+  - send_message
+  - open_notifications
+  - open_profile
+  - edit_profile
+  - open_credits
+  - buy_credits
+  - open_premium
+  - subscribe
+  - restore_purchases
+  - start_verification
+  - unlock_hosting
+  - add_trusted_contact
+  - sos
+  - share_meetup
+  - report_user
+  - block_user
+  - sign_out
+  - delete_account
+  - withdraw_request
+  - close_meetup
+  - edit_name
+  - switch_theme
+
+events:
+  # Sessions.
+  app_opened:
+    version: 1
+    family: session
+    source: app
+    attributes:
+      cold_start: {type: bool}
+  app_foregrounded:
+    version: 1
+    family: session
+    source: app
+  app_backgrounded:
+    version: 1
+    family: session
+    source: app
+  session_started:
+    version: 1
+    family: session
+    source: app
+  session_ended:
+    version: 1
+    family: session
+    source: app
+    attributes:
+      duration_ms: {type: int}
+
+  # Screens.
+  screen_viewed:
+    version: 1
+    family: screen
+    source: app
+  screen_left:
+    version: 1
+    family: screen
+    source: app
+    attributes:
+      duration_ms: {type: int}
+
+  # Actions.
+  cta_tapped:
+    version: 1
+    family: action
+    source: app
+    attributes:
+      cta: {type: enum, values_from: ctas}
+  search_performed:
+    version: 1
+    family: action
+    source: app
+    attributes:
+      result_count: {type: int, max: 10000}
+      filter_count: {type: int, max: 50}
+  filter_changed:
+    version: 1
+    family: action
+    source: app
+    attributes:
+      filter: {type: id}
+      active: {type: bool}
+  toggle_changed:
+    version: 1
+    family: action
+    source: app
+    attributes:
+      toggle: {type: id}
+      value: {type: bool}
+
+  # Flows. flow_id and flow_step are envelope fields.
+  flow_started:
+    version: 1
+    family: flow
+    source: app
+  flow_step_viewed:
+    version: 1
+    family: flow
+    source: app
+  flow_step_completed:
+    version: 1
+    family: flow
+    source: app
+    attributes:
+      duration_ms: {type: int}
+  flow_completed:
+    version: 1
+    family: flow
+    source: app
+    attributes:
+      duration_ms: {type: int}
+  flow_abandoned:
+    version: 1
+    family: flow
+    source: app
+    attributes:
+      reason: {type: enum, values: [back, closed, backgrounded, error, timeout]}
+
+  # Friction.
+  error_shown:
+    version: 1
+    family: friction
+    source: app
+    attributes:
+      kind: {type: id}
+  api_error:
+    version: 1
+    family: friction
+    source: app
+    attributes:
+      route: {type: id}
+      status_class: {type: enum, values: [4xx, 5xx, network, timeout]}
+  request_timeout:
+    version: 1
+    family: friction
+    source: app
+    attributes:
+      route: {type: id}
+  rage_tap:
+    version: 1
+    family: friction
+    source: app
+    attributes:
+      taps: {type: int, max: 100}
+  long_dwell:
+    version: 1
+    family: friction
+    source: app
+    attributes:
+      duration_ms: {type: int}
+  credits_insufficient_shown:
+    version: 1
+    family: friction
+    source: app
+    attributes:
+      required_credits: {type: int, max: 100000}
+
+  # Server domain events, from the billing and meetup outboxes.
+  # A charged meetup was created (the host's). What it cost is the
+  # matching credits_spent.
+  meetup_created:
+    version: 1
+    family: server
+    source: server
+  join_requested:
+    version: 1
+    family: server
+    source: server
+  request_accepted:
+    version: 1
+    family: server
+    source: server
+  meetup_completed:
+    version: 1
+    family: server
+    source: server
+  credits_granted:
+    version: 1
+    family: server
+    source: server
+    attributes:
+      reason: {type: id}
+      credits: {type: int, max: 1000000}
+  credits_spent:
+    version: 1
+    family: server
+    source: server
+    attributes:
+      reason: {type: id}
+      credits: {type: int, max: 1000000}
+  credits_refunded:
+    version: 1
+    family: server
+    source: server
+    attributes:
+      reason: {type: id}
+      credits: {type: int, max: 1000000}
+  credits_expired:
+    version: 1
+    family: server
+    source: server
+    attributes:
+      reason: {type: id}
+      credits: {type: int, max: 1000000}
+  # Credits taken back: a store refund of a pack (reversal) or an operator's
+  # negative adjustment.
+  credits_revoked:
+    version: 1
+    family: server
+    source: server
+    attributes:
+      reason: {type: id}
+      credits: {type: int, max: 1000000}
+  purchase_verified:
+    version: 1
+    family: server
+    source: server
+    attributes:
+      platform: {type: enum, values: [ios, android]}
+      kind: {type: enum, values: [consumable, subscription]}
+      product_id: {type: id}
+  subscription_changed:
+    version: 1
+    family: server
+    source: server
+    attributes:
+      status: {type: id}
+      plan_code: {type: id}

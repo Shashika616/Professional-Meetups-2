@@ -314,6 +314,7 @@ func safetyStateFromProto(s *meetupv1.SafetyStateResponse) SafetyState {
 func (c *grpcClient) CreateMeetup(
 	ctx context.Context, hostUserID string, hostTrustLevel int32, intent string,
 	windowStart, windowEnd int64, lat, lng float64, label string, capacity int32,
+	charge CreateCharge,
 ) (Meetup, error) {
 	intentProto, ok := intentFromWire[intent]
 	if !ok {
@@ -329,6 +330,9 @@ func (c *grpcClient) CreateMeetup(
 		LocationLng:            lng,
 		LocationLabel:          label,
 		Capacity:               capacity,
+		ExpectedCost:           charge.ExpectedCost,
+		PriceVersion:           charge.PriceVersion,
+		IdempotencyKey:         charge.IdempotencyKey,
 	})
 	if err != nil {
 		return Meetup{}, withScheduleConflict(err)

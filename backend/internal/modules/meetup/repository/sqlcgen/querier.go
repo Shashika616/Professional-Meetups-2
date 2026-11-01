@@ -138,6 +138,8 @@ type Querier interface {
 	// Scoped to the requester and to 'pending' in the WHERE, like Withdraw:
 	// an accepted request is a withdrawal (ADR-020 §4), never a cancellation.
 	CancelPendingMeetupRequest(ctx context.Context, arg CancelPendingMeetupRequestParams) (MeetupMeetupRequest, error)
+	ClaimActivityOutboxBatch(ctx context.Context, arg ClaimActivityOutboxBatchParams) ([]ClaimActivityOutboxBatchRow, error)
+	ClaimBillingOutboxBatch(ctx context.Context, arg ClaimBillingOutboxBatchParams) ([]ClaimBillingOutboxBatchRow, error)
 	// Claims up to batch_size due rows. Deliberately IDENTICAL in shape to
 	// ClaimNotificationOutboxBatch — the proven claiming strategy, not a second
 	// design.
@@ -297,6 +299,8 @@ type Querier interface {
 	// How many meetups one host has created recently, for the nearby-notify
 	// cap (#89). idx_meetups_host narrows to the host; a host's rows are few.
 	CountMeetupsCreatedByHostSince(ctx context.Context, arg CountMeetupsCreatedByHostSinceParams) (int64, error)
+	CountPendingActivityEvents(ctx context.Context) (int64, error)
+	CountPendingBillingEvents(ctx context.Context) (int64, error)
 	// Backs the pending gauge. Same predicate as the claimable partial index, so
 	// it is an index-only scan over the pending set rather than a table scan.
 	CountPendingMeetupsCompleted(ctx context.Context) (int64, error)
@@ -334,6 +338,8 @@ type Querier interface {
 	// meetup is not misconduct and should not be a permanent bar, and the
 	// host sees the withdrawal in the request's own history either way.
 	CreateMeetupRequest(ctx context.Context, arg CreateMeetupRequestParams) (MeetupMeetupRequest, error)
+	DeleteDeadLetteredActivityEvents(ctx context.Context, arg DeleteDeadLetteredActivityEventsParams) (int64, error)
+	DeleteDeadLetteredBillingEvents(ctx context.Context, arg DeleteDeadLetteredBillingEventsParams) (int64, error)
 	// Retention for dead-lettered rows, kept longer than successes on purpose.
 	DeleteDeadLetteredMeetupsCompleted(ctx context.Context, arg DeleteDeadLetteredMeetupsCompletedParams) (int64, error)
 	// Retention for dead-lettered rows (§F8), kept longer than successes on
@@ -355,6 +361,8 @@ type Querier interface {
 	// above reassigns ownership on sign-in); if the row is no longer theirs,
 	// zero rows match and nothing changes.
 	DeleteDeviceTokenForUser(ctx context.Context, arg DeleteDeviceTokenForUserParams) (int64, error)
+	DeleteProcessedActivityEvents(ctx context.Context, arg DeleteProcessedActivityEventsParams) (int64, error)
+	DeleteProcessedBillingEvents(ctx context.Context, arg DeleteProcessedBillingEventsParams) (int64, error)
 	// Retention for done rows, batched via the id subquery rather than one
 	// unbounded DELETE — same reasoning as DeleteProcessedNotifications. The
 	// caller loops until a batch comes back short.
@@ -442,6 +450,10 @@ type Querier interface {
 	// ListActiveMeetups isLive closure, and (as BROWSABLE, 'open' only) in
 	// ListOpenMeetupsFirstPage/AfterCursor above. Keep the three in step.
 	FindScheduleConflict(ctx context.Context, arg FindScheduleConflictParams) (FindScheduleConflictRow, error)
+	// The meetup an earlier request with this Idempotency-Key created (plan 29
+	// §3.5). Read under the host's schedule lock, inside the create
+	// transaction, so two concurrent retries cannot both miss it.
+	GetMeetupByCreationKey(ctx context.Context, arg GetMeetupByCreationKeyParams) (MeetupMeetup, error)
 	// my_request_status is the *latest* request this specific user (viewerID)
 	// has made on this meetup, or NULL if they never requested — the frontend
 	// uses this to render "REQUEST TO JOIN" vs. the request's current status
@@ -499,6 +511,13 @@ type Querier interface {
 	// does not need this — a no-show is legitimately ratable by someone who did
 	// attend and confirm (ADR-015).
 	HasConfirmedMeetupHappened(ctx context.Context, arg HasConfirmedMeetupHappenedParams) (bool, error)
+	// meetup.activity_outbox: join requests and accepts, for analytics (plan 29D),
+	// written in the same transaction as the request or the accept.
+	InsertActivityEvent(ctx context.Context, arg InsertActivityEventParams) error
+	// meetup.billing_outbox: charged meetups' created, cancelled and closed
+	// events, written in the same transaction as the change (plan 29 §3.5,
+	// §3.6). Same claiming strategy as the other meetup outboxes.
+	InsertBillingEvent(ctx context.Context, arg InsertBillingEventParams) error
 	// True if meetupID is cancelled, ratedID is that meetup's host, and
 	// raterID has an accepted meetup_requests row for it (ADR-020 §3) — a
 	// cancelled meetup's accepted requests stay 'accepted' (cancellation is a
@@ -766,6 +785,12 @@ type Querier interface {
 	// space; a collision between two users only makes them wait for each
 	// other briefly (a false serialisation), never lets a conflict through.
 	LockUserSchedule(ctx context.Context, userID string) error
+	MarkActivityEventDeadLettered(ctx context.Context, arg MarkActivityEventDeadLetteredParams) error
+	MarkActivityEventFailed(ctx context.Context, arg MarkActivityEventFailedParams) error
+	MarkActivityEventProcessed(ctx context.Context, id uuid.UUID) error
+	MarkBillingEventDeadLettered(ctx context.Context, arg MarkBillingEventDeadLetteredParams) error
+	MarkBillingEventFailed(ctx context.Context, arg MarkBillingEventFailedParams) error
+	MarkBillingEventProcessed(ctx context.Context, id uuid.UUID) error
 	MarkMeetupFull(ctx context.Context, id uuid.UUID) error
 	// Terminal. Leaves the claimable partial index and is never attempted again,
 	// but the row is kept: a permanent failure here means some users' profile

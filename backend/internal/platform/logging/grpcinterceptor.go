@@ -45,3 +45,15 @@ func requestIDFromIncoming(ctx context.Context) string {
 	}
 	return values[0]
 }
+
+// UnaryClientInterceptor forwards the request id to the monolith, so its
+// log lines carry the gateway's id (it used to stop at the gateway). The
+// trace id travels separately, as W3C traceparent, through otelgrpc.
+func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		if id := RequestIDFromContext(ctx); id != "" {
+			ctx = metadata.AppendToOutgoingContext(ctx, requestIDMetadataKey, id)
+		}
+		return invoker(ctx, method, req, reply, cc, opts...)
+	}
+}

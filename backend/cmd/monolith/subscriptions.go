@@ -16,7 +16,6 @@ type subscriptionDeps struct {
 	bus               *eventbus.InMemoryBus
 	userDisplayCache  meetuprepo.UserDisplayCacheRepository
 	userLocationCache meetuprepo.UserLocationCacheRepository
-	subscriptionCache meetuprepo.SubscriptionCacheRepository
 	meetupService     meetup.Service
 	authService       auth.Service
 	logger            *slog.Logger
@@ -64,26 +63,9 @@ func registerSubscriptions(d subscriptionDeps) {
 		return err
 	})
 
-	// billing -> meetup: entitlement cache. NOTHING PUBLISHES THESE UNTIL
-	// PHASE 3 — wired now anyway, the same bootstrapping pattern Phase 1
-	// used for publishing events nothing consumed yet, so Phase 3 adds a
-	// publisher rather than also having to add plumbing here.
-	d.bus.Subscribe(eventbus.TopicSubscriptionActivated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.SubscriptionActivatedPayload)
-		if !ok {
-			return fmt.Errorf("subscription cache: unexpected payload type %T", e.Payload)
-		}
-		_, err := d.subscriptionCache.Upsert(ctx, payload.UserID, payload.Tier, true, payload.OccurredAt)
-		return err
-	})
-	d.bus.Subscribe(eventbus.TopicSubscriptionDeactivated, func(ctx context.Context, e eventbus.Event) error {
-		payload, ok := e.Payload.(eventbus.SubscriptionDeactivatedPayload)
-		if !ok {
-			return fmt.Errorf("subscription cache: unexpected payload type %T", e.Payload)
-		}
-		_, err := d.subscriptionCache.Upsert(ctx, payload.UserID, payload.Tier, false, payload.OccurredAt)
-		return err
-	})
+	// billing -> meetup: the subscription_cache read model is fed through
+	// billing's outbox, not this bus (plan 29B, subscriptionCacheConsumer
+	// in store_wiring.go): a subscription change must not be lost.
 
 	// meetup -> meetup: the nearby-notify fan-out. The one same-module,
 	// different-subscription consumer — CreateMeetup publishes it, and this

@@ -278,6 +278,161 @@ func (ns NullMeetupMeetupStatus) Value() (driver.Value, error) {
 	return string(ns.MeetupMeetupStatus), nil
 }
 
+type AnalyticsAggregateRun struct {
+	Day          pgtype.Date        `json:"day"`
+	AggregatedAt pgtype.Timestamptz `json:"aggregated_at"`
+	Events       int64              `json:"events"`
+}
+
+type AnalyticsDailyAbandonStat struct {
+	Day    pgtype.Date `json:"day"`
+	FlowID string      `json:"flow_id"`
+	Step   string      `json:"step"`
+	Reason string      `json:"reason"`
+	Count  int64       `json:"count"`
+}
+
+type AnalyticsDailyCreditBandStat struct {
+	Day     pgtype.Date `json:"day"`
+	Band    string      `json:"band"`
+	Events  int64       `json:"events"`
+	Credits int64       `json:"credits"`
+}
+
+type AnalyticsDailyCreditStat struct {
+	Day       pgtype.Date `json:"day"`
+	EventName string      `json:"event_name"`
+	Detail    string      `json:"detail"`
+	Events    int64       `json:"events"`
+	Users     int64       `json:"users"`
+	Credits   int64       `json:"credits"`
+}
+
+type AnalyticsDailyErrorStat struct {
+	Day    pgtype.Date `json:"day"`
+	Kind   string      `json:"kind"`
+	Screen string      `json:"screen"`
+	Detail string      `json:"detail"`
+	Count  int64       `json:"count"`
+}
+
+type AnalyticsDailyFeatureStat struct {
+	Day         pgtype.Date `json:"day"`
+	Feature     string      `json:"feature"`
+	Uses        int64       `json:"uses"`
+	UniqueUsers int64       `json:"unique_users"`
+}
+
+type AnalyticsDailyFunnelStat struct {
+	Day          pgtype.Date `json:"day"`
+	FlowID       string      `json:"flow_id"`
+	Step         string      `json:"step"`
+	Entered      int64       `json:"entered"`
+	Completed    int64       `json:"completed"`
+	Abandoned    int64       `json:"abandoned"`
+	MedianStepMs pgtype.Int8 `json:"median_step_ms"`
+}
+
+type AnalyticsDailyScreenStat struct {
+	Day         pgtype.Date `json:"day"`
+	Screen      string      `json:"screen"`
+	Views       int64       `json:"views"`
+	UniqueUsers int64       `json:"unique_users"`
+	MedianMs    pgtype.Int8 `json:"median_ms"`
+	P90Ms       pgtype.Int8 `json:"p90_ms"`
+	Bounces     int64       `json:"bounces"`
+	Exits       int64       `json:"exits"`
+}
+
+type AnalyticsDailySessionStat struct {
+	Day             pgtype.Date `json:"day"`
+	Sessions        int64       `json:"sessions"`
+	Users           int64       `json:"users"`
+	SignedInUsers   int64       `json:"signed_in_users"`
+	MedianSessionMs pgtype.Int8 `json:"median_session_ms"`
+	MeanSessionMs   pgtype.Int8 `json:"mean_session_ms"`
+}
+
+type AnalyticsEvent struct {
+	ReceivedDay   pgtype.Date        `json:"received_day"`
+	EventID       uuid.UUID          `json:"event_id"`
+	EventName     string             `json:"event_name"`
+	SchemaVersion int32              `json:"schema_version"`
+	Source        string             `json:"source"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	ReceivedAt    pgtype.Timestamptz `json:"received_at"`
+	UserKey       pgtype.Text        `json:"user_key"`
+	InstallID     pgtype.Text        `json:"install_id"`
+	SessionID     pgtype.Text        `json:"session_id"`
+	AppVersion    pgtype.Text        `json:"app_version"`
+	OsName        pgtype.Text        `json:"os_name"`
+	OsVersion     pgtype.Text        `json:"os_version"`
+	DeviceClass   pgtype.Text        `json:"device_class"`
+	Locale        pgtype.Text        `json:"locale"`
+	Screen        pgtype.Text        `json:"screen"`
+	FlowID        pgtype.Text        `json:"flow_id"`
+	FlowStep      pgtype.Text        `json:"flow_step"`
+	Attributes    []byte             `json:"attributes"`
+}
+
+type AnalyticsEventsDefault struct {
+	ReceivedDay   pgtype.Date        `json:"received_day"`
+	EventID       uuid.UUID          `json:"event_id"`
+	EventName     string             `json:"event_name"`
+	SchemaVersion int32              `json:"schema_version"`
+	Source        string             `json:"source"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	ReceivedAt    pgtype.Timestamptz `json:"received_at"`
+	UserKey       pgtype.Text        `json:"user_key"`
+	InstallID     pgtype.Text        `json:"install_id"`
+	SessionID     pgtype.Text        `json:"session_id"`
+	AppVersion    pgtype.Text        `json:"app_version"`
+	OsName        pgtype.Text        `json:"os_name"`
+	OsVersion     pgtype.Text        `json:"os_version"`
+	DeviceClass   pgtype.Text        `json:"device_class"`
+	Locale        pgtype.Text        `json:"locale"`
+	Screen        pgtype.Text        `json:"screen"`
+	FlowID        pgtype.Text        `json:"flow_id"`
+	FlowStep      pgtype.Text        `json:"flow_step"`
+	Attributes    []byte             `json:"attributes"`
+}
+
+type AnalyticsOptOut struct {
+	UserKey   string             `json:"user_key"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type AnalyticsPartition struct {
+	Day        pgtype.Date        `json:"day"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
+	ArchiveUri pgtype.Text        `json:"archive_uri"`
+	DroppedAt  pgtype.Timestamptz `json:"dropped_at"`
+}
+
+type AnalyticsReportRun struct {
+	Day        pgtype.Date        `json:"day"`
+	Status     string             `json:"status"`
+	StartedAt  pgtype.Timestamptz `json:"started_at"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
+	Detail     pgtype.Text        `json:"detail"`
+	Attempts   int32              `json:"attempts"`
+	EmailedAt  pgtype.Timestamptz `json:"emailed_at"`
+	UploadedAt pgtype.Timestamptz `json:"uploaded_at"`
+	ReportUri  pgtype.Text        `json:"report_uri"`
+	Bytes      pgtype.Int8        `json:"bytes"`
+}
+
+type AnalyticsUserActivityDay struct {
+	Day     pgtype.Date `json:"day"`
+	UserKey string      `json:"user_key"`
+}
+
+type AnalyticsUserFirstSeen struct {
+	UserKey  string      `json:"user_key"`
+	FirstDay pgtype.Date `json:"first_day"`
+}
+
 type AuthContactInvitesSent struct {
 	ID        uuid.UUID          `json:"id"`
 	UserID    uuid.UUID          `json:"user_id"`
@@ -414,6 +569,233 @@ type AuthVerificationCode struct {
 	TargetNormalized pgtype.Text             `json:"target_normalized"`
 }
 
+type BillingAdminAudit struct {
+	ID        int64              `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	Action    string             `json:"action"`
+	Detail    []byte             `json:"detail"`
+	Operator  string             `json:"operator"`
+	Reason    string             `json:"reason"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type BillingBillingOutbox struct {
+	ID             uuid.UUID          `json:"id"`
+	Topic          string             `json:"topic"`
+	Payload        []byte             `json:"payload"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	Attempts       int32              `json:"attempts"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+}
+
+type BillingCreditLot struct {
+	ID                  uuid.UUID          `json:"id"`
+	UserID              uuid.UUID          `json:"user_id"`
+	Kind                string             `json:"kind"`
+	Initial             int64              `json:"initial"`
+	Remaining           int64              `json:"remaining"`
+	GrantedAt           pgtype.Timestamptz `json:"granted_at"`
+	ExpiresAt           pgtype.Timestamptz `json:"expires_at"`
+	DecayPercent        pgtype.Int4        `json:"decay_percent"`
+	DecayEvery          pgtype.Interval    `json:"decay_every"`
+	DecayPeriodsApplied int32              `json:"decay_periods_applied"`
+	NextDecayAt         pgtype.Timestamptz `json:"next_decay_at"`
+	SourceRef           pgtype.Text        `json:"source_ref"`
+}
+
+type BillingHold struct {
+	ID             uuid.UUID          `json:"id"`
+	UserID         uuid.UUID          `json:"user_id"`
+	Kind           string             `json:"kind"`
+	Amount         int64              `json:"amount"`
+	State          string             `json:"state"`
+	PriceVersion   int32              `json:"price_version"`
+	PeriodStart    pgtype.Timestamptz `json:"period_start"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	MeetupID       pgtype.UUID        `json:"meetup_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	CapturedAt     pgtype.Timestamptz `json:"captured_at"`
+	ReleasedAt     pgtype.Timestamptz `json:"released_at"`
+	ReleaseReason  pgtype.Text        `json:"release_reason"`
+}
+
+type BillingHoldAllocation struct {
+	HoldID   uuid.UUID `json:"hold_id"`
+	LotID    uuid.UUID `json:"lot_id"`
+	Amount   int64     `json:"amount"`
+	Refunded int64     `json:"refunded"`
+}
+
+type BillingLedgerEntry struct {
+	ID             int64              `json:"id"`
+	UserID         uuid.UUID          `json:"user_id"`
+	Delta          int64              `json:"delta"`
+	HeldDelta      int64              `json:"held_delta"`
+	DebtDelta      int64              `json:"debt_delta"`
+	Reason         string             `json:"reason"`
+	LotID          pgtype.UUID        `json:"lot_id"`
+	HoldID         pgtype.UUID        `json:"hold_id"`
+	RefType        pgtype.Text        `json:"ref_type"`
+	RefID          pgtype.Text        `json:"ref_id"`
+	BalanceAfter   int64              `json:"balance_after"`
+	HeldAfter      int64              `json:"held_after"`
+	DebtAfter      int64              `json:"debt_after"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	Operator       pgtype.Text        `json:"operator"`
+	Note           pgtype.Text        `json:"note"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type BillingPlan struct {
+	Code            string `json:"code"`
+	Period          string `json:"period"`
+	MeetupsIncluded int32  `json:"meetups_included"`
+	MaxCapacity     int32  `json:"max_capacity"`
+	MaxAdvanceDays  int32  `json:"max_advance_days"`
+	Active          bool   `json:"active"`
+	Title           string `json:"title"`
+	Perks           []byte `json:"perks"`
+}
+
+type BillingPlanUsage struct {
+	UserID      uuid.UUID          `json:"user_id"`
+	PeriodStart pgtype.Timestamptz `json:"period_start"`
+	Used        int32              `json:"used"`
+	Held        int32              `json:"held"`
+}
+
+type BillingPriceRule struct {
+	Version       int32              `json:"version"`
+	Document      []byte             `json:"document"`
+	EffectiveFrom pgtype.Timestamptz `json:"effective_from"`
+	Active        bool               `json:"active"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	CreatedBy     string             `json:"created_by"`
+}
+
+type BillingProcessedStoreNotification struct {
+	Platform         string             `json:"platform"`
+	NotificationID   string             `json:"notification_id"`
+	NotificationType string             `json:"notification_type"`
+	Subtype          pgtype.Text        `json:"subtype"`
+	Outcome          string             `json:"outcome"`
+	ProcessedAt      pgtype.Timestamptz `json:"processed_at"`
+}
+
+type BillingReconciliationRun struct {
+	RunDate    pgtype.Date        `json:"run_date"`
+	Checked    int32              `json:"checked"`
+	Mismatches int32              `json:"mismatches"`
+	Detail     []byte             `json:"detail"`
+	FinishedAt pgtype.Timestamptz `json:"finished_at"`
+}
+
+type BillingRefundLog struct {
+	ID        int64              `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	HoldID    uuid.UUID          `json:"hold_id"`
+	MeetupID  pgtype.UUID        `json:"meetup_id"`
+	Event     string             `json:"event"`
+	Outcome   string             `json:"outcome"`
+	Percent   int32              `json:"percent"`
+	Amount    int64              `json:"amount"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type BillingStoreProduct struct {
+	ProductID string      `json:"product_id"`
+	Kind      string      `json:"kind"`
+	Credits   pgtype.Int8 `json:"credits"`
+	Bonus     int64       `json:"bonus"`
+	PlanCode  pgtype.Text `json:"plan_code"`
+	Period    pgtype.Text `json:"period"`
+	Badge     pgtype.Text `json:"badge"`
+	Sort      int32       `json:"sort"`
+	Featured  bool        `json:"featured"`
+	Active    bool        `json:"active"`
+}
+
+type BillingStorePurchase struct {
+	ID                    uuid.UUID          `json:"id"`
+	UserID                uuid.UUID          `json:"user_id"`
+	Platform              string             `json:"platform"`
+	TransactionID         string             `json:"transaction_id"`
+	OriginalTransactionID string             `json:"original_transaction_id"`
+	TokenHash             pgtype.Text        `json:"token_hash"`
+	ProductID             string             `json:"product_id"`
+	Kind                  string             `json:"kind"`
+	AppAccountToken       uuid.UUID          `json:"app_account_token"`
+	Environment           string             `json:"environment"`
+	Credits               pgtype.Int8        `json:"credits"`
+	LotID                 pgtype.UUID        `json:"lot_id"`
+	Raw                   []byte             `json:"raw"`
+	VerifiedAt            pgtype.Timestamptz `json:"verified_at"`
+	PendingFinishToken    pgtype.Text        `json:"pending_finish_token"`
+	FinishedAt            pgtype.Timestamptz `json:"finished_at"`
+	RefundedAt            pgtype.Timestamptz `json:"refunded_at"`
+}
+
+type BillingSubscription struct {
+	UserID                uuid.UUID          `json:"user_id"`
+	PlanCode              string             `json:"plan_code"`
+	Status                string             `json:"status"`
+	Platform              string             `json:"platform"`
+	OriginalTransactionID pgtype.Text        `json:"original_transaction_id"`
+	CurrentPeriodStart    pgtype.Timestamptz `json:"current_period_start"`
+	CurrentPeriodEnd      pgtype.Timestamptz `json:"current_period_end"`
+	AutoRenew             bool               `json:"auto_renew"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	ProductID             pgtype.Text        `json:"product_id"`
+	GracePeriodEnd        pgtype.Timestamptz `json:"grace_period_end"`
+}
+
+type BillingWallet struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	Balance   int64              `json:"balance"`
+	Held      int64              `json:"held"`
+	Debt      int64              `json:"debt"`
+	Version   int64              `json:"version"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ClosedAt  pgtype.Timestamptz `json:"closed_at"`
+}
+
+type BillingWelcomeGrant struct {
+	UserID              uuid.UUID          `json:"user_id"`
+	IdentityFingerprint string             `json:"identity_fingerprint"`
+	LotID               uuid.UUID          `json:"lot_id"`
+	Amount              int64              `json:"amount"`
+	GrantedAt           pgtype.Timestamptz `json:"granted_at"`
+}
+
+type MeetupActivityOutbox struct {
+	ID             uuid.UUID          `json:"id"`
+	Topic          string             `json:"topic"`
+	Payload        []byte             `json:"payload"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	Attempts       int32              `json:"attempts"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+}
+
+type MeetupBillingOutbox struct {
+	ID             uuid.UUID          `json:"id"`
+	Topic          string             `json:"topic"`
+	Payload        []byte             `json:"payload"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	Attempts       int32              `json:"attempts"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+}
+
 type MeetupDeviceToken struct {
 	ID        uuid.UUID          `json:"id"`
 	UserID    uuid.UUID          `json:"user_id"`
@@ -439,6 +821,8 @@ type MeetupMeetup struct {
 	CancellationReason     pgtype.Text        `json:"cancellation_reason"`
 	StartingSoonNotifiedAt pgtype.Timestamptz `json:"starting_soon_notified_at"`
 	Location               interface{}        `json:"location"`
+	CreationKey            pgtype.Text        `json:"creation_key"`
+	ChargeHoldID           pgtype.UUID        `json:"charge_hold_id"`
 }
 
 type MeetupMeetupFeedback struct {
@@ -540,4 +924,23 @@ type MeetupUserLocationCache struct {
 	Lng       float64            `json:"lng"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	Location  interface{}        `json:"location"`
+}
+
+type OpsFeatureFlag struct {
+	Key       string             `json:"key"`
+	Enabled   bool               `json:"enabled"`
+	Rules     []byte             `json:"rules"`
+	Value     []byte             `json:"value"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy string             `json:"updated_by"`
+}
+
+type OpsFeatureFlagAudit struct {
+	ID        int64              `json:"id"`
+	Key       string             `json:"key"`
+	Before    []byte             `json:"before"`
+	After     []byte             `json:"after"`
+	Operator  string             `json:"operator"`
+	Reason    string             `json:"reason"`
+	ChangedAt pgtype.Timestamptz `json:"changed_at"`
 }

@@ -181,6 +181,9 @@ func (s *MeetupServer) CreateMeetup(ctx context.Context, req *meetupv1.CreateMee
 		LocationLng:    req.GetLocationLng(),
 		LocationLabel:  req.GetLocationLabel(),
 		Capacity:       int(req.GetCapacity()),
+		ExpectedCost:   req.ExpectedCost,
+		PriceVersion:   int(req.GetPriceVersion()),
+		IdempotencyKey: req.GetIdempotencyKey(),
 	})
 	if err != nil {
 		return nil, toStatus(err)

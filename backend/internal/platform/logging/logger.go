@@ -10,6 +10,8 @@ import (
 	"context"
 	"log/slog"
 	"os"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // New returns a slog.Logger that writes JSON lines using Cloud Logging's
@@ -38,9 +40,13 @@ func replaceAttr(_ []string, a slog.Attr) slog.Attr {
 // logger carries it automatically. Returns logger unchanged if ctx carries
 // no request ID.
 func FromContext(ctx context.Context, logger *slog.Logger) *slog.Logger {
-	id := RequestIDFromContext(ctx)
-	if id == "" {
-		return logger
+	if id := RequestIDFromContext(ctx); id != "" {
+		logger = logger.With("request_id", id)
 	}
-	return logger.With("request_id", id)
+	// Plan 29D: the W3C trace id, the same on the gateway's line and the
+	// monolith's for one request, and the key a trace backend searches by.
+	if sc := trace.SpanContextFromContext(ctx); sc.HasTraceID() {
+		logger = logger.With("trace_id", sc.TraceID().String())
+	}
+	return logger
 }

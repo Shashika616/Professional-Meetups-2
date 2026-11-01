@@ -152,3 +152,85 @@ func TestScheduledTickRunsEveryAuthSweep(t *testing.T) {
 		}
 	}
 }
+
+// The billing sweeps have no ticker of their own: the scheduled tick is the
+// only thing that runs them while the service scales to zero. A sweep added
+// to billing/sweeps.go and not to the tick would never run in production —
+// holds would never expire and the daily reconciliation would never happen.
+func TestScheduledTickRunsEveryBillingSweep(t *testing.T) {
+	main, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sweeps, err := os.ReadFile(filepath.Join("..", "..", "internal", "modules", "billing", "sweeps.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, line := range strings.Split(string(sweeps), "\n") {
+		const prefix = "func (s *Service) "
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		name := strings.TrimPrefix(line, prefix)
+		name = name[:strings.IndexByte(name, '(')]
+		if !strings.HasPrefix(name, "Sweep") && name != "Reconcile" {
+			continue
+		}
+		found++
+		if !strings.Contains(string(main), "billingService."+name+")") {
+			t.Errorf("billing has sweep %s, but the scheduled tick does not run it", name)
+		}
+	}
+	if found < 3 {
+		t.Fatalf("found %d billing sweeps; the parse is broken", found)
+	}
+	// And both billing outboxes are drained by the tick.
+	for _, drain := range []string{"meetupBillingPoller.Drain", "billingPoller.Drain"} {
+		if !strings.Contains(string(main), drain+")") {
+			t.Errorf("the scheduled tick does not drain %s", drain)
+		}
+	}
+}
+
+// The analytics sweeps (plan 29D) also run only from the scheduled tick:
+// without it, partitions stop being made ahead, days stop being aggregated,
+// and raw events are never archived or dropped, so the database outgrows
+// the free tier.
+func TestScheduledTickRunsEveryAnalyticsSweep(t *testing.T) {
+	main, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sweeps []byte
+	for _, name := range []string{"sweeps.go", "report_run.go"} {
+		src, err := os.ReadFile(filepath.Join("..", "..", "internal", "modules", "analytics", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		sweeps = append(sweeps, src...)
+	}
+	found := 0
+	for _, line := range strings.Split(string(sweeps), "\n") {
+		const prefix = "func (s *Service) Sweep"
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		name := strings.TrimPrefix(line, "func (s *Service) ")
+		name = name[:strings.IndexByte(name, '(')]
+		found++
+		if !strings.Contains(string(main), "analyticsService."+name+")") {
+			t.Errorf("analytics has sweep %s, but the scheduled tick does not run it", name)
+		}
+	}
+	if found < 4 {
+		t.Fatalf("found %d analytics sweeps; the parse is broken", found)
+	}
+	// And the meetup activity outbox (join requests and accepts) is drained
+	// and kept bounded by the tick.
+	for _, want := range []string{"activityPoller.Drain)", "retentionSweep(activityRetention)"} {
+		if !strings.Contains(string(main), want) {
+			t.Errorf("the scheduled tick does not run %s", want)
+		}
+	}
+}

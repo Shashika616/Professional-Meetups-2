@@ -39,6 +39,7 @@ func TestCancelledMeetup_ParticipantReviewsHost_Integration(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatalf("accepted participant's active list does not carry the cancelled meetup: %+v", active)
+		return // unreachable; tells staticcheck found is non-nil below
 	}
 	if found.Status != meetup.StatusCancelled {
 		t.Errorf("status = %v, want cancelled", found.Status)

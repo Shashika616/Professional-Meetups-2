@@ -15,6 +15,9 @@ import (
 	migratepostgres "github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file" // file:// migration source
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"professional-meetups-monolith/backend/internal/platform/telemetry"
+
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver, needed only to drive migrate
 )
 
@@ -71,6 +74,8 @@ func New(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.Itoa(int(StatementTimeout.Milliseconds()))
 
+	// A span per query (operation and sqlc name only, never arguments).
+	cfg.ConnConfig.Tracer = telemetry.PgxTracer{}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("db: connect to postgres: %w", err)

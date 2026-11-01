@@ -250,6 +250,15 @@ message CreateMeetupRequest {
   string location_label = 7;
   int32 capacity = 8;
   int64 window_end_unix_seconds = 9;
+  // Plan 29 §3.5. The cost the app showed from POST /v1/billing/quote. Unset
+  // from builds without the credits UI; a charged create without it, or with
+  // a cost that no longer matches, is refused with price_changed (and an old
+  // build gets 426 before that).
+  optional int64 expected_cost = 10;
+  int32 price_version = 11;
+  // The Idempotency-Key header. A retry with the same key returns the
+  // original meetup and charges nothing more.
+  string idempotency_key = 12;
 }
 
 // MeetupResponse carries host display info (name/photo/trust level/rating)

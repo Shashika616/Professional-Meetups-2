@@ -206,9 +206,13 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("POST /v1/meetups/{id}/review", h.requireAuth(http.HandlerFunc(h.submitMeetupReview)))
 	mux.Handle("GET /v1/meetups/{id}/review", h.requireAuth(http.HandlerFunc(h.getMeetupReview)))
 
-	// billing (Phase 3) routes: registered, 503 until that module exists.
-	// See unavailable.go.
-	h.registerUnbuiltModuleRoutes(mux)
+	// billing (plans 29A and 29B): wallet, ledger, quote, entitlements,
+	// purchases, subscription, catalog, the store webhooks, and the app
+	// config. See billing.go.
+	h.registerBillingRoutes(mux)
+
+	// analytics (plan 29D): event ingest and consent. See analytics.go.
+	h.registerAnalyticsRoutes(mux)
 }
 
 type federatedSignupRequest struct {
@@ -703,7 +707,10 @@ const accountClaimRequiredCode = "account_claim_required"
 // place this translation happens, not a switch statement per handler.
 func writeGRPCError(w http.ResponseWriter, err error) {
 	st := status.Convert(err)
-	code := apperror.HTTPStatusFromGRPC(st.Code())
+	// HTTPStatus, not HTTPStatusFromGRPC: a coded error (402 insufficient
+	// credits, 409 price changed, 426 update required) is told apart by its
+	// code, not by the gRPC code it travelled as.
+	code := apperror.HTTPStatus(st)
 	// The raw text stays in the log; the client gets a sentence a person
 	// can act on (apperror.UserMessage). Anything 5xx is logged at error
 	// level — that is the class of failure someone has to go and look at.
@@ -720,6 +727,15 @@ func writeGRPCError(w http.ResponseWriter, err error) {
 			Email:              claim.Email,
 			ResendAfterSeconds: claim.ResendAfterSeconds,
 		})
+		return
+	}
+	if reason, fields, ok := apperror.CodedFromStatus(st); ok {
+		body := make(map[string]any, len(fields)+2)
+		for k, v := range fields {
+			body[k] = v
+		}
+		body["error"], body["code"] = message, reason
+		writeJSON(w, code, body)
 		return
 	}
 	var conflict *monolithclient.ScheduleConflictError

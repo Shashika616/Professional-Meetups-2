@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package analytics.v1;
+
+option go_package = "professional-meetups-monolith/backend/internal/proto/analytics/v1;analyticsv1";
+
+// AnalyticsService is the analytics module's ingest and consent surface
+// (plan 29 §4.3, ADR-011, docs/api/analytics.md).
+//
+// Never exposed to clients directly: the gateway calls it on the same
+// internally authenticated server as every other module. user_id is set by
+// the gateway from the verified JWT (empty when signed out), never from the
+// request body. The client's IP address is not sent: it is used for rate
+// limiting at the gateway and never stored.
+service AnalyticsService {
+  // Ingest validates a batch against the event registry and queues what
+  // passes. It returns once the events are queued, never after a database
+  // write.
+  rpc Ingest(IngestRequest) returns (IngestResponse);
+  // SetConsent stores a signed-in user's opt-out server side.
+  rpc SetConsent(SetConsentRequest) returns (SetConsentResponse);
+}
+
+message IngestRequest {
+  string user_id = 1;
+  string install_id = 2;
+  string app_version = 3;
+  string os_name = 4;
+  string os_version = 5;
+  string device_class = 6;
+  string locale = 7;
+  repeated Event events = 8;
+}
+
+message Event {
+  string event_id = 1;
+  string event_name = 2;
+  int32 schema_version = 3;
+  // RFC 3339, device time.
+  string occurred_at = 4;
+  string session_id = 5;
+  string screen = 6;
+  string flow_id = 7;
+  string flow_step = 8;
+  // The attributes object as JSON, so the registry checks the types the
+  // device actually sent.
+  bytes attributes_json = 9;
+}
+
+message IngestResponse {
+  int32 accepted = 1;
+  int32 dropped = 2;
+}
+
+message SetConsentRequest {
+  string user_id = 1;
+  bool opted_out = 2;
+}
+
+message SetConsentResponse {}

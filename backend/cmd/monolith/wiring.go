@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -16,8 +19,11 @@ import (
 	authconfig "professional-meetups-monolith/backend/internal/modules/auth/config"
 	"professional-meetups-monolith/backend/internal/modules/auth/email"
 	"professional-meetups-monolith/backend/internal/modules/auth/sms"
+	"professional-meetups-monolith/backend/internal/modules/billing"
 	"professional-meetups-monolith/backend/internal/modules/meetup"
+	meetuprepo "professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/modules/notification"
+	"professional-meetups-monolith/backend/internal/platform/flags"
 	"professional-meetups-monolith/backend/internal/platform/metrics"
 	"professional-meetups-monolith/backend/internal/platform/outbox"
 )
@@ -201,12 +207,14 @@ func requireRealSendersInProduction(getenv func(string) string, cfg authconfig.C
 		return nil
 	}
 	var missing []string
-	if !(cfg.GmailAddress != "" && cfg.GmailAppPassword != "") &&
-		!(cfg.ResendAPIKey != "" && cfg.ResendFromEmail != "") {
+	hasGmail := cfg.GmailAddress != "" && cfg.GmailAppPassword != ""
+	hasResend := cfg.ResendAPIKey != "" && cfg.ResendFromEmail != ""
+	hasTwilio := cfg.TwilioAccountSID != "" && cfg.TwilioAuthToken != "" && cfg.TwilioPhoneNumber != ""
+	if !hasGmail && !hasResend {
 		missing = append(missing,
 			"email (set GMAIL_ADDRESS+GMAIL_APP_PASSWORD or RESEND_API_KEY+RESEND_FROM_EMAIL)")
 	}
-	if !(cfg.TwilioAccountSID != "" && cfg.TwilioAuthToken != "" && cfg.TwilioPhoneNumber != "") {
+	if !hasTwilio {
 		missing = append(missing,
 			"SMS (set TWILIO_ACCOUNT_SID+TWILIO_AUTH_TOKEN+TWILIO_PHONE_NUMBER)")
 	}
@@ -263,4 +271,132 @@ func userDeletedProcess(
 		}
 		return nil
 	}
+}
+
+// --- billing (plan 29A) ---
+
+// creationCharger adapts the billing module to the CreationCharger port the
+// meetup module declares (plan 29 §3.5). It is the only place the two
+// modules' types meet; as separate services this becomes a gRPC client and
+// neither module changes.
+type creationCharger struct{ billing *billing.Service }
+
+var _ meetup.CreationCharger = creationCharger{}
+
+func (c creationCharger) QuoteCreation(ctx context.Context, host meetup.CreationHost, capacity int, windowStart time.Time) (meetup.CreationQuote, error) {
+	q, err := c.billing.QuoteForCreation(ctx, billing.Caller{UserID: host.UserID, TrustLevel: host.TrustLevel}, capacity, windowStart)
+	if err != nil {
+		return meetup.CreationQuote{}, err
+	}
+	return meetup.CreationQuote{
+		Cost:           q.Cost,
+		PriceVersion:   q.PriceVersion,
+		CoveredByPlan:  q.CoveredByPlan,
+		MaxCapacity:    q.Limits.MaxCapacity,
+		MaxAdvanceDays: q.Limits.MaxAdvanceDays,
+	}, nil
+}
+
+func (c creationCharger) Reserve(ctx context.Context, hostUserID string, q meetup.CreationQuote, key string) (string, error) {
+	return c.billing.Reserve(ctx, hostUserID, billing.ReserveRequest{
+		Cost: q.Cost, PriceVersion: q.PriceVersion, CoveredByPlan: q.CoveredByPlan,
+	}, key)
+}
+
+func (c creationCharger) Release(ctx context.Context, holdID string) error {
+	return c.billing.Release(ctx, holdID)
+}
+
+// meetupBillingProcess is the meetup billing outbox's delivery step: a
+// created event captures the hold; a cancelled or closed one applies the
+// refund policy. Billing makes both idempotent, so a redelivered row is
+// harmless. Like userDeletedProcess it is a named function so the seam
+// between the two modules can be driven by a test.
+func meetupBillingProcess(svc *billing.Service) func(context.Context, outbox.Row) error {
+	return func(ctx context.Context, row outbox.Row) error {
+		var e meetuprepo.BillingEvent
+		if err := json.Unmarshal(row.Payload, &e); err != nil {
+			return fmt.Errorf("decode meetup billing event: %w", err)
+		}
+		switch e.Topic {
+		case meetuprepo.BillingTopicCreated:
+			return svc.Capture(ctx, e.HoldID, e.MeetupID)
+		case meetuprepo.BillingTopicCancelled, meetuprepo.BillingTopicClosed:
+			event := billing.EventClosed
+			if e.Topic == meetuprepo.BillingTopicCancelled {
+				event = billing.EventCancelled
+			}
+			return svc.HandleMeetupEnded(ctx, billing.MeetupEnded{
+				HoldID: e.HoldID, MeetupID: e.MeetupID, Event: event,
+				AcceptedCount: e.AcceptedCount, WindowStart: e.WindowStart, EndedAt: e.EndedAt,
+			})
+		default:
+			return fmt.Errorf("unknown meetup billing topic %q", e.Topic)
+		}
+	}
+}
+
+// profileReader is the slice of the auth module these adapters read.
+type profileReader interface {
+	GetProfile(ctx context.Context, userID string) (auth.Profile, error)
+}
+
+// identityFingerprint gives billing a keyed hash of the person behind an
+// account — their verified phone, or failing that their verified personal
+// email — so welcome credits go to one person once, however many accounts
+// they open (plan 29 D1). Billing never sees the number or the address.
+//
+// Keyed with the work-email HMAC key, already a mounted secret of this
+// process, under its own domain prefix so the two uses can never produce
+// comparable values.
+type identityFingerprint struct {
+	auth profileReader
+	key  []byte
+}
+
+func (f identityFingerprint) Fingerprint(ctx context.Context, userID string) (string, error) {
+	p, err := f.auth.GetProfile(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	var anchor string
+	switch {
+	case p.PhoneVerified && p.PhoneNumber != "":
+		anchor = "phone:" + strings.TrimSpace(p.PhoneNumber)
+	case p.PersonalEmailVerified && p.PersonalEmail != "":
+		anchor = "email:" + strings.ToLower(strings.TrimSpace(p.PersonalEmail))
+	default:
+		return "", nil
+	}
+	mac := hmac.New(sha256.New, f.key)
+	mac.Write([]byte("tiehere-welcome-fingerprint-v1\x00" + anchor))
+	return hex.EncodeToString(mac.Sum(nil)), nil
+}
+
+// flagEmailResolver lets email_domains flag rules (the @meetups.test
+// fixtures) see an account's email: the verified personal email, which is
+// the address the seeded test accounts sign in with — and only once verified.
+func flagEmailResolver(a profileReader) flags.EmailResolver {
+	return func(ctx context.Context, userID string) (string, error) {
+		p, err := a.GetProfile(ctx, userID)
+		if err != nil {
+			return "", err
+		}
+		// Verified only: an unverified address is just text the user typed,
+		// and an allowlist must not be joinable by typing.
+		if !p.PersonalEmailVerified {
+			return "", nil
+		}
+		return p.PersonalEmail, nil
+	}
+}
+
+// minSupportedAppVersion is what /v1/app-config reports as the oldest app
+// build still supported. The app may show "please update" below it; the
+// server refuses nothing on its basis (only the credits 426 does, against MIN_CREDITS_APP_VERSION).
+func minSupportedAppVersion() string {
+	if v := os.Getenv("MIN_SUPPORTED_APP_VERSION"); v != "" {
+		return v
+	}
+	return "1.0.0"
 }

@@ -2,9 +2,14 @@ package grpcapi
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"professional-meetups-monolith/backend/internal/platform/apperror"
+	"professional-meetups-monolith/backend/internal/platform/clientinfo"
+	"professional-meetups-monolith/backend/internal/platform/flags"
+	"professional-meetups-monolith/backend/internal/platform/metrics"
 	opsv1 "professional-meetups-monolith/backend/internal/proto/ops/v1"
 )
 
@@ -36,6 +41,51 @@ type OpsServer struct {
 
 	sweeps []Sweep
 	logger *slog.Logger
+
+	appConfig AppConfig
+}
+
+// FlagSource evaluates every flag for one caller (internal/platform/flags).
+type FlagSource interface {
+	EvaluateAll(ctx context.Context, subject flags.Subject) (map[string]flags.Evaluated, error)
+}
+
+// AppConfig is what GET /v1/app-config serves besides the flags.
+type AppConfig struct {
+	Flags                  FlagSource
+	MinSupportedAppVersion string
+	BillingCatalogVersion  int32
+}
+
+// WithAppConfig enables GetAppConfig. Without it the RPC is unimplemented.
+func (s *OpsServer) WithAppConfig(c AppConfig) *OpsServer {
+	s.appConfig = c
+	return s
+}
+
+// GetAppConfig evaluates every flag for the caller (plan 29 §2). A caller
+// with no user id is evaluated anonymously: allowlists do not match, and
+// flags fall back to their defaults.
+func (s *OpsServer) GetAppConfig(ctx context.Context, req *opsv1.GetAppConfigRequest) (*opsv1.GetAppConfigResponse, error) {
+	if s.appConfig.Flags == nil {
+		return s.UnimplementedOpsServiceServer.GetAppConfig(ctx, req)
+	}
+	evaluated, err := s.appConfig.Flags.EvaluateAll(ctx, flags.Subject{
+		UserID:     req.GetUserId(),
+		AppVersion: clientinfo.From(ctx).AppVersion,
+	})
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	resp := &opsv1.GetAppConfigResponse{
+		Flags:                  make(map[string]*opsv1.FlagValue, len(evaluated)),
+		MinSupportedAppVersion: s.appConfig.MinSupportedAppVersion,
+		BillingCatalogVersion:  s.appConfig.BillingCatalogVersion,
+	}
+	for key, e := range evaluated {
+		resp.Flags[key] = &opsv1.FlagValue{Enabled: e.Enabled, ValueJson: string(e.Value)}
+	}
+	return resp, nil
 }
 
 // NewOpsServer constructs an OpsServer over sweeps, run in the order given.
@@ -94,4 +144,15 @@ func (s *OpsServer) RunScheduledWork(
 	}
 
 	return resp, nil
+}
+
+// ScrapeMetrics hands the gateway this process's Prometheus registry
+// (plan 29D). Only the gateway can call it: the internal shared secret
+// guards every RPC on this port.
+func (s *OpsServer) ScrapeMetrics(context.Context, *opsv1.ScrapeMetricsRequest) (*opsv1.ScrapeMetricsResponse, error) {
+	text, err := metrics.Text()
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(fmt.Errorf("ops: gather metrics: %w: %w", apperror.ErrInternal, err))
+	}
+	return &opsv1.ScrapeMetricsResponse{Text: text}, nil
 }

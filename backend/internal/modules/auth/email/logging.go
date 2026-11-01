@@ -41,3 +41,20 @@ func (s *LoggingEmailSender) SendAlert(_ context.Context, _, message string) err
 	)
 	return nil
 }
+
+// SendWithAttachment validates and logs what would have been sent: the
+// number of recipients, the filename, type and size. Never the addresses
+// or the body.
+func (s *LoggingEmailSender) SendWithAttachment(_ context.Context, to []string, subject, _ string, att Attachment) error {
+	if err := Validate(to, subject, att); err != nil {
+		return err
+	}
+	slog.Default().Info("email with attachment (LoggingEmailSender — not actually sent)",
+		"recipients", len(to),
+		"subject", subject,
+		"filename", att.Filename,
+		"content_type", att.ContentType,
+		"bytes", len(att.Data),
+	)
+	return nil
+}

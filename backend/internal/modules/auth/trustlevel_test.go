@@ -273,7 +273,7 @@ func TestComputeTrustLevel_ProviderVerifiedEmailCountsTowardLevel2(t *testing.T)
 	// The profile reports it as verified, because that flag is derived from
 	// presence. If a separate personal_email_verified column is ever added,
 	// this is where the two definitions would stop agreeing.
-	if !(fromProvider.PersonalEmail != "") {
+	if fromProvider.PersonalEmail == "" {
 		t.Error("PersonalEmailVerified is derived as PersonalEmail != \"\"; that is no longer true")
 	}
 }

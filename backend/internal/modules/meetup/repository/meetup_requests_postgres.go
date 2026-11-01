@@ -105,6 +105,15 @@ func (r *postgresMeetupRequestRepository) Create(ctx context.Context, meetupID, 
 	}
 	created := meetupRequestFromRow(row)
 
+	// Plan 29D: the durable record analytics counts join requests from,
+	// written whether or not the host has a device to notify.
+	if err := enqueueActivity(ctx, q, ActivityEvent{
+		Topic: ActivityTopicRequestCreated, RequestID: created.ID, MeetupID: meetupID,
+		RequesterID: requesterID, HostUserID: hostUserID, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		return MeetupRequest{}, err
+	}
+
 	// Queued inside this transaction, before the commit — the request row
 	// and the host's notification of it are one atomic fact (§F3).
 	if notify != nil {
@@ -574,6 +583,14 @@ func (r *postgresMeetupRequestRepository) Accept(
 	// are NOT the same thing as the bus events below: those feed idempotent
 	// caches and tolerate loss (ADR-001 §4); these are one-shot,
 	// user-visible pushes that do not.
+	// Plan 29D: the accept's durable record for analytics, device or not.
+	if err := enqueueActivity(ctx, q, ActivityEvent{
+		Topic: ActivityTopicRequestAccepted, RequestID: acceptedRequest.ID, MeetupID: acceptedRequest.MeetupID,
+		RequesterID: acceptedRequest.RequesterID, HostUserID: hostUserID, OccurredAt: now,
+	}); err != nil {
+		return MeetupRequest{}, false, nil, err
+	}
+
 	if notify != nil {
 		if err := notify(ctx, notifyTx{q: q}, acceptedRequest, autoRejected); err != nil {
 			return MeetupRequest{}, false, nil, fmt.Errorf("repository: queue accept notifications: %w", err)

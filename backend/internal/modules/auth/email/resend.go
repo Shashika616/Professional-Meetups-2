@@ -58,6 +58,27 @@ func (s *ResendEmailSender) SendAlert(ctx context.Context, to, message string) e
 	return s.send(ctx, to, sosAlertSubject, message)
 }
 
+// SendWithAttachment sends one email to every recipient with one
+// attachment (plan 29F), after Validate.
+func (s *ResendEmailSender) SendWithAttachment(ctx context.Context, to []string, subject, body string, att Attachment) error {
+	if err := Validate(to, subject, att); err != nil {
+		return err
+	}
+	_, err := s.client.Emails.SendWithContext(ctx, &resend.SendEmailRequest{
+		From:    s.from,
+		To:      to,
+		Subject: subject,
+		Text:    body,
+		Attachments: []*resend.Attachment{{
+			Content: att.Data, Filename: att.Filename, ContentType: att.ContentType,
+		}},
+	})
+	if err != nil {
+		return fmt.Errorf("email: resend send with attachment: %w", err)
+	}
+	return nil
+}
+
 func (s *ResendEmailSender) send(ctx context.Context, to, subject, body string) error {
 	_, err := s.client.Emails.SendWithContext(ctx, &resend.SendEmailRequest{
 		From:    s.from,

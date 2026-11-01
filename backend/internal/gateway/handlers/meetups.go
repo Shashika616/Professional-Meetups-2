@@ -168,6 +168,11 @@ type createMeetupRequest struct {
 	LocationLng            float64 `json:"location_lng"`
 	LocationLabel          string  `json:"location_label"`
 	Capacity               int32   `json:"capacity"`
+	// Plan 29 §3.5: the cost the app showed from POST /v1/billing/quote.
+	// Absent from builds without the credits UI. Never a price the server
+	// charges by — only what it checks its own price against.
+	ExpectedCost *int64 `json:"expected_cost"`
+	PriceVersion int32  `json:"price_version"`
 }
 
 func (h *Handler) createMeetup(w http.ResponseWriter, r *http.Request) {
@@ -176,10 +181,16 @@ func (h *Handler) createMeetup(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
+	key, ok := idempotencyKey(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, msgBadRequest)
+		return
+	}
 
 	ctx := r.Context()
 	m, err := h.monolith.CreateMeetup(ctx, middleware.UserIDFromContext(ctx), int32(middleware.TrustLevelFromContext(ctx)),
-		req.Intent, req.WindowStartUnixSeconds, req.WindowEndUnixSeconds, req.LocationLat, req.LocationLng, req.LocationLabel, req.Capacity)
+		req.Intent, req.WindowStartUnixSeconds, req.WindowEndUnixSeconds, req.LocationLat, req.LocationLng, req.LocationLabel, req.Capacity,
+		monolithclient.CreateCharge{ExpectedCost: req.ExpectedCost, PriceVersion: req.PriceVersion, IdempotencyKey: key})
 	if err != nil {
 		writeGRPCError(w, err)
 		return

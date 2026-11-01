@@ -89,6 +89,13 @@ type CreateMeetupRequest struct {
 	// reverse geocoding (see the module's CreateMeetup).
 	LocationLabel string
 	Capacity      int
+
+	// Plan 29 §3.5. ExpectedCost is the cost the app showed (nil from builds
+	// without the credits UI); IdempotencyKey is the request's
+	// Idempotency-Key header, "" when it sent none.
+	ExpectedCost   *int64
+	PriceVersion   int
+	IdempotencyKey string
 }
 
 // Meetup is the module's view of a meetup, including host display info.

@@ -38,6 +38,45 @@ service OpsService {
   // — one broken sweep must not block the account-deletion purge, which has
   // a legal deadline.
   rpc RunScheduledWork(RunScheduledWorkRequest) returns (RunScheduledWorkResponse);
+
+  // Remote configuration for the app (plan 29 §2, ADR-012): every feature
+  // flag evaluated for the caller, the oldest app version still supported,
+  // and the billing catalog's version. Backs GET /v1/app-config, which is
+  // served signed in and signed out.
+  rpc GetAppConfig(GetAppConfigRequest) returns (GetAppConfigResponse);
+
+  // ScrapeMetrics returns the monolith's Prometheus registry in the text
+  // exposition format, for the gateway's token-protected
+  // /metrics/monolith (plan 29D). A gRPC call rather than a second
+  // listener: the monolith already has exactly one port, and the internal
+  // shared secret already guards it.
+  rpc ScrapeMetrics(ScrapeMetricsRequest) returns (ScrapeMetricsResponse);
+}
+
+message GetAppConfigRequest {
+  // Set by the gateway from the verified JWT; empty for an anonymous caller.
+  // The app version and platform travel as metadata (internal/platform/
+  // clientinfo), like on every other call.
+  string user_id = 1;
+}
+
+message FlagValue {
+  bool enabled = 1;
+  // The flag's optional payload as JSON text ("100" for a sample rate),
+  // empty when it has none.
+  string value_json = 2;
+}
+
+message GetAppConfigResponse {
+  map<string, FlagValue> flags = 1;
+  string min_supported_app_version = 2;
+  int32 billing_catalog_version = 3;
+}
+
+message ScrapeMetricsRequest {}
+
+message ScrapeMetricsResponse {
+  bytes text = 1;
 }
 
 message RunScheduledWorkRequest {}

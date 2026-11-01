@@ -28,6 +28,10 @@ func HTTPStatusFromGRPC(code codes.Code) int {
 		return http.StatusConflict
 	case codes.ResourceExhausted:
 		return http.StatusTooManyRequests
+	// A precondition without a coded reason (see HTTPStatus) is the
+	// caller's problem to fix, never a server fault.
+	case codes.FailedPrecondition:
+		return http.StatusBadRequest
 	case codes.DeadlineExceeded:
 		return http.StatusGatewayTimeout
 	case codes.Unavailable:
@@ -101,6 +105,7 @@ var userMessagePrefixes = []string{
 var userMessageSuffixes = []string{
 	": invalid input", ": not found", ": unauthorized", ": conflict",
 	": forbidden", ": rate limited", ": internal error",
+	": payment required", ": upgrade required",
 }
 
 // Developer field names that show up inside validation sentences.

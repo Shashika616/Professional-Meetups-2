@@ -20,6 +20,8 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	OpsService_RunScheduledWork_FullMethodName = "/ops.v1.OpsService/RunScheduledWork"
+	OpsService_GetAppConfig_FullMethodName     = "/ops.v1.OpsService/GetAppConfig"
+	OpsService_ScrapeMetrics_FullMethodName    = "/ops.v1.OpsService/ScrapeMetrics"
 )
 
 // OpsServiceClient is the client API for OpsService service.
@@ -60,6 +62,17 @@ type OpsServiceClient interface {
 	// — one broken sweep must not block the account-deletion purge, which has
 	// a legal deadline.
 	RunScheduledWork(ctx context.Context, in *RunScheduledWorkRequest, opts ...grpc.CallOption) (*RunScheduledWorkResponse, error)
+	// Remote configuration for the app (plan 29 §2, ADR-012): every feature
+	// flag evaluated for the caller, the oldest app version still supported,
+	// and the billing catalog's version. Backs GET /v1/app-config, which is
+	// served signed in and signed out.
+	GetAppConfig(ctx context.Context, in *GetAppConfigRequest, opts ...grpc.CallOption) (*GetAppConfigResponse, error)
+	// ScrapeMetrics returns the monolith's Prometheus registry in the text
+	// exposition format, for the gateway's token-protected
+	// /metrics/monolith (plan 29D). A gRPC call rather than a second
+	// listener: the monolith already has exactly one port, and the internal
+	// shared secret already guards it.
+	ScrapeMetrics(ctx context.Context, in *ScrapeMetricsRequest, opts ...grpc.CallOption) (*ScrapeMetricsResponse, error)
 }
 
 type opsServiceClient struct {
@@ -74,6 +87,26 @@ func (c *opsServiceClient) RunScheduledWork(ctx context.Context, in *RunSchedule
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RunScheduledWorkResponse)
 	err := c.cc.Invoke(ctx, OpsService_RunScheduledWork_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *opsServiceClient) GetAppConfig(ctx context.Context, in *GetAppConfigRequest, opts ...grpc.CallOption) (*GetAppConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetAppConfigResponse)
+	err := c.cc.Invoke(ctx, OpsService_GetAppConfig_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *opsServiceClient) ScrapeMetrics(ctx context.Context, in *ScrapeMetricsRequest, opts ...grpc.CallOption) (*ScrapeMetricsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScrapeMetricsResponse)
+	err := c.cc.Invoke(ctx, OpsService_ScrapeMetrics_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +151,17 @@ type OpsServiceServer interface {
 	// — one broken sweep must not block the account-deletion purge, which has
 	// a legal deadline.
 	RunScheduledWork(context.Context, *RunScheduledWorkRequest) (*RunScheduledWorkResponse, error)
+	// Remote configuration for the app (plan 29 §2, ADR-012): every feature
+	// flag evaluated for the caller, the oldest app version still supported,
+	// and the billing catalog's version. Backs GET /v1/app-config, which is
+	// served signed in and signed out.
+	GetAppConfig(context.Context, *GetAppConfigRequest) (*GetAppConfigResponse, error)
+	// ScrapeMetrics returns the monolith's Prometheus registry in the text
+	// exposition format, for the gateway's token-protected
+	// /metrics/monolith (plan 29D). A gRPC call rather than a second
+	// listener: the monolith already has exactly one port, and the internal
+	// shared secret already guards it.
+	ScrapeMetrics(context.Context, *ScrapeMetricsRequest) (*ScrapeMetricsResponse, error)
 	mustEmbedUnimplementedOpsServiceServer()
 }
 
@@ -130,6 +174,12 @@ type UnimplementedOpsServiceServer struct{}
 
 func (UnimplementedOpsServiceServer) RunScheduledWork(context.Context, *RunScheduledWorkRequest) (*RunScheduledWorkResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunScheduledWork not implemented")
+}
+func (UnimplementedOpsServiceServer) GetAppConfig(context.Context, *GetAppConfigRequest) (*GetAppConfigResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAppConfig not implemented")
+}
+func (UnimplementedOpsServiceServer) ScrapeMetrics(context.Context, *ScrapeMetricsRequest) (*ScrapeMetricsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ScrapeMetrics not implemented")
 }
 func (UnimplementedOpsServiceServer) mustEmbedUnimplementedOpsServiceServer() {}
 func (UnimplementedOpsServiceServer) testEmbeddedByValue()                    {}
@@ -170,6 +220,42 @@ func _OpsService_RunScheduledWork_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OpsService_GetAppConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAppConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OpsServiceServer).GetAppConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OpsService_GetAppConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OpsServiceServer).GetAppConfig(ctx, req.(*GetAppConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OpsService_ScrapeMetrics_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScrapeMetricsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OpsServiceServer).ScrapeMetrics(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OpsService_ScrapeMetrics_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OpsServiceServer).ScrapeMetrics(ctx, req.(*ScrapeMetricsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OpsService_ServiceDesc is the grpc.ServiceDesc for OpsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -180,6 +266,14 @@ var OpsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunScheduledWork",
 			Handler:    _OpsService_RunScheduledWork_Handler,
+		},
+		{
+			MethodName: "GetAppConfig",
+			Handler:    _OpsService_GetAppConfig_Handler,
+		},
+		{
+			MethodName: "ScrapeMetrics",
+			Handler:    _OpsService_ScrapeMetrics_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

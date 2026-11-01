@@ -1,0 +1,214 @@
+syntax = "proto3";
+
+package billing.v1;
+
+option go_package = "professional-meetups-monolith/backend/internal/proto/billing/v1;billingv1";
+
+// BillingService is the credits module's read surface for the app (plan 29
+// §3.9, ADR-010). Store purchases and subscriptions arrive in 29B.
+//
+// Never exposed to clients directly: the gateway calls it on the same
+// internally authenticated server as every other module. Every request
+// carries the caller's user id and trust level, set by the gateway from the
+// verified JWT and never from the request body — there is no request here
+// that names another user.
+service BillingService {
+  rpc GetWallet(GetWalletRequest) returns (WalletResponse);
+  rpc ListLedger(ListLedgerRequest) returns (ListLedgerResponse);
+  rpc Quote(QuoteRequest) returns (QuoteResponse);
+  rpc GetEntitlements(GetEntitlementsRequest) returns (EntitlementsResponse);
+
+  // Plan 29B: store purchases, subscriptions, the catalog and the store
+  // webhooks. The webhook RPCs carry no caller: the gateway forwards the
+  // store's request untouched and billing verifies its signature (Apple) or
+  // push token (Google) before reading anything in it.
+  rpc VerifyPurchase(VerifyPurchaseRequest) returns (VerifyPurchaseResponse);
+  rpc GetSubscription(GetSubscriptionRequest) returns (SubscriptionResponse);
+  rpc GetCatalog(GetCatalogRequest) returns (CatalogResponse);
+  rpc HandleAppleNotification(HandleAppleNotificationRequest) returns (HandleNotificationResponse);
+  rpc HandleGoogleNotification(HandleGoogleNotificationRequest) returns (HandleNotificationResponse);
+}
+
+message Caller {
+  string user_id = 1;
+  int32 trust_level = 2;
+}
+
+message GetWalletRequest {
+  Caller caller = 1;
+}
+
+message ExpiringCredits {
+  string kind = 1;
+  int64 remaining = 2;
+  // 0 when the lot does not expire.
+  int64 expires_at_unix_seconds = 3;
+  // 0 when the lot does not decay soon.
+  int64 next_decay_at_unix_seconds = 4;
+  int64 next_decay_credits = 5;
+}
+
+message WalletResponse {
+  int64 balance = 1;
+  int64 held = 2;
+  int64 available = 3;
+  int64 debt = 4;
+  repeated ExpiringCredits expiring_soon = 5;
+}
+
+message ListLedgerRequest {
+  Caller caller = 1;
+  string cursor = 2;
+  int32 page_size = 3;
+}
+
+message LedgerEntry {
+  int64 id = 1;
+  int64 delta = 2;
+  int64 held_delta = 3;
+  string reason = 4;
+  string ref_type = 5;
+  string ref_id = 6;
+  int64 balance_after = 7;
+  int64 created_at_unix_seconds = 8;
+}
+
+message ListLedgerResponse {
+  repeated LedgerEntry entries = 1;
+  string next_cursor = 2;
+}
+
+// QuoteRequest is what the user chose. No price, amount or balance: the
+// server prices it (plan 29 §1).
+message QuoteRequest {
+  Caller caller = 1;
+  int32 capacity = 2;
+  int64 window_start_unix_seconds = 3;
+}
+
+message Limits {
+  int32 max_capacity = 1;
+  int32 max_advance_days = 2;
+}
+
+message QuoteResponse {
+  int64 cost = 1;
+  int64 would_cost = 2;
+  int64 base = 3;
+  int64 people = 4;
+  int64 lead_time = 5;
+  int32 price_version = 6;
+  bool covered_by_plan = 7;
+  int64 balance_available = 8;
+  Limits limits = 9;
+  // Always true: credits have no switch. Kept so the response shape is stable.
+  bool credits_enforced = 10;
+}
+
+message GetEntitlementsRequest {
+  Caller caller = 1;
+}
+
+message EntitlementsResponse {
+  // Empty without a plan.
+  string plan_code = 1;
+  string plan_status = 2;
+  int64 period_end_unix_seconds = 3;
+  Limits limits = 4;
+  int32 meetups_included = 5;
+  int32 meetups_used = 6;
+  // Always true: credits have no switch. Kept so the response shape is stable.
+  bool credits_enforced = 7;
+}
+
+// --- 29B ---
+
+message VerifyPurchaseRequest {
+  Caller caller = 1;
+  // "ios" or "android".
+  string platform = 2;
+  string product_id = 3;
+  // The StoreKit 2 signed transaction (iOS) or the purchase token
+  // (Android). A credential: never logged.
+  string token = 4;
+}
+
+message SubscriptionResponse {
+  // "none" without a subscription.
+  string status = 1;
+  string plan_code = 2;
+  string platform = 3;
+  string product_id = 4;
+  int64 current_period_end_unix_seconds = 5;
+  bool auto_renew = 6;
+  // Whether the plan applies right now.
+  bool entitled = 7;
+}
+
+message VerifyPurchaseResponse {
+  // "consumable" or "subscription".
+  string kind = 1;
+  string product_id = 2;
+  int64 credits_granted = 3;
+  // A repeat of a purchase verified before: nothing new was granted.
+  bool already_processed = 4;
+  WalletResponse wallet = 5;
+  SubscriptionResponse subscription = 6;
+}
+
+message GetSubscriptionRequest {
+  Caller caller = 1;
+}
+
+message GetCatalogRequest {
+  // Empty for a caller who is not signed in.
+  string user_id = 1;
+}
+
+message CreditPack {
+  string product_id = 1;
+  // Everything the pack grants, bonus included.
+  int64 credits = 2;
+  int64 bonus = 3;
+  string badge = 4;
+  int32 sort = 5;
+}
+
+message CatalogPlan {
+  string code = 1;
+  // Store product id per platform ("ios", "android").
+  map<string, string> product_ids = 2;
+  string period = 3;
+  string title = 4;
+  repeated string perks = 5;
+  bool featured = 6;
+}
+
+// No prices, ever: the app shows the store's own price.
+message CatalogResponse {
+  int32 catalog_version = 1;
+  repeated CreditPack credit_packs = 2;
+  bool plans_visible = 3;
+  repeated CatalogPlan plans = 4;
+  string terms_url = 5;
+  string privacy_url = 6;
+  // What the app attaches to a purchase by this caller. Empty when
+  // anonymous.
+  string app_account_token = 7;
+}
+
+message HandleAppleNotificationRequest {
+  string signed_payload = 1;
+}
+
+message HandleGoogleNotificationRequest {
+  // The push request's Authorization header, verbatim.
+  string authorization_header = 1;
+  string message_id = 2;
+  string message_data_base64 = 3;
+}
+
+message HandleNotificationResponse {
+  // False for a notification handled before.
+  bool processed = 1;
+}

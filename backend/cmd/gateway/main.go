@@ -23,9 +23,13 @@ import (
 	"professional-meetups-monolith/backend/internal/gateway/handlers"
 	"professional-meetups-monolith/backend/internal/gateway/middleware"
 	"professional-meetups-monolith/backend/internal/gateway/monolithclient"
+	"professional-meetups-monolith/backend/internal/platform/clientinfo"
 	"professional-meetups-monolith/backend/internal/platform/jwt"
 	"professional-meetups-monolith/backend/internal/platform/logging"
 	"professional-meetups-monolith/backend/internal/platform/ratelimit"
+	"professional-meetups-monolith/backend/internal/platform/telemetry"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // shutdownTimeout bounds how long graceful shutdown waits for in-flight
@@ -59,6 +63,25 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+
+	// Plan 29D: OpenTelemetry. The exporter is configuration (OTEL_EXPORTER,
+	// default none); the providers are flushed on the way out.
+	telCfg, err := telemetry.ConfigFromEnv("gateway", os.Getenv("K_REVISION"), os.Getenv)
+	if err != nil {
+		return err
+	}
+	tel, err := telemetry.Setup(ctx, telCfg)
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tel.Shutdown(flushCtx); err != nil {
+			logger.Warn("telemetry flush on shutdown", "error", err)
+		}
+	}()
+	logger.Info("telemetry", "exporter", telCfg.Exporter, "environment", telCfg.Environment)
 
 	monolith, err := monolithclient.New(cfg.MonolithAddr, cfg.MonolithSharedSecret)
 	if err != nil {
@@ -129,12 +152,23 @@ func run(logger *slog.Logger) error {
 	// then rate limiting, then the body cap.
 	var handler http.Handler = mux
 	handler = middleware.MaxBytes(handler)
+	// X-App-Version / X-Platform into the request context, from where the
+	// monolith client forwards them on every call (plan 29 §2).
+	handler = clientinfo.Middleware(handler)
 	// Metrics sit inside rate limiting so a 429 is still counted — knowing
 	// that a route is shedding load is the whole reason to have the metric.
 	handler = middleware.Metrics(handler)
 	handler = middleware.RateLimit(limiter, middleware.WithTrustedProxyHops(cfg.TrustedProxyHops))(handler)
 	handler = middleware.RequestLogging(logger)(handler)
 	handler = logging.HTTPMiddleware(handler)
+	// The server span, outside the request logger so its trace id is in the
+	// request's log line. Health probes are left out of traces.
+	handler = otelhttp.NewHandler(handler, "gateway",
+		otelhttp.WithFilter(func(r *http.Request) bool {
+			return r.URL.Path != "/healthz" && r.URL.Path != "/readyz"
+		}),
+		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string { return r.Method }),
+	)
 	handler = middleware.Recover(logger)(handler)
 
 	// Go's http.Server defaults to no timeouts at all on any of these, so a

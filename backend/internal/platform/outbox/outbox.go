@@ -35,9 +35,15 @@ package outbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Row is one claimed unit of work. Payload is opaque here — its shape is
@@ -319,7 +325,16 @@ func (p *Poller) claimAndProcess(ctx context.Context) (int, error) {
 // user gets a duplicate for no reason. Losing the bookkeeping for work that
 // actually happened is the one avoidable source of duplicates here.
 func (p *Poller) deliver(ctx context.Context, row Row) {
+	// Plan 29D: one span per delivery, named by the outbox it came from.
+	ctx, span := otel.Tracer("outbox").Start(ctx, "outbox deliver", trace.WithAttributes(
+		attribute.String("outbox.store", fmt.Sprintf("%T", p.store)),
+		attribute.Int("outbox.attempt", row.Attempts+1),
+	))
+	defer span.End()
 	err := p.process(ctx, row)
+	if err != nil {
+		span.SetStatus(codes.Error, "delivery failed")
+	}
 
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()

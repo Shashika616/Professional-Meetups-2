@@ -217,8 +217,17 @@ type CreateMeetupRequest struct {
 	LocationLabel        string `protobuf:"bytes,7,opt,name=location_label,json=locationLabel,proto3" json:"location_label,omitempty"`
 	Capacity             int32  `protobuf:"varint,8,opt,name=capacity,proto3" json:"capacity,omitempty"`
 	WindowEndUnixSeconds int64  `protobuf:"varint,9,opt,name=window_end_unix_seconds,json=windowEndUnixSeconds,proto3" json:"window_end_unix_seconds,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Plan 29 §3.5. The cost the app showed from POST /v1/billing/quote. Unset
+	// from builds without the credits UI; a charged create without it, or with
+	// a cost that no longer matches, is refused with price_changed (and an old
+	// build gets 426 before that).
+	ExpectedCost *int64 `protobuf:"varint,10,opt,name=expected_cost,json=expectedCost,proto3,oneof" json:"expected_cost,omitempty"`
+	PriceVersion int32  `protobuf:"varint,11,opt,name=price_version,json=priceVersion,proto3" json:"price_version,omitempty"`
+	// The Idempotency-Key header. A retry with the same key returns the
+	// original meetup and charges nothing more.
+	IdempotencyKey string `protobuf:"bytes,12,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CreateMeetupRequest) Reset() {
@@ -312,6 +321,27 @@ func (x *CreateMeetupRequest) GetWindowEndUnixSeconds() int64 {
 		return x.WindowEndUnixSeconds
 	}
 	return 0
+}
+
+func (x *CreateMeetupRequest) GetExpectedCost() int64 {
+	if x != nil && x.ExpectedCost != nil {
+		return *x.ExpectedCost
+	}
+	return 0
+}
+
+func (x *CreateMeetupRequest) GetPriceVersion() int32 {
+	if x != nil {
+		return x.PriceVersion
+	}
+	return 0
+}
+
+func (x *CreateMeetupRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
 }
 
 // MeetupResponse carries host display info (name/photo/trust level/rating)
@@ -4242,7 +4272,7 @@ var File_meetup_v1_meetup_proto protoreflect.FileDescriptor
 
 const file_meetup_v1_meetup_proto_rawDesc = "" +
 	"\n" +
-	"\x16meetup/v1/meetup.proto\x12\tmeetup.v1\"\x87\x03\n" +
+	"\x16meetup/v1/meetup.proto\x12\tmeetup.v1\"\x91\x04\n" +
 	"\x13CreateMeetupRequest\x12 \n" +
 	"\fhost_user_id\x18\x01 \x01(\tR\n" +
 	"hostUserId\x12(\n" +
@@ -4253,7 +4283,12 @@ const file_meetup_v1_meetup_proto_rawDesc = "" +
 	"\flocation_lng\x18\x06 \x01(\x01R\vlocationLng\x12%\n" +
 	"\x0elocation_label\x18\a \x01(\tR\rlocationLabel\x12\x1a\n" +
 	"\bcapacity\x18\b \x01(\x05R\bcapacity\x125\n" +
-	"\x17window_end_unix_seconds\x18\t \x01(\x03R\x14windowEndUnixSeconds\"\xc7\v\n" +
+	"\x17window_end_unix_seconds\x18\t \x01(\x03R\x14windowEndUnixSeconds\x12(\n" +
+	"\rexpected_cost\x18\n" +
+	" \x01(\x03H\x00R\fexpectedCost\x88\x01\x01\x12#\n" +
+	"\rprice_version\x18\v \x01(\x05R\fpriceVersion\x12'\n" +
+	"\x0fidempotency_key\x18\f \x01(\tR\x0eidempotencyKeyB\x10\n" +
+	"\x0e_expected_cost\"\xc7\v\n" +
 	"\x0eMeetupResponse\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12 \n" +
 	"\fhost_user_id\x18\x02 \x01(\tR\n" +
@@ -4795,6 +4830,7 @@ func file_meetup_v1_meetup_proto_init() {
 	if File_meetup_v1_meetup_proto != nil {
 		return
 	}
+	file_meetup_v1_meetup_proto_msgTypes[0].OneofWrappers = []any{}
 	file_meetup_v1_meetup_proto_msgTypes[1].OneofWrappers = []any{}
 	file_meetup_v1_meetup_proto_msgTypes[12].OneofWrappers = []any{}
 	file_meetup_v1_meetup_proto_msgTypes[17].OneofWrappers = []any{}

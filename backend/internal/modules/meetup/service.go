@@ -179,6 +179,8 @@ type service struct {
 	wake            func()
 	geocoder        geocoding.ReverseGeocoder
 	contactNotifier TrustedContactNotifier
+	charger         CreationCharger
+	billingWake     func()
 	logger          *slog.Logger
 }
 
@@ -217,7 +219,14 @@ type Deps struct {
 	// the feature is unavailable rather than silently pretending to send,
 	// which is exactly the failure the old live-location switch had.
 	ContactNotifier TrustedContactNotifier
-	Logger          *slog.Logger
+	// Charger prices and reserves meetup creation (plan 29 §3.5). Optional:
+	// nil means creation is free and limits are today's, which is what
+	// most tests want.
+	Charger CreationCharger
+	// BillingWake, if set, is called after a write that may have queued a
+	// meetup billing event — cmd/monolith passes that poller's Wake.
+	BillingWake func()
+	Logger      *slog.Logger
 }
 
 // TrustedContactNotifier is the auth module's contact fan-out, seen from
@@ -266,6 +275,8 @@ func New(deps Deps) Service {
 		outbox:          deps.Outbox,
 		wake:            deps.Wake,
 		geocoder:        deps.Geocoder,
+		charger:         deps.Charger,
+		billingWake:     deps.BillingWake,
 		logger:          logger,
 	}
 }
@@ -281,10 +292,6 @@ func (s *service) CreateMeetup(ctx context.Context, req CreateMeetupRequest) (Me
 	if err := checkTrustLevel(req.Intent, req.HostTrustLevel,
 		requiredTrustLevelToHost(req.Intent), "hosting"); err != nil {
 		return Meetup{}, err
-	}
-
-	if req.Capacity < 1 || req.Capacity > 20 {
-		return Meetup{}, fmt.Errorf("meetup: capacity must be between 1 and 20: %w", apperror.ErrInvalidInput)
 	}
 
 	// Defense in depth — the DB's CHECK(window_end > window_start) is the
@@ -307,6 +314,31 @@ func (s *service) CreateMeetup(ctx context.Context, req CreateMeetupRequest) (Me
 		return Meetup{}, fmt.Errorf("meetup: location_label is too long: %w", apperror.ErrInvalidInput)
 	}
 
+	// Charging (plan 29 §3.5), after every rule above and never instead of
+	// one. A retry with the same Idempotency-Key returns the original
+	// meetup before anything is priced or held.
+	if req.IdempotencyKey != "" {
+		if existing, err := s.meetups.FindByCreationKey(ctx, req.HostUserID, req.IdempotencyKey); err == nil {
+			full, err := s.meetups.GetByID(ctx, existing.ID, req.HostUserID)
+			if err != nil {
+				return Meetup{}, err
+			}
+			return meetupFromRepo(full, req.HostUserID), nil
+		} else if !errors.Is(err, apperror.ErrNotFound) {
+			return Meetup{}, err
+		}
+	}
+	quote, err := s.creationLimits(ctx, req)
+	if err != nil {
+		return Meetup{}, err
+	}
+	if err := checkLimits(req, quote, time.Now()); err != nil {
+		return Meetup{}, err
+	}
+	if err := checkExpectedCost(req, quote); err != nil {
+		return Meetup{}, err
+	}
+
 	// A submitted label that's empty or a known placeholder gets replaced
 	// with a reverse-geocoded one from the submitted coordinates; a host's
 	// own real, searched label is never touched. Synchronous, but the
@@ -322,6 +354,14 @@ func (s *service) CreateMeetup(ctx context.Context, req CreateMeetupRequest) (Me
 		locationLabel = geocoded
 	}
 
+	holdID := ""
+	if quote.charged() {
+		holdID, err = s.charger.Reserve(ctx, req.HostUserID, quote, reserveKey(req))
+		if err != nil {
+			return Meetup{}, err
+		}
+	}
+
 	created, err := s.meetups.Create(ctx, repository.NewMeetup{
 		HostUserID:    req.HostUserID,
 		Intent:        repository.Intent(req.Intent),
@@ -331,12 +371,23 @@ func (s *service) CreateMeetup(ctx context.Context, req CreateMeetupRequest) (Me
 		LocationLng:   req.LocationLng,
 		LocationLabel: locationLabel,
 		Capacity:      req.Capacity,
+		CreationKey:   req.IdempotencyKey,
+		ChargeHoldID:  holdID,
 		// One meetup at a time: checked under the host's schedule lock in
 		// the same transaction as the insert (ScheduleConflictError names
 		// the meetup in the way).
 	}, scheduleGuard(req.HostUserID, req.WindowStart, req.WindowEnd, ""))
 	if err != nil {
+		// A concurrent retry with the same key won the race: its meetup is
+		// this request's answer, and it is paying with the same hold.
+		if existing, isRetry, getErr := s.existingForKey(ctx, err, req.HostUserID); isRetry {
+			return existing, getErr
+		}
+		s.releaseAfterFailedCreate(ctx, req, holdID)
 		return Meetup{}, err
+	}
+	if holdID != "" {
+		s.wakeBilling()
 	}
 
 	// The host gets their own Safety Gate row too ("a host, also a user" —
@@ -647,6 +698,7 @@ func (s *service) CloseMeetup(ctx context.Context, req CloseMeetupRequest) (Meet
 	}
 
 	s.notifyPollerWake()
+	s.wakeBilling()
 
 	// Close's own RETURNING has no host display info to join against —
 	// re-fetch the fully-populated view for the response.
@@ -744,6 +796,7 @@ func (s *service) AutoCloseSweep(ctx context.Context) (int, error) {
 	}
 	if len(claimed) > 0 {
 		s.notifyPollerWake()
+		s.wakeBilling()
 	}
 	return len(claimed), nil
 }
@@ -791,6 +844,7 @@ func (s *service) CancelMeetup(ctx context.Context, req CancelMeetupRequest) err
 	}
 
 	s.notifyPollerWake()
+	s.wakeBilling()
 	return nil
 }
 

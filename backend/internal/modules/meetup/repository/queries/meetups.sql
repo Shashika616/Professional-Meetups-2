@@ -1,7 +1,13 @@
 -- name: CreateMeetup :one
-INSERT INTO meetup.meetups (host_user_id, intent, window_start, window_end, location_lat, location_lng, location_label, capacity)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO meetup.meetups (host_user_id, intent, window_start, window_end, location_lat, location_lng, location_label, capacity, creation_key, charge_hold_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, sqlc.narg(creation_key), sqlc.narg(charge_hold_id))
 RETURNING *;
+
+-- name: GetMeetupByCreationKey :one
+-- The meetup an earlier request with this Idempotency-Key created (plan 29
+-- §3.5). Read under the host's schedule lock, inside the create
+-- transaction, so two concurrent retries cannot both miss it.
+SELECT * FROM meetup.meetups WHERE host_user_id = sqlc.arg(host_user_id) AND creation_key = sqlc.arg(creation_key);
 
 -- name: GetMeetupByID :one
 -- my_request_status is the *latest* request this specific user (viewerID)

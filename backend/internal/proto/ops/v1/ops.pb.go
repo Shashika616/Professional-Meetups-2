@@ -21,6 +21,247 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type GetAppConfigRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Set by the gateway from the verified JWT; empty for an anonymous caller.
+	// The app version and platform travel as metadata (internal/platform/
+	// clientinfo), like on every other call.
+	UserId        string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAppConfigRequest) Reset() {
+	*x = GetAppConfigRequest{}
+	mi := &file_ops_v1_ops_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAppConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAppConfigRequest) ProtoMessage() {}
+
+func (x *GetAppConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ops_v1_ops_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAppConfigRequest.ProtoReflect.Descriptor instead.
+func (*GetAppConfigRequest) Descriptor() ([]byte, []int) {
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *GetAppConfigRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type FlagValue struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	// The flag's optional payload as JSON text ("100" for a sample rate),
+	// empty when it has none.
+	ValueJson     string `protobuf:"bytes,2,opt,name=value_json,json=valueJson,proto3" json:"value_json,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FlagValue) Reset() {
+	*x = FlagValue{}
+	mi := &file_ops_v1_ops_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FlagValue) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FlagValue) ProtoMessage() {}
+
+func (x *FlagValue) ProtoReflect() protoreflect.Message {
+	mi := &file_ops_v1_ops_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FlagValue.ProtoReflect.Descriptor instead.
+func (*FlagValue) Descriptor() ([]byte, []int) {
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *FlagValue) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *FlagValue) GetValueJson() string {
+	if x != nil {
+		return x.ValueJson
+	}
+	return ""
+}
+
+type GetAppConfigResponse struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Flags                  map[string]*FlagValue  `protobuf:"bytes,1,rep,name=flags,proto3" json:"flags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	MinSupportedAppVersion string                 `protobuf:"bytes,2,opt,name=min_supported_app_version,json=minSupportedAppVersion,proto3" json:"min_supported_app_version,omitempty"`
+	BillingCatalogVersion  int32                  `protobuf:"varint,3,opt,name=billing_catalog_version,json=billingCatalogVersion,proto3" json:"billing_catalog_version,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *GetAppConfigResponse) Reset() {
+	*x = GetAppConfigResponse{}
+	mi := &file_ops_v1_ops_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAppConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAppConfigResponse) ProtoMessage() {}
+
+func (x *GetAppConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ops_v1_ops_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAppConfigResponse.ProtoReflect.Descriptor instead.
+func (*GetAppConfigResponse) Descriptor() ([]byte, []int) {
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *GetAppConfigResponse) GetFlags() map[string]*FlagValue {
+	if x != nil {
+		return x.Flags
+	}
+	return nil
+}
+
+func (x *GetAppConfigResponse) GetMinSupportedAppVersion() string {
+	if x != nil {
+		return x.MinSupportedAppVersion
+	}
+	return ""
+}
+
+func (x *GetAppConfigResponse) GetBillingCatalogVersion() int32 {
+	if x != nil {
+		return x.BillingCatalogVersion
+	}
+	return 0
+}
+
+type ScrapeMetricsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScrapeMetricsRequest) Reset() {
+	*x = ScrapeMetricsRequest{}
+	mi := &file_ops_v1_ops_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScrapeMetricsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScrapeMetricsRequest) ProtoMessage() {}
+
+func (x *ScrapeMetricsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ops_v1_ops_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScrapeMetricsRequest.ProtoReflect.Descriptor instead.
+func (*ScrapeMetricsRequest) Descriptor() ([]byte, []int) {
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{3}
+}
+
+type ScrapeMetricsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Text          []byte                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ScrapeMetricsResponse) Reset() {
+	*x = ScrapeMetricsResponse{}
+	mi := &file_ops_v1_ops_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScrapeMetricsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScrapeMetricsResponse) ProtoMessage() {}
+
+func (x *ScrapeMetricsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ops_v1_ops_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScrapeMetricsResponse.ProtoReflect.Descriptor instead.
+func (*ScrapeMetricsResponse) Descriptor() ([]byte, []int) {
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ScrapeMetricsResponse) GetText() []byte {
+	if x != nil {
+		return x.Text
+	}
+	return nil
+}
+
 type RunScheduledWorkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -29,7 +270,7 @@ type RunScheduledWorkRequest struct {
 
 func (x *RunScheduledWorkRequest) Reset() {
 	*x = RunScheduledWorkRequest{}
-	mi := &file_ops_v1_ops_proto_msgTypes[0]
+	mi := &file_ops_v1_ops_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -41,7 +282,7 @@ func (x *RunScheduledWorkRequest) String() string {
 func (*RunScheduledWorkRequest) ProtoMessage() {}
 
 func (x *RunScheduledWorkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_ops_v1_ops_proto_msgTypes[0]
+	mi := &file_ops_v1_ops_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -54,7 +295,7 @@ func (x *RunScheduledWorkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunScheduledWorkRequest.ProtoReflect.Descriptor instead.
 func (*RunScheduledWorkRequest) Descriptor() ([]byte, []int) {
-	return file_ops_v1_ops_proto_rawDescGZIP(), []int{0}
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{5}
 }
 
 // SweepResult is one sweep's outcome. `name` matches the log field used by
@@ -75,7 +316,7 @@ type SweepResult struct {
 
 func (x *SweepResult) Reset() {
 	*x = SweepResult{}
-	mi := &file_ops_v1_ops_proto_msgTypes[1]
+	mi := &file_ops_v1_ops_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -87,7 +328,7 @@ func (x *SweepResult) String() string {
 func (*SweepResult) ProtoMessage() {}
 
 func (x *SweepResult) ProtoReflect() protoreflect.Message {
-	mi := &file_ops_v1_ops_proto_msgTypes[1]
+	mi := &file_ops_v1_ops_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -100,7 +341,7 @@ func (x *SweepResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SweepResult.ProtoReflect.Descriptor instead.
 func (*SweepResult) Descriptor() ([]byte, []int) {
-	return file_ops_v1_ops_proto_rawDescGZIP(), []int{1}
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SweepResult) GetName() string {
@@ -137,7 +378,7 @@ type RunScheduledWorkResponse struct {
 
 func (x *RunScheduledWorkResponse) Reset() {
 	*x = RunScheduledWorkResponse{}
-	mi := &file_ops_v1_ops_proto_msgTypes[2]
+	mi := &file_ops_v1_ops_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -149,7 +390,7 @@ func (x *RunScheduledWorkResponse) String() string {
 func (*RunScheduledWorkResponse) ProtoMessage() {}
 
 func (x *RunScheduledWorkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_ops_v1_ops_proto_msgTypes[2]
+	mi := &file_ops_v1_ops_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -162,7 +403,7 @@ func (x *RunScheduledWorkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunScheduledWorkResponse.ProtoReflect.Descriptor instead.
 func (*RunScheduledWorkResponse) Descriptor() ([]byte, []int) {
-	return file_ops_v1_ops_proto_rawDescGZIP(), []int{2}
+	return file_ops_v1_ops_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RunScheduledWorkResponse) GetResults() []*SweepResult {
@@ -183,7 +424,24 @@ var File_ops_v1_ops_proto protoreflect.FileDescriptor
 
 const file_ops_v1_ops_proto_rawDesc = "" +
 	"\n" +
-	"\x10ops/v1/ops.proto\x12\x06ops.v1\"\x19\n" +
+	"\x10ops/v1/ops.proto\x12\x06ops.v1\".\n" +
+	"\x13GetAppConfigRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"D\n" +
+	"\tFlagValue\x12\x18\n" +
+	"\aenabled\x18\x01 \x01(\bR\aenabled\x12\x1d\n" +
+	"\n" +
+	"value_json\x18\x02 \x01(\tR\tvalueJson\"\x95\x02\n" +
+	"\x14GetAppConfigResponse\x12=\n" +
+	"\x05flags\x18\x01 \x03(\v2'.ops.v1.GetAppConfigResponse.FlagsEntryR\x05flags\x129\n" +
+	"\x19min_supported_app_version\x18\x02 \x01(\tR\x16minSupportedAppVersion\x126\n" +
+	"\x17billing_catalog_version\x18\x03 \x01(\x05R\x15billingCatalogVersion\x1aK\n" +
+	"\n" +
+	"FlagsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12'\n" +
+	"\x05value\x18\x02 \x01(\v2\x11.ops.v1.FlagValueR\x05value:\x028\x01\"\x16\n" +
+	"\x14ScrapeMetricsRequest\"+\n" +
+	"\x15ScrapeMetricsResponse\x12\x12\n" +
+	"\x04text\x18\x01 \x01(\fR\x04text\"\x19\n" +
 	"\x17RunScheduledWorkRequest\"S\n" +
 	"\vSweepResult\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
@@ -191,10 +449,12 @@ const file_ops_v1_ops_proto_rawDesc = "" +
 	"\x05error\x18\x03 \x01(\tR\x05error\"a\n" +
 	"\x18RunScheduledWorkResponse\x12-\n" +
 	"\aresults\x18\x01 \x03(\v2\x13.ops.v1.SweepResultR\aresults\x12\x16\n" +
-	"\x06failed\x18\x02 \x01(\x05R\x06failed2c\n" +
+	"\x06failed\x18\x02 \x01(\x05R\x06failed2\xfc\x01\n" +
 	"\n" +
 	"OpsService\x12U\n" +
-	"\x10RunScheduledWork\x12\x1f.ops.v1.RunScheduledWorkRequest\x1a .ops.v1.RunScheduledWorkResponseBCZAprofessional-meetups-monolith/backend/internal/proto/ops/v1;opsv1b\x06proto3"
+	"\x10RunScheduledWork\x12\x1f.ops.v1.RunScheduledWorkRequest\x1a .ops.v1.RunScheduledWorkResponse\x12I\n" +
+	"\fGetAppConfig\x12\x1b.ops.v1.GetAppConfigRequest\x1a\x1c.ops.v1.GetAppConfigResponse\x12L\n" +
+	"\rScrapeMetrics\x12\x1c.ops.v1.ScrapeMetricsRequest\x1a\x1d.ops.v1.ScrapeMetricsResponseBCZAprofessional-meetups-monolith/backend/internal/proto/ops/v1;opsv1b\x06proto3"
 
 var (
 	file_ops_v1_ops_proto_rawDescOnce sync.Once
@@ -208,21 +468,33 @@ func file_ops_v1_ops_proto_rawDescGZIP() []byte {
 	return file_ops_v1_ops_proto_rawDescData
 }
 
-var file_ops_v1_ops_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_ops_v1_ops_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_ops_v1_ops_proto_goTypes = []any{
-	(*RunScheduledWorkRequest)(nil),  // 0: ops.v1.RunScheduledWorkRequest
-	(*SweepResult)(nil),              // 1: ops.v1.SweepResult
-	(*RunScheduledWorkResponse)(nil), // 2: ops.v1.RunScheduledWorkResponse
+	(*GetAppConfigRequest)(nil),      // 0: ops.v1.GetAppConfigRequest
+	(*FlagValue)(nil),                // 1: ops.v1.FlagValue
+	(*GetAppConfigResponse)(nil),     // 2: ops.v1.GetAppConfigResponse
+	(*ScrapeMetricsRequest)(nil),     // 3: ops.v1.ScrapeMetricsRequest
+	(*ScrapeMetricsResponse)(nil),    // 4: ops.v1.ScrapeMetricsResponse
+	(*RunScheduledWorkRequest)(nil),  // 5: ops.v1.RunScheduledWorkRequest
+	(*SweepResult)(nil),              // 6: ops.v1.SweepResult
+	(*RunScheduledWorkResponse)(nil), // 7: ops.v1.RunScheduledWorkResponse
+	nil,                              // 8: ops.v1.GetAppConfigResponse.FlagsEntry
 }
 var file_ops_v1_ops_proto_depIdxs = []int32{
-	1, // 0: ops.v1.RunScheduledWorkResponse.results:type_name -> ops.v1.SweepResult
-	0, // 1: ops.v1.OpsService.RunScheduledWork:input_type -> ops.v1.RunScheduledWorkRequest
-	2, // 2: ops.v1.OpsService.RunScheduledWork:output_type -> ops.v1.RunScheduledWorkResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	8, // 0: ops.v1.GetAppConfigResponse.flags:type_name -> ops.v1.GetAppConfigResponse.FlagsEntry
+	6, // 1: ops.v1.RunScheduledWorkResponse.results:type_name -> ops.v1.SweepResult
+	1, // 2: ops.v1.GetAppConfigResponse.FlagsEntry.value:type_name -> ops.v1.FlagValue
+	5, // 3: ops.v1.OpsService.RunScheduledWork:input_type -> ops.v1.RunScheduledWorkRequest
+	0, // 4: ops.v1.OpsService.GetAppConfig:input_type -> ops.v1.GetAppConfigRequest
+	3, // 5: ops.v1.OpsService.ScrapeMetrics:input_type -> ops.v1.ScrapeMetricsRequest
+	7, // 6: ops.v1.OpsService.RunScheduledWork:output_type -> ops.v1.RunScheduledWorkResponse
+	2, // 7: ops.v1.OpsService.GetAppConfig:output_type -> ops.v1.GetAppConfigResponse
+	4, // 8: ops.v1.OpsService.ScrapeMetrics:output_type -> ops.v1.ScrapeMetricsResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_ops_v1_ops_proto_init() }
@@ -236,7 +508,7 @@ func file_ops_v1_ops_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ops_v1_ops_proto_rawDesc), len(file_ops_v1_ops_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

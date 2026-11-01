@@ -23,27 +23,40 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
 	"professional-meetups-monolith/backend/internal/eventbus"
 	"professional-meetups-monolith/backend/internal/grpcapi"
+	"professional-meetups-monolith/backend/internal/modules/analytics"
+	analyticsconfig "professional-meetups-monolith/backend/internal/modules/analytics/config"
+	analyticsrepo "professional-meetups-monolith/backend/internal/modules/analytics/repository"
 	"professional-meetups-monolith/backend/internal/modules/auth"
 	authconfig "professional-meetups-monolith/backend/internal/modules/auth/config"
 	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"professional-meetups-monolith/backend/internal/modules/auth/linkedin"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
+	"professional-meetups-monolith/backend/internal/modules/billing"
+	billingconfig "professional-meetups-monolith/backend/internal/modules/billing/config"
+	"professional-meetups-monolith/backend/internal/modules/billing/store/apple"
 	"professional-meetups-monolith/backend/internal/modules/meetup"
 	meetuprepo "professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/modules/notification"
+	"professional-meetups-monolith/backend/internal/platform/clientinfo"
 	"professional-meetups-monolith/backend/internal/platform/db"
+	"professional-meetups-monolith/backend/internal/platform/flags"
 	"professional-meetups-monolith/backend/internal/platform/geocoding"
 	"professional-meetups-monolith/backend/internal/platform/internalauth"
 	"professional-meetups-monolith/backend/internal/platform/logging"
 	"professional-meetups-monolith/backend/internal/platform/outbox"
+	"professional-meetups-monolith/backend/internal/platform/telemetry"
+	analyticsv1 "professional-meetups-monolith/backend/internal/proto/analytics/v1"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
+	billingv1 "professional-meetups-monolith/backend/internal/proto/billing/v1"
 	meetupv1 "professional-meetups-monolith/backend/internal/proto/meetup/v1"
 	opsv1 "professional-meetups-monolith/backend/internal/proto/ops/v1"
 	"professional-meetups-monolith/backend/migrations"
@@ -180,6 +193,24 @@ func run(logger *slog.Logger) error {
 		logger.Warn("TEST_OTP_BYPASS_EMAILS is set — the fixed code \"123456\" is accepted for ALL FOUR email verification purposes (signup, login, personal, corporate) on specific allowlisted addresses, and the real email send is skipped for them. Anyone who knows an allowlisted address can sign in as it: every entry must be an unroutable test address, never a deliverable one. See TESTING-NOTES.md.", "allowlisted_addresses", n)
 	}
 
+	// Plan 29D: OpenTelemetry, before the pool so its query spans have a
+	// provider. Exporter by configuration (OTEL_EXPORTER, default none).
+	telCfg, err := telemetry.ConfigFromEnv("monolith", os.Getenv("K_REVISION"), os.Getenv)
+	if err != nil {
+		return err
+	}
+	tel, err := telemetry.Setup(ctx, telCfg)
+	if err != nil {
+		return fmt.Errorf("telemetry: %w", err)
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tel.Shutdown(flushCtx); err != nil {
+			logger.Warn("telemetry flush on shutdown", "error", err)
+		}
+	}()
+
 	pool, err := db.New(ctx, databaseURL)
 	if err != nil {
 		return err
@@ -249,6 +280,94 @@ func run(logger *slog.Logger) error {
 		Logger:                  logger,
 	})
 
+	// --- feature flags and billing (plan 29A, ADR-010, ADR-012) ---
+	//
+	// The flags service reads ops.feature_flags through a 30-second cache;
+	// email_domains rules (the @meetups.test fixtures) resolve an account's
+	// email through auth, only when a rule needs it.
+	flagService := flags.NewService(flags.NewPostgresStore(pool),
+		flags.WithEmailResolver(flagEmailResolver(authService)), flags.WithLogger(logger))
+	billingCfg, err := billingconfig.Load()
+	if err != nil {
+		return err
+	}
+	appleRoots, err := apple.TrustedRoots()
+	if err != nil {
+		return err
+	}
+	billingService := billing.New(billing.Deps{
+		Pool:         pool,
+		Fingerprints: identityFingerprint{auth: authService, key: workEmailHMACKey},
+		Config:       billingCfg,
+		Flags:        flagService,
+		// Plan 29B: Apple and Google, failing closed without credentials.
+		Store:      billingStore(billingCfg, appleRoots, logger),
+		AppleRoots: appleRoots,
+		GooglePush: googlePush(billingCfg, logger),
+		Logger:     logger,
+	})
+	// --- analytics module (plan 29D) ---
+	//
+	// Best effort by design: its buffer drops rather than blocks, and its
+	// outbox consumers below cannot fail. Without ANALYTICS_USER_KEY_SECRET
+	// on Cloud Run it collects nothing (rather than keying users weakly).
+	analyticsCfg, err := analyticsconfig.Load()
+	if err != nil {
+		return err
+	}
+	if analyticsCfg.Disabled {
+		logger.Warn("analytics disabled: collecting nothing", "reason", analyticsCfg.DisabledReason)
+	}
+	if analyticsCfg.ArchiveBucket == "" {
+		logger.Warn("analytics: ANALYTICS_ARCHIVE_BUCKET is not set; raw events are dropped after the retention without an archive")
+	}
+	analyticsService := analytics.New(analytics.Deps{
+		Store:   analyticsrepo.New(pool),
+		Config:  analyticsCfg,
+		Flags:   flagService,
+		Archive: analytics.NewGCS(),
+		// Plan 29F: the daily report's email and billing's daily check.
+		Mailer:         newReportMailer(emailSender),
+		Reconciliation: reconciliationSource{billing: billingService},
+		Logger:         logger,
+	})
+	// Its own context, cancelled only after the gRPC server has drained, so
+	// events accepted by the last requests are still flushed.
+	analyticsCtx, stopAnalytics := context.WithCancel(context.WithoutCancel(ctx))
+	defer func() {
+		stopAnalytics()
+		select {
+		case <-analyticsService.Done():
+		case <-time.After(10 * time.Second):
+			logger.Warn("analytics: final flush did not finish in time")
+		}
+	}()
+	go analyticsService.Run(analyticsCtx)
+	// Today's partition and the next three, now, so the first events after
+	// a fresh migration never land in the default partition. The tick keeps
+	// it three days ahead.
+	if _, err := analyticsService.SweepPartitions(ctx); err != nil {
+		logger.Warn("analytics: could not create partitions at start-up; the tick will retry", "error", err)
+	}
+
+	// billing.billing_outbox: the Google consume/acknowledge retries
+	// (billing's own), subscription changes into the meetup module's
+	// subscription_cache, and (29D) credits, purchases and subscriptions
+	// for analytics, whose consumer never returns an error.
+	subscriptionCache := meetuprepo.NewSubscriptionCacheRepository(pool)
+	billingOutbox := billing.NewOutboxStore(pool)
+	billingPoller := outbox.New(billingOutbox,
+		billing.OutboxProcess(billingService.HandleOutboxEvent, subscriptionCacheConsumer(subscriptionCache),
+			analyticsBillingConsumer(analyticsService)),
+		outbox.WithLogger(logger))
+	// meetup.billing_outbox: a charged meetup's created/cancelled/closed
+	// events, delivered to billing (capture; the refund policy). Built
+	// before the meetup service, which needs its Wake.
+	meetupBillingOutbox := meetuprepo.NewBillingOutboxRepository(pool)
+	meetupBillingPoller := outbox.New(meetupBillingOutbox,
+		withAnalytics(meetupBillingProcess(billingService), meetupBillingAnalytics(analyticsService)),
+		outbox.WithLogger(logger))
+
 	// --- meetup module (Phase 2) ---
 	//
 	// Its three event-fed caches are read models of data other modules own
@@ -256,7 +375,6 @@ func run(logger *slog.Logger) error {
 	// the subscriptions below.
 	userDisplayCache := meetuprepo.NewUserDisplayCacheRepository(pool)
 	userLocationCache := meetuprepo.NewUserLocationCacheRepository(pool)
-	subscriptionCache := meetuprepo.NewSubscriptionCacheRepository(pool)
 	meetupDeviceTokens := meetuprepo.NewDeviceTokenRepository(pool)
 
 	notificationOutbox := meetuprepo.NewNotificationOutboxRepository(pool)
@@ -282,7 +400,8 @@ func run(logger *slog.Logger) error {
 	// smuggle in by reusing the wrong ones.
 	meetupsCompletedPoller := outbox.New(
 		meetupsCompletedOutbox,
-		meetup.NewCompletedRecompute(meetupsCompletedOutbox, bus, logger).Process,
+		withAnalytics(meetup.NewCompletedRecompute(meetupsCompletedOutbox, bus, logger).Process,
+			meetupsCompletedAnalytics(analyticsService)),
 		outbox.WithLogger(logger),
 	)
 
@@ -318,14 +437,16 @@ func run(logger *slog.Logger) error {
 		// translation between the two modules' own types lives here, in the
 		// same place every other cross-module wire is made.
 		ContactNotifier: contactNotifier{auth: authService},
-		Logger:          logger,
+		// meetup -> billing (plan 29 §3.5): price and reserve a creation.
+		Charger:     creationCharger{billing: billingService},
+		BillingWake: meetupBillingPoller.Wake,
+		Logger:      logger,
 	})
 
 	registerSubscriptions(subscriptionDeps{
 		bus:               bus,
 		userDisplayCache:  userDisplayCache,
 		userLocationCache: userLocationCache,
-		subscriptionCache: subscriptionCache,
 		meetupService:     meetupService,
 		authService:       authService,
 		logger:            logger,
@@ -341,7 +462,9 @@ func run(logger *slog.Logger) error {
 	// then recovery closest to the handler. Authentication runs BEFORE any
 	// module code — an unauthenticated caller never reaches business logic or
 	// the database.
-	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
+	// Plan 29D: a server span per call, continuing the gateway's trace
+	// from the W3C traceparent otelgrpc's client handler sent.
+	grpcServer := grpc.NewServer(grpc.StatsHandler(otelgrpc.NewServerHandler()), grpc.ChainUnaryInterceptor(
 		logging.UnaryServerInterceptor(),
 		// Outside the deadline and recovery interceptors on purpose: a call
 		// that times out or panics still has to be counted, or the metrics
@@ -352,6 +475,9 @@ func run(logger *slog.Logger) error {
 		// server-side backstop beneath it.
 		logging.DeadlineUnaryServerInterceptor(logging.DefaultRPCTimeout),
 		internalauth.UnaryServerInterceptor(internalSecrets),
+		// The calling app build (X-App-Version, X-Platform), forwarded by
+		// the gateway as metadata — plan 29 §2.
+		clientinfo.UnaryServerInterceptor(),
 		logging.RecoveryUnaryServerInterceptor(logger),
 	))
 	authv1.RegisterAuthServiceServer(grpcServer, grpcapi.NewAuthServer(authService))
@@ -359,6 +485,8 @@ func run(logger *slog.Logger) error {
 	// check is wired at the server level above, so it covers every meetup RPC
 	// automatically, with nothing meetup-specific to add.
 	meetupv1.RegisterMeetupServiceServer(grpcServer, grpcapi.NewMeetupServer(meetupService))
+	billingv1.RegisterBillingServiceServer(grpcServer, grpcapi.NewBillingServer(billingService))
+	analyticsv1.RegisterAnalyticsServiceServer(grpcServer, grpcapi.NewAnalyticsServer(analyticsService))
 
 	// The standard gRPC health service (§D1/§D3). Compose uses it to gate
 	// the gateway's start on the monolith being genuinely ready to SERVE,
@@ -394,6 +522,8 @@ func run(logger *slog.Logger) error {
 	userDeletedOutbox := repository.NewUserDeletedOutboxRepository(pool)
 	userDeletedConsumers := []func(context.Context, eventbus.UserDeletedPayload) error{
 		meetupService.HandleUserDeleted,
+		billingService.HandleUserDeleted,
+		analyticsService.HandleUserDeleted,
 	}
 	userDeletedPoller := outbox.New(
 		userDeletedOutbox,
@@ -434,6 +564,21 @@ func run(logger *slog.Logger) error {
 	userDeletedRetention := notification.NewRetentionFor("user-deleted outbox", userDeletedOutbox, logger)
 	go userDeletedRetention.Run(ctx)
 	go auth.NewRefreshTokenSweeper(authService, logger).Run(ctx)
+	// Billing's two outboxes, woken by the writes that fill them.
+	go billingPoller.Run(ctx)
+	go meetupBillingPoller.Run(ctx)
+	billingRetention := notification.NewRetentionFor("billing outbox", billingOutbox, logger)
+	meetupBillingRetention := notification.NewRetentionFor("meetup billing outbox", meetupBillingOutbox, logger)
+	go billingRetention.Run(ctx)
+	go meetupBillingRetention.Run(ctx)
+	// meetup.activity_outbox (plan 29D): join requests and accepts, for
+	// analytics only. Its process function never fails, so a row is
+	// retried only if the process dies mid-delivery.
+	activityOutbox := meetuprepo.NewActivityOutboxRepository(pool)
+	activityPoller := outbox.New(activityOutbox, meetupActivityProcess(analyticsService), outbox.WithLogger(logger))
+	activityRetention := notification.NewRetentionFor("meetup activity outbox", activityOutbox, logger)
+	go activityPoller.Run(ctx)
+	go activityRetention.Run(ctx)
 
 	// The same work, driven from outside the process.
 	//
@@ -466,7 +611,31 @@ func run(logger *slog.Logger) error {
 		grpcapi.Sweep{Name: "auth: abandoned guests", Run: countedInt(authService.SweepAbandonedGuests)},
 		grpcapi.Sweep{Name: "auth: expired safety holds", Run: countedInt(authService.SweepExpiredSafetyHolds)},
 		grpcapi.Sweep{Name: "auth: contact invitation log", Run: countedInt(authService.SweepContactInvites)},
-	)
+		// Billing (plan 29A). Captures and refunds first, so a creation's
+		// capture lands before its hold could be expired below.
+		grpcapi.Sweep{Name: "outbox: meetup billing events", Run: countedInt(meetupBillingPoller.Drain)},
+		grpcapi.Sweep{Name: "billing: expired holds", Run: countedInt(billingService.SweepExpiredHolds)},
+		grpcapi.Sweep{Name: "billing: decay and expiry", Run: countedInt(billingService.SweepDecayAndExpiry)},
+		grpcapi.Sweep{Name: "outbox: billing", Run: countedInt(billingPoller.Drain)},
+		grpcapi.Sweep{Name: "billing: reconciliation", Run: countedInt(billingService.Reconcile)},
+		grpcapi.Sweep{Name: "retention: meetup billing events", Run: retentionSweep(meetupBillingRetention)},
+		grpcapi.Sweep{Name: "retention: billing outbox", Run: retentionSweep(billingRetention)},
+		// Plan 29D. Partitions first, so the day's writes have somewhere to
+		// go; the aggregate before the retention, which never drops a day
+		// that has not been aggregated (it aggregates first if it must).
+		grpcapi.Sweep{Name: "outbox: meetup activity", Run: countedInt(activityPoller.Drain)},
+		grpcapi.Sweep{Name: "retention: meetup activity", Run: retentionSweep(activityRetention)},
+		grpcapi.Sweep{Name: "analytics: partitions", Run: countedInt(analyticsService.SweepPartitions)},
+		grpcapi.Sweep{Name: "analytics: aggregate", Run: countedInt(analyticsService.SweepAggregate)},
+		grpcapi.Sweep{Name: "analytics: archive and retention", Run: countedInt(analyticsService.SweepRetention)},
+		// After 06:00 Colombo, once a day: yesterday's report, emailed and
+		// stored. Idempotent by date; a failed delivery retries next tick.
+		grpcapi.Sweep{Name: "analytics: daily report", Run: countedInt(analyticsService.SweepReport)},
+	).WithAppConfig(grpcapi.AppConfig{
+		Flags:                  flagService,
+		MinSupportedAppVersion: minSupportedAppVersion(),
+		BillingCatalogVersion:  int32(billingCfg.CatalogVersion),
+	})
 	// Same server, same port, same interceptor chain as the two services
 	// above, so the shared-secret check already covers it.
 	opsv1.RegisterOpsServiceServer(grpcServer, opsServer)

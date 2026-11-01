@@ -120,10 +120,41 @@ func (r *postgresMeetupRepository) Create(ctx context.Context, m NewMeetup, guar
 	q := r.q.WithTx(tx)
 
 	// Lock, then check, then write — all on this connection (Plan 19).
-	if err := runScheduleGuard(ctx, q, m.HostUserID, guard); err != nil {
-		return Meetup{}, err
+	//
+	// The idempotency check runs under the same lock and BEFORE the
+	// schedule guard: a retry of a create that already succeeded would
+	// otherwise be refused as a clash with the very meetup it created.
+	if guard != nil || m.CreationKey != "" {
+		if err := q.LockUserSchedule(ctx, m.HostUserID); err != nil {
+			return Meetup{}, fmt.Errorf("repository: lock user schedule: %w: %w", apperror.ErrInternal, err)
+		}
+	}
+	if m.CreationKey != "" {
+		existing, err := q.GetMeetupByCreationKey(ctx, sqlcgen.GetMeetupByCreationKeyParams{
+			HostUserID: hostID, CreationKey: textOrNull(m.CreationKey),
+		})
+		if err == nil {
+			return Meetup{}, &CreationKeyExistsError{MeetupID: existing.ID.String()}
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return Meetup{}, fmt.Errorf("repository: look up creation key: %w", err)
+		}
+	}
+	if guard != nil {
+		// Returned as-is: the guard's error is the caller's own typed error.
+		if err := guard(ctx, scheduleTx{q: q}); err != nil {
+			return Meetup{}, err
+		}
 	}
 
+	holdID := pgtype.UUID{}
+	if m.ChargeHoldID != "" {
+		parsed, err := parseUUID(m.ChargeHoldID)
+		if err != nil {
+			return Meetup{}, fmt.Errorf("repository: invalid charge hold id: %w", apperror.ErrInternal)
+		}
+		holdID = pgtype.UUID{Bytes: parsed, Valid: true}
+	}
 	row, err := q.CreateMeetup(ctx, sqlcgen.CreateMeetupParams{
 		HostUserID:    hostID,
 		Intent:        sqlcgen.MeetupIntentType(m.Intent),
@@ -133,9 +164,17 @@ func (r *postgresMeetupRepository) Create(ctx context.Context, m NewMeetup, guar
 		LocationLng:   m.LocationLng,
 		LocationLabel: m.LocationLabel,
 		Capacity:      int16(m.Capacity),
+		CreationKey:   textOrNull(m.CreationKey),
+		ChargeHoldID:  holdID,
 	})
 	if err != nil {
 		return Meetup{}, fmt.Errorf("repository: create meetup: %w", err)
+	}
+
+	// The charge's capture is queued in the same transaction as the meetup
+	// it pays for: either both exist or neither does (plan 29 §3.5).
+	if err := enqueueBillingEvents(ctx, q, BillingTopicCreated, []sqlcgen.MeetupMeetup{row}); err != nil {
+		return Meetup{}, err
 	}
 
 	created := Meetup{
@@ -178,6 +217,21 @@ func (r *postgresMeetupRepository) Create(ctx context.Context, m NewMeetup, guar
 	})
 
 	return created, nil
+}
+
+func (r *postgresMeetupRepository) FindByCreationKey(ctx context.Context, hostUserID, key string) (Meetup, error) {
+	host, err := parseUUID(hostUserID)
+	if err != nil {
+		return Meetup{}, fmt.Errorf("repository: invalid host user id: %w", apperror.ErrInvalidInput)
+	}
+	row, err := r.q.GetMeetupByCreationKey(ctx, sqlcgen.GetMeetupByCreationKeyParams{HostUserID: host, CreationKey: textOrNull(key)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Meetup{}, fmt.Errorf("repository: no meetup for this creation key: %w", apperror.ErrNotFound)
+	}
+	if err != nil {
+		return Meetup{}, fmt.Errorf("repository: look up creation key: %w", err)
+	}
+	return bareMeetupFromRow(row), nil
 }
 
 func (r *postgresMeetupRepository) GetByID(ctx context.Context, id, viewerID string) (Meetup, error) {
@@ -674,6 +728,10 @@ func (r *postgresMeetupRepository) Cancel(ctx context.Context, id, reason, hostU
 		}
 	}
 
+	if err := enqueueBillingEvents(ctx, q, BillingTopicCancelled, []sqlcgen.MeetupMeetup{row}); err != nil {
+		return Meetup{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return Meetup{}, fmt.Errorf("repository: commit cancel transaction: %w: %w", apperror.ErrInternal, err)
 	}
@@ -736,6 +794,9 @@ func (r *postgresMeetupRepository) Close(ctx context.Context, id, hostUserID str
 	}
 
 	if err := enqueueMeetupsCompletedRecompute(ctx, q, []Meetup{closed}); err != nil {
+		return Meetup{}, err
+	}
+	if err := enqueueBillingEvents(ctx, q, BillingTopicClosed, []sqlcgen.MeetupMeetup{row}); err != nil {
 		return Meetup{}, err
 	}
 
@@ -948,6 +1009,9 @@ func (r *postgresMeetupRepository) claimSweep(
 
 	if completes {
 		if err := enqueueMeetupsCompletedRecompute(ctx, q, claimed); err != nil {
+			return nil, err
+		}
+		if err := enqueueBillingEvents(ctx, q, BillingTopicClosed, rows); err != nil {
 			return nil, err
 		}
 	}

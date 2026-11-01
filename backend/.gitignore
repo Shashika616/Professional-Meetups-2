@@ -2,3 +2,6 @@
 # `go build ./cmd/monolith` from this directory writes the binary here.
 /monolith
 /gateway
+
+# Local reports from scripts/seed-analytics.sh (plan 29F)
+analytics-report-*.xlsx

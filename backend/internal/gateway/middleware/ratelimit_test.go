@@ -331,3 +331,49 @@ func TestRateLimit_AccountCreationCheckDoesNotReadTheBody(t *testing.T) {
 		t.Errorf("status = %d, want 429", rec.Code)
 	}
 }
+
+// TestRateLimit_AnalyticsHasAHigherIPCeiling: many phones behind one NAT
+// each send analytics batches, so that path's per-IP budget is 300 a
+// minute, not 20. Every other path keeps 20.
+func TestRateLimit_AnalyticsHasAHigherIPCeiling(t *testing.T) {
+	h := &countingHandler{}
+	mw := RateLimit(newLimiter(t))(h)
+	for i := 0; i < 300; i++ {
+		rec := httptest.NewRecorder()
+		mw.ServeHTTP(rec, postJSON("/v1/analytics/events", `{}`))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("analytics request %d: %d", i+1, rec.Code)
+		}
+	}
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, postJSON("/v1/analytics/events", `{}`))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("301st analytics request: %d, want 429", rec.Code)
+	}
+	for i := 0; i < 20; i++ {
+		mw.ServeHTTP(httptest.NewRecorder(), postJSON("/v1/meetups", `{}`))
+	}
+	rec = httptest.NewRecorder()
+	mw.ServeHTTP(rec, postJSON("/v1/meetups", `{}`))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Errorf("21st request on another path: %d, want 429", rec.Code)
+	}
+}
+
+// Security review 2026-11-01, S-2: the store webhooks are authenticated by
+// signature, and Apple and Google send bursts from a few addresses; at 20 a
+// minute per IP a burst of renewals or refunds would be refused and delayed
+// by the stores' backoff. They get a much higher ceiling.
+func TestRateLimit_StoreWebhooksAreNotThrottledAtTwenty(t *testing.T) {
+	h := &countingHandler{}
+	mw := RateLimit(newLimiter(t))(h)
+	for _, path := range []string{"/v1/billing/webhooks/apple", "/v1/billing/webhooks/google"} {
+		for i := 0; i < 100; i++ {
+			rec := httptest.NewRecorder()
+			mw.ServeHTTP(rec, postJSON(path, `{}`))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s request %d: %d", path, i+1, rec.Code)
+			}
+		}
+	}
+}

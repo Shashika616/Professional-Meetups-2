@@ -27,4 +27,15 @@ var (
 	// not a request-volume limit applied uniformly at the edge. Both map to
 	// the same HTTP 429, which is the correct shared signal either way.
 	ErrRateLimited = errors.New("rate limited")
+	// ErrPaymentRequired is "this costs credits the caller does not have"
+	// (plan 29 §3.5). HTTP 402. Usually wrapped in a CodedError carrying
+	// the cost and the shortfall.
+	ErrPaymentRequired = errors.New("payment required")
+	// ErrUpgradeRequired is "this app build is too old for this action"
+	// (plan 29 §2, D11). HTTP 426.
+	ErrUpgradeRequired = errors.New("upgrade required")
+	// ErrUnavailable is "a dependency this needs is down or not configured"
+	// (plan 29 §3.7: store verification without credentials fails closed).
+	// HTTP 503: the request was fine and may succeed later.
+	ErrUnavailable = errors.New("unavailable")
 )

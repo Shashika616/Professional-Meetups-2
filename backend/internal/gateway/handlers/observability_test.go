@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -69,5 +70,37 @@ func TestReadyz_StillNeedsNoCredential(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if rec.Code != http.StatusOK {
 		t.Errorf("/readyz status %d, want 200", rec.Code)
+	}
+}
+
+type scrapingHealth struct{ okHealth }
+
+func (scrapingHealth) ScrapeMonolithMetrics(context.Context) ([]byte, error) {
+	return []byte("# TYPE credits_spent_total counter\ncredits_spent_total 14\n"), nil
+}
+
+// Plan 29D: the monolith's registry through the gateway, behind the same
+// token as /metrics, and nowhere at all in production without one.
+func TestMonolithMetrics_ServedBehindTheSameGuard(t *testing.T) {
+	get := func(access MetricsAccess, auth string) (int, string) {
+		mux := http.NewServeMux()
+		RegisterObservability(mux, scrapingHealth{}, access)
+		req := httptest.NewRequest(http.MethodGet, "/metrics/monolith", nil)
+		if auth != "" {
+			req.Header.Set("Authorization", auth)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec.Code, rec.Body.String()
+	}
+	if code, _ := get(MetricsAccess{}, ""); code != http.StatusNotFound {
+		t.Fatalf("production without a token: %d, want 404", code)
+	}
+	if code, _ := get(MetricsAccess{Token: "t"}, "Bearer nope"); code != http.StatusNotFound {
+		t.Fatalf("wrong token: %d, want 404", code)
+	}
+	code, body := get(MetricsAccess{Token: "t"}, "Bearer t")
+	if code != http.StatusOK || body == "" || !strings.Contains(body, "credits_spent_total 14") {
+		t.Fatalf("right token: %d %q", code, body)
 	}
 }

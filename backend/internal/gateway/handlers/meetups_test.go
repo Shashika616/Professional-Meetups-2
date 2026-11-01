@@ -19,6 +19,7 @@ import (
 // fakeMonolith (handlers_test.go) via the shared Client interface, so only
 // the methods a test actually drives need implementing.
 type meetupRecorder struct {
+	charge         monolithclient.CreateCharge
 	gotUserID      string
 	gotTrustLevel  int32
 	gotMeetupID    string
@@ -43,7 +44,8 @@ type meetupRecorder struct {
 
 // The fake in handlers_test.go embeds monolithclient.Client, so these
 // overrides are all that is needed for the meetup routes.
-func (f *fakeMonolith) CreateMeetup(_ context.Context, hostUserID string, hostTrustLevel int32, intent string, _, _ int64, _, _ float64, _ string, _ int32) (monolithclient.Meetup, error) {
+func (f *fakeMonolith) CreateMeetup(_ context.Context, hostUserID string, hostTrustLevel int32, intent string, _, _ int64, _, _ float64, _ string, _ int32, charge monolithclient.CreateCharge) (monolithclient.Meetup, error) {
+	f.meetup.charge = charge
 	f.meetup.gotUserID, f.meetup.gotTrustLevel, f.meetup.gotIntent = hostUserID, hostTrustLevel, intent
 	return monolithclient.Meetup{ID: "meetup-1", HostUserID: hostUserID}, f.err
 }

@@ -19,6 +19,33 @@ type MonolithHealthChecker interface {
 	CheckHealth(ctx context.Context) error
 }
 
+// MonolithMetricsScraper is the optional second half of the monolith
+// client RegisterObservability uses: its Prometheus text.
+type MonolithMetricsScraper interface {
+	ScrapeMonolithMetrics(ctx context.Context) ([]byte, error)
+}
+
+const scrapeTimeout = 5 * time.Second
+
+func monolithMetricsHandler(monolith MonolithHealthChecker) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		scraper, ok := monolith.(MonolithMetricsScraper)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), scrapeTimeout)
+		defer cancel()
+		text, err := scraper.ScrapeMonolithMetrics(ctx)
+		if err != nil {
+			http.Error(w, "monolith metrics unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_, _ = w.Write(text)
+	})
+}
+
 // readinessTimeout bounds the dependency check /readyz performs. Short on
 // purpose: a readiness probe that hangs is worse than one that fails, because
 // an orchestrator waiting on it learns nothing while the timeout it actually
@@ -64,11 +91,18 @@ func RegisterObservability(mux *http.ServeMux, monolith MonolithHealthChecker, m
 		writeStatusJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
+	// The monolith's registry, at its own path behind the same guard. Its
+	// own path, not merged into /metrics: both processes export the Go
+	// runtime and process collectors under the same names, and one
+	// exposition cannot hold two copies of a metric (plan 29D).
+	monolithMetrics := monolithMetricsHandler(monolith)
 	switch {
 	case metricsAccess.Token != "":
 		mux.Handle("GET /metrics", requireBearer(metricsAccess.Token, metrics.Handler()))
+		mux.Handle("GET /metrics/monolith", requireBearer(metricsAccess.Token, monolithMetrics))
 	case metricsAccess.Public:
 		mux.Handle("GET /metrics", metrics.Handler())
+		mux.Handle("GET /metrics/monolith", monolithMetrics)
 	}
 	// Neither: not mounted, so the route 404s like any unknown path.
 }
