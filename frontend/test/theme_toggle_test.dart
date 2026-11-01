@@ -83,17 +83,17 @@ void main() {
       // widget's rendered color matches the dark value.
       expect(container.read(themeModeProvider), AppThemeMode.dark);
       final beforeColor = sampledColor();
-      expect(beforeColor, AppPalette.onyx);
+      expect(beforeColor, AppPalette.backgroundGradient.colors.first);
 
       await container.read(themeModeProvider.notifier).toggle();
       await tester.pump();
 
       final afterColor = sampledColor();
       // Not just "changed to something" — changed to exactly the current
-      // (now light-mode) AppPalette.onyx value, proving the rebuilt widget
+      // (now light-mode) AppPalette.backgroundGradient first stop, proving the rebuilt widget
       // re-read the getter rather than keeping its old painted color.
       expect(afterColor, isNot(beforeColor));
-      expect(afterColor, AppPalette.onyx);
+      expect(afterColor, AppPalette.backgroundGradient.colors.first);
 
       // Flushes SplashScreen's pending 2-second navigation timer so it
       // isn't still pending when this test ends (same pattern this test

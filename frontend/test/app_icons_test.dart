@@ -82,6 +82,7 @@ const Map<String, String> _all = {
   'atSign': AppIcons.atSign,
   'checkbox': AppIcons.checkbox,
   'checkboxChecked': AppIcons.checkboxChecked,
+  'credits': AppIcons.credits,
 };
 
 void main() {

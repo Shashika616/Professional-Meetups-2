@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/models/credits.dart';
+import 'package:professional_connections_platform/core/services/app_config_service.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
@@ -20,6 +22,8 @@ void main() {
   Widget wrap(Widget page) => ProviderScope(
     overrides: [
       meetupServiceProvider.overrideWithValue(ScriptedMeetupService()),
+      walletProvider.overrideWith((ref) async => Wallet.empty),
+      appConfigProvider.overrideWith((ref) async => RemoteAppConfig.defaults),
       subscriptionStatusProvider.overrideWith(
         (ref) async => const SubscriptionStatus(
           tier: SubscriptionTier.free,

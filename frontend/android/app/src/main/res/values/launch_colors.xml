@@ -9,5 +9,5 @@
   device meant a white flash before a near-black splash.
 -->
 <resources>
-    <color name="launch_ground">#FFF7F9FA</color>
+    <color name="launch_ground">#FFF0F4F8</color>
 </resources>
