@@ -47,12 +47,22 @@ module):
 - `internal/modules/meetup` — scheduling, lifecycle/auto-close, requests,
   safety gate, ratings, geo-visibility, device tokens, the three read-model
   caches (`user_display_cache`, `user_location_cache`, `subscription_cache`).
-- `internal/modules/billing` — subscriptions, Apple/Google purchase
-  verification, webhook handling.
+- `internal/modules/billing` — the credit wallet: lots, holds, the
+  append-only ledger, decay, pricing, entitlements, welcome credits and the
+  refund policy (ADR-010, plan 29A); Apple/Google purchase verification,
+  subscriptions and webhooks arrive in 29B. Schema `billing`. Meetup reaches
+  it only through the `CreationCharger` port it declares, and through
+  `meetup.billing_outbox`.
 - `internal/modules/notification` — owns no schema at all (today's
   notification-dispatch has no database either) — just the `Sender`
   interface (FCM or logging fallback) and the handler that reacts to a
   `push-notification-requested` event on the bus.
+
+*Added by plan 29A (2026-10-24):* `internal/platform/flags` (remote config
+and feature flags, schema `ops`, ADR-012) is a platform package rather than a
+module, read by every module and served through the ops service as
+`GET /v1/app-config`. `internal/modules/analytics` (ADR-011) is planned for
+29D with its own schema `analytics`.
 
 Each module exposes exactly one Go interface (its own `Service` type) to the
 rest of the monolith — no module reaches into another module's repository or

@@ -45,11 +45,22 @@ as `service.yaml.template` (the real `backend/service.yaml` is gitignored).
 | `firebase-sa` | `FIREBASE_SERVICE_ACCOUNT_JSON` (push notifications) |
 | `twilio-auth-token` | `TWILIO_AUTH_TOKEN` (SMS OTP) |
 | `gmail-app-password` | `GMAIL_APP_PASSWORD` (email OTP) |
+| `apple-app-store-private-key` | `APPLE_APP_STORE_PRIVATE_KEY` (monolith): the App Store Connect API `.p8` key, PEM text. Without it iOS purchases are 503 (§13) |
+| `google-play-service-account` | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` (monolith): the Android Publisher service account key file's contents. Without it Android purchases are 503 (§13) |
+| `analytics-user-key-secret` | `ANALYTICS_USER_KEY_SECRET` (monolith): 32+ random bytes keying `user_key = HMAC-SHA256(user id)`. Without it production collects no analytics and sends no report (§14). Rotating it splits every account's history in two; do not rotate casually |
 
 Plain env values (not secrets, but environment-specific; see the template):
 `LINKEDIN_CLIENT_ID`, `LINKEDIN_REDIRECT_URI`, `TWILIO_ACCOUNT_SID`,
 `TWILIO_PHONE_NUMBER`, `GMAIL_ADDRESS`, `ALLOW_TEST_OTP_BYPASS=false`,
-`TEST_OTP_BYPASS_PHONES`, `TEST_OTP_BYPASS_EMAILS`.
+`TEST_OTP_BYPASS_PHONES`, `TEST_OTP_BYPASS_EMAILS`, and for store purchases
+(§13) `APPLE_APP_STORE_ISSUER_ID`, `APPLE_APP_STORE_KEY_ID`,
+`GOOGLE_PUBSUB_PUSH_AUDIENCE`, `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT`,
+`BILLING_TERMS_URL`, `BILLING_PRIVACY_URL`. `BILLING_STORE` must never be set
+on Cloud Run (the monolith refuses to start with `BILLING_STORE=fake` there).
+For analytics and telemetry (§14): `ANALYTICS_ARCHIVE_BUCKET`,
+`ANALYTICS_RAW_RETENTION_DAYS`, `ANALYTICS_REPORT_RECIPIENTS`, `OTEL_EXPORTER`
+and the standard `OTEL_*` variables, `DEPLOYMENT_ENVIRONMENT`, and on the
+gateway `METRICS_TOKEN` (a secret if set).
 
 ## 2. What the backend needs from any host (portability notes)
 
@@ -638,3 +649,231 @@ It reads the `SUPABASE_DIRECT_URL` Actions secret the backup already uses
 
 Not created automatically on 2026-10-22: granting project-level roles to a
 new identity was left to the project owner.
+
+## 12. Credits, feature flags and the billing sweeps (plan 29A)
+
+Migrations 0025-0028 add the `ops` schema (feature flags), the `billing` schema,
+the meetup columns `creation_key` and `charge_hold_id`, and (0028) a trigger that
+refuses TRUNCATE on the ledger. They are backward
+compatible with the revision already serving (sqlc lists columns explicitly), so
+the usual order holds: run migrations, then deploy. The monolith refuses to start
+below the latest migration it ships (29 after plan 29B, §13).
+
+### Credits are live on deploy
+
+Credits have **no flag**. From the moment this revision serves, creating a
+meetup costs credits (or plan quota), a hosting-level user's first billing call
+grants the 60 welcome credits, and the free limits are 20 people and 14 days
+ahead. Only subscription plans are switched, by `billing.plans.visible`
+(off, on for the seeded `@meetups.test` accounts).
+
+**Deploy this with the 29C app release, not before.** Every app build older than
+`MIN_CREDITS_APP_VERSION` gets 426 "Update TieHere to host a meetup." when it
+tries to create a meetup (everything else keeps working). The builds on phones
+today are 1.0.0, so deploying ahead of 29C stops everyone hosting until they
+update.
+
+### Environment
+
+All optional; the defaults are safe.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MIN_CREDITS_APP_VERSION` | `1.1.0` | An older app build gets 426 "Update TieHere to host a meetup." on create. Set it to the first released build with the credits UI (29C). |
+| `MIN_SUPPORTED_APP_VERSION` | `1.0.0` | Reported by `/v1/app-config`; the app may prompt below it. The server refuses nothing because of it. |
+| `BILLING_CATALOG_VERSION` | `1` | Reported by `/v1/app-config` so the app knows when to refetch the catalog (29B). |
+
+### Admin: `cmd/billingadmin`
+
+The only way to change credits, plans or flags by hand. It needs `DATABASE_URL`
+pointing at the **session pooler** (port 5432, §9), never the transaction pooler.
+Every changing command needs `--operator` and `--reason`, and is written to the
+ledger, `billing.admin_audit` or `ops.feature_flag_audit`.
+
+```bash
+cd backend
+export DATABASE_URL='<session pooler URL for monolith_db>'
+go run ./cmd/billingadmin flags show
+go run ./cmd/billingadmin flags set --flag billing.plans.visible --enabled true \
+  --operator shashika --reason "launch plans"
+go run ./cmd/billingadmin show-wallet --user <uuid>
+go run ./cmd/billingadmin grant --user <uuid> --amount 20 --operator shashika --reason "support #12"
+go run ./cmd/billingadmin adjust --user <uuid> --delta -5 --operator shashika --reason "correction"
+go run ./cmd/billingadmin set-plan --user <uuid> --plan enterprise --until 2027-06-30 \
+  --operator shashika --reason "contract"
+```
+
+`grant` and `adjust` are idempotent: the identical command run twice applies
+once. Pass `--key <new value>` to repeat a grant on purpose. A flag change is live
+on every instance within 30 seconds.
+
+There is no switch that makes creation free again; that would take a deploy.
+Hiding plans (`flags set --flag billing.plans.visible --enabled false`) does not
+affect subscriptions already active.
+
+### New sweeps on the scheduled tick (§10)
+
+The billing sweeps have no ticker of their own, so the tick is what runs them
+(`TestScheduledTickRunsEveryBillingSweep` pins the list):
+
+| Sweep name in the logs | What it does |
+|---|---|
+| `outbox: meetup billing events` | Captures holds for created meetups; applies the refund policy to cancelled and closed ones |
+| `billing: expired holds` | Releases holds older than their TTL (2 hours) |
+| `billing: decay and expiry` | Materialises weekly welcome-credit decay and expiries for idle wallets |
+| `outbox: billing` | Drains billing's outbox: Google finishes, the meetup subscription cache, and (29D) credits, purchase and subscription events for analytics |
+| `billing: reconciliation` | Once per UTC day: checks every wallet against its lots, open holds and ledger; records the run in `billing.reconciliation_runs` |
+| `retention: meetup billing events`, `retention: billing outbox` | Keep the two outboxes bounded |
+
+### Checking the books
+
+A reconciliation mismatch is logged at error level as
+`billing: reconciliation mismatch` and should never happen. To look directly:
+
+```sql
+SELECT run_date, checked, mismatches, detail FROM billing.reconciliation_runs ORDER BY run_date DESC LIMIT 7;
+SELECT * FROM billing.refund_log ORDER BY created_at DESC LIMIT 20;
+-- Debt (a capture that arrived after its hold lapsed and could not be covered):
+SELECT user_id, debt FROM billing.wallets WHERE debt > 0;
+```
+
+`billing.ledger_entries` rejects UPDATE, DELETE and TRUNCATE by trigger; corrections are new
+entries made with `billingadmin adjust`.
+
+## 13. Store purchases, subscriptions and the catalog (plan 29B)
+
+Migration 0029 adds `billing.store_products` (the catalog: three credit packs and
+the two Pro products), `billing.store_purchases`, `billing.processed_store_notifications`,
+plan titles and perks, and two subscription columns. Additive and backward
+compatible: run it, then deploy. The monolith then refuses to start below
+schema 29.
+
+The console steps (products, API keys, notification URLs, testers, review
+notes) are in `docs/deploy/store-setup.md`. Until they are done:
+
+| Missing | Effect |
+|---|---|
+| `APPLE_APP_STORE_ISSUER_ID`, `_KEY_ID` or `_PRIVATE_KEY` | iOS purchases answer 503 and the monolith logs `billing: store verification is not configured; refusing the purchase (fail closed)`. Nothing is granted. |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | The same for Android, and purchases already granted are not consumed (the `store.finish` outbox job retries them until the key is set; Google refunds what is not acknowledged within three days) |
+| `GOOGLE_PUBSUB_PUSH_AUDIENCE` | `POST /v1/billing/webhooks/google` answers 503; Pub/Sub retries |
+| `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT` (production) | The same 503. The audience alone does not prove a push came from our subscription, so production requires the subscription's service account too (security review 2026-11-01, S-1) |
+
+Apple notifications need no secret: they are verified against Apple's root
+certificate, which is embedded in the code.
+
+`APPLE_BUNDLE_ID` and `GOOGLE_PLAY_PACKAGE_NAME` default to the app's real ids
+(`com.profconn.professionalConnectionsPlatform`,
+`com.profconn.professional_connections_platform`); set them only if those
+change. Sandbox purchases are accepted in production only from the test
+accounts on the `billing.plans.visible` allowlist (App Review uses the sandbox).
+
+### Things to watch
+
+- Log lines `billing: verified purchase refused` (a real store purchase that
+  failed a check: wrong app, wrong account, sandbox) and `billing: granted a
+  subscription to an account the plans are hidden from` (a paid purchase is
+  always granted; this says how it was bought).
+- Dead-lettered `store.finish` rows in `billing.billing_outbox`: a Google
+  purchase that could not be consumed. Consume it in the Play Console before
+  the three days are up.
+
+## 14. Analytics, the daily report and telemetry (plans 29D-29F)
+
+Migrations 0030-0032 add the `analytics` schema (day-partitioned raw events,
+daily aggregates, opt-outs, report runs, per-day active accounts) and
+`meetup.activity_outbox`. Additive: run them, then deploy. The monolith then
+refuses to start below schema 32.
+
+### Environment and secrets
+
+| Variable | Default | Effect when missing |
+|---|---|---|
+| `ANALYTICS_USER_KEY_SECRET` (secret) | none | **Production collects nothing** and logs `analytics disabled: collecting nothing` at start-up. Locally a fixed development key is used |
+| `ANALYTICS_ARCHIVE_BUCKET` | none | Raw days are still dropped after the retention, without an archive copy (logged at start-up and per day). The daily report is not stored. Give the Cloud Run service account `roles/storage.objectCreator` on the bucket |
+| `ANALYTICS_RAW_RETENTION_DAYS` | `14` | Raw events stay this many days (1-90) |
+| `ANALYTICS_REPORT_RECIPIENTS` | none | Comma-separated plain addresses (at most 20). Empty: the report is built and stored, not emailed. It goes out through the configured sender (Gmail, then Resend, then the logging sender) |
+| `OTEL_EXPORTER` | `none` | `stdout` or `otlp` (with `OTEL_EXPORTER_OTLP_ENDPOINT`). See `docs/observability.md` |
+| `METRICS_TOKEN` (gateway) | none | `/metrics` and `/metrics/monolith` are not served on Cloud Run |
+
+### Flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `analytics.enabled` | on | The kill switch: off drops every event, app and server, at once (no release needed) |
+| `analytics.sample_rate` | 100 | The share of installs that send events (the app reads it from `/v1/app-config`) |
+
+```bash
+go run ./cmd/billingadmin flags set --flag analytics.enabled --enabled false --operator shashika --reason "incident"
+```
+
+### Sweeps on the scheduled tick (§10)
+
+| Sweep name in the logs | What it does |
+|---|---|
+| `outbox: meetup activity`, `retention: meetup activity` | Join requests and accepts into analytics; keeps the outbox bounded |
+| `analytics: partitions` | Creates today's raw partition and the next three |
+| `analytics: aggregate` | Aggregates each complete Asia/Colombo day once (`analytics.aggregate_runs`) |
+| `analytics: archive and retention` | Archives raw days past the retention to `gs://$ANALYTICS_ARCHIVE_BUCKET/analytics/raw/YYYY/MM/DD.ndjson.gz`, then drops them; keeps 120 days of active-account rows |
+| `analytics: daily report` | After 06:00 Asia/Colombo, once: yesterday's report, emailed and stored at `analytics/reports/YYYY-MM-DD.xlsx`. A failed email or upload is retried on the next tick (only the part that failed), up to 24 attempts |
+
+The 15-minute tick (§10) is frequent enough for the report: it lands between
+06:00 and 06:15 Colombo. No second Scheduler job is needed.
+
+### Regenerating a report
+
+```bash
+cd backend
+export DATABASE_URL='<session pooler URL for monolith_db>'
+go run ./cmd/analyticsreport --date=2026-10-31 --out=report.xlsx      # just the file
+go run ./cmd/analyticsreport --date=2026-10-31 --deliver              # email and replace the stored copy
+```
+
+It re-aggregates the day from its raw events, so it works while they are still
+in Postgres (the retention window).
+
+### Checking
+
+```sql
+SELECT day, status, attempts, emailed_at, uploaded_at, detail FROM analytics.report_runs ORDER BY day DESC LIMIT 7;
+SELECT day, aggregated_at, events FROM analytics.aggregate_runs ORDER BY day DESC LIMIT 7;
+SELECT day, archived_at, dropped_at FROM analytics.partitions ORDER BY day DESC LIMIT 20;
+```
+
+Metrics (behind `METRICS_TOKEN`): `analytics_events_dropped_total{reason}`,
+`analytics_flush_failures_total`, `analytics_reports_total{part,outcome}`.
+Locally, `backend/scripts/seed-analytics.sh` seeds a realistic fortnight and
+builds a report from it.
+
+## 15. Switching on credit packs and subscription plans in production
+
+Credits and credit packs need no switch: they are live with the backend and the
+1.1.0 app. Packs appear in the app as soon as the store products exist (the
+catalog lists them; the app shows those the store returns).
+
+Plans are hidden behind `billing.plans.visible` until you choose. In order:
+
+1. The store side is done (`docs/deploy/store-setup.md`): both Pro products
+   approved in App Store Connect and Play Console, notifications pointed at
+   `/v1/billing/webhooks/{apple,google}`, the four Apple values and the Google
+   service account in Secret Manager, `GOOGLE_PUBSUB_PUSH_AUDIENCE` and
+   `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT` set.
+2. `BILLING_TERMS_URL` and `BILLING_PRIVACY_URL` are set (App Review requires
+   them on the subscription screen).
+3. Test with a sandbox tester (iOS) and a license tester (Android) on an
+   allowlisted `@meetups.test` account: buy, restore, cancel in the store, and
+   check `billing.subscriptions` and the app (`TESTING-NOTES.md`).
+4. Turn plans on for everyone:
+
+   ```bash
+   go run ./cmd/billingadmin flags set --flag billing.plans.visible --enabled true \
+     --operator shashika --reason "launch plans"
+   ```
+
+   Live within 30 seconds; no release. The app shows Premium from its next
+   app-config read (on open or resume).
+5. Watch the next daily report's Credits and revenue sheet, and the log line
+   `billing: verified purchase refused`.
+
+To hide plans again, set the flag to false. Subscriptions already bought stay
+active and keep their perks.
+

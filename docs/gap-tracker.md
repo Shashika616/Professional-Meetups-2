@@ -247,7 +247,7 @@ Two passes. **2026-10-01:** four parallel read-only reviews (gateway/platform, a
 66. **Mobile client — Medium, reported.** (a) Any refresh error clears the session, including a transient 5xx or network drop. **Partly addressed in the working tree 2026-10-08:** `token_refresher.dart` now re-reads storage before clearing, which fixes the double-spend race that logged out freshly refreshed sessions; a genuine network error still clears. (b) Only one of ~15 auth HTTP calls has a timeout. **OPEN.**
 67. **Database role and backups — Medium, reported.** App connects as the Supabase admin role with `sslmode=require` (no certificate verification); the backup workflow uses a long-lived service-account key with `objectAdmin`. **OPEN.**
 68. **Push circuit breaker and duplicate delivery — Medium, reported.** One foreign-project token (403) counts toward the global breaker; 60 s outbox lease can be exceeded by sequential delivery. **OPEN.**
-69. **Latent bug and parity gap — Medium, reported.** `subscription_cache_postgres.go` uses an unqualified table name (`meetup.subscription_cache`); and `internal/modules/billing` is an empty directory, which is gap #8 restated: confirm where premium entitlement is enforced. **OPEN.**
+69. **Latent bug and parity gap — Medium, reported.** `subscription_cache_postgres.go` uses an unqualified table name (`meetup.subscription_cache`); and `internal/modules/billing` is an empty directory, which is gap #8 restated: confirm where premium entitlement is enforced. **CLOSED in the working tree by 29B (2026-10-25):** the repository now uses the generated, schema-qualified queries (`TestSubscriptionCacheUpsertAndRead` failed before with `relation "subscription_cache" does not exist`), the cache is fed through billing's outbox, and everything that consumes plan quota or applies plan limits asks billing, not the cache (the cache is display only).
 70. **Performance — reported.** Browse query aggregates every meetup in radius before paging; profile queries (`CanViewMemberProfile`, `ListRecentMeetupsForMember`) scan whole tables; `ClaimMeetupsStartingSoon` is not sargable; `ClaimMeetupsToAutoClose` sorts against an index led by a different column; rotated refresh tokens are kept ~37 days with no supporting index; event publish uses the request context so a client disconnect cancels fan-out. **OPEN.**
 71. **Low-severity hardening — mixed.** JWT has no `aud` and does not require `exp` (verified: only `WithValidMethods` and `WithIssuer`); `/metrics` is public and unauthenticated (verified route); no gateway-side gRPC deadline; unbounded `X-Request-ID`; Nominatim not throttled and unbounded response; 7-entry free-email domain list; no length limit on feedback notes or device tokens; per-meetup rating averages shown for 1-2 reviews; Android `allowBackup`, no R8/obfuscation; custom-scheme deep link has no PKCE (and a stale pubspec comment says it does); Stadia key compiled into the binary when `MAP_PROVIDER=stadia` (see #9); compose publishes Postgres/gRPC on all interfaces with `app/app`; CI actions not pinned to SHAs and no `permissions:` blocks (the working tree adds the `generated-code` job but not these); default compute service account on Cloud Run; confirm the Firebase `AIza...` key is restricted in the GCP console. **OPEN.**
 72. **Provider-verified email now satisfies Level 2's "personal email" input — decision needed, 2026-10-08.** `computeTrustLevel` requires `PersonalEmail != ""`; federated signup now writes it at creation (ADR-009). A trust-model change nobody has recorded as a decision. **DECIDED 2026-10-08 (Shashika): yes, it counts as the personal email; no extra flag.** **PINNED 2026-10-08 (Plan 26):** `TestComputeTrustLevel_ProviderVerifiedEmailCountsTowardLevel2` in `auth/trustlevel_test.go` asserts Level 2 from a provider-sourced `PersonalEmail` with no OTP step, and Level 1 without it so the rung is load-bearing. No behaviour change.
@@ -297,3 +297,89 @@ Still open from this review and carried into **Phase B**: #80, #81, #87,
 #88, #89, #90, #91, the `/metrics` half of #93, and `FLAG_SECURE`/
 geocoder disclosure from #94. **Phase C**: #95, #96. Detail and
 failing-before output: `docs/plans/28A-completion-report.md`.
+
+## Plan 29 — credits, billing, subscriptions and analytics (planned 2026-10-24)
+
+Plan: `docs/plans/29-credits-billing-analytics.md`, prompts `29A` to `29F`. Replaces gap #8 (no billing module) and covers #33 (503 billing routes), #47 (Premium product ids), #69 (V-20 subscription cache table name). New work, not started.
+
+### 29A — billing foundations (working tree, 2026-10-24)
+
+- **29A-1. Flags, app config, version headers — DONE in the working tree.** `ops.feature_flags` + audit (migration 0025), `internal/platform/flags` (pure evaluator, 30 s cache), `internal/platform/clientinfo` (X-App-Version / X-Platform carried gateway → monolith as gRPC metadata), `GET /v1/app-config`. ADR-012.
+- **29A-2. Credit core — DONE in the working tree.** `billing` schema (0026), wallet ledger with lots, holds, allocations, decay, expiry, debt, append-only ledger trigger, pricing, entitlements, welcome grant, refund policy, daily reconciliation, `cmd/billingadmin`. ADR-010, `docs/api/billing.md`, runbook §12.
+- **29A-3. Meetup charging — DONE in the working tree, always on (no flag since 2026-10-25).** `CreationCharger` port, `Idempotency-Key`, 402/409/426, `meetup.billing_outbox` (0027) written in the create, cancel, close and auto-close transactions. Capacity CHECK widened to 1-30; the per-user limit stays 20 without a plan.
+- **29A-4. Deploy order — OPEN (Shashika).** Credits have no flag, so the backend charges from the moment it serves and every build below `MIN_CREDITS_APP_VERSION` gets 426 on create. Deploy it with the 29C app release and `MIN_CREDITS_APP_VERSION` set to that build. The free advance window becomes 14 days at the same moment.
+- **29A-5. Review fixes — DONE in the working tree (2026-10-24).** Idempotency key bound to its request (409 `idempotency_key_reused`); no billing writes while not enforced, and unreadable flags fail open to not enforced (counted); ledger TRUNCATE refused (migration 0028); early cancellations count toward the refund cap; a full refund writes off its own capture's debt; flag email rules use verified addresses only; `wallet.go` split. Detail: `docs/plans/29A-completion-report.md` "Review fixes".
+- **29A-6. Credits have no flag — DONE in the working tree (2026-10-25).** Product decision: credits are used and bought from day one; only subscription plans stay behind `billing.plans.visible`. Removed `credits.enforced`, `billing.credit_packs.visible`, the enforcement branches, the 90-day unenforced window and the flag-failure metric (supersedes the fail-mode part of 29A-5). Detail: `docs/plans/29A-completion-report.md` "Change after review".
+
+### 29B — store purchases, subscriptions, catalog (working tree, 2026-10-25)
+
+- **29B-1. Store verification — DONE in the working tree.** `internal/modules/billing/store/{apple,google,fake}`, ported from the sibling's `verify`/`webhookauth` (embedded Apple Root CA G3 pinned by fingerprint), plus the App Store Server API lookup, Google one-time products, consume/acknowledge, breaker + bounded retry + timeouts, hard-coded endpoints. Fails closed (503) without credentials; `BILLING_STORE=fake` refused on Cloud Run.
+- **29B-2. Purchases and webhooks — DONE in the working tree.** Migration 0029; `POST /v1/billing/purchases/verify` (account token = UUIDv5, bundle/package, environment, product, revoked/pending/expired checks; one grant per transaction); Apple Server Notifications V2 and Google RTDN, verified first and applied once; store refunds of packs remove what is left and record the rest as debt. Closes #33 (the 503 billing routes).
+- **29B-3. Catalog and subscription — DONE in the working tree.** `GET /v1/billing/catalog` (no prices; plans behind `billing.plans.visible`) and `GET /v1/billing/subscription`. Product ids per D5/D6; covers #47 server side (the app moves to them in 29C).
+- **29B-4. Store consoles and secrets — OPEN (Shashika).** Every step in `docs/deploy/store-setup.md`: products, App Store Server API key, notification URLs, Play service account, RTDN topic and push subscription, testers, review notes, legal links. Until then purchases are 503.
+
+### 29C — Flutter credits, buy credits, server-driven Premium (working tree, 2026-10-25)
+
+- **29C-1. Credits in the app — DONE in the working tree.** App config and version headers on every request, `CreditService`, the cost row and Buy credits path in the schedule flow, limits from entitlements, the Credits and Buy credits pages, and consumable purchases bound to the account token. App version 1.1.0+7. Detail: `docs/plans/29C-completion-report.md`.
+- **29C-2. Premium from the catalog — DONE in the working tree.** Plans, perks and legal links come from the server; prices from the store; the Profile row is hidden while plans are hidden. Closes #47 (Premium product ids).
+- **29C-3. Ledger noise — OPEN (29F).** The history API returns holds and releases (zero balance change), which the app filters out; filtering on the server would be simpler.
+
+### 29D — analytics module and OpenTelemetry (working tree, 2026-10-26)
+
+- **29D-1. OpenTelemetry and metrics — DONE in the working tree.** Traces (`otelhttp`, `otelgrpc`, pgx, outbox and store spans; W3C trace context replaces the lost request id; `trace_id` in logs), business counters, the monolith's registry at the gateway's `/metrics/monolith`. Exporter `none` by default. `docs/observability.md`.
+- **29D-2. Analytics pipeline — DONE in the working tree.** Registry plus generated Dart constants, migrations 0030 (`analytics` schema) and 0031 (`meetup.activity_outbox`), `POST /v1/analytics/events`, `PUT /v1/analytics/consent`, bounded buffer with COPY flush, server events from the billing and meetup outboxes, partition, aggregate, archive and retention sweeps, deletion and opt-out. Load: p95 1.0 ms at 200 batches/s, 0 drops. Detail: `docs/plans/29D-completion-report.md`.
+- **29D-3. Secrets, bucket and policy — OPEN (Shashika).** `ANALYTICS_USER_KEY_SECRET` in Secret Manager (production collects nothing without it), `ANALYTICS_ARCHIVE_BUCKET` with `roles/storage.objectCreator` and a lifecycle rule, and the privacy policy update (`docs/privacy-analytics-notes.md`) before 29E ships.
+- **29D-4. Day-boundary duplicates — ACCEPTED.** Deduplication by `event_id` holds within a server UTC day; a retry across midnight can be stored twice.
+
+### 29E — analytics in the Flutter app (working tree, 2026-10-26)
+
+- **29E-1. App analytics — DONE in the working tree.**
+  - An in-house client: bounded persisted queue, gzip transport, backoff and opt-out.
+  - Sessions, all 54 route pushes and 6 sheets named from one catalogue, screen time with the background excluded, and tabs by tap and swipe.
+  - 19 catalogued controls and all nine funnels.
+  - Friction: errors, API failures, timeouts, rage taps and long dwell.
+  - A real analytics switch in Privacy Controls.
+  - Verified on the emulator against the local backend.
+  - Detail: `docs/plans/29E-completion-report.md`.
+- **29E-2. Unwired registry events — OPEN (29F).** `search_performed`, `toggle_changed`, `credits_insufficient_shown`.
+- **29E-3. Signed-out opt-out not re-sent after sign-in — OPEN.** The app sends nothing while it is off; only the server-side record is missing.
+
+### 29F — daily report, hardening, review (working tree, 2026-11-01)
+
+- **29F-1. Daily Excel report — DONE in the working tree.** `analytics/report` (excelize, nine sheets, frozen headers, number formats, red on a fall of more than 20% against last week, DAU and funnel charts, Asia/Colombo days, groups under 5 suppressed), the `analytics: daily report` sweep (after 06:00 Colombo, idempotent by date, only failed parts retried), `cmd/analyticsreport --date`, attachments on every email sender, `analytics/reports/YYYY-MM-DD.xlsx`. Migration 0032. Detail: `docs/plans/29-final-report.md`.
+- **29F-2. Security and scalability review — DONE.** `docs/security-review-2026-11-01.md`. Fixed: S-1 RTDN service account required in production, S-2 webhook IP ceiling, S-3 consent per-user limit, S-4 background statement timeouts, S-5 excelize vulnerabilities, S-7 addresses in delivery errors; a sessions-aggregate rewrite and a `user_first_seen(first_day)` index.
+- **#97 Plan 29 review fixes (S-1, S-2, S-3, S-7) — CLOSED in the working tree.**
+- **#98 Background statement limits and the excelize pin (S-4, S-5) — CLOSED in the working tree.** excelize is pinned to a main-branch commit (`v2.11.1-0.20261003002531-6258dcebc4e2`) until a tagged release carries the fixes; move to the tag when it ships.
+- **#99 Open, Low/Info:** S-6 anonymous analytics can be inflated by rotating install ids (bounded by the IP ceiling; accepted). S-8 `golang.org/x/net` v0.60.0 has two unreached advisories; upgrade to v0.62.0 after 2026-11-10 (two-week rule). Back-and-forth loops are not measured in the Stuck sheet. Aggregation grows with events per day: split it or move to hourly rollups well before ten million a day.
+- **29F-3. Owner actions — OPEN (Shashika).** Plan 29 §9 and the runbook §14-§15: store consoles, secrets (`ANALYTICS_USER_KEY_SECRET`, store keys, `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT`), `ANALYTICS_REPORT_RECIPIENTS`, the bucket with `roles/storage.objectCreator`, legal updates.
+
+## Round 12 — full review after Plan 29 (2026-11-01)
+
+Full report: `docs/full-review-2026-11-01.md` (read-only, working tree). All **OPEN**.
+
+100. **N1-H1 service.yaml gitignored; CI test job and deploy workflow fail on a clean checkout — High.**
+101. **N1-B2 migration 0019 can fail on duplicate pending+accepted rows in production; needs pre-flight and cleanup — High.**
+102. **N1-H2 cron tick (150 s) outlives gateway WriteTimeout (30 s); per-sweep 30 s cap undercuts analytics aggregation — High.**
+103. **N1-B1 public profile lists upcoming meetup times and places to any signed-in user incl. guests — High.**
+104. **N1-M1 Plan 29 entirely untracked in git; no CI run, no off-disk copy — Medium.**
+105. **N1-M2 manifests missing analytics, OTel, store and cron settings; template still Cloud SQL and r22 — Medium.**
+106. **N1-A1 email OTP start/resend routes lack per-target daily send and guess budgets (brute force, Gmail quota) — Medium-High.**
+107. **N1-A2 limiter key peek is case-sensitive while JSON decoding is not; limits bypassable — Medium.**
+108. **Location: GetMeetup exact coordinates at any distance (supersedes #90 half); join radius fails open and ignores cache age; stale location cache never swept; SOS and meetup coordinates kept indefinitely; full-precision storage — Medium-High.**
+109. **N1-D1 privacy page says approximate/browse-only, app uploads exact and reads from meetup detail — Medium.**
+110. **N1-M3 raw analytics archive keeps user_key and install_id, no lifecycle, not erased on deletion — Medium.**
+111. **N1-A3 unknown company reaches Level 3 unreviewed; no disposable-mail list (rest of #91) — Medium (policy).**
+112. **N1-A4 / N1-B5 contact email unconfirmed, share uncapped and allowed on cancelled meetups, safety_share records unnotified contacts, name in outgoing texts — Medium-Low.**
+113. **N1-D2 redelivered credit pack routed to subscription verifier; no app-level purchase listener — Medium.**
+114. **N1-B3 join/accept do not check window_end — Medium.**
+115. **N1-B4 notification outbox visibility timeout shorter than a slow batch (duplicate pushes) — Medium.**
+116. **N1-M4 report regeneration needs objectUser, runbook grants objectCreator — Medium.**
+117. **N1-M5 server analytics events lost on kill; tick never flushes buffer — Medium.**
+118. **Nominatim: coordinates can reach logs via url.Error; no cache/throttle; unbounded body; placeholder User-Agent; browse coords in URL query; 50 km hard-coded x4 — Low-Medium.**
+119. **N1-L1..L4 archive held in memory; install_id unvalidated limiter key; inbound trace headers trusted; id attributes accept UUIDs — Low.**
+120. **N1-A5..A7, N1-B6, N1-B7 JWKS refetch under lock; limiter keyed on raw path, no cap; Idempotency-Key reuse returns 200; reviews without time limit — Low.**
+121. **N1-D3..D8 min app version not enforced; credit client no 426; install id survives sign-out; 429 refresh at launch; SOS Retry sends new alert silently; opt-out mid-flush; runbook drift (schema 16, Cloud SQL proxy, eleven sweeps, PAUSED) — Low.**
+
+## Plan 30 (planned 2026-11-01)
+
+Plan: `docs/plans/30-review-fixes-photos-sos-reviews.md`, prompts 30A-30E. Covers #100-#121 and the earlier open items, plus product changes: user-owned profile photos (LinkedIn photo only at LinkedIn onboarding, no sync), 2 trusted contacts with name and phone only and no confirmation, strictly reactive SOS with the new message and location fallback, anonymous host reviews. Not started.

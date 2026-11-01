@@ -391,6 +391,63 @@ whether the meetups they hold should be cancelled before launch.
   `development`. Push to TestFlight and App Store builds needs `production`.
   Deliberately deferred while the Apple Developer Program is pending.
 
+## Testing purchases: sandbox and license testers (plan 29, 2026-11-01)
+
+### Who sees the hidden plans
+
+`billing.plans.visible` is **off** for everyone except its allowlist (migration
+0025): any account whose verified email is on `@meetups.test`, and the eight
+seeded test user ids (`00000000-0000-4000-8000-0000000000{10,11,20,21,30,31,40,41}`,
+`backend/testdata/seed-test-users.sql`). Those accounts see Premium and the plans;
+nobody else does until the flag is turned on (runbook §15). Credits and credit packs
+have no flag: every account sees them.
+
+The same allowlist decides who may pay with **sandbox** money in production
+(`billing.sandboxAllowed`, plan 29 §6): a sandbox or license-test purchase from any
+other account is refused, and turning plans on for everyone does not change that.
+Off Cloud Run (local Docker), sandbox purchases are accepted from anyone.
+
+### iOS: sandbox testers
+
+1. App Store Connect → Users and Access → Sandbox → add a tester with an
+   address that is not a real Apple ID.
+2. On the device, Settings → App Store → Sandbox Account → sign in as that
+   tester. Do not sign out of the real Apple ID.
+3. Install a TestFlight or Xcode build, sign in to TieHere with an allowlisted
+   account (for example `l3.a@meetups.test`), buy a credit pack, then a plan.
+4. Check: the balance moves (Credits page), `billing.store_purchases` has an
+   `environment = 'sandbox'` row, and `billing.ledger_entries` a `grant`.
+   Subscriptions renew every few minutes in the sandbox; cancel in Settings →
+   App Store → Sandbox Account → Manage, and watch the Apple notification arrive
+   (`billing.processed_store_notifications`).
+
+### Android: license testers
+
+1. Play Console → Settings → License testing → add the Google account on the
+   test phone. Use an internal-testing track build.
+2. Sign in to TieHere with an allowlisted account and buy. License-test
+   purchases are free, are flagged as test purchases (stored as sandbox), and
+   subscriptions renew every few minutes.
+3. Check as above. A consumable is consumed by the server (the
+   `store.finish` outbox job); if it is not, look for a dead-lettered
+   `store.finish` row (runbook §13).
+
+### Without the stores (local only)
+
+`BILLING_STORE=fake` (refused on Cloud Run) makes the monolith accept tokens made
+with `store/fake.Encode`, for automated tests and local runs. The Flutter app always
+talks to the real store plugin, so on a device the Buy credits and Premium pages show
+only products the store returns.
+
+### Analytics test data
+
+`backend/scripts/seed-analytics.sh [accounts] [days] [end]` writes a synthetic
+fortnight into the **local** database (the seeder refuses any host but localhost),
+aggregates it and builds a report. The data is synthetic: it never touches auth or
+billing tables and is not a test fixture. Clear it with
+`TRUNCATE analytics.events, analytics.user_activity_days, analytics.user_first_seen`
+plus the `analytics.daily_*` tables.
+
 ## Before any public release: checklist
 
 1. `ALLOW_TEST_OTP_BYPASS` is unset or `false` everywhere it can be set
@@ -408,5 +465,7 @@ whether the meetups they hold should be cancelled before launch.
    (which print live codes at Info) are not the production fallback.
 7. Android release builds are signed with a release keystore, not the debug key
    (`docs/security-review-2026-10-01.md`, V-5).
-8. Re-read this file top to bottom and delete every section whose mechanism no
+8. `billing.plans.visible` is decided on purpose: still allowlisted for the
+   test accounts, or on for everyone (runbook §15).
+9. Re-read this file top to bottom and delete every section whose mechanism no
    longer exists.
