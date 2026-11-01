@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -34,6 +35,7 @@ Future<List<String>?> showShareWithContactsSheet(
 }) {
   return showModalBottomSheet<List<String>>(
     context: context,
+    routeSettings: const RouteSettings(name: ScreenNames.shareWithContacts),
     isScrollControlled: true,
     backgroundColor: AppPalette.card,
     shape: const RoundedRectangleBorder(
@@ -323,6 +325,9 @@ class _NoContactsYet extends StatelessWidget {
             Navigator.of(context).pop();
             Navigator.of(context).push(
               MaterialPageRoute<void>(
+                settings: const RouteSettings(
+                  name: ScreenNames.trustedContacts,
+                ),
                 builder: (_) => const ManageTrustedContactsPage(),
               ),
             );

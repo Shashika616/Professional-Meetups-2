@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -137,12 +140,26 @@ class _HomePageState extends ConsumerState<HomePage>
     final trustLevel = profile?.trustLevel ?? 0;
 
     void onIntentSelected(IntentType? picked) {
+      // Plan 29E: the intent chips are Home's filter.
+      Analytics.instance.record(
+        AnalyticsEvent.filterChanged,
+        attributes: {
+          AnalyticsAttribute.filter:
+              'intent_${picked?.name.toLowerCase() ?? 'all'}',
+          AnalyticsAttribute.active: picked != null,
+        },
+      );
       // A locked intent still explains itself rather than doing nothing.
       // Only a NAMED intent can be locked; "All" never is.
       if (picked != null && !picked.canJoin(trustLevel)) {
         showSnack(context, picked.joinLockedMessage, type: ToastType.locked);
         Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
+          MaterialPageRoute(
+            settings: const RouteSettings(
+              name: ScreenNames.verificationChecklist,
+            ),
+            builder: (_) => const VerificationChecklistPage(),
+          ),
         );
         return;
       }
@@ -150,6 +167,7 @@ class _HomePageState extends ConsumerState<HomePage>
     }
 
     Future<void> onHostMeetup() async {
+      track(Cta.scheduleMeetup);
       // HOST-side gate (ADR-002 § 4) — Level 3 for ordinary intents, one
       // above joining, with its own destination: someone short of the HOST
       // bar may already be Level 2 and able to join, so the "unlock joining"
@@ -171,15 +189,21 @@ class _HomePageState extends ConsumerState<HomePage>
               'Verify your account to host meetups.',
           type: ToastType.locked,
         );
-        Navigator.of(
-          context,
-        ).push(MaterialPageRoute(builder: (_) => const HostingUnlockPage()));
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            settings: const RouteSettings(name: ScreenNames.hostingUnlock),
+            builder: (_) => const HostingUnlockPage(),
+          ),
+        );
         return;
       }
 
-      await Navigator.of(
-        context,
-      ).push(MaterialPageRoute(builder: (_) => const ScheduleFlowPage()));
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: ScreenNames.scheduleMeetup),
+          builder: (_) => const ScheduleFlowPage(),
+        ),
+      );
       // Invalidates every cached (intent, coordinate, window) instance of
       // this family, not just one — this screen doesn't know which key the
       // list last used, and a freshly-hosted meetup should invalidate

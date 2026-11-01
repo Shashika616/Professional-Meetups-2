@@ -94,6 +94,10 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   late final Widget _mapCanvas = MapCanvas(
     initialCentre: _defaultCenter,
     initialZoom: 13,
+    // A preview, not a control. The place comes from search or from the
+    // device; dragging and pinching only moved the pin away from what was
+    // chosen, and every gesture redrew the native map under the sheet.
+    interactive: false,
     onReady: (canvas) => _canvas = canvas,
     // Keeps the picked point in step with a map the user dragged by
     // hand. Search and current-location set it directly and
@@ -300,6 +304,7 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
       final position = await resolveCurrentLocationForMap(context);
       if (!mounted || position == null) return;
       final here = MapPoint(position.latitude, position.longitude);
+      _clearSearchedPlace();
       setState(() => _pickedLocation = here);
       await _canvas?.moveTo(here, zoom: 15);
       // Leave the search field as-is (ADR-029) — no placeholder text is
@@ -310,6 +315,20 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
     } finally {
       if (mounted) setState(() => _locating = false);
     }
+  }
+
+  /// Drops a previously searched place when the device's own position
+  /// replaces it. Without this the banner kept the old name and, worse,
+  /// [_submit] sent it with the NEW coordinates — the server keeps any real
+  /// label it is given, so the meetup was created showing one place's name
+  /// at another place. An empty label is what makes the server look the
+  /// address up from the coordinates.
+  void _clearSearchedPlace() {
+    if (_searchController.text.isEmpty) return;
+    _suppressNextSearch = true;
+    _lastChosenLabel = null;
+    _searchController.clear();
+    _results = [];
   }
 
   void _showError(String message) {

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -40,6 +41,7 @@ class ParticipantsPage extends ConsumerStatefulWidget {
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.participants),
         builder: (_) => ParticipantsPage(meetupId: meetupId, meetup: meetup),
       ),
     );
@@ -386,6 +388,9 @@ class _VerifyToSeeNotice extends StatelessWidget {
             height: 44,
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(
+                settings: const RouteSettings(
+                  name: ScreenNames.verificationChecklist,
+                ),
                 builder: (_) => const VerificationChecklistPage(),
               ),
             ),

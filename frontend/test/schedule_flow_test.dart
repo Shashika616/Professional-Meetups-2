@@ -2,10 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/widgets/app_back_button.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
 import 'package:professional_connections_platform/core/maps/map_provider.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:professional_connections_platform/core/models/credits.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
+import 'package:professional_connections_platform/core/services/app_config_service.dart';
+import 'package:professional_connections_platform/core/services/meetup_service.dart';
+import 'package:professional_connections_platform/core/services/subscription_service.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
@@ -13,8 +20,10 @@ import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart'
     show ScheduleFlowPage, debugScheduleFlowNowOverride;
 
+import 'support/analytics_harness.dart';
 import 'support/app_icon_finder.dart';
 
+import 'support/fake_credit_service.dart';
 import 'support/scripted_meetup_service.dart';
 
 /// Resolves immediately to a fixed, already-Level-2 profile — the Intent
@@ -33,15 +42,25 @@ class _FakeAuthSessionNotifier extends AuthSessionNotifier {
 
 /// [service] answers the time step's schedule check (a free window by
 /// default); the flow never reaches the network in these tests.
-Widget _appWith({ScriptedMeetupService? service}) {
+Widget _appWith({
+  ScriptedMeetupService? service,
+  FakeCreditService? credits,
+  Widget home = const ScheduleFlowPage(),
+}) {
   return ProviderScope(
     overrides: [
       authSessionProvider.overrideWith(_FakeAuthSessionNotifier.new),
       meetupServiceProvider.overrideWithValue(
         service ?? ScriptedMeetupService(),
       ),
+      // Plan 29C: limits and prices come from billing. A fake that
+      // answers at once keeps these tests on the flow itself.
+      creditServiceProvider.overrideWithValue(credits ?? FakeCreditService()),
+      subscriptionServiceProvider.overrideWithValue(_NoStore()),
+      walletProvider.overrideWith((ref) async => Wallet.empty),
+      appConfigProvider.overrideWith((ref) async => RemoteAppConfig.defaults),
     ],
-    child: const MaterialApp(home: ScheduleFlowPage()),
+    child: MaterialApp(home: home),
   );
 }
 
@@ -83,9 +102,13 @@ void _pinClockToStartOfToday() {
 /// that timer fires (a single `pump()`, never `pumpAndSettle()`, in
 /// between) so `MapLocationStep.dispose()` cancels it — no real network
 /// call ever happens in this test.
-Future<void> _reachCapacityStep(WidgetTester tester) async {
+Future<void> _reachCapacityStep(
+  WidgetTester tester, {
+  ScriptedMeetupService? service,
+  FakeCreditService? credits,
+}) async {
   _pinClockToStartOfToday();
-  await tester.pumpWidget(_appWith());
+  await tester.pumpWidget(_appWith(service: service, credits: credits));
   await tester.pumpAndSettle();
 
   await tester.tap(find.text('Coffee'));
@@ -127,6 +150,154 @@ Future<void> _reachCapacityStep(WidgetTester tester) async {
 }
 
 void main() {
+  // Plan 29E: the schedule-a-meetup funnel.
+  group('Schedule flow — funnel analytics', () {
+    const flow = AnalyticsFlow.scheduleMeetup;
+    const intent = 'intent', timing = 'timing', location = 'location';
+    const capacity = 'capacity', review = 'review';
+
+    Meetup created() => Meetup(
+      id: 'm-1',
+      hostUserId: 'user-1',
+      hostFullName: 'Ada Lovelace',
+      hostTrustLevel: 3,
+      intent: IntentType.coffee,
+      windowStart: DateTime.now().add(const Duration(hours: 3)),
+      windowEnd: DateTime.now().add(const Duration(hours: 4)),
+      locationLat: 6.9,
+      locationLng: 79.8,
+      locationLabel: 'Test Cafe',
+      capacity: 2,
+      acceptedCount: 0,
+      status: MeetupStatus.open,
+      createdAt: DateTime.now(),
+      isHostedByMe: true,
+    );
+
+    testWidgets('every step in order, then completed', (tester) async {
+      final analytics = await installTestAnalytics();
+      tester.view.physicalSize = const Size(1080, 3000);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.reset);
+      final service = ScriptedMeetupService(meetupDetail: created())
+        ..createMeetupScript.add(created());
+      final credits = FakeCreditService()
+        ..quoteScript = [quoteOf(12, available: 60)];
+      await _reachCapacityStep(tester, service: service, credits: credits);
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const Key('reviewConfirm')));
+      await tester.tap(find.byKey(const Key('reviewConfirm')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(flowEvents(analytics, flow), [
+        'flow_started',
+        'flow_step_viewed:$intent',
+        'flow_step_completed:$intent',
+        'flow_step_viewed:$timing',
+        'flow_step_completed:$timing',
+        'flow_step_viewed:$location',
+        'flow_step_completed:$location',
+        'flow_step_viewed:$capacity',
+        'flow_step_completed:$capacity',
+        'flow_step_viewed:$review',
+        'flow_step_completed:$review',
+        'flow_completed:$review',
+      ]);
+      // Leaving the page after success is not an abandonment.
+      await tester.pumpWidget(const SizedBox());
+      expect(
+        flowEvents(
+          analytics,
+          flow,
+        ).where((e) => e.startsWith('flow_abandoned')),
+        isEmpty,
+      );
+    });
+
+    testWidgets('backing out is an abandonment at the step it left from', (
+      tester,
+    ) async {
+      final analytics = await installTestAnalytics();
+      await tester.pumpWidget(
+        _appWith(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const ScheduleFlowPage(),
+                ),
+              ),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Coffee'));
+      await tester.pumpAndSettle();
+      // Back to the intent step, then out of the flow.
+      await tester.tap(find.byType(AppBackButton));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(AppBackButton));
+      await tester.pumpAndSettle();
+      expect(find.byType(ScheduleFlowPage), findsNothing);
+
+      final events = flowEvents(analytics, flow);
+      expect(events, [
+        'flow_started',
+        'flow_step_viewed:$intent',
+        'flow_step_completed:$intent',
+        'flow_step_viewed:$timing',
+        'flow_step_viewed:$intent',
+        'flow_abandoned:$intent',
+      ]);
+      final abandoned = queued(
+        analytics,
+      ).lastWhere((e) => e['event_name'] == AnalyticsEvent.flowAbandoned);
+      expect(
+        (abandoned['attributes'] as Map)[AnalyticsAttribute.reason],
+        AnalyticsValue.flowAbandonedReasonBack,
+      );
+    });
+
+    testWidgets('30 minutes in the background abandons it where it stood', (
+      tester,
+    ) async {
+      final analytics = await installTestAnalytics();
+      _pinClockToStartOfToday();
+      await tester.pumpWidget(_appWith());
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Coffee'));
+      await tester.pumpAndSettle();
+
+      analytics.lifecycleChanged(AppLifecycleState.paused);
+      await tester.pump(const Duration(minutes: 31));
+      analytics.lifecycleChanged(AppLifecycleState.resumed);
+
+      final abandoned = queued(
+        analytics,
+      ).lastWhere((e) => e['event_name'] == AnalyticsEvent.flowAbandoned);
+      expect(abandoned['flow_step'], timing);
+      expect(
+        (abandoned['attributes'] as Map)[AnalyticsAttribute.reason],
+        AnalyticsValue.flowAbandonedReasonBackgrounded,
+      );
+      // The page closing later does not abandon it a second time.
+      await tester.pumpWidget(const SizedBox());
+      expect(
+        flowEvents(
+          analytics,
+          flow,
+        ).where((e) => e.startsWith('flow_abandoned')),
+        hasLength(1),
+      );
+    });
+  });
+
   group('Schedule flow — location step, Stadia selected without a key', () {
     testWidgets(
       'shows a clear "not configured" message instead of attempting to '
@@ -501,4 +672,289 @@ void main() {
       },
     );
   });
+
+  group('Schedule flow — credits (plan 29C)', () {
+    Meetup created() => Meetup(
+      id: 'm-1',
+      hostUserId: 'user-1',
+      hostFullName: 'Ada Lovelace',
+      hostTrustLevel: 3,
+      intent: IntentType.coffee,
+      windowStart: DateTime.now().add(const Duration(hours: 3)),
+      windowEnd: DateTime.now().add(const Duration(hours: 4)),
+      locationLat: 6.9,
+      locationLng: 79.8,
+      locationLabel: 'Test Cafe',
+      capacity: 2,
+      acceptedCount: 0,
+      status: MeetupStatus.open,
+      createdAt: DateTime.now(),
+      isHostedByMe: true,
+    );
+
+    Future<void> reachReview(
+      WidgetTester tester,
+      ScriptedMeetupService service,
+      FakeCreditService credits,
+    ) async {
+      tester.view.physicalSize = const Size(1080, 3000);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.reset);
+      await _reachCapacityStep(tester, service: service, credits: credits);
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pumpAndSettle();
+      expect(find.text('Review & confirm'), findsOneWidget);
+    }
+
+    Finder costRow() => find.byKey(const Key('reviewCost'));
+    PrimaryButton confirm(WidgetTester tester) =>
+        tester.widget<PrimaryButton>(find.byKey(const Key('reviewConfirm')));
+
+    Future<void> tapConfirm(WidgetTester tester) async {
+      await tester.ensureVisible(find.byKey(const Key('reviewConfirm')));
+      await tester.tap(find.byKey(const Key('reviewConfirm')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+
+    testWidgets(
+      'the review step shows the server\'s cost and the balance, and creating carries it',
+      (tester) async {
+        final service = ScriptedMeetupService(meetupDetail: created())
+          ..createMeetupScript.add(created());
+        final credits = FakeCreditService()
+          ..quoteScript = [quoteOf(12, available: 60)];
+        await reachReview(tester, service, credits);
+
+        expect(
+          find.descendant(of: costRow(), matching: find.text('12 credits')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: costRow(),
+            matching: find.text('Your balance: 60 credits'),
+          ),
+          findsOneWidget,
+        );
+        expect(credits.quoteCalls.single.capacity, 2);
+        expect(confirm(tester).label, 'Confirm & schedule');
+
+        await tapConfirm(tester);
+        final charge = service.createMeetupCharges.single!;
+        expect(charge.expectedCost, 12);
+        expect(charge.priceVersion, 1);
+        expect(charge.idempotencyKey, isNotEmpty);
+      },
+    );
+
+    testWidgets('a plan-covered meetup says so instead of a cost', (
+      tester,
+    ) async {
+      final credits = FakeCreditService()
+        ..quoteScript = [quoteOf(0, available: 0, plan: true)];
+      await reachReview(tester, ScriptedMeetupService(), credits);
+      expect(
+        find.descendant(
+          of: costRow(),
+          matching: find.text('Included in your plan'),
+        ),
+        findsOneWidget,
+      );
+      expect(confirm(tester).label, 'Confirm & schedule');
+    });
+
+    testWidgets(
+      'not enough credits: BUY CREDITS, then a new quote, then it schedules',
+      (tester) async {
+        final service = ScriptedMeetupService(meetupDetail: created())
+          ..createMeetupScript.add(created());
+        final credits = FakeCreditService()
+          ..catalogResult = Catalog.empty
+          ..quoteScript = [
+            quoteOf(30, available: 10),
+            quoteOf(30, available: 80),
+          ];
+        await reachReview(tester, service, credits);
+
+        expect(confirm(tester).label, 'Buy credits');
+        await tester.ensureVisible(find.byKey(const Key('reviewConfirm')));
+        await tester.tap(find.byKey(const Key('reviewConfirm')));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Buy credits'),
+          findsWidgets,
+          reason: 'the buy-credits page is open',
+        );
+        expect(find.byKey(const Key('buyCreditsEmpty')), findsOneWidget);
+
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(credits.quoteCalls, hasLength(2), reason: 're-quoted on return');
+        expect(
+          find.descendant(
+            of: costRow(),
+            matching: find.text('Your balance: 80 credits'),
+          ),
+          findsOneWidget,
+        );
+        expect(confirm(tester).label, 'Confirm & schedule');
+
+        await tapConfirm(tester);
+        expect(service.createMeetupCharges, hasLength(1));
+        expect(service.createMeetupCharges.single!.expectedCost, 30);
+      },
+    );
+
+    testWidgets(
+      'price_changed shows the new cost and asks again, as a new submission',
+      (tester) async {
+        final service = ScriptedMeetupService(meetupDetail: created())
+          ..createMeetupScript.addAll([
+            const MeetupPriceChangedException(
+              'The price changed.',
+              cost: 14,
+              priceVersion: 2,
+            ),
+            created(),
+          ]);
+        final credits = FakeCreditService()
+          ..quoteScript = [quoteOf(10), quoteOf(14, version: 2)];
+        await reachReview(tester, service, credits);
+
+        await tapConfirm(tester);
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('reviewCostNotice')), findsOneWidget);
+        expect(
+          find.textContaining('The price is now 14 credits'),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: costRow(), matching: find.text('14 credits')),
+          findsOneWidget,
+        );
+
+        await tapConfirm(tester);
+        expect(service.createMeetupCharges, hasLength(2));
+        final first = service.createMeetupCharges[0]!,
+            second = service.createMeetupCharges[1]!;
+        expect(second.expectedCost, 14);
+        expect(second.priceVersion, 2);
+        expect(second.idempotencyKey, isNot(first.idempotencyKey));
+      },
+    );
+
+    testWidgets('update_required shows the server\'s message', (tester) async {
+      final service = ScriptedMeetupService()
+        ..createMeetupScript.add(
+          const MeetupUpdateRequiredException(
+            'Update TieHere to host a meetup.',
+          ),
+        );
+      await reachReview(tester, service, FakeCreditService());
+      await tapConfirm(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Update TieHere to host a meetup.'), findsOneWidget);
+      await tester.pumpAndSettle(const Duration(seconds: 5));
+    });
+
+    testWidgets(
+      'a retry after a dropped connection reuses the same idempotency key',
+      (tester) async {
+        final service = ScriptedMeetupService(meetupDetail: created())
+          ..createMeetupScript.addAll([
+            const MeetupOfflineException(),
+            created(),
+          ]);
+        await reachReview(tester, service, FakeCreditService());
+        await tapConfirm(tester);
+        await tester.pumpAndSettle(const Duration(seconds: 5));
+        await tapConfirm(tester);
+        expect(service.createMeetupCharges, hasLength(2));
+        expect(
+          service.createMeetupCharges[1]!.idempotencyKey,
+          service.createMeetupCharges[0]!.idempotencyKey,
+        );
+      },
+    );
+
+    testWidgets('a plan raises the stepper to its own limit', (tester) async {
+      final credits = FakeCreditService()
+        ..entitlementsResult = const Entitlements(
+          limits: CreationLimits(maxCapacity: 30, maxAdvanceDays: 30),
+          planCode: 'pro',
+        );
+      await _reachCapacityStep(tester, credits: credits);
+      for (var i = 0; i < 28; i++) {
+        await tester.tap(findAppIcon(AppIcons.plus));
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+      expect(find.text('30'), findsOneWidget);
+      final plus = tester.widget<GestureDetector>(
+        find.ancestor(
+          of: findAppIcon(AppIcons.plus),
+          matching: find.byType(GestureDetector),
+        ),
+      );
+      expect(plus.onTap, isNull);
+    });
+
+    testWidgets(
+      'the date picker reaches as far as the entitlement, 14 days by default',
+      (tester) async {
+        for (final (credits, days) in [
+          (FakeCreditService(), 14),
+          (
+            FakeCreditService()
+              ..entitlementsResult = const Entitlements(
+                limits: CreationLimits(maxCapacity: 30, maxAdvanceDays: 30),
+              ),
+            30,
+          ),
+          (FakeCreditService()..entitlementsError = Exception('down'), 14),
+        ]) {
+          _pinClockToStartOfToday();
+          await tester.pumpWidget(_appWith(credits: credits));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Coffee'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Date'));
+          await tester.pumpAndSettle();
+          final picker = tester.widget<DatePickerDialog>(
+            find.byType(DatePickerDialog),
+          );
+          expect(picker.lastDate.difference(picker.firstDate).inDays, days);
+          await tester.tap(find.text('Cancel'));
+          await tester.pumpAndSettle();
+          await tester.pumpWidget(const SizedBox());
+        }
+      },
+    );
+  });
+}
+
+/// No store at all: the buy-credits page renders its empty state.
+class _NoStore implements SubscriptionService {
+  @override
+  Future<List<ProductDetails>> availableProducts(
+    List<String> productIds,
+  ) async => const [];
+
+  @override
+  Future<SubscriptionStatus> currentStatus() async => const SubscriptionStatus(
+    tier: SubscriptionTier.free,
+    status: SubscriptionLifecycleStatus.none,
+  );
+
+  @override
+  Future<void> restorePurchases() async {}
+
+  @override
+  Future<SubscriptionStatus> verifyPurchase({
+    required String platform,
+    required String receiptOrToken,
+    required String productId,
+  }) async => throw UnimplementedError();
 }

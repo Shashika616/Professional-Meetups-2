@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -259,6 +260,7 @@ class _NotificationRow extends StatelessWidget {
     if (notification.meetupId.isEmpty) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: ScreenNames.meetupDetail),
         builder: (_) => MeetupDetailPage(meetupId: notification.meetupId),
       ),
     );

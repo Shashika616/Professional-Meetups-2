@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:professional_connections_platform/core/services/client_info_http_client.dart';
 import 'package:professional_connections_platform/core/utils/debug_log.dart';
 import 'package:professional_connections_platform/core/config/app_config.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
@@ -62,7 +63,7 @@ class HttpAuthService extends _HttpAuthBase
     // with no timeout would prove the production path works when it
     // does not.
   }) : super._(
-         DeadlineHttpClient(httpClient ?? http.Client()),
+         DeadlineHttpClient(ClientInfoHttpClient(httpClient ?? http.Client())),
          appLinks ?? AppLinks(),
          baseUrl ?? AppConfig.gatewayBaseUrl,
          getAccessToken ?? (() async => null),

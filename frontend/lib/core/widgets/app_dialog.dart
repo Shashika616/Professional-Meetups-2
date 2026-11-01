@@ -35,6 +35,7 @@ Future<T?> showAppDialog<T>(
   BuildContext context, {
   required WidgetBuilder builder,
   bool barrierDismissible = true,
+  String? screen,
 }) {
   final route = ModalRoute.of(context);
   if (route != null && !route.isCurrent) return Future<T?>.value(null);
@@ -42,6 +43,8 @@ Future<T?> showAppDialog<T>(
     context: context,
     builder: builder,
     barrierDismissible: barrierDismissible,
+    // Plan 29E: a dialog with a screen name counts as a screen.
+    routeSettings: RouteSettings(name: screen),
   );
 }
 

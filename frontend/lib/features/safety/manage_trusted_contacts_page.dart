@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/widgets/secure_screen.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -152,6 +153,7 @@ class _ManageTrustedContactsPageState
   /// three fields belongs near the keyboard that is about to cover half
   /// the screen, not floating in the middle of it.
   Future<void> _showAddContactDialog() {
+    track(Cta.addTrustedContact);
     return showAppSheet<void>(
       context,
       builder: (dialogContext) => _AddContactForm(

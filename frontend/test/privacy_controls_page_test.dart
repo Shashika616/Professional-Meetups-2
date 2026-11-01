@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
 import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
+
+import 'support/analytics_harness.dart';
 
 void main() {
   Future<void> pumpPage(WidgetTester tester) async {
@@ -54,5 +58,37 @@ void main() {
       find.textContaining('we text them once to ask whether they agree'),
       findsOneWidget,
     );
+  });
+
+  // Plan 29E: the first real control replaces "Controls are coming".
+  testWidgets('the analytics switch is real: off clears, stops and tells the '
+      'server; on starts again', (tester) async {
+    final transport = FakeAnalyticsTransport();
+    final analytics = await installTestAnalytics(transport: transport);
+    analytics.cta(AnalyticsCta.openMap);
+    await pumpPage(tester);
+    expect(find.text('Controls are coming'), findsNothing);
+    expect(find.text('Share usage analytics'), findsOneWidget);
+    final toggle = find.byKey(const Key('analyticsToggle'));
+    await tester.ensureVisible(toggle);
+    expect(
+      tester.widget<Switch>(toggle).value,
+      isTrue,
+      reason: 'on by default',
+    );
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(toggle).value, isFalse);
+    expect(Analytics.instance.optedOut, isTrue);
+    expect(analytics.queue.isEmpty, isTrue);
+    expect(transport.consents, [true]);
+    analytics.cta(AnalyticsCta.openMap);
+    expect(analytics.queue.isEmpty, isTrue);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(Analytics.instance.optedOut, isFalse);
+    expect(transport.consents, [true, false]);
   });
 }

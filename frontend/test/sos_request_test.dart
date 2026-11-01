@@ -114,7 +114,7 @@ void main() {
       'name': 'Amma',
       'phone_number': '+94771111111',
       'email': '',
-      if (status != null) 'status': status,
+      'status': ?status,
     };
 
     test('reads pending and expired', () {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_sheet.dart';
@@ -42,6 +43,7 @@ Future<void> showParticipantReviewSheet(
 }) {
   return showAppSheet<void>(
     context,
+    screen: ScreenNames.participantReview,
     // Near full height. This sheet is a task — a score, then optional
     // traits, then done — and at its content height it opened as a half
     // panel that then grew as traits appeared, which moved the buttons

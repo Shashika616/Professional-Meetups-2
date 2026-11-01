@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 
 import 'package:professional_connections_platform/core/config/app_config.dart';
+import 'package:professional_connections_platform/core/services/client_info_http_client.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/models/paged_result.dart';
@@ -20,7 +21,7 @@ class HttpMeetupService implements MeetupService {
     http.Client? httpClient,
     String? baseUrl,
     Future<String?> Function()? getAccessToken,
-  }) : _httpClient = httpClient ?? http.Client(),
+  }) : _httpClient = ClientInfoHttpClient(httpClient ?? http.Client()),
        _baseUrl = baseUrl ?? AppConfig.gatewayBaseUrl,
        _getAccessToken = getAccessToken ?? (() async => null);
 
@@ -37,16 +38,25 @@ class HttpMeetupService implements MeetupService {
     required double locationLng,
     required String locationLabel,
     required int capacity,
+    CreationCharge? charge,
   }) async {
-    final response = await _authenticatedPost('/v1/meetups', {
-      'intent': intent.wireValue,
-      'window_start_unix_seconds': windowStart.millisecondsSinceEpoch ~/ 1000,
-      'window_end_unix_seconds': windowEnd.millisecondsSinceEpoch ~/ 1000,
-      'location_lat': locationLat,
-      'location_lng': locationLng,
-      'location_label': locationLabel,
-      'capacity': capacity,
-    });
+    final response = await _authenticatedPost(
+      '/v1/meetups',
+      {
+        'intent': intent.wireValue,
+        'window_start_unix_seconds': windowStart.millisecondsSinceEpoch ~/ 1000,
+        'window_end_unix_seconds': windowEnd.millisecondsSinceEpoch ~/ 1000,
+        'location_lat': locationLat,
+        'location_lng': locationLng,
+        'location_label': locationLabel,
+        'capacity': capacity,
+        if (charge != null) 'expected_cost': charge.expectedCost,
+        if (charge != null) 'price_version': charge.priceVersion,
+      },
+      extraHeaders: {
+        if (charge != null) 'Idempotency-Key': charge.idempotencyKey,
+      },
+    );
     return Meetup.fromJson(_decodeOrThrow(response));
   }
 
@@ -371,6 +381,18 @@ class HttpMeetupService implements MeetupService {
     switch (response.statusCode) {
       case 400:
         return MeetupNetworkException(message);
+      case 402:
+        if (body?['code'] == 'credits_debt') {
+          return MeetupCreditsDebtException(message, debt: _int(body?['debt']));
+        }
+        return MeetupInsufficientCreditsException(
+          message,
+          cost: _int(body?['cost']),
+          available: _int(body?['available']),
+          shortfall: _int(body?['shortfall']),
+        );
+      case 426:
+        return MeetupUpdateRequiredException(message);
       case 401:
         return MeetupSessionExpiredException(message);
       case 403:
@@ -394,11 +416,23 @@ class HttpMeetupService implements MeetupService {
             }
           }
         }
+        if (body?['code'] == 'price_changed') {
+          return MeetupPriceChangedException(
+            message,
+            cost: _int(body?['cost']),
+            priceVersion: _int(body?['price_version']),
+          );
+        }
+        if (body?['code'] == 'idempotency_key_reused') {
+          return MeetupIdempotencyKeyReusedException(message);
+        }
         return MeetupConflictException(message);
       default:
         return MeetupNetworkException(message);
     }
   }
+
+  static int _int(Object? v) => (v as num?)?.toInt() ?? 0;
 
   /// The decoded error body, or null when it is not a JSON object.
   Map<String, dynamic>? _errorBody(String body) {
@@ -413,9 +447,10 @@ class HttpMeetupService implements MeetupService {
 
   Future<http.Response> _authenticatedPost(
     String path,
-    Map<String, Object?> body,
-  ) async {
-    final headers = await _authHeaders();
+    Map<String, Object?> body, {
+    Map<String, String> extraHeaders = const {},
+  }) async {
+    final headers = {...await _authHeaders(), ...extraHeaders};
     return _send(
       () => _httpClient.post(
         Uri.parse('$_baseUrl$path'),

@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
-import 'package:professional_connections_platform/core/widgets/app_banner.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
-import 'package:professional_connections_platform/core/widgets/app_tag.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 
@@ -24,8 +23,12 @@ import 'package:professional_connections_platform/core/widgets/section_label.dar
 /// appeared to work, which is worse than not offering one").
 ///
 /// So this page states what the app currently does, which is all true today
-/// and verifiable in the code, and says plainly that the controls are
-/// coming. When a real toggle exists it replaces the matching line here.
+/// and verifiable in the code. A control is added only when it is real.
+///
+/// The first one (plan 29E) is usage analytics: off stops the app recording
+/// and sending anything at once, clears what was queued, and (signed in)
+/// tells the server, which then drops anything still carrying the account
+/// and deletes what it already holds.
 class PrivacyControlsPage extends StatelessWidget {
   const PrivacyControlsPage({super.key});
 
@@ -110,14 +113,13 @@ class PrivacyControlsPage extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
-              // A banner, not a fifth card. It is a standing fact about
-              // the page rather than another topic in the list, and the
-              // card it used to sit in made it look like one.
-              const AppBanner(
-                icon: AppIcons.info,
-                title: 'Controls are coming',
-                tone: AppTone.accent,
+              const SizedBox(height: 24),
+              const SectionLabel('Your choices'),
+              const SizedBox(height: 12),
+              const FlatCard(
+                radius: 18,
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: _AnalyticsToggle(),
               ),
             ],
           ),
@@ -234,6 +236,84 @@ class _FactState extends State<_Fact> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Usage analytics on or off (plan 29 D8: on by default, with this
+/// opt-out). The one line under it says what is collected; the full list is
+/// in the privacy policy.
+class _AnalyticsToggle extends StatefulWidget {
+  const _AnalyticsToggle();
+
+  @override
+  State<_AnalyticsToggle> createState() => _AnalyticsToggleState();
+}
+
+class _AnalyticsToggleState extends State<_AnalyticsToggle> {
+  late bool _on = !Analytics.instance.optedOut;
+
+  Future<void> _set(bool on) async {
+    setState(() => _on = on);
+    await Analytics.instance.setOptedOut(!on);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppPalette.tintedSurface(
+                AppPalette.textPrimary.withValues(alpha: 0.05),
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: AppIcon(
+              AppIcons.bulb,
+              size: 18,
+              color: AppPalette.candyBlue,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Share usage analytics',
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Which screens and buttons you use, so we can fix what gets '
+                  'in the way. Never your messages, contacts or location.',
+                  style: TextStyle(
+                    color: AppPalette.textSecondary,
+                    fontSize: 12.5,
+                    height: 1.45,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Switch(
+            key: const Key('analyticsToggle'),
+            value: _on,
+            onChanged: _set,
+            activeTrackColor: AppPalette.candyBlue,
+          ),
+        ],
+      ),
     );
   }
 }

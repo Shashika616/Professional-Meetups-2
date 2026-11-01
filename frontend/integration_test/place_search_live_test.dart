@@ -46,10 +46,7 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(
-      find.widgetWithText(
-        TextField,
-        'Search for a cafe, restaurant, or venue',
-      ),
+      find.widgetWithText(TextField, 'Search for a cafe, restaurant, or venue'),
       'coffee',
     );
     await tester.pump();

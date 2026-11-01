@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' show Geolocator;
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/models/paged_result.dart';
@@ -372,6 +373,9 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
                   onTap: () async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
+                        settings: const RouteSettings(
+                          name: ScreenNames.meetupDetail,
+                        ),
                         builder: (_) => MeetupDetailPage(meetupId: meetup.id),
                       ),
                     );

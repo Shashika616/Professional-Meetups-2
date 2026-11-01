@@ -3,6 +3,9 @@ import 'dart:async' show StreamSubscription, unawaited;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/services/app_config_service.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
@@ -55,6 +58,8 @@ class _AppShellState extends ConsumerState<AppShell>
     _pageController = PageController(
       initialPage: ref.read(currentTabIndexProvider),
     );
+    // Plan 29E: the tracker reports the tab showing, not "the shell".
+    Analytics.instance.tabChanged(ref.read(currentTabIndexProvider));
 
     // ADR-030 (round-9 scaffolding) — initializes the push service and
     // subscribes to its message stream once, for the app's lifetime.
@@ -85,6 +90,10 @@ class _AppShellState extends ConsumerState<AppShell>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ref.invalidate(activeMeetupsProvider);
+      // Plan 29C: flags and the balance can change while the app is away
+      // (a flag turned on, a refund, a purchase on another device).
+      ref.invalidate(appConfigProvider);
+      ref.invalidate(walletProvider);
     }
   }
 
@@ -186,14 +195,31 @@ class _AppShellState extends ConsumerState<AppShell>
     // when the provider changed out from under the PageView, not the
     // other way around (the page?.round() guard is what prevents those
     // two paths from fighting each other).
+    //
+    // jumpToPage, not animateToPage: a tab tap switches instantly, as tab
+    // bars do on both iOS and Android. Animating from Home to Profile slid
+    // THROUGH Events and Safety, building each page that crossed the screen
+    // in the middle of the moving animation — up to three first-visit builds
+    // of 60-70 ms each inside one 280 ms slide, measured as consecutive
+    // dropped frames. A jump builds only the page that was asked for.
+    // Swiping between tabs still animates; that is the PageView's own drag.
     ref.listen<int>(currentTabIndexProvider, (previous, next) {
       if (_pageController.hasClients && _pageController.page?.round() != next) {
-        _pageController.animateToPage(
-          next,
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeOutCubic,
-        );
+        _pageController.jumpToPage(next);
       }
+      // A tap and a swipe both land here (both set the provider), so both
+      // count as a screen change.
+      Analytics.instance.tabChanged(next);
+    });
+    // Plan 29E: the server's kill switch and sample rate. A fetch that
+    // failed is not applied; the last answer (or the default, on) stands.
+    ref.listen<AsyncValue<RemoteAppConfig>>(appConfigProvider, (_, next) {
+      final config = next.value;
+      if (config == null || identical(config, RemoteAppConfig.defaults)) return;
+      Analytics.instance.applyRemoteConfig(
+        enabled: config.analyticsEnabled,
+        sampleRate: config.analyticsSampleRate,
+      );
     });
     // Safety net for any authenticated call site that forgot its own
     // SessionExpiredException catch (`frontend/PLAN.md`'s "Session refresh
@@ -215,8 +241,9 @@ class _AppShellState extends ConsumerState<AppShell>
       final byUser = next.value?.signedOutByUser ?? false;
       if (wasLoggedIn && !isLoggedIn && !byUser) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (context) => const LandingPage(sessionExpired: true),
+          screenRoute(
+            ScreenNames.landing,
+            (context) => const LandingPage(sessionExpired: true),
           ),
           (route) => false,
         );

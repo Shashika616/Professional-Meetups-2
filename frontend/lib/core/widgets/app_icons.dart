@@ -119,6 +119,12 @@ class AppIcons {
   static const String trash = '<path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13"/>';
   static const String premium =
       '<path d="M4 18l1.5-9 4.5 4 2-6 2 6 4.5-4L20 18z"/>';
+  // Plan 29C: credits. A coin edge-on over a coin face, same weight as the
+  // rest of the set.
+  static const String credits =
+      '<ellipse cx="12" cy="7" rx="7" ry="3"/>'
+      '<path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7"/>'
+      '<path d="M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/>';
   static const String appearance =
       '<path d="M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10z"/>';
   static const String work =

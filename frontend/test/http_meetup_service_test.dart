@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/models/paged_result.dart';
 import 'package:professional_connections_platform/core/services/http_meetup_service.dart';
@@ -283,6 +284,124 @@ void main() {
                 'You are already hosting a meetup at that time.',
               ),
         ),
+      );
+    });
+  });
+
+  group('creating with credits (plan 29C)', () {
+    Future<Object?> create(
+      http.Response response, {
+      void Function(http.Request)? onRequest,
+    }) async {
+      try {
+        await _serviceWith(
+          MockClient((r) async {
+            onRequest?.call(r);
+            return response;
+          }),
+        ).createMeetup(
+          intent: IntentType.coffee,
+          windowStart: DateTime(2030, 1, 1, 10),
+          windowEnd: DateTime(2030, 1, 1, 11),
+          locationLat: 6.9,
+          locationLng: 79.8,
+          locationLabel: 'Cafe',
+          capacity: 4,
+          charge: const CreationCharge(
+            expectedCost: 10,
+            priceVersion: 1,
+            idempotencyKey: 'key-1',
+          ),
+        );
+      } catch (e) {
+        return e;
+      }
+      return null;
+    }
+
+    test('sends the shown cost, its version and the Idempotency-Key', () async {
+      late http.Request seen;
+      await create(http.Response('{}', 500), onRequest: (r) => seen = r);
+      final body = jsonDecode(seen.body) as Map<String, dynamic>;
+      expect(body['expected_cost'], 10);
+      expect(body['price_version'], 1);
+      expect(seen.headers['Idempotency-Key'], 'key-1');
+      expect(seen.headers['X-App-Version'], isNotEmpty);
+    });
+
+    test('402 insufficient_credits carries the server\'s numbers', () async {
+      final e = await create(
+        http.Response(
+          jsonEncode({
+            'error': 'Not enough credits.',
+            'code': 'insufficient_credits',
+            'cost': 12,
+            'available': 5,
+            'shortfall': 7,
+          }),
+          402,
+        ),
+      );
+      expect(e, isA<MeetupInsufficientCreditsException>());
+      final x = e! as MeetupInsufficientCreditsException;
+      expect((x.cost, x.available, x.shortfall), (12, 5, 7));
+    });
+
+    test('402 credits_debt', () async {
+      final e = await create(
+        http.Response(
+          jsonEncode({'error': 'Unpaid.', 'code': 'credits_debt', 'debt': 30}),
+          402,
+        ),
+      );
+      expect(e, isA<MeetupCreditsDebtException>());
+      expect((e! as MeetupCreditsDebtException).debt, 30);
+    });
+
+    test('409 price_changed carries the new price', () async {
+      final e = await create(
+        http.Response(
+          jsonEncode({
+            'error': 'The price changed.',
+            'code': 'price_changed',
+            'cost': 14,
+            'price_version': 2,
+          }),
+          409,
+        ),
+      );
+      expect(e, isA<MeetupPriceChangedException>());
+      expect((e! as MeetupPriceChangedException).cost, 14);
+      expect(
+        e,
+        isA<MeetupConflictException>(),
+        reason: 'still a conflict for screens that only know that',
+      );
+    });
+
+    test('409 idempotency_key_reused and 426 update_required', () async {
+      expect(
+        await create(
+          http.Response(
+            jsonEncode({'error': 'Used.', 'code': 'idempotency_key_reused'}),
+            409,
+          ),
+        ),
+        isA<MeetupIdempotencyKeyReusedException>(),
+      );
+      final e = await create(
+        http.Response(
+          jsonEncode({
+            'error': 'Update TieHere to host a meetup.',
+            'code': 'update_required',
+          }),
+          426,
+        ),
+      );
+      expect(e, isA<MeetupUpdateRequiredException>());
+      expect(
+        (e! as MeetupException).message,
+        'Update TieHere to host a meetup.',
       );
     });
   });

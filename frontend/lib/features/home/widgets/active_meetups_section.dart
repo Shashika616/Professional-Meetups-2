@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -336,6 +337,7 @@ class _PersistentMeetupCard extends StatelessWidget {
     return Pressable(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
+          settings: const RouteSettings(name: ScreenNames.meetupDetail),
           builder: (_) => MeetupDetailPage(meetupId: meetup.id),
         ),
       ),
@@ -515,6 +517,7 @@ class _ActiveMeetupRow extends StatelessWidget {
     return Pressable(
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute(
+          settings: const RouteSettings(name: ScreenNames.meetupDetail),
           builder: (_) => MeetupDetailPage(meetupId: meetup.id),
         ),
       ),
@@ -692,6 +695,7 @@ class _ReviewInvitationCardState extends ConsumerState<_ReviewInvitationCard> {
   Future<void> _openReview() async {
     final submitted = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.meetupReview),
         builder: (_) => MeetupReviewPage(
           meetupId: widget.meetup.id,
           hostUserId: widget.meetup.hostUserId,

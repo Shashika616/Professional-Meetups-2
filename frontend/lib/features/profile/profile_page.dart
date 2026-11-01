@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
@@ -22,6 +24,8 @@ import 'package:professional_connections_platform/core/widgets/professional_avat
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/core/widgets/verification_badges.dart';
+import 'package:professional_connections_platform/features/credits/credits_format.dart';
+import 'package:professional_connections_platform/features/credits/credits_page.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
@@ -142,6 +146,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   title: 'Phone',
                   done: profile?.phoneVerified ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
+                  screen: ScreenNames.phoneVerification,
                   buildScreen: (context) =>
                       PhoneVerificationPage(currentValue: profile?.phoneNumber),
                 ),
@@ -174,6 +179,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   title: 'Personal email',
                   done: profile?.personalEmailVerified ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
+                  screen: ScreenNames.personalEmailVerification,
                   buildScreen: (context) => PersonalEmailVerificationPage(
                     currentValue: profile?.personalEmail,
                   ),
@@ -185,6 +191,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   title: 'Personal details',
                   done: profile?.personalDetailsComplete ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
+                  screen: ScreenNames.personalDetails,
                   buildScreen: (context) =>
                       PersonalDetailsPage(profile: profile),
                 ),
@@ -195,6 +202,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   title: 'Work email',
                   done: profile?.workEmailVerified ?? false,
                   locked: !(profile?.linkedInConnected ?? false),
+                  screen: ScreenNames.corporateEmailVerification,
                   buildScreen: (context) => CorporateEmailVerificationPage(
                     currentDomainHint: profile?.companyDomain,
                   ),
@@ -205,8 +213,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             _section(
               'Preferences',
               children: [
-                _premiumRow(context, ref),
+                _creditsRow(context, ref),
                 const _Divider(),
+                if (_showPremiumRow(ref)) ...[
+                  _premiumRow(context, ref),
+                  const _Divider(),
+                ],
                 _Row(
                   // An eye, not a padlock. The four verification rows
                   // further down use a padlock to mean "you cannot do
@@ -225,6 +237,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
+                      settings: const RouteSettings(
+                        name: ScreenNames.privacyControls,
+                      ),
                       builder: (context) => const PrivacyControlsPage(),
                     ),
                   ),
@@ -245,6 +260,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
+                      settings: const RouteSettings(
+                        name: ScreenNames.notifications,
+                      ),
                       builder: (context) => const NotificationsPage(),
                     ),
                   ),
@@ -261,6 +279,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute<void>(
+                      settings: const RouteSettings(name: ScreenNames.safety),
                       builder: (context) => const SafetyPage(),
                     ),
                   ),
@@ -271,8 +290,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   title: 'Appearance',
                   trailing: Switch(
                     value: !isLight,
-                    onChanged: (_) =>
-                        ref.read(themeModeProvider.notifier).toggle(),
+                    onChanged: (_) {
+                      track(Cta.switchTheme);
+                      ref.read(themeModeProvider.notifier).toggle();
+                    },
                     activeTrackColor: AppPalette.candyBlue,
                   ),
                 ),
@@ -364,6 +385,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
   /// the signing out itself (see [_SignOutDialog]) so its button can show
   /// the work happening; this only navigates once it reports done.
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    track(Cta.signOut);
     final signedOut = await showAppDialog<bool>(
       context,
       builder: (_) => const _SignOutDialog(),
@@ -371,7 +393,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     if (signedOut != true || !context.mounted) return;
     // Clears the nav stack so the back button can't return to AppShell.
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (context) => const LandingPage()),
+      MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.landing),
+        builder: (context) => const LandingPage(),
+      ),
       (route) => false,
     );
   }
@@ -381,6 +406,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
   /// so it can show the work and any refusal in place; this only leaves
   /// the signed-in app once it reports the account gone.
   Future<void> _confirmDeleteAccount(BuildContext context) async {
+    track(Cta.deleteAccount);
     final outcome = await showAppSheet<_DeleteOutcome>(
       context,
       builder: (_) => const _DeleteAccountSheet(),
@@ -390,6 +416,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
       case _DeleteOutcome.deleted:
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(
+            settings: const RouteSettings(name: ScreenNames.landing),
             builder: (context) => const LandingPage(accountDeleted: true),
           ),
           (route) => false,
@@ -477,6 +504,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     WidgetRef ref,
     UserProfile profile,
   ) async {
+    track(Cta.editName);
     final newName = await showAppDialog<String>(
       context,
       builder: (context) => _EditNameDialog(initialName: profile.fullName),
@@ -565,6 +593,47 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     );
   }
 
+  /// Plan 29C: the balance, opening the Credits page. The figure is the
+  /// server's; a placeholder bar while it loads, nothing on a failure
+  /// (the page itself says what went wrong).
+  Widget _creditsRow(BuildContext context, WidgetRef ref) {
+    final walletAsync = ref.watch(walletProvider);
+    final loading = walletAsync.isLoading && !walletAsync.hasValue;
+    final wallet = walletAsync.value;
+    return _Row(
+      key: const Key('profileCreditsRow'),
+      icon: AppIcons.credits,
+      title: 'Credits',
+      subtitle: wallet == null ? null : formatCredits(wallet.available),
+      subtitleOverride: loading
+          ? const SkeletonLoader(child: SkeletonBox(width: 70, height: 9))
+          : null,
+      trailing: AppIcon(
+        AppIcons.forward,
+        size: 18,
+        color: AppPalette.textSecondary,
+      ),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: ScreenNames.credits),
+          builder: (context) => const CreditsPage(),
+        ),
+      ),
+    );
+  }
+
+  /// Premium is offered only once the server shows plans to this account
+  /// (`billing.plans.visible`). Someone who already holds a subscription
+  /// still gets the row, to see it.
+  bool _showPremiumRow(WidgetRef ref) {
+    final plansVisible =
+        ref.watch(appConfigProvider).value?.plansVisible ?? false;
+    final entitled =
+        ref.watch(subscriptionStatusProvider).value?.isEntitled ?? false;
+    return plansVisible || entitled;
+  }
+
   /// Entry point into the Premium purchase flow (ADR-031, Slice B) — the
   /// natural existing PREFERENCES-section slot, not a new nav destination.
   /// Subtitle reads the real backend-confirmed status via
@@ -601,7 +670,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             ),
       onTap: () => Navigator.push(
         context,
-        MaterialPageRoute<void>(builder: (context) => const PremiumPage()),
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: ScreenNames.premium),
+          builder: (context) => const PremiumPage(),
+        ),
       ),
     );
   }
@@ -650,6 +722,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     required String title,
     required bool done,
     required bool locked,
+    required String screen,
     required WidgetBuilder buildScreen,
   }) {
     // Pencil first, tick LAST: the tick is the row's status and every
@@ -688,8 +761,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
     // the glyphs painted on it.
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () =>
-          Navigator.push(context, MaterialPageRoute(builder: buildScreen)),
+      onTap: () {
+        track(Cta.startVerification);
+        Navigator.push(context, screenRoute(screen, buildScreen));
+      },
       child: row,
     );
   }
@@ -823,6 +898,7 @@ class ConnectLinkedInBannerState extends ConsumerState<ConnectLinkedInBanner> {
 
 class _Row extends StatelessWidget {
   const _Row({
+    super.key,
     required this.icon,
     // Overrides the candyBlue every other row's glyph uses. Only the
     // destructive row passes it: a row that ends an account should not
@@ -1400,28 +1476,37 @@ class _RoundControl extends StatelessWidget {
     );
   }
 
+  // Drawn at 34 with a 15-point glyph, the size of the app's other small
+  // corner tiles; at 44 and 19 it read as a primary button sitting in the
+  // corner of the card. The TAP area stays 44 — the minimum comfortable
+  // touch target — by centring the smaller circle in a 44 box.
   Widget _buildControl() {
     return GestureDetector(
       onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppPalette.card,
-          border: Border.all(color: AppPalette.hairline),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(
-                alpha: AppPalette.isLight ? 0.06 : 0.3,
-              ),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(width: 44, height: 44, child: Center(child: _circle())),
+    );
+  }
+
+  Widget _circle() {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: AppPalette.card,
+        border: Border.all(color: AppPalette.hairline),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(
+              alpha: AppPalette.isLight ? 0.06 : 0.3,
             ),
-          ],
-        ),
-        child: AppIcon(icon, size: 19, color: AppPalette.textPrimary),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
+      child: AppIcon(icon, size: 15, color: AppPalette.textPrimary),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
@@ -46,38 +47,29 @@ class BrandMarkTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: _tileColor,
         borderRadius: BorderRadius.circular(cornerRadius),
-        border: Border.all(
-          color: AppPalette.candyBlue.withValues(alpha: 0.35),
-          width: 1,
-        ),
+        border: Border.all(color: AppPalette.hairline, width: 1),
         boxShadow: glow
             ? [
                 BoxShadow(
-                  color: AppPalette.candyBlue.withValues(alpha: 0.35),
+                  color: AppPalette.brandGreen.withValues(alpha: 0.22),
                   blurRadius: size * 0.35,
                   spreadRadius: 2,
                 ),
               ]
             : null,
       ),
-      // The mark is inset rather than filling the tile: an app icon's artwork
-      // sits inside its plate, and BoxFit.cover on a non-square mark would
-      // crop the figures' heads.
-      child: Padding(
-        padding: EdgeInsets.all(size * 0.17),
-        child: Image.asset(
-          'assets/images/brand/tiehere_mark.png',
-          fit: BoxFit.contain,
-          // The mark is a 276px source drawn at anything from 48 to 170
-          // logical pixels. Without this it decodes at full size in every
-          // place it appears, including the splash, for no visible gain.
-          cacheWidth: (size * MediaQuery.devicePixelRatioOf(context)).round(),
-          errorBuilder: (context, error, stackTrace) => Icon(
-            Icons.people_outline_rounded,
-            size: size * 0.42,
-            color: AppPalette.brandBlue,
-          ),
-        ),
+      // The current mark, green with white on a dark tile and green with
+      // onyx on a light one — the same pair as the launcher icons. Drawn
+      // from the brand SVGs rather than a bitmap: sharp at every size from
+      // 48 to 170, and nothing to decode on the splash. The artwork already
+      // sits inside its own margin, so it fills the tile.
+      child: SvgPicture.asset(
+        AppPalette.isLight
+            ? 'assets/images/brand/tiehere_mark_on_light.svg'
+            : 'assets/images/brand/tiehere_mark_on_dark.svg',
+        width: size,
+        height: size,
+        fit: BoxFit.contain,
       ),
     );
   }

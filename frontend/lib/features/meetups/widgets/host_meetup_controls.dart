@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -57,6 +58,7 @@ class HostMeetupControls extends ConsumerWidget {
   bool get _canCancel => meetup.isHostedByMe && _isOpenOrFull;
 
   Future<void> _confirmClose(BuildContext context, WidgetRef ref) async {
+    track(Cta.closeMeetup);
     final confirmed = await showConfirmDialog(
       context,
       title: 'Close meetup',
@@ -100,6 +102,7 @@ class HostMeetupControls extends ConsumerWidget {
   }
 
   Future<void> _confirmCancel(BuildContext context, WidgetRef ref) async {
+    track(Cta.cancelMeetup);
     final reason = await showAppDialog<String>(
       context,
       builder: (context) => const _CancelReasonDialog(),

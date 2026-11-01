@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/tracked_flow.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
@@ -66,83 +70,100 @@ class VerificationChecklistPage extends ConsumerWidget {
     final detailsDone = profile?.personalDetailsComplete ?? false;
     final allDone = linkedInConnected && phoneDone && emailDone && detailsDone;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      // Without this, the AppBar's own (transparent) region isn't covered
-      // by AppBackground at all — body painting starts below the app bar,
-      // so that strip shows through to nothing but plain black instead of
-      // the same image/gradient as the rest of the screen. This also
-      // widens MediaQuery's top padding to include the app bar's height,
-      // so the SafeArea below still pushes content clear of the title row.
-      // Same fix as profile_setup_screen.dart's identical Scaffold shape.
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(title: Text(title)),
-      body: AppBackground(
-        child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-            children: [
-              Text(
-                description,
-                style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 20),
-              if (!linkedInConnected) ...[
-                const ConnectLinkedInBanner(),
+    // Plan 29E: the verify-to-Level-2 funnel. A step is viewed when its
+    // screen is opened from a row, and completed when the profile says so.
+    return TrackedFlow(
+      flowId: AnalyticsFlow.verifyLevel2,
+      doneSteps: {
+        if (phoneDone) AnalyticsFlowStep.verifyLevel2Phone,
+        if (emailDone) AnalyticsFlowStep.verifyLevel2PersonalEmail,
+        if (detailsDone) AnalyticsFlowStep.verifyLevel2PersonalDetails,
+      },
+      completed: allDone,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        // Without this, the AppBar's own (transparent) region isn't covered
+        // by AppBackground at all — body painting starts below the app bar,
+        // so that strip shows through to nothing but plain black instead of
+        // the same image/gradient as the rest of the screen. This also
+        // widens MediaQuery's top padding to include the app bar's height,
+        // so the SafeArea below still pushes content clear of the title row.
+        // Same fix as profile_setup_screen.dart's identical Scaffold shape.
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(title: Text(title)),
+        body: AppBackground(
+          child: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+              children: [
+                Text(
+                  description,
+                  style: TextStyle(
+                    color: AppPalette.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
                 const SizedBox(height: 20),
+                if (!linkedInConnected) ...[
+                  const ConnectLinkedInBanner(),
+                  const SizedBox(height: 20),
+                ],
+                const SectionLabel('Remaining steps'),
+                const SizedBox(height: 12),
+                FlatCard(
+                  radius: 18,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: Column(
+                    children: [
+                      _ChecklistRow(
+                        icon: AppIcons.phone,
+                        title: 'Phone',
+                        done: phoneDone,
+                        locked: !linkedInConnected,
+                        screen: ScreenNames.phoneVerification,
+                        buildScreen: (context) => PhoneVerificationPage(
+                          currentValue: profile?.phoneNumber,
+                        ),
+                      ),
+                      const _ChecklistDivider(),
+                      _ChecklistRow(
+                        icon: AppIcons.atSign,
+                        title: 'Personal email',
+                        done: emailDone,
+                        locked: !linkedInConnected,
+                        screen: ScreenNames.personalEmailVerification,
+                        buildScreen: (context) => PersonalEmailVerificationPage(
+                          currentValue: profile?.personalEmail,
+                        ),
+                      ),
+                      const _ChecklistDivider(),
+                      _ChecklistRow(
+                        icon: AppIcons.idCard,
+                        title: 'Personal details',
+                        done: detailsDone,
+                        locked: !linkedInConnected,
+                        screen: ScreenNames.personalDetails,
+                        buildScreen: (context) =>
+                            PersonalDetailsPage(profile: profile),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 28),
+                // Does not retry the join action that led here (ADR-028 § 3)
+                // — pops back and lets the next tap on REQUEST TO JOIN simply
+                // work now that the meetup is no longer locked for this
+                // viewer.
+                PrimaryButton(
+                  label: 'Complete',
+                  height: 48,
+                  onPressed: allDone ? () => Navigator.of(context).pop() : null,
+                ),
               ],
-              const SectionLabel('Remaining steps'),
-              const SizedBox(height: 12),
-              FlatCard(
-                radius: 18,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 6,
-                ),
-                child: Column(
-                  children: [
-                    _ChecklistRow(
-                      icon: AppIcons.phone,
-                      title: 'Phone',
-                      done: phoneDone,
-                      locked: !linkedInConnected,
-                      buildScreen: (context) => PhoneVerificationPage(
-                        currentValue: profile?.phoneNumber,
-                      ),
-                    ),
-                    const _ChecklistDivider(),
-                    _ChecklistRow(
-                      icon: AppIcons.atSign,
-                      title: 'Personal email',
-                      done: emailDone,
-                      locked: !linkedInConnected,
-                      buildScreen: (context) => PersonalEmailVerificationPage(
-                        currentValue: profile?.personalEmail,
-                      ),
-                    ),
-                    const _ChecklistDivider(),
-                    _ChecklistRow(
-                      icon: AppIcons.idCard,
-                      title: 'Personal details',
-                      done: detailsDone,
-                      locked: !linkedInConnected,
-                      buildScreen: (context) =>
-                          PersonalDetailsPage(profile: profile),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 28),
-              // Does not retry the join action that led here (ADR-028 § 3)
-              // — pops back and lets the next tap on REQUEST TO JOIN simply
-              // work now that the meetup is no longer locked for this
-              // viewer.
-              PrimaryButton(
-                label: 'Complete',
-                height: 48,
-                onPressed: allDone ? () => Navigator.of(context).pop() : null,
-              ),
-            ],
+            ),
           ),
         ),
       ),
@@ -150,12 +171,21 @@ class VerificationChecklistPage extends ConsumerWidget {
   }
 }
 
+/// Which verify-to-Level-2 step each row's screen is.
+const _flowSteps = {
+  ScreenNames.phoneVerification: AnalyticsFlowStep.verifyLevel2Phone,
+  ScreenNames.personalEmailVerification:
+      AnalyticsFlowStep.verifyLevel2PersonalEmail,
+  ScreenNames.personalDetails: AnalyticsFlowStep.verifyLevel2PersonalDetails,
+};
+
 class _ChecklistRow extends StatelessWidget {
   const _ChecklistRow({
     required this.icon,
     required this.title,
     required this.done,
     required this.locked,
+    required this.screen,
     required this.buildScreen,
   });
 
@@ -163,6 +193,7 @@ class _ChecklistRow extends StatelessWidget {
   final String title;
   final bool done;
   final bool locked;
+  final String screen;
   final WidgetBuilder buildScreen;
 
   @override
@@ -239,8 +270,14 @@ class _ChecklistRow extends StatelessWidget {
 
     if (locked) return row;
     return Pressable(
-      onTap: () =>
-          Navigator.push(context, MaterialPageRoute(builder: buildScreen)),
+      onTap: () {
+        track(Cta.startVerification);
+        final step = _flowSteps[screen];
+        if (step != null) {
+          Analytics.instance.flow(AnalyticsFlow.verifyLevel2).stepViewed(step);
+        }
+        Navigator.push(context, screenRoute(screen, buildScreen));
+      },
       child: row,
     );
   }

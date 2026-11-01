@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -128,6 +130,7 @@ class _EventsPageState extends ConsumerState<EventsPage>
   /// scheduling flow (ADR-002 § 4): someone below the host bar for every
   /// intent goes to the unlock page instead, with the same one-line toast.
   Future<void> _hostMeetup(BuildContext context, WidgetRef ref) async {
+    track(Cta.scheduleMeetup);
     final trustLevel =
         ref.read(authSessionProvider).value?.profile?.trustLevel ?? 0;
     if (!IntentType.values.any((i) => i.canHost(trustLevel))) {
@@ -136,14 +139,20 @@ class _EventsPageState extends ConsumerState<EventsPage>
         'Verify your account to host meetups.',
         type: ToastType.locked,
       );
-      await Navigator.of(
-        context,
-      ).push(MaterialPageRoute(builder: (_) => const HostingUnlockPage()));
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: ScreenNames.hostingUnlock),
+          builder: (_) => const HostingUnlockPage(),
+        ),
+      );
       return;
     }
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const ScheduleFlowPage()));
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.scheduleMeetup),
+        builder: (_) => const ScheduleFlowPage(),
+      ),
+    );
     ref.invalidate(myMeetupsProvider);
     ref.invalidate(activeMeetupsProvider);
   }
@@ -236,6 +245,11 @@ class _EventsPageState extends ConsumerState<EventsPage>
                   onTap: (meetup) async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
+                        settings: RouteSettings(
+                          name: _isFinished(meetup)
+                              ? ScreenNames.meetupDetail
+                              : ScreenNames.requestManagement,
+                        ),
                         builder: (_) => _isFinished(meetup)
                             ? MeetupDetailPage(meetupId: meetup.id)
                             : RequestManagementPage(meetup: meetup),
@@ -264,6 +278,9 @@ class _EventsPageState extends ConsumerState<EventsPage>
                   onTap: (meetup) async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
+                        settings: const RouteSettings(
+                          name: ScreenNames.meetupDetail,
+                        ),
                         builder: (_) => MeetupDetailPage(meetupId: meetup.id),
                       ),
                     );
@@ -991,6 +1008,7 @@ class RequestManagementPageState extends ConsumerState<RequestManagementPage> {
   }
 
   Future<void> _respond(MeetupRequestModel request, bool accept) async {
+    track(accept ? Cta.acceptRequest : Cta.declineRequest);
     try {
       await ref
           .read(meetupServiceProvider)

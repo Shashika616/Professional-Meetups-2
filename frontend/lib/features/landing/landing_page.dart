@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/landing_collage.dart';
@@ -125,6 +126,9 @@ class _LandingPageState extends State<LandingPage> {
                     onPressed: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
+                          settings: const RouteSettings(
+                            name: ScreenNames.onboarding,
+                          ),
                           builder: (context) => const OnboardingFlow(),
                         ),
                       );
@@ -134,6 +138,9 @@ class _LandingPageState extends State<LandingPage> {
                   GestureDetector(
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
+                        settings: const RouteSettings(
+                          name: ScreenNames.emailSignIn,
+                        ),
                         builder: (context) => const EmailLoginPage(),
                       ),
                     ),

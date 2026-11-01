@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/friction.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -106,6 +108,7 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
       await Navigator.push(
         context,
         MaterialPageRoute(
+          settings: const RouteSettings(name: ScreenNames.profileSetup),
           builder: (context) => ProfileSetupScreen(initialFullName: fullName),
         ),
       );
@@ -120,7 +123,10 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
   // stack.
   void _navigateToAppShell() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (context) => const AppShell()),
+      MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.appShell),
+        builder: (context) => const AppShell(),
+      ),
       (route) => false,
     );
   }
@@ -134,12 +140,16 @@ class _EmailLoginPageState extends ConsumerState<EmailLoginPage> {
   Widget build(BuildContext context) {
     // The system back gesture and the app bar arrow must agree: on the
     // email step both return to the method choice, not to LandingPage.
-    return PopScope(
-      canPop: _step != _Step.email,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _backToMethods();
-      },
-      child: _scaffold(context),
+    // Plan 29E: a form left a minute without input is friction.
+    return DwellTracker(
+      stepKey: _step,
+      child: PopScope(
+        canPop: _step != _Step.email,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _backToMethods();
+        },
+        child: _scaffold(context),
+      ),
     );
   }
 

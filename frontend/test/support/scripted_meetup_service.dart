@@ -141,7 +141,23 @@ class ScriptedMeetupService implements MeetupService {
     required double locationLng,
     required String locationLabel,
     required int capacity,
-  }) => throw UnimplementedError();
+    CreationCharge? charge,
+  }) async {
+    createMeetupCharges.add(charge);
+    createMeetupCapacities.add(capacity);
+    if (createMeetupScript.isEmpty) throw UnimplementedError();
+    final next = createMeetupScript.removeAt(0);
+    if (next is Meetup) return next;
+    throw next;
+  }
+
+  /// Plan 29C: what each createMeetup call answers, in order: a [Meetup]
+  /// is returned, anything else is thrown.
+  final List<Object> createMeetupScript = [];
+
+  /// The charge each createMeetup call carried, in order.
+  final List<CreationCharge?> createMeetupCharges = [];
+  final List<int> createMeetupCapacities = [];
 
   @override
   Future<PagedResult<Meetup>> listOpenMeetups({

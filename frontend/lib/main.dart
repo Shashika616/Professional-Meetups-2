@@ -1,9 +1,16 @@
+import 'dart:async' show unawaited;
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/analytics_client.dart';
+import 'package:professional_connections_platform/core/analytics/analytics_queue.dart';
+import 'package:professional_connections_platform/core/analytics/analytics_scope.dart';
+import 'package:professional_connections_platform/core/analytics/analytics_transport.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -94,9 +101,27 @@ void main() async {
   PaintingBinding.instance.imageCache.maximumSize = 100;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 100 << 20; // 100 MB
 
+  // An explicit container (rather than ProviderScope building its own) so
+  // the analytics transport can read the session before the widget tree
+  // exists: batches carry the access token when there is one.
+  final container = ProviderContainer(retry: _retryPolicy);
+
+  // Plan 29E: the real analytics client. Everywhere else the instance is a
+  // no-op, which is what keeps widget tests silent.
+  final analytics = AnalyticsClient(
+    transport: HttpAnalyticsTransport(
+      getAccessToken: () =>
+          container.read(tokenRefresherProvider).getValidAccessToken(),
+    ),
+    store: SharedPreferencesQueueStore(),
+    settings: SharedPreferencesAnalyticsSettings(),
+  );
+  Analytics.instance = analytics;
+  unawaited(analytics.start());
+
   runApp(
-    ProviderScope(
-      retry: _retryPolicy,
+    UncontrolledProviderScope(
+      container: container,
       child: const ProfessionalConnectionsApp(),
     ),
   );
@@ -193,8 +218,12 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
       // light ground. Annotating the whole tree keeps every screen honest.
       builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
         value: overlayStyle,
-        child: child ?? const SizedBox.shrink(),
+        child: AnalyticsScope(child: child ?? const SizedBox.shrink()),
       ),
+      // Plan 29E: which screen is showing, from every route's name. A new
+      // observer per build: one navigator per observer, and the theme
+      // switch builds a second navigator before the first is gone.
+      navigatorObservers: [Analytics.instance.newNavigatorObserver()],
       theme: ThemeData(
         brightness: isLight ? Brightness.light : Brightness.dark,
         useMaterial3: true,
@@ -355,6 +384,7 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
         ),
       ),
       home: const SplashScreen(),
+      // MaterialApp names `home` '/'; the screen tracker reads it as splash.
     );
   }
 }

@@ -94,10 +94,9 @@ class MapSheetScaffold extends StatelessWidget {
         // Layer 4: the floating top control, above the overlay.
         //
         // It used to live inside the Expanded above, under the scrim,
-        // which forced the scrim to start below it — and a blur that
-        // covers four fifths of a screen and leaves a sharp band across
-        // the top reads as a rendering fault rather than as a material.
-        // Up here the scrim can run edge to edge while the field stays
+        // which forced the scrim to start below it and left a sharp band
+        // of map across the top. Up here the scrim can run edge to edge
+        // while the field stays
         // crisp and tappable. The Expanded's top IS the stack's top, so
         // the same `top: 12` puts it exactly where it was.
         if (topOverlay != null)

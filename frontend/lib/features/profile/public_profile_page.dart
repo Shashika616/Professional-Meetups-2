@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
@@ -35,6 +36,7 @@ class PublicProfilePage extends ConsumerStatefulWidget {
   }) {
     return Navigator.of(context).push(
       MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.publicProfile),
         builder: (_) =>
             PublicProfilePage(userId: userId, initialName: initialName),
       ),

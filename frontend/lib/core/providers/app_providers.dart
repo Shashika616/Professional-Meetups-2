@@ -5,12 +5,16 @@ import 'package:riverpod/legacy.dart' show StateProvider;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:professional_connections_platform/core/models/auth_session.dart';
+import 'package:professional_connections_platform/core/models/credits.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/models/paged_result.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
+import 'package:professional_connections_platform/core/services/app_config_service.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
+import 'package:professional_connections_platform/core/services/credit_service.dart';
+import 'package:professional_connections_platform/core/services/http_credit_service.dart';
 import 'package:professional_connections_platform/core/services/http_auth_service.dart';
 import 'package:professional_connections_platform/core/services/http_meetup_service.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -52,11 +56,19 @@ final _authBundleProvider = Provider<_AuthBundle>((ref) {
   final subscriptionService = HttpSubscriptionService(
     getAccessToken: refresher.getValidAccessToken,
   );
+  final creditService = HttpCreditService(
+    getAccessToken: refresher.getValidAccessToken,
+  );
+  final appConfigService = HttpAppConfigService(
+    getAccessToken: refresher.getValidAccessToken,
+  );
   return _AuthBundle(
     service: authService,
     refresher: refresher,
     meetupService: meetupService,
     subscriptionService: subscriptionService,
+    creditService: creditService,
+    appConfigService: appConfigService,
   );
 });
 
@@ -92,9 +104,60 @@ final subscriptionServiceProvider = Provider<SubscriptionService>(
 /// isn't used here: callers that need a fresh read after a purchase call
 /// `ref.invalidate(subscriptionStatusProvider)` explicitly (mirrors how
 /// other on-demand backend reads in this app are refreshed).
-final subscriptionStatusProvider = FutureProvider<SubscriptionStatus>(
-  (ref) => ref.read(subscriptionServiceProvider).currentStatus(),
+final subscriptionStatusProvider = FutureProvider<SubscriptionStatus>((ref) {
+  _watchSignedInUser(ref);
+  return ref.read(subscriptionServiceProvider).currentStatus();
+});
+
+/// Makes a provider of the caller's own data start over when the signed-in
+/// account changes (sign-in, sign-out, a different account). Without it a
+/// fresh sign-in kept the previous session's answer, failed or not, and a
+/// second account on the same phone saw the first one's balance (found on
+/// the emulator during plan 29C).
+void _watchSignedInUser(Ref ref) {
+  ref.watch(authSessionProvider.select((s) => s.value?.profile?.id));
+}
+
+/// Credits and the billing catalog (plan 29C), same bundle-proxy wiring.
+final creditServiceProvider = Provider<CreditService>(
+  (ref) => ref.read(_authBundleProvider).creditService,
 );
+
+final appConfigServiceProvider = Provider<AppConfigService>(
+  (ref) => ref.read(_authBundleProvider).appConfigService,
+);
+
+/// GET /v1/app-config. Re-read when the app returns to the foreground
+/// (AppShell), so a flag the server turns on reaches a running app.
+final appConfigProvider = FutureProvider<RemoteAppConfig>((ref) {
+  // Flags are evaluated per account (allowlists).
+  _watchSignedInUser(ref);
+  return ref.read(appConfigServiceProvider).fetch();
+});
+
+/// The caller's credit balance, as the server reports it. Invalidated
+/// after anything that changes it (a purchase, a creation) and on resume.
+final walletProvider = FutureProvider<Wallet>((ref) {
+  _watchSignedInUser(ref);
+  return ref.read(creditServiceProvider).wallet();
+});
+
+/// The caller's limits and plan. autoDispose: the schedule flow reads it
+/// fresh each time it opens, since a plan can start or end in between.
+final entitlementsProvider = FutureProvider.autoDispose<Entitlements>((ref) {
+  _watchSignedInUser(ref);
+  return ref.read(creditServiceProvider).entitlements();
+});
+
+/// What the app may offer this caller. autoDispose, so each visit to the
+/// Premium or buy-credits page asks again: that is how plans appear when
+/// `billing.plans.visible` turns on, with no app update. Also re-read with
+/// the app config on resume.
+final catalogProvider = FutureProvider.autoDispose<Catalog>((ref) {
+  // A new catalog version or flag set is a reason to ask again.
+  ref.watch(appConfigProvider);
+  return ref.read(creditServiceProvider).catalog();
+});
 
 /// Real as of ADR-030 round-10 (was [NoOpPushNotificationService] under
 /// round-9's scaffolding, the same way [authServiceProvider]/
@@ -132,12 +195,16 @@ class _AuthBundle {
     required this.refresher,
     required this.meetupService,
     required this.subscriptionService,
+    required this.creditService,
+    required this.appConfigService,
   });
 
   final HttpAuthService service;
   final TokenRefresher refresher;
   final HttpMeetupService meetupService;
   final HttpSubscriptionService subscriptionService;
+  final HttpCreditService creditService;
+  final HttpAppConfigService appConfigService;
 }
 
 /// Home's intent filter for the "Happening Soon" list. NULL MEANS "ALL

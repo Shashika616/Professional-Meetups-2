@@ -514,6 +514,76 @@ void main() {
     },
   );
 
+  // A searched place, then "use my current location". The pin moved but the
+  // banner kept the searched name, and CONTINUE submitted that name with the
+  // NEW coordinates: the server keeps any real label it is given, so the
+  // meetup was created showing one place's name at another place.
+  testWidgets(
+    'using the current location after picking a searched place replaces it',
+    (tester) async {
+      GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+        position: testPosition(lat: 6.8800, lng: 79.9000),
+      );
+      double? submittedLat;
+      String? submittedLabel;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox.expand(
+              child: AndroidMapLocationStep(
+                onSubmit: (lat, lng, label) {
+                  submittedLat = lat;
+                  submittedLabel = label;
+                },
+                httpClient: MockClient(
+                  (request) async => http.Response(
+                    _featureCollection([('The Coffee Shop', 6.9213, 79.8756)]),
+                    200,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      final field = find.widgetWithText(
+        TextField,
+        'Search for a cafe, restaurant, or venue',
+      );
+      await tester.enterText(field, 'coffee');
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      await tester.tap(find.text('The Coffee Shop'));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.ensureVisible(find.text('Use my current location'));
+      await tester.tap(find.text('Use my current location'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.text('Your current location'),
+        findsOneWidget,
+        reason: 'the banner still names the searched place',
+      );
+      expect(find.text('The Coffee Shop'), findsNothing);
+
+      await tester.ensureVisible(find.text('Continue'));
+      await tester.tap(find.text('Continue'));
+      await tester.pump();
+
+      expect(submittedLat, closeTo(6.8800, 0.0001));
+      expect(
+        submittedLabel,
+        isEmpty,
+        reason: 'the old place name was sent with the new coordinates',
+      );
+    },
+  );
+
   Future<void> pumpStep(WidgetTester tester) => tester.pumpWidget(
     MaterialApp(
       home: Scaffold(

@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/maps/map_canvas.dart';
@@ -231,13 +229,10 @@ class _PickerSheet extends StatelessWidget {
 ///
 /// # EDGE TO EDGE, NOT FROM THE FIELD DOWN
 ///
-/// It used to start below the search bar, leaving a sharp band of map
-/// across the top of a blurred screen: a blur with a seam in it reads as
-/// something half-drawn, not as a material. [MapSheetScaffold] now paints
-/// the search field above this layer, so the frost can cover the whole
-/// screen and the field still sits crisp on top of it, which is also the
-/// behaviour the field needs — it stays readable and tappable while the
-/// list is open.
+/// The scrim covers the whole screen, and [MapSheetScaffold] paints the
+/// search field above it, so the field stays readable and tappable while
+/// the list is open. A scrim that started below the field would leave a
+/// band of map across the top that reads as half-drawn.
 class _SuggestionsOverlay extends StatelessWidget {
   const _SuggestionsOverlay({
     required this.suggestions,
@@ -257,40 +252,47 @@ class _SuggestionsOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        Positioned.fill(
-          // The ClipRect is still load-bearing: a BackdropFilter is not
-          // clipped to its own bounds, so its blur otherwise samples and
-          // paints across the whole layer behind it.
-          child: ClipRect(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: onDismiss,
-              child: BackdropFilter(
-                // Heavier than the 8 it covered four fifths of the screen
-                // with: a full-screen material should read as frosted
-                // glass, and at 8 the map's road grid stayed legible
-                // enough to compete with the place names on top of it.
-                filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+    // The keyboard is open while this list is (the field above it has
+    // focus), and the layout under it no longer shrinks for the keyboard
+    // (see ScheduleFlow), so the list measures the room above it itself.
+    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Room between the list's top and the keyboard, less the
+        // dropdown's own header and padding.
+        final room = constraints.maxHeight - (top + 6) - keyboard - 72;
+        return Stack(
+          children: [
+            Positioned.fill(
+              // A plain scrim, NOT a blur. The blur this replaced covered
+              // the whole screen exactly while someone was typing, and a
+              // BackdropFilter over a native map view is among the most
+              // expensive things Flutter can draw: it re-rendered on every
+              // frame of the keyboard animation, which was the stutter.
+              // Nearly opaque, so the map's roads cannot compete with the
+              // place names on top.
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onDismiss,
                 child: ColoredBox(
-                  color: AppPalette.onyx.withValues(alpha: 0.55),
+                  color: AppPalette.onyx.withValues(alpha: 0.92),
                 ),
               ),
             ),
-          ),
-        ),
-        Positioned(
-          top: top + 6,
-          left: sideInset,
-          right: sideInset,
-          child: PlaceSuggestionsDropdown(
-            suggestions: suggestions,
-            searching: searching,
-            onSelect: onSelect,
-          ),
-        ),
-      ],
+            Positioned(
+              top: top + 6,
+              left: sideInset,
+              right: sideInset,
+              child: PlaceSuggestionsDropdown(
+                suggestions: suggestions,
+                searching: searching,
+                onSelect: onSelect,
+                maxListHeight: room,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

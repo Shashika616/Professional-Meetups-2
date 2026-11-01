@@ -9,6 +9,11 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/flow_tracker.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/models/credits.dart';
+import 'package:professional_connections_platform/core/services/credit_service.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 
 /// Drives the StoreKit2/Play Billing purchase flow (ADR-031, Slice B),
@@ -35,39 +40,114 @@ import 'package:professional_connections_platform/core/services/subscription_ser
 /// - `error` / `canceled` — surfaces the message, completes the platform
 ///   transaction if one is pending (nothing to verify — the purchase
 ///   itself didn't succeed).
+///
+/// Plan 29C adds credit packs. A product in [consumableIds] is bought with
+/// `buyConsumable(autoConsume: false)` (the server consumes it with Google
+/// after granting, so the app must not) and verified through
+/// [CreditService.verifyPurchase]; everything else is a subscription, as
+/// before. Every purchase carries [accountToken] as `applicationUserName`
+/// (Apple's appAccountToken, Google's obfuscatedAccountId): the server
+/// refuses a purchase without it, which is what stops a receipt being
+/// replayed on another account. The rule above holds for both kinds.
 class PurchaseFlowController extends ChangeNotifier {
   PurchaseFlowController({
     required SubscriptionService subscriptionService,
     required String platform,
+    CreditService? creditService,
+    Set<String> consumableIds = const {},
+    String? accountToken,
     Stream<List<PurchaseDetails>>? purchaseUpdates,
     Future<void> Function(PurchaseDetails)? completePurchase,
     Future<bool> Function(PurchaseParam)? buyNonConsumable,
+    Future<bool> Function(PurchaseParam)? buyConsumable,
+    String? analyticsFlow,
   }) : _subscriptionService = subscriptionService,
+       _flow = analyticsFlow == null
+           ? null
+           : Analytics.instance.flow(analyticsFlow),
        _platform = platform,
+       _creditService = creditService,
+       _consumableIds = consumableIds,
+       accountToken = accountToken,
        _completePurchase =
            completePurchase ?? InAppPurchase.instance.completePurchase,
        _buyNonConsumable =
            buyNonConsumable ??
            ((param) =>
-               InAppPurchase.instance.buyNonConsumable(purchaseParam: param)) {
+               InAppPurchase.instance.buyNonConsumable(purchaseParam: param)),
+       _buyConsumable =
+           buyConsumable ??
+           ((param) => InAppPurchase.instance.buyConsumable(
+             purchaseParam: param,
+             autoConsume: false,
+           )) {
     _subscription = (purchaseUpdates ?? InAppPurchase.instance.purchaseStream)
         .listen(_handleUpdates, onError: _handleStreamError);
   }
 
   final SubscriptionService _subscriptionService;
   final String _platform;
+  final CreditService? _creditService;
+  Set<String> _consumableIds;
   final Future<void> Function(PurchaseDetails) _completePurchase;
   final Future<bool> Function(PurchaseParam) _buyNonConsumable;
+  final Future<bool> Function(PurchaseParam) _buyConsumable;
+
+  /// The caller's account token. Set by the screen once the session is
+  /// known; a purchase is not started without one.
+  String? accountToken;
+
+  /// Plan 29E: the buy-credits or subscribe funnel this purchase is part
+  /// of (null: none). Choose, store sheet, confirmed by the server.
+  final FlowTracker? _flow;
+
+  String get _chooseStep => _flow?.flowId == AnalyticsFlow.subscribe
+      ? AnalyticsFlowStep.subscribeChoosePlan
+      : AnalyticsFlowStep.buyCreditsChoosePack;
+  String get _sheetStep => _flow?.flowId == AnalyticsFlow.subscribe
+      ? AnalyticsFlowStep.subscribeStoreSheet
+      : AnalyticsFlowStep.buyCreditsStoreSheet;
+  String get _confirmedStep => _flow?.flowId == AnalyticsFlow.subscribe
+      ? AnalyticsFlowStep.subscribeConfirmed
+      : AnalyticsFlowStep.buyCreditsConfirmed;
+
+  /// Starts the funnel at its choose step (the page opening).
+  void startFlow() => _flow?.stepViewed(_chooseStep);
+
+  /// Abandons the funnel if it did not finish (the page closing).
+  void endFlow() => _flow?.abandon(AnalyticsValue.flowAbandonedReasonBack);
   late final StreamSubscription<List<PurchaseDetails>> _subscription;
 
   bool busy = false;
   String? errorMessage;
   SubscriptionStatus? lastVerifiedStatus;
 
+  /// The server's answer to the last verified credit pack.
+  PurchaseGrant? lastGrant;
+
+  /// The credit pack product ids, from the catalog.
+  set consumableIds(Set<String> ids) => _consumableIds = ids;
+
   Future<void> buy(ProductDetails product) async {
     errorMessage = null;
+    final token = accountToken;
+    if (token == null || token.isEmpty) {
+      errorMessage = 'Sign in again to buy.';
+      notifyListeners();
+      return;
+    }
     notifyListeners();
-    await _buyNonConsumable(PurchaseParam(productDetails: product));
+    _flow?.stepCompleted(_chooseStep);
+    _flow?.stepViewed(_sheetStep);
+    final param = PurchaseParam(
+      productDetails: product,
+      applicationUserName: token,
+    );
+    if (_consumableIds.contains(product.id)) {
+      await _buyConsumable(param);
+    } else {
+      await _buyNonConsumable(param);
+    }
   }
 
   Future<void> restore() => _subscriptionService.restorePurchases();
@@ -80,6 +160,7 @@ class PurchaseFlowController extends ChangeNotifier {
           errorMessage = null;
           notifyListeners();
         case PurchaseStatus.purchased:
+          await _verifyAndComplete(details, bought: true);
         case PurchaseStatus.restored:
           await _verifyAndComplete(details);
         case PurchaseStatus.error:
@@ -90,42 +171,72 @@ class PurchaseFlowController extends ChangeNotifier {
           // anything about their payment.
           errorMessage =
               'The purchase could not be completed. Please try again.';
+          _flow?.abandon(AnalyticsValue.flowAbandonedReasonError);
           notifyListeners();
           await _completeIfPending(details);
         case PurchaseStatus.canceled:
           busy = false;
           errorMessage = null;
+          _flow?.abandon(AnalyticsValue.flowAbandonedReasonClosed);
           notifyListeners();
           await _completeIfPending(details);
       }
     }
   }
 
-  Future<void> _verifyAndComplete(PurchaseDetails details) async {
+  Future<void> _verifyAndComplete(
+    PurchaseDetails details, {
+    bool bought = false,
+  }) async {
     busy = true;
     errorMessage = null;
     notifyListeners();
     try {
-      final status = await _subscriptionService.verifyPurchase(
-        platform: _platform,
-        receiptOrToken: details.verificationData.serverVerificationData,
-        productId: details.productID,
-      );
-      lastVerifiedStatus = status;
+      final credits = _creditService;
+      if (credits != null && _consumableIds.contains(details.productID)) {
+        lastGrant = await credits.verifyPurchase(
+          platform: _platform,
+          productId: details.productID,
+          token: details.verificationData.serverVerificationData,
+        );
+      } else {
+        lastVerifiedStatus = await _subscriptionService.verifyPurchase(
+          platform: _platform,
+          receiptOrToken: details.verificationData.serverVerificationData,
+          productId: details.productID,
+        );
+      }
       // Only now — after the backend has confirmed verification — is the
-      // transaction marked complete to the platform.
-      await _completeIfPending(details);
+      // transaction marked complete to the platform. The grant stands
+      // whatever happens next: on Android the server has already consumed
+      // a credit pack, and the plugin's own completion can then report an
+      // error that is not one.
+      try {
+        await _completeIfPending(details);
+      } catch (_) {
+        // Granted; the store redelivers an unfinished transaction and the
+        // server answers it as already processed.
+      }
+      if (bought) {
+        // Confirmed by the server: the funnel's last step.
+        _flow?.stepCompleted(_sheetStep);
+        _flow?.stepViewed(_confirmedStep);
+        _flow?.complete();
+      }
       busy = false;
       notifyListeners();
     } catch (e) {
+      if (bought) _flow?.abandon(AnalyticsValue.flowAbandonedReasonError);
       // Deliberately does NOT call completePurchase here: verification
       // failed, so the transaction is left pending and will be
       // re-delivered on the purchase stream (e.g. next launch) for retry,
       // rather than being silently finished/dropped.
       busy = false;
-      errorMessage = e is SubscriptionException
-          ? e.message
-          : 'Could not verify your purchase. Please try again.';
+      errorMessage = switch (e) {
+        SubscriptionException(:final message) => message,
+        CreditException(:final message) => message,
+        _ => 'Could not verify your purchase. Please try again.',
+      };
       notifyListeners();
     }
   }

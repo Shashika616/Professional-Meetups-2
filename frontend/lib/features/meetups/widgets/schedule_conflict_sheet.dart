@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -25,6 +26,7 @@ Future<void> showScheduleConflictSheet(
 }) {
   return showModalBottomSheet<void>(
     context: context,
+    routeSettings: const RouteSettings(name: ScreenNames.scheduleConflict),
     // Sized to its content and scrollable past the default 9/16 cap, so a
     // long place name or a small screen never pushes the actions off the
     // bottom.
@@ -150,6 +152,7 @@ class _ScheduleConflictSheet extends StatelessWidget {
               Navigator.of(context).pop();
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
+                  settings: const RouteSettings(name: ScreenNames.meetupDetail),
                   builder: (_) => MeetupDetailPage(meetupId: conflict.id),
                 ),
               );

@@ -3,6 +3,9 @@ import 'package:geolocator/geolocator.dart' show LocationAccuracy;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/widgets/secure_screen.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -256,6 +259,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
     WidgetRef ref,
     int trustLevel,
   ) async {
+    track(Cta.sos);
     // ADR-003. This one check covers both safety actions: the SOS trigger
     // below, and the add-a-contact screen this method routes to when the
     // caller has none. UX only — the server gate is what is enforced.
@@ -286,6 +290,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
       Navigator.push(
         context,
         MaterialPageRoute<void>(
+          settings: const RouteSettings(name: ScreenNames.trustedContacts),
           builder: (context) =>
               const ManageTrustedContactsPage(explainSosPrompt: true),
         ),
@@ -298,6 +303,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
     // and it belongs where the thumb already is.
     await showAppSheet<void>(
       context,
+      screen: ScreenNames.sosConfirm,
       builder: (dialogContext) => _SosConfirmDialog(ref: ref),
     );
   }
@@ -314,6 +320,7 @@ class _SafetyPageState extends ConsumerState<SafetyPage>
     );
     Navigator.of(context).push(
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: ScreenNames.verificationChecklist),
         builder: (_) => const VerificationChecklistPage(
           title: 'Unlock safety features',
           description:
@@ -353,6 +360,7 @@ class _TrustedContactsSection extends ConsumerWidget {
     await Navigator.push(
       context,
       MaterialPageRoute<void>(
+        settings: const RouteSettings(name: ScreenNames.trustedContacts),
         builder: (context) => const ManageTrustedContactsPage(),
       ),
     );
@@ -588,6 +596,24 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
   static const Duration _sosLocationFallback = Duration(seconds: 5);
 
   _SosDialogPhase _phase = _SosDialogPhase.confirming;
+
+  /// Plan 29E: the SOS funnel. confirm, sending, sent.
+  final _flow = Analytics.instance.flow(AnalyticsFlow.sos);
+
+  @override
+  void initState() {
+    super.initState();
+    _flow.start();
+    _flow.stepViewed(AnalyticsFlowStep.sosConfirm);
+  }
+
+  @override
+  void dispose() {
+    // Closed without sending. Does nothing once it completed or failed.
+    _flow.abandon(AnalyticsValue.flowAbandonedReasonClosed);
+    super.dispose();
+  }
+
   String _resultMessage = '';
 
   /// True once an attempt has been made without a usable location, so
@@ -597,6 +623,8 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
 
   Future<void> _confirm() async {
     setState(() => _phase = _SosDialogPhase.sending);
+    _flow.stepCompleted(AnalyticsFlowStep.sosConfirm);
+    _flow.stepViewed(AnalyticsFlowStep.sosSending);
 
     // # THE LOCATION IS BEST-EFFORT, AND NEVER A REASON NOT TO SEND
     //
@@ -638,6 +666,9 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
       if (!mounted) return;
       setState(() {
         _phase = _SosDialogPhase.succeeded;
+        _flow.stepCompleted(AnalyticsFlowStep.sosSending);
+        _flow.stepViewed(AnalyticsFlowStep.sosSent);
+        _flow.complete();
         _sentWithoutLocation = latitude == null || longitude == null;
         _resultMessage = contactsNotified == 1
             ? '1 trusted contact was alerted.'
@@ -655,6 +686,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
       if (!mounted) return;
       setState(() {
         _phase = _SosDialogPhase.failed;
+        _flow.abandon(AnalyticsValue.flowAbandonedReasonError);
         _resultMessage = error.message;
       });
     } catch (error) {
@@ -671,6 +703,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
       if (!mounted) return;
       setState(() {
         _phase = _SosDialogPhase.failed;
+        _flow.abandon(AnalyticsValue.flowAbandonedReasonError);
         _resultMessage =
             'Could not send the alert. Try again, or call emergency services.';
       });

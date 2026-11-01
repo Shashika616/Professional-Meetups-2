@@ -64,6 +64,7 @@ enum SubscriptionLifecycleStatus {
   pastDue,
   canceled,
   expired,
+  revoked,
 }
 
 /// True for active/gracePeriod — the one place "does this status count as
@@ -85,6 +86,8 @@ class SubscriptionStatus {
     this.productId,
     this.currentPeriodEnd,
     this.autoRenewStatus = false,
+    this.planCode = '',
+    this.serverEntitled,
   });
 
   final SubscriptionTier tier;
@@ -102,20 +105,45 @@ class SubscriptionStatus {
   final DateTime? currentPeriodEnd;
   final bool autoRenewStatus;
 
-  bool get isEntitled => status.isEntitled;
+  /// The plan the subscription is for (`pro`, `enterprise`), when any.
+  final String planCode;
 
+  /// The server's own `entitled` (plan 29B), which also accounts for a
+  /// grace period that has ended. Older answers without it fall back to
+  /// the status.
+  final bool? serverEntitled;
+
+  bool get isEntitled => serverEntitled ?? status.isEntitled;
+
+  /// Reads both the 29B shape (`plan_code`, `entitled`, `auto_renew`) and
+  /// the older one (`tier`, `auto_renew_status`).
   factory SubscriptionStatus.fromJson(Map<String, dynamic> json) {
+    final status = _statusFromWire(json['status'] as String? ?? 'none');
+    final planCode = json['plan_code'] as String? ?? '';
+    final entitled = json['entitled'] as bool?;
+    final tier = json.containsKey('tier')
+        ? _tierFromWire(json['tier'] as String? ?? 'free')
+        : planCode == 'enterprise'
+        ? SubscriptionTier.enterprise
+        : (entitled ?? status.isEntitled) && planCode.isNotEmpty
+        ? SubscriptionTier.premium
+        : SubscriptionTier.free;
+    final end = (json['current_period_end_unix_seconds'] as num?)?.toInt() ?? 0;
+    final productId = json['product_id'] as String?;
     return SubscriptionStatus(
-      tier: _tierFromWire(json['tier'] as String? ?? 'free'),
-      status: _statusFromWire(json['status'] as String? ?? 'none'),
+      tier: tier,
+      status: status,
       platform: json['platform'] as String?,
-      productId: json['product_id'] as String?,
-      currentPeriodEnd: json['current_period_end_unix_seconds'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(
-              (json['current_period_end_unix_seconds'] as int) * 1000,
-            )
+      productId: (productId == null || productId.isEmpty) ? null : productId,
+      currentPeriodEnd: end > 0
+          ? DateTime.fromMillisecondsSinceEpoch(end * 1000)
           : null,
-      autoRenewStatus: json['auto_renew_status'] as bool? ?? false,
+      autoRenewStatus:
+          json['auto_renew'] as bool? ??
+          json['auto_renew_status'] as bool? ??
+          false,
+      planCode: planCode,
+      serverEntitled: entitled,
     );
   }
 
@@ -132,6 +160,7 @@ class SubscriptionStatus {
         'past_due' => SubscriptionLifecycleStatus.pastDue,
         'canceled' => SubscriptionLifecycleStatus.canceled,
         'expired' => SubscriptionLifecycleStatus.expired,
+        'revoked' => SubscriptionLifecycleStatus.revoked,
         _ => SubscriptionLifecycleStatus.none,
       };
 }

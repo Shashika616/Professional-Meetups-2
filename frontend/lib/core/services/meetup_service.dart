@@ -12,6 +12,9 @@ import 'package:professional_connections_platform/core/models/paged_result.dart'
 /// re-checked server-side regardless of what this app's own UI already
 /// disables.
 abstract interface class MeetupService {
+  /// [charge] is what the review step showed (plan 29 §3.5): the quoted
+  /// cost, its price version, and the Idempotency-Key that makes a retry
+  /// of the same submission create one meetup and charge once.
   Future<Meetup> createMeetup({
     required IntentType intent,
     required DateTime windowStart,
@@ -20,6 +23,7 @@ abstract interface class MeetupService {
     required double locationLng,
     required String locationLabel,
     required int capacity,
+    CreationCharge? charge,
   });
 
   /// cursor null means the first page. [viewerLat]/[viewerLng] are
@@ -233,6 +237,25 @@ abstract interface class MeetupService {
   Future<void> cancelMeetup(String meetupId, {required String reason});
 }
 
+/// What a create carries for billing. Never an amount the server uses:
+/// [expectedCost] is checked against the server's own price, and a
+/// mismatch is [MeetupPriceChangedException].
+class CreationCharge {
+  const CreationCharge({
+    required this.expectedCost,
+    required this.priceVersion,
+    required this.idempotencyKey,
+  });
+
+  final int expectedCost;
+  final int priceVersion;
+
+  /// One per review-step submission, reused when that submission is
+  /// retried (a timeout, a dropped connection), so the server creates one
+  /// meetup and charges once however many times it arrives.
+  final String idempotencyKey;
+}
+
 /// Typed errors a [MeetupService] can throw — mirrors [AuthException]'s
 /// shape so the UI can show a real message instead of a generic failure.
 sealed class MeetupException implements Exception {
@@ -271,6 +294,54 @@ class MeetupScheduleConflictException extends MeetupConflictException {
   });
 
   final Meetup conflict;
+}
+
+/// 409 with `code: price_changed` — the cost the review step showed is not
+/// the server's current price (or none was shown). [cost] is the new one,
+/// to show before asking again.
+class MeetupPriceChangedException extends MeetupConflictException {
+  const MeetupPriceChangedException(
+    super.message, {
+    required this.cost,
+    required this.priceVersion,
+  });
+
+  final int cost;
+  final int priceVersion;
+}
+
+/// 409 with `code: idempotency_key_reused` — this submission's key was
+/// already used for a different create. The flow starts a new submission.
+class MeetupIdempotencyKeyReusedException extends MeetupConflictException {
+  const MeetupIdempotencyKeyReusedException(super.message);
+}
+
+/// 402 with `code: insufficient_credits`: the server's own numbers.
+class MeetupInsufficientCreditsException extends MeetupException {
+  const MeetupInsufficientCreditsException(
+    super.message, {
+    required this.cost,
+    required this.available,
+    required this.shortfall,
+  });
+
+  final int cost;
+  final int available;
+  final int shortfall;
+}
+
+/// 402 with `code: credits_debt`: an earlier charge is unpaid (a store
+/// refund of credits already spent). Creating is blocked until credits are
+/// added.
+class MeetupCreditsDebtException extends MeetupException {
+  const MeetupCreditsDebtException(super.message, {required this.debt});
+
+  final int debt;
+}
+
+/// 426 `update_required`: this build predates the credits screens.
+class MeetupUpdateRequiredException extends MeetupException {
+  const MeetupUpdateRequiredException(super.message);
 }
 
 /// 404 — the meetup or request no longer exists.
@@ -352,6 +423,7 @@ class MockMeetupService implements MeetupService {
     required double locationLng,
     required String locationLabel,
     required int capacity,
+    CreationCharge? charge,
   }) async {
     await Future<void>.delayed(latency);
     final meetup = Meetup(

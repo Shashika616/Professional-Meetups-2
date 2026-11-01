@@ -56,6 +56,7 @@ Future<T?> showAppSheet<T>(
   required WidgetBuilder builder,
   bool isDismissible = true,
   double? minHeightFactor,
+  String? screen,
 }) {
   final route = ModalRoute.of(context);
   if (route != null && !route.isCurrent) return Future<T?>.value(null);
@@ -80,6 +81,8 @@ Future<T?> showAppSheet<T>(
       borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
     ),
     builder: wrapped,
+    // Plan 29E: a sheet with a screen name counts as a screen.
+    routeSettings: RouteSettings(name: screen),
   );
 }
 

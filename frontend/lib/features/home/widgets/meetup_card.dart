@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -43,7 +44,10 @@ class MeetupCard extends StatelessWidget {
   void _handleLockedTap(BuildContext context) {
     showSnack(context, meetup.intent.joinLockedMessage, type: ToastType.locked);
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
+      MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.verificationChecklist),
+        builder: (_) => const VerificationChecklistPage(),
+      ),
     );
   }
 

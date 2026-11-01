@@ -1,94 +1,63 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/models/credits.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/services/client_info_http_client.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
+import 'package:professional_connections_platform/core/utils/uuid.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/app_tag.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
+import 'package:professional_connections_platform/core/widgets/load_failed_state.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/features/premium/purchase_flow_controller.dart';
 
-/// The three Premium subscription products, sold identically as StoreKit2
-/// auto-renewable subscriptions (iOS) and Play Billing subscriptions
-/// (Android). **Each ID must be configured identically in App Store Connect
-/// and Google Play Console** before a real purchase can succeed. Monthly
-/// has existed as a concept since ADR-031 Slice B; weekly and yearly were
-/// added by Plan 20 Fix 3 (2026-09-18) and are a needs-Shashika's-action
-/// item, same category as the App Store Connect API key and the Google
-/// Play service account. Until a product is configured the store returns
-/// nothing for it and the screen simply does not offer that tier.
-const String premiumWeeklyProductId = 'premium_weekly';
-const String premiumMonthlyProductId = 'premium_monthly';
-const String premiumYearlyProductId = 'premium_yearly';
-
-/// The tiers in display order, with the words the screen uses for each.
-/// The price, title and description of a tier come from the store's
-/// [ProductDetails]; nothing about money is written down in this file.
-enum PremiumTier {
-  weekly(premiumWeeklyProductId, 'Weekly', 'week', 'Billed weekly'),
-  monthly(premiumMonthlyProductId, 'Monthly', 'month', 'Billed monthly'),
-  yearly(premiumYearlyProductId, 'Yearly', 'year', 'Billed yearly');
-
-  const PremiumTier(this.productId, this.label, this.period, this.billing);
-
-  final String productId;
-  final String label;
-  final String period;
-  final String billing;
-
-  static PremiumTier? forProductId(String? id) {
-    for (final tier in values) {
-      if (tier.productId == id) return tier;
-    }
-    return null;
-  }
-}
-
-/// The tier the card at the top shows off and the one pre-selected when the
-/// store offers it: the longest commitment, which the card's "two months
-/// free" framing was written for. A presentation choice, not purchase
-/// logic; every tier buys through the same [PurchaseFlowController.buy].
-const PremiumTier featuredTier = PremiumTier.yearly;
-
-/// What Premium gets you. ONE list for all three tiers, on purpose: the
-/// per-tier differentiation (if any) is a business decision Shashika has
-/// not made yet, so this is a deliberate placeholder in the same spirit as
-/// the price placeholder it replaces. Do not invent different perks per
-/// tier here; when the decision lands, key this by [PremiumTier].
-const List<(String, String, String, String)> premiumPerks = [
-  (AppIcons.calendarCheck, 'Host up to ', 'three meetups a day', '.'),
-  (AppIcons.filter, 'Filter Happening Soon by ', 'company and industry', '.'),
-  (AppIcons.verifiedBadge, 'A ', 'Premium mark', ' on your profile and cards.'),
-  (AppIcons.support, '', 'Priority help', ' from the TieHere team.'),
-];
-
-/// The Premium screen (ADR-031, Slice B; consolidated by Plan 20 Fix 3),
-/// reached from `ProfilePage`'s PREFERENCES row whether or not the account
-/// is already entitled: this screen renders both states itself.
+/// The Premium screen (ADR-031, Slice B; server-driven since plan 29C),
+/// reached from `ProfilePage`'s Preferences row.
 ///
-/// The one Premium screen in the app. It has the plans design (a featured
-/// card with the perks in a white inset, one row per tier, one button) on
-/// the real data flow: products come from the store through
-/// [SubscriptionService.availableProducts] in one call for all three ids,
-/// purchases go through [PurchaseFlowController] (stream-driven, never
-/// polling), and the account's standing is the backend-confirmed
-/// [SubscriptionStatus] via [subscriptionStatusProvider], never anything
-/// inferred from local purchase state.
+/// # THE SERVER SAYS WHAT IS ON OFFER, THE STORE SAYS WHAT IT COSTS
 ///
-/// Tiers the store does not return (not yet configured, or withdrawn) are
-/// simply absent: the screen shows what is actually on sale rather than
-/// failing over one missing product. With nothing on sale it says so.
+/// Plans, their titles, perks, which one is featured, and the legal links
+/// come from the catalog (`GET /v1/billing/catalog`). Prices come from the
+/// store's own [ProductDetails], in the buyer's currency; the catalog never
+/// carries one. Nothing about the plans is written in this file, so:
+///
+/// - turning `billing.plans.visible` on shows the plans to a running app
+///   (the catalog is fetched again each time this page opens and when the
+///   app returns to the foreground), with no update;
+/// - a product is withdrawn by the catalog (weekly was), not by code;
+/// - a product the store does not return is simply not offered.
+///
+/// Purchases go through [PurchaseFlowController] (the store transaction is
+/// completed only after the server confirms), carrying the account token as
+/// `applicationUserName`. The account's standing is the server's
+/// [SubscriptionStatus], never inferred from local purchase state.
 class PremiumPage extends ConsumerStatefulWidget {
-  const PremiumPage({super.key});
+  const PremiumPage({
+    super.key,
+    this.platform,
+    this.purchaseUpdates,
+    this.buyNonConsumable,
+    this.completePurchase,
+  });
+
+  /// Test seams; null means this device and the real `InAppPurchase`.
+  final String? platform;
+  final Stream<List<PurchaseDetails>>? purchaseUpdates;
+  final Future<bool> Function(PurchaseParam)? buyNonConsumable;
+  final Future<void> Function(PurchaseDetails)? completePurchase;
 
   @override
   ConsumerState<PremiumPage> createState() => _PremiumPageState();
@@ -96,47 +65,66 @@ class PremiumPage extends ConsumerStatefulWidget {
 
 class _PremiumPageState extends ConsumerState<PremiumPage> {
   late final PurchaseFlowController _controller;
+  late final String _platform =
+      widget.platform ?? ClientInfoHttpClient.currentPlatform();
 
-  /// Store products keyed by tier, in display order; null while loading.
-  Map<PremiumTier, ProductDetails>? _products;
+  /// Store products by id; null while loading.
+  Map<String, ProductDetails>? _products;
   String? _loadError;
-  PremiumTier? _selected;
+
+  /// The product ids [_products] was loaded for, to reload when the
+  /// catalog changes.
+  String _loadedFor = '';
+  String? _selected;
 
   @override
   void initState() {
     super.initState();
     _controller = PurchaseFlowController(
       subscriptionService: ref.read(subscriptionServiceProvider),
-      platform: defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android',
+      platform: _platform,
+      purchaseUpdates: widget.purchaseUpdates,
+      buyNonConsumable: widget.buyNonConsumable,
+      completePurchase: widget.completePurchase,
+      analyticsFlow: AnalyticsFlow.subscribe,
     )..addListener(_onControllerChanged);
-    _loadProducts();
+    _controller.startFlow();
   }
 
-  Future<void> _loadProducts() async {
+  /// The plans on offer, for this platform, in catalog order.
+  List<CatalogPlan> _offered(Catalog catalog) => [
+    if (catalog.plansVisible)
+      for (final p in catalog.plans)
+        if (p.productIdFor(_platform).isNotEmpty) p,
+  ];
+
+  Future<void> _loadProducts(List<CatalogPlan> plans, String key) async {
+    _loadedFor = key;
+    if (plans.isEmpty) {
+      setState(() => _products = const {});
+      return;
+    }
     try {
       final details = await ref
           .read(subscriptionServiceProvider)
           .availableProducts([
-            for (final tier in PremiumTier.values) tier.productId,
+            for (final p in plans) p.productIdFor(_platform),
           ]);
       if (!mounted) return;
-      final byTier = <PremiumTier, ProductDetails>{};
-      for (final tier in PremiumTier.values) {
-        for (final product in details) {
-          if (product.id == tier.productId) {
-            byTier[tier] = product;
-            break;
-          }
-        }
-      }
+      final byId = {for (final d in details) d.id: d};
       setState(() {
-        _products = byTier;
+        _products = byId;
         _loadError = null;
-        // Pre-select the featured tier when it is on sale, else the first
-        // one that is; nothing when nothing is.
-        _selected = byTier.containsKey(featuredTier)
-            ? featuredTier
-            : (byTier.isEmpty ? null : byTier.keys.first);
+        // The featured plan when the store sells it, else the first it does.
+        final onSale = [
+          for (final p in plans)
+            if (byId.containsKey(p.productIdFor(_platform))) p,
+        ];
+        final featured = onSale.where((p) => p.featured);
+        _selected = onSale.isEmpty
+            ? null
+            : (featured.isNotEmpty ? featured.first : onSale.first)
+                  .productIdFor(_platform);
       });
     } catch (_) {
       if (!mounted) return;
@@ -154,51 +142,72 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
       showSnack(context, error, type: ToastType.error);
     }
     if (_controller.lastVerifiedStatus != null) {
-      // The backend is the source of truth for "am I Premium now" — this
-      // just tells the rest of the app to re-read it, it never sets local
-      // state that the UI would show instead.
+      // The backend is the source of truth for "am I Premium now"; this
+      // tells the rest of the app to read it again.
       ref.invalidate(subscriptionStatusProvider);
     }
   }
 
   @override
   void dispose() {
+    _controller.endFlow();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
   }
 
+  Future<void> _open(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // The account token comes from the session, which may resolve after
+    // this page opens; a purchase is refused until it has.
+    final userId = ref.watch(
+      authSessionProvider.select((s) => s.value?.profile?.id),
+    );
+    _controller.accountToken = userId == null ? null : accountToken(userId);
+    final catalogAsync = ref.watch(catalogProvider);
+    final catalog = catalogAsync.value;
+    final plans = catalog == null ? const <CatalogPlan>[] : _offered(catalog);
+    if (catalog != null) {
+      final key = [
+        catalog.version,
+        for (final p in plans) p.productIdFor(_platform),
+      ].join(',');
+      if (key != _loadedFor) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && key != _loadedFor) _loadProducts(plans, key);
+        });
+      }
+    }
+
     final statusAsync = ref.watch(subscriptionStatusProvider);
     final status = statusAsync.value;
     final entitled = status?.isEntitled ?? false;
-    final currentTier = entitled
-        ? PremiumTier.forProductId(status?.productId)
-        : null;
     final products = _products;
     final bottomInset = MediaQuery.viewPaddingOf(context).bottom;
-
+    final onSale = [
+      for (final p in plans)
+        if (products?[p.productIdFor(_platform)] != null) p,
+    ];
     final selectedProduct = _selected == null ? null : products?[_selected!];
     final canBuy =
         !entitled &&
         !_controller.busy &&
         selectedProduct != null &&
         _loadError == null;
+    // One plan today, so one list of perks; the first plan on offer says
+    // what Premium gets you.
+    final perks = plans.isEmpty ? const <String>[] : plans.first.perks;
+    final hidden = catalog != null && !catalog.plansVisible;
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      // extendBodyBehindAppBar so AppBackground paints the app-bar strip
-      // too — without it the (transparent) bar shows through to nothing and
-      // sits as a flat band above the image. Same shape as
-      // verification_checklist_page.dart's Scaffold.
       extendBodyBehindAppBar: true,
-      // The ordinary pushed-page bar: title, and Flutter's own back button
-      // on the left. This screen used to suppress that and put a custom
-      // round X on the right instead — the only screen in the app that did,
-      // so leaving is where nothing else puts it. Consistency wins over the
-      // modal flavour a close button implies; this is a pushed route like
-      // any other (profile_page.dart pushes it).
       appBar: AppBar(title: const Text('Premium')),
       body: AppBackground(
         child: SafeArea(
@@ -208,27 +217,43 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
                   children: [
-                    // ONE card: where the account stands, what the page
-                    // is offering, and what Premium gets you. These were
-                    // three stacked blocks — a status card, a centred
-                    // 24px headline, and a green-tinted plan card with a
-                    // second card inset inside it — so the screen opened
-                    // on three competing surfaces before a single price.
-                    // The screen set draws one plain card holding all of
-                    // it, and prices where prices belong: on the tiers.
                     statusAsync.when(
-                      data: (status) => _PerksCard(status: status),
+                      data: (status) => _PerksCard(
+                        status: status,
+                        perks: perks,
+                        currentPlan: _planFor(plans, status.productId),
+                      ),
                       loading: () => const SkeletonLoader(
                         child: SkeletonBox(
                           width: double.infinity,
-                          height: 260,
+                          height: 200,
                           radius: 20,
                         ),
                       ),
-                      error: (_, _) => const _PerksCard(status: null),
+                      error: (_, _) => _PerksCard(
+                        status: null,
+                        perks: perks,
+                        currentPlan: null,
+                      ),
                     ),
                     const SizedBox(height: 16),
-                    if (_loadError != null)
+                    if (catalogAsync.hasError && catalog == null)
+                      LoadFailedState(
+                        compact: true,
+                        failure: LoadFailure.of(catalogAsync.error),
+                        onRetry: () => ref.invalidate(catalogProvider),
+                      )
+                    else if (hidden)
+                      Text(
+                        key: const Key('premiumHidden'),
+                        'Premium plans are not available yet.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppPalette.textSecondary,
+                          fontSize: 12.5,
+                        ),
+                      )
+                    else if (_loadError != null)
                       Text(
                         _loadError!,
                         textAlign: TextAlign.center,
@@ -237,7 +262,7 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                           fontSize: 12,
                         ),
                       )
-                    else if (products == null)
+                    else if (catalog == null || products == null)
                       const SkeletonLoader(
                         child: SkeletonBox(
                           width: double.infinity,
@@ -245,7 +270,7 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                           radius: 16,
                         ),
                       )
-                    else if (products.isEmpty)
+                    else if (onSale.isEmpty)
                       Text(
                         'Plans and prices come from the App Store or Google '
                         'Play, and Premium isn\'t available on this device '
@@ -257,28 +282,32 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                         ),
                       )
                     else ...[
-                      for (final tier in PremiumTier.values)
-                        if (products[tier] != null) ...[
-                          _TierRow(
-                            key: Key('tier-${tier.productId}'),
-                            tier: tier,
-                            product: products[tier]!,
-                            selected: _selected == tier,
-                            isCurrent: currentTier == tier,
-                            featured: tier == featuredTier,
-                            onTap: entitled
-                                ? null
-                                : () => setState(() => _selected = tier),
-                          ),
-                          const SizedBox(height: 10),
-                        ],
+                      for (final plan in onSale) ...[
+                        _TierRow(
+                          key: Key('tier-${plan.productIdFor(_platform)}'),
+                          plan: plan,
+                          product: products[plan.productIdFor(_platform)]!,
+                          selected: _selected == plan.productIdFor(_platform),
+                          isCurrent:
+                              entitled &&
+                              status?.productId == plan.productIdFor(_platform),
+                          onTap: entitled
+                              ? null
+                              : () => setState(
+                                  () =>
+                                      _selected = plan.productIdFor(_platform),
+                                ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       const SizedBox(height: 2),
                       Center(
                         child: Text(
                           entitled
                               ? 'Manage or cancel your subscription from your '
                                     'app store account.'
-                              : 'Cancel any time from your app store account.',
+                              : 'Renews automatically. Cancel any time from '
+                                    'your app store account.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: AppPalette.textSecondary,
@@ -287,12 +316,49 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: 12),
+                    if (catalog != null &&
+                        (catalog.termsUrl.isNotEmpty ||
+                            catalog.privacyUrl.isNotEmpty)) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (catalog.termsUrl.isNotEmpty)
+                            TextButton(
+                              key: const Key('premiumTerms'),
+                              onPressed: () => _open(catalog.termsUrl),
+                              child: Text(
+                                'Terms of use',
+                                style: TextStyle(
+                                  color: AppPalette.candyBlue,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                            ),
+                          if (catalog.privacyUrl.isNotEmpty)
+                            TextButton(
+                              key: const Key('premiumPrivacy'),
+                              onPressed: () => _open(catalog.privacyUrl),
+                              child: Text(
+                                'Privacy policy',
+                                style: TextStyle(
+                                  color: AppPalette.candyBlue,
+                                  fontSize: 12.5,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 8),
                     Center(
                       child: TextButton(
                         onPressed: _controller.busy
                             ? null
-                            : () => _controller.restore(),
+                            : () {
+                                track(Cta.restorePurchases);
+                                _controller.restore();
+                              },
                         child: Text(
                           'Restore purchases',
                           style: TextStyle(
@@ -305,21 +371,18 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
                   ],
                 ),
               ),
-              if (products != null && products.isNotEmpty)
+              if (onSale.isNotEmpty && !hidden)
                 Padding(
                   padding: EdgeInsets.fromLTRB(20, 8, 20, 16 + bottomInset),
-                  // PrimaryButton's own default fill, not a green override:
-                  // the app has exactly one primary-CTA colour and this page
-                  // was the only screen opting out of it. Green stays on
-                  // this page as a MARK (the card's hairline, the perk
-                  // icons, the selected tier's tick); at full width it read
-                  // as a different app's button.
                   child: PrimaryButton(
                     key: const Key('premiumSubscribe'),
                     label: entitled ? 'Current plan' : 'Subscribe',
                     isLoading: _controller.busy,
                     onPressed: canBuy
-                        ? () => _controller.buy(selectedProduct)
+                        ? () {
+                            track(Cta.subscribe);
+                            _controller.buy(selectedProduct);
+                          }
                         : null,
                   ),
                 ),
@@ -329,27 +392,30 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
       ),
     );
   }
+
+  CatalogPlan? _planFor(List<CatalogPlan> plans, String? productId) {
+    for (final p in plans) {
+      if (p.productIdFor(_platform) == productId) return p;
+    }
+    return null;
+  }
 }
 
-/// What Premium gets you, with the account's standing as a tag at the top
-/// — the shape the screen set draws: a `Free` chip, the page's one
-/// headline, and the perks as check lines.
-///
-/// # NO GREEN SLAB, NO CARD INSIDE A CARD
-///
-/// This card used to be a green-tinted, green-bordered, elevated surface
-/// with a second bordered panel inset inside it, the perks in that panel,
-/// each with an outlined circle icon joined by a vertical hairline. Four
-/// surfaces deep for a list of four sentences, and the only page in the
-/// app with a colour-washed card. It is the ordinary card now, and the
-/// green appears where it appears everywhere else: at glyph size.
+/// What Premium gets you, with the account's standing as a tag at the top.
+/// One plain card; the perks are the catalog's.
 class _PerksCard extends StatelessWidget {
-  const _PerksCard({required this.status});
+  const _PerksCard({
+    required this.status,
+    required this.perks,
+    required this.currentPlan,
+  });
 
-  /// Null when the backend has not answered — the perks are a fact about
-  /// the product, so they are shown regardless, under the Free chip that
-  /// an unconfirmed account is treated as anyway.
+  /// Null when the backend has not answered.
   final SubscriptionStatus? status;
+  final List<String> perks;
+
+  /// The catalog plan the account holds, when the server names it.
+  final CatalogPlan? currentPlan;
 
   @override
   Widget build(BuildContext context) {
@@ -359,13 +425,13 @@ class _PerksCard extends StatelessWidget {
       SubscriptionTier.premium when entitled => 'Premium',
       _ => 'Free',
     };
-    final tier = PremiumTier.forProductId(status?.productId);
     final renewal = !entitled
         ? null
         : [
-            if (tier != null) '${tier.label} plan',
+            if (currentPlan != null) '${currentPlan!.periodLabel} plan',
             if (status?.currentPeriodEnd != null)
-              'Renews ${_formatDate(status!.currentPeriodEnd!)}',
+              '${status!.autoRenewStatus ? 'Renews' : 'Ends'} '
+                  '${_formatDate(status!.currentPeriodEnd!)}',
           ].join(' · ');
 
     return FlatCard(
@@ -401,7 +467,8 @@ class _PerksCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 14),
-          for (final perk in premiumPerks) _PerkRow(perk: perk),
+          for (final perk in perks) _PerkRow(text: perk),
+          if (perks.isEmpty) const SizedBox(height: 6),
         ],
       ),
     );
@@ -411,50 +478,35 @@ class _PerksCard extends StatelessWidget {
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 }
 
-/// One perk: an outlined round icon, the sentence with its key phrase in
-/// weight, and a hairline down to the next icon.
-///
-/// Its ink used to be fixed (dark on a hardcoded white inset, back when the
-/// card was a green slab). It is themed now, like the rest of the app — the
-/// icon is the one thing still carrying the brand green, which is the size
-/// green is supposed to appear at.
+/// One perk: a tick at glyph size and the catalog's sentence.
 class _PerkRow extends StatelessWidget {
-  const _PerkRow({required this.perk});
+  const _PerkRow({required this.text});
 
-  final (String, String, String, String) perk;
+  final String text;
 
   @override
   Widget build(BuildContext context) {
-    final (icon, before, strong, after) = perk;
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // A tick at glyph size, not an outlined circle with a hairline
-          // running down to the next one. The connector drew a process —
-          // four steps in an order — where this is four unordered facts.
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: AppIcon(icon, size: 17, color: AppPalette.brandGreen),
+            child: AppIcon(
+              AppIcons.checkCircle,
+              size: 17,
+              color: AppPalette.brandGreen,
+            ),
           ),
           const SizedBox(width: 11),
           Expanded(
-            child: Text.rich(
-              TextSpan(
-                text: before,
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontSize: 13.5,
-                  height: 1.4,
-                ),
-                children: [
-                  TextSpan(
-                    text: strong,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  TextSpan(text: after),
-                ],
+            child: Text(
+              text,
+              style: TextStyle(
+                color: AppPalette.textPrimary,
+                fontSize: 13.5,
+                height: 1.4,
               ),
             ),
           ),
@@ -464,27 +516,24 @@ class _PerkRow extends StatelessWidget {
   }
 }
 
-/// A row for one tier: a radio, the name and the store's price, and on the
-/// right either the billing note, a "Popular" badge for the featured tier,
-/// or CURRENT PLAN for the one the account holds. The chosen one takes a
-/// pale tint. Not tappable while the account is entitled: a subscriber
-/// changes plan through the store, not by buying a second subscription.
+/// A row for one plan: a radio, the period and the store's price, and on
+/// the right the billing note, "Popular" for the featured plan, or
+/// "Current plan" for the one held. Not tappable while entitled: a
+/// subscriber changes plan through the store.
 class _TierRow extends StatelessWidget {
   const _TierRow({
     super.key,
-    required this.tier,
+    required this.plan,
     required this.product,
     required this.selected,
     required this.isCurrent,
-    required this.featured,
     required this.onTap,
   });
 
-  final PremiumTier tier;
+  final CatalogPlan plan;
   final ProductDetails product;
   final bool selected;
   final bool isCurrent;
-  final bool featured;
   final VoidCallback? onTap;
 
   @override
@@ -495,7 +544,7 @@ class _TierRow extends StatelessWidget {
     final highlighted = selected || isCurrent;
     final badge = isCurrent
         ? 'Current plan'
-        : featured
+        : plan.featured
         ? 'Popular'
         : null;
     return GestureDetector(
@@ -533,7 +582,7 @@ class _TierRow extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             Text(
-              tier.label,
+              plan.periodLabel,
               style: TextStyle(
                 color: AppPalette.textPrimary,
                 fontSize: 15,
@@ -575,7 +624,7 @@ class _TierRow extends StatelessWidget {
               )
             else
               Text(
-                tier.billing,
+                plan.billingLabel,
                 style: TextStyle(
                   color: AppPalette.textSecondary,
                   fontSize: 12.5,

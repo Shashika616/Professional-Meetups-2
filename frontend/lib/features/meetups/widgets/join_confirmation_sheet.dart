@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -23,6 +24,7 @@ Future<bool> showJoinConfirmationSheet(
 }) async {
   final confirmed = await showModalBottomSheet<bool>(
     context: context,
+    routeSettings: const RouteSettings(name: ScreenNames.joinConfirmation),
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: AppPalette.card,

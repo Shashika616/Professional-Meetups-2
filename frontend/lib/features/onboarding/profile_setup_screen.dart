@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/friction.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -169,102 +170,105 @@ class _ProfileSetupScreenState extends ConsumerState<ProfileSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      // Without this, the AppBar's own (transparent) region isn't covered
-      // by AppBackground at all — body painting starts below the app bar,
-      // so that strip shows through to nothing but plain black instead of
-      // the same image/gradient as the rest of the screen. This also
-      // widens MediaQuery's top padding to include the app bar's height,
-      // so the SafeArea below still pushes content clear of the title row.
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        // FittedBox, not a bare Text — "COMPLETE YOUR PROFILE" at the
-        // theme's letter-spaced title style doesn't fit next to the Skip
-        // action on narrow devices; shrinking to fit keeps the full text
-        // visible instead of the default ellipsis truncation.
-        title: const FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Text('Complete your profile'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _skip,
-            child: Text(
-              'Skip for now',
-              style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-            ),
+    // Plan 29E: a form left a minute without input is friction.
+    return DwellTracker(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        // Without this, the AppBar's own (transparent) region isn't covered
+        // by AppBackground at all — body painting starts below the app bar,
+        // so that strip shows through to nothing but plain black instead of
+        // the same image/gradient as the rest of the screen. This also
+        // widens MediaQuery's top padding to include the app bar's height,
+        // so the SafeArea below still pushes content clear of the title row.
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          // FittedBox, not a bare Text — "COMPLETE YOUR PROFILE" at the
+          // theme's letter-spaced title style doesn't fit next to the Skip
+          // action on narrow devices; shrinking to fit keeps the full text
+          // visible instead of the default ellipsis truncation.
+          title: const FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('Complete your profile'),
           ),
-        ],
-      ),
-      body: AppBackground(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const SizedBox(height: 8),
-                Text(
-                  'Tell us about yourself',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    color: AppPalette.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 20),
-                AppTextField(
-                  controller: _fullNameController,
-                  icon: AppIcons.idCard,
-                  hint: 'Full name',
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'Company or organization (optional)',
-                  style: TextStyle(
-                    fontSize: 10,
-                    letterSpacing: 0.6,
-                    fontWeight: FontWeight.w600,
-                    color: AppPalette.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                AppTextField(
-                  controller: _companyNameController,
-                  icon: AppIcons.building,
-                  hint: 'Company or organization name',
-                ),
-                const SizedBox(height: 12),
-                _companyEmailField(),
-                // Two explanatory paragraphs used to sit here — a privacy
-                // note and a one-account-per-work-email warning. The first
-                // restated what the verified state already shows; the
-                // second is a rule the backend enforces, so it belongs in
-                // the error the user sees if they hit it, not as standing
-                // text every user reads to learn a rule most never break.
-                if (_showOtpEntry) ...[
-                  const SizedBox(height: 16),
-                  OtpEntry(
-                    onSend: _sendCompanyEmailOtp,
-                    onSubmit: _verifyCompanyEmailOtp,
-                  ),
-                ],
-                if (_validationError != null) ...[
-                  const SizedBox(height: 12),
+          actions: [
+            TextButton(
+              onPressed: _skip,
+              child: Text(
+                'Skip for now',
+                style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+        body: AppBackground(
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const SizedBox(height: 8),
                   Text(
-                    _validationError!,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppPalette.danger, fontSize: 12),
+                    'Tell us about yourself',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                      color: AppPalette.textPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  AppTextField(
+                    controller: _fullNameController,
+                    icon: AppIcons.idCard,
+                    hint: 'Full name',
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Company or organization (optional)',
+                    style: TextStyle(
+                      fontSize: 10,
+                      letterSpacing: 0.6,
+                      fontWeight: FontWeight.w600,
+                      color: AppPalette.textSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _companyNameController,
+                    icon: AppIcons.building,
+                    hint: 'Company or organization name',
+                  ),
+                  const SizedBox(height: 12),
+                  _companyEmailField(),
+                  // Two explanatory paragraphs used to sit here — a privacy
+                  // note and a one-account-per-work-email warning. The first
+                  // restated what the verified state already shows; the
+                  // second is a rule the backend enforces, so it belongs in
+                  // the error the user sees if they hit it, not as standing
+                  // text every user reads to learn a rule most never break.
+                  if (_showOtpEntry) ...[
+                    const SizedBox(height: 16),
+                    OtpEntry(
+                      onSend: _sendCompanyEmailOtp,
+                      onSubmit: _verifyCompanyEmailOtp,
+                    ),
+                  ],
+                  if (_validationError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _validationError!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppPalette.danger, fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  PrimaryButton(
+                    label: 'Continue',
+                    isLoading: _submitting,
+                    onPressed: _canContinue ? _onContinue : null,
                   ),
                 ],
-                const SizedBox(height: 24),
-                PrimaryButton(
-                  label: 'Continue',
-                  isLoading: _submitting,
-                  onPressed: _canContinue ? _onContinue : null,
-                ),
-              ],
+              ),
             ),
           ),
         ),

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -78,14 +80,27 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
 
   int _step = 0;
 
+  /// Plan 29E: the review funnel. Page 0 is the overall experience, page 1
+  /// the people; submit is the last step.
+  final _flow = Analytics.instance.flow(AnalyticsFlow.reviewMeetup);
+
+  static const _flowSteps = [
+    AnalyticsFlowStep.reviewMeetupExperience,
+    AnalyticsFlowStep.reviewMeetupRating,
+  ];
+
   @override
   void initState() {
     super.initState();
+    _flow.start();
+    _flow.stepViewed(_flowSteps.first);
     _load();
   }
 
   @override
   void dispose() {
+    // Left without submitting. Does nothing once it completed.
+    _flow.abandon(AnalyticsValue.flowAbandonedReasonBack);
     _pageController.dispose();
     _notesController.dispose();
     _peopleScroll.dispose();
@@ -129,7 +144,9 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
   bool get _allRated => _toRate.every((p) => _scores.containsKey(p.userId));
 
   void _goToStep(int step) {
+    if (step > _step) _flow.stepCompleted(_flowSteps[_step]);
     setState(() => _step = step);
+    if (step < _flowSteps.length) _flow.stepViewed(_flowSteps[step]);
     _pageController.animateToPage(
       step,
       duration: const Duration(milliseconds: 320),
@@ -141,6 +158,8 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
     final overall = _overall;
     if (overall == null || _submitting) return;
     setState(() => _submitting = true);
+    _flow.stepCompleted(_flowSteps[_step.clamp(0, _flowSteps.length - 1)]);
+    _flow.stepViewed(AnalyticsFlowStep.reviewMeetupSubmit);
 
     final notes = _notesController.text.trim();
     try {
@@ -160,6 +179,8 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
                 )
                 .toList(),
           );
+      _flow.stepCompleted(AnalyticsFlowStep.reviewMeetupSubmit);
+      _flow.complete();
       if (!mounted) return;
       // The meetup leaves the home list the moment this lands, so both
       // lists that render it have to be refetched.

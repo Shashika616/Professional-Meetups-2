@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/utils/debug_log.dart';
 import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
@@ -24,6 +27,10 @@ import 'package:professional_connections_platform/features/verification/personal
 import 'package:professional_connections_platform/features/verification/personal_email_verification_page.dart';
 import 'package:professional_connections_platform/features/verification/phone_verification_page.dart';
 
+/// One verification screen in a sequence: its screen name (plan 29E) and
+/// how to build it.
+typedef VerificationStep = ({String screen, WidgetBuilder build});
+
 /// The phone → personal email → personal details → corporate email
 /// sequence, each step individually skippable (`frontend/PLAN.md`'s
 /// Level 2/3 addendum, Step 5). No longer run as part of initial onboarding
@@ -44,18 +51,31 @@ import 'package:professional_connections_platform/features/verification/phone_ve
 /// in which case the safe fallback is the full sequence, same as a
 /// brand-new user — not silently skipping steps we have no actual
 /// confirmation are done.
-List<WidgetBuilder> pendingVerificationSteps(UserProfile? profile) {
+List<VerificationStep> pendingVerificationSteps(UserProfile? profile) {
   return [
     if (profile?.phoneVerified != true)
-      (context) => PhoneVerificationPage(currentValue: profile?.phoneNumber),
+      (
+        screen: ScreenNames.phoneVerification,
+        build: (context) =>
+            PhoneVerificationPage(currentValue: profile?.phoneNumber),
+      ),
     if (profile?.personalEmailVerified != true)
-      (context) =>
-          PersonalEmailVerificationPage(currentValue: profile?.personalEmail),
+      (
+        screen: ScreenNames.personalEmailVerification,
+        build: (context) =>
+            PersonalEmailVerificationPage(currentValue: profile?.personalEmail),
+      ),
     if (profile?.personalDetailsComplete != true)
-      (context) => PersonalDetailsPage(profile: profile),
+      (
+        screen: ScreenNames.personalDetails,
+        build: (context) => PersonalDetailsPage(profile: profile),
+      ),
     if (profile?.workEmailVerified != true)
-      (context) => CorporateEmailVerificationPage(
-        currentDomainHint: profile?.companyDomain,
+      (
+        screen: ScreenNames.corporateEmailVerification,
+        build: (context) => CorporateEmailVerificationPage(
+          currentDomainHint: profile?.companyDomain,
+        ),
       ),
   ];
 }
@@ -67,11 +87,11 @@ List<WidgetBuilder> pendingVerificationSteps(UserProfile? profile) {
 /// longer runs this sequence.
 Future<void> runVerificationSequence(
   BuildContext context,
-  List<WidgetBuilder> steps,
+  List<VerificationStep> steps,
 ) async {
-  for (final buildScreen in steps) {
+  for (final step in steps) {
     if (!context.mounted) return;
-    await Navigator.push(context, MaterialPageRoute(builder: buildScreen));
+    await Navigator.push(context, screenRoute(step.screen, step.build));
   }
 }
 
@@ -90,6 +110,30 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
 
   _OnboardingFlowState() : _busy = false;
 
+  /// Plan 29E: the onboarding funnel. Its email and OTP steps are recorded
+  /// by EmailSignupStep, which shares this tracker (one per flow id).
+  final _flow = Analytics.instance.flow(AnalyticsFlow.onboarding);
+
+  static String _stepName(_OnboardingStep step) => switch (step) {
+    _OnboardingStep.ageConfirmation =>
+      AnalyticsFlowStep.onboardingAgeConfirmation,
+    _OnboardingStep.chooseMethod => AnalyticsFlowStep.onboardingChooseMethod,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _flow.start();
+    _flow.stepViewed(_stepName(_step));
+  }
+
+  @override
+  void dispose() {
+    // Left before reaching the app. Does nothing once it completed.
+    _flow.abandon(AnalyticsValue.flowAbandonedReasonBack);
+    super.dispose();
+  }
+
   /// The user's 18+ attestation, recorded when AgeConfirmationStep's
   /// CONTINUE fires (which it cannot until the box is checked). Held as a
   /// value rather than implied by the step, so the provider calls carry
@@ -101,6 +145,8 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
       _ageConfirmed = true;
       _step = _OnboardingStep.chooseMethod;
     });
+    _flow.stepCompleted(AnalyticsFlowStep.onboardingAgeConfirmation);
+    _flow.stepViewed(AnalyticsFlowStep.onboardingChooseMethod);
   }
 
   /// The steps in the order they are shown. [_goBack] reads a predecessor
@@ -140,6 +186,7 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
       // user says they have not given.
       if (_step == _OnboardingStep.ageConfirmation) _ageConfirmed = false;
     });
+    _flow.stepViewed(_stepName(_step));
   }
 
   // The provider buttons (Apple/Google/LinkedIn) live in
@@ -181,11 +228,17 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
     final success = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.emailSignup),
         builder: (context) =>
             EmailSignupStep(ageConfirmedOver18: _ageConfirmed),
       ),
     );
-    if (success == true && mounted) await _goToAppShell();
+    if (success == true && mounted) {
+      await _goToAppShell();
+    } else {
+      // Backed out of the email path: the method picker is showing again.
+      _flow.stepViewed(AnalyticsFlowStep.onboardingChooseMethod);
+    }
   }
 
   /// [stackTrace] is accepted and deliberately NOT logged — see below. It
@@ -254,18 +307,26 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   // being null (the fetch right after sign-in failed) falls back the same
   // way, for the same reason.
   Future<void> _goToAppShell() async {
+    // Signed in: whatever step got here (the method picker for Apple,
+    // Google and LinkedIn; the code for email) is done.
+    final signedInAt = _flow.step;
+    if (signedInAt != null) _flow.stepCompleted(signedInAt);
     final state = ref.read(authSessionProvider).value;
     if (state?.profile?.workEmailVerified != true) {
+      _flow.stepViewed(AnalyticsFlowStep.onboardingProfileSetup);
       final fullName = state?.session?.fullName ?? '';
       if (!mounted) return;
       await Navigator.push(
         context,
         MaterialPageRoute(
+          settings: const RouteSettings(name: ScreenNames.profileSetup),
           builder: (context) => ProfileSetupScreen(initialFullName: fullName),
         ),
       );
+      _flow.stepCompleted(AnalyticsFlowStep.onboardingProfileSetup);
       if (!mounted) return;
     }
+    _flow.complete();
     _navigateToAppShell();
   }
 
@@ -279,7 +340,10 @@ class _OnboardingFlowState extends ConsumerState<OnboardingFlow> {
   // (ProfilePage) and forced session expiry (AppShell's own listener).
   void _navigateToAppShell() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (context) => const AppShell()),
+      MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.appShell),
+        builder: (context) => const AppShell(),
+      ),
       (route) => false,
     );
   }

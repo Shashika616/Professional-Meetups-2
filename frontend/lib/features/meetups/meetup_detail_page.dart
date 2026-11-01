@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -127,6 +130,9 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
   Future<void> _requestToJoin() async {
     try {
       await ref.read(meetupServiceProvider).requestToJoin(widget.meetupId);
+      final flow = Analytics.instance.flow(AnalyticsFlow.joinMeetup);
+      flow.stepCompleted(AnalyticsFlowStep.joinMeetupRequest);
+      flow.complete();
       if (!mounted) return;
       showSnack(context, 'Request sent.', type: ToastType.success);
       await _load();
@@ -149,7 +155,12 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       if (!mounted) return;
       showSnack(context, error.message, type: ToastType.locked);
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
+        MaterialPageRoute(
+          settings: const RouteSettings(
+            name: ScreenNames.verificationChecklist,
+          ),
+          builder: (_) => const VerificationChecklistPage(),
+        ),
       );
     } catch (error) {
       if (mounted) {
@@ -161,6 +172,12 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
           type: ToastType.error,
         );
       }
+    } finally {
+      // Any way out but success (an error, a conflict, the trust gate):
+      // the funnel stopped at the request. Does nothing after complete().
+      Analytics.instance
+          .flow(AnalyticsFlow.joinMeetup)
+          .abandon(AnalyticsValue.flowAbandonedReasonError);
     }
   }
 
@@ -180,6 +197,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     String requestId, {
     required bool pending,
   }) async {
+    track(Cta.withdrawRequest);
     final String? note;
     if (pending) {
       final confirmed = await showAppDialog<bool>(
@@ -258,8 +276,17 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
       return PrimaryButton(
         label: 'I\'m interested',
         onPressed: () async {
+          track(Cta.joinMeetup);
+          // Plan 29E: the join funnel. The detail step is done when the
+          // user asks to join; the request step when the server takes it.
+          // Accepted is the server's own event (request_accepted).
+          final flow = Analytics.instance.flow(AnalyticsFlow.joinMeetup);
+          flow.stepViewed(AnalyticsFlowStep.joinMeetupDetail);
+          flow.stepCompleted(AnalyticsFlowStep.joinMeetupDetail);
+          flow.stepViewed(AnalyticsFlowStep.joinMeetupRequest);
           // Who is hosting, before anything is sent.
           if (!await showJoinConfirmationSheet(context, meetup: meetup)) {
+            flow.abandon(AnalyticsValue.flowAbandonedReasonClosed);
             return;
           }
           await _requestToJoin();
@@ -269,13 +296,19 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
     return PrimaryButton(
       label: 'I\'m interested',
       onPressed: () {
+        track(Cta.joinMeetup);
         showSnack(
           context,
           meetup.intent.joinLockedMessage,
           type: ToastType.locked,
         );
         Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
+          MaterialPageRoute(
+            settings: const RouteSettings(
+              name: ScreenNames.verificationChecklist,
+            ),
+            builder: (_) => const VerificationChecklistPage(),
+          ),
         );
       },
     );
@@ -583,6 +616,9 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
             onTap: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute<void>(
+                  settings: const RouteSettings(
+                    name: ScreenNames.requestManagement,
+                  ),
                   builder: (_) => RequestManagementPage(meetup: meetup),
                 ),
               );
@@ -623,6 +659,9 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
                 excludeMeetupId: meetup.id,
                 onOpen: (other) => Navigator.of(context).push(
                   MaterialPageRoute<void>(
+                    settings: const RouteSettings(
+                      name: ScreenNames.meetupDetail,
+                    ),
                     builder: (_) => MeetupDetailPage(meetupId: other.id),
                   ),
                 ),

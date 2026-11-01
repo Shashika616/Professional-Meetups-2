@@ -21,6 +21,7 @@ class ImmediateMeetupService implements MeetupService {
     required double locationLng,
     required String locationLabel,
     required int capacity,
+    CreationCharge? charge,
   }) => throw UnimplementedError();
 
   @override

@@ -4,6 +4,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/models/credits.dart';
+import 'package:professional_connections_platform/core/services/app_config_service.dart';
+import 'package:professional_connections_platform/core/services/subscription_service.dart';
+import 'package:professional_connections_platform/features/credits/credits_page.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
@@ -23,6 +27,7 @@ import 'package:professional_connections_platform/features/verification/personal
 import 'package:professional_connections_platform/features/verification/personal_email_verification_page.dart';
 import 'package:professional_connections_platform/features/verification/phone_verification_page.dart';
 
+import 'support/fake_credit_service.dart';
 import 'support/fake_secure_storage_platform.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
 import 'package:professional_connections_platform/features/privacy/privacy_controls_page.dart';
@@ -1243,5 +1248,85 @@ void main() {
       isFalse,
       reason: 'two string literals look glued together without a space',
     );
+  });
+
+  group('credits and premium rows (plan 29C)', () {
+    Widget app({
+      required bool plansVisible,
+      bool entitled = false,
+      FakeCreditService? credits,
+    }) => ProviderScope(
+      overrides: [
+        authServiceProvider.overrideWithValue(_FakeAuthService()),
+        sessionStorageProvider.overrideWithValue(
+          SecureSessionStorage(storage: const FlutterSecureStorage()),
+        ),
+        creditServiceProvider.overrideWithValue(credits ?? FakeCreditService()),
+        walletProvider.overrideWith(
+          (ref) async =>
+              const Wallet(balance: 60, held: 0, available: 60, debt: 0),
+        ),
+        appConfigProvider.overrideWith(
+          (ref) async =>
+              RemoteAppConfig(flags: {'billing.plans.visible': plansVisible}),
+        ),
+        subscriptionStatusProvider.overrideWith(
+          (ref) async => SubscriptionStatus.fromJson({
+            'status': entitled ? 'active' : 'none',
+            'plan_code': entitled ? 'pro' : '',
+            'entitled': entitled,
+          }),
+        ),
+      ],
+      child: const MaterialApp(home: ProfilePage()),
+    );
+
+    Future<void> tall(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1080, 5200);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.reset);
+    }
+
+    testWidgets(
+      'the Credits row shows the balance and opens the Credits page',
+      (tester) async {
+        await tall(tester);
+        await tester.pumpWidget(app(plansVisible: false));
+        await tester.pumpAndSettle();
+        final row = find.byKey(const Key('profileCreditsRow'));
+        await tester.ensureVisible(row);
+        expect(
+          find.descendant(of: row, matching: find.text('60 credits')),
+          findsOneWidget,
+        );
+        await tester.tap(row);
+        await tester.pumpAndSettle();
+        expect(find.byType(CreditsPage), findsOneWidget);
+      },
+    );
+
+    testWidgets('with plans hidden the Premium row is hidden', (tester) async {
+      await tall(tester);
+      await tester.pumpWidget(app(plansVisible: false));
+      await tester.pumpAndSettle();
+      expect(find.text('Premium'), findsNothing);
+    });
+
+    testWidgets('with plans visible the Premium row shows', (tester) async {
+      await tall(tester);
+      await tester.pumpWidget(app(plansVisible: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Premium'), findsOneWidget);
+    });
+
+    testWidgets('a subscriber sees the Premium row even with plans hidden', (
+      tester,
+    ) async {
+      await tall(tester);
+      await tester.pumpWidget(app(plansVisible: false, entitled: true));
+      await tester.pumpAndSettle();
+      expect(find.text('Premium'), findsOneWidget);
+      expect(find.text('Premium active'), findsOneWidget);
+    });
   });
 }

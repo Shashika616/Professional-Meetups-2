@@ -6,6 +6,10 @@ import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
+import 'package:professional_connections_platform/core/models/credits.dart';
+import 'package:professional_connections_platform/core/services/app_config_service.dart';
 import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
@@ -25,6 +29,7 @@ import 'package:professional_connections_platform/features/meetups/events_page.d
 import 'package:professional_connections_platform/features/profile/profile_page.dart';
 import 'package:professional_connections_platform/features/splash/splash_screen.dart';
 
+import 'support/analytics_harness.dart';
 import 'support/fake_geolocator_platform.dart';
 import 'support/fake_meetup_service.dart';
 import 'support/fake_secure_storage_platform.dart';
@@ -506,6 +511,56 @@ void main() {
     expect(tester.widget<AppBottomBar>(find.byType(AppBottomBar)).index, 0);
   });
 
+  // Plan 29E: a tab change is a screen change, whether it came from a swipe
+  // or a tap (both go through currentTabIndexProvider).
+  testWidgets('tab swipes and taps are both counted as screen views', (
+    tester,
+  ) async {
+    final analytics = await installTestAnalytics();
+    final container = ProviderContainer(
+      overrides: [
+        authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
+        authServiceProvider.overrideWithValue(_FakeAuthService()),
+        meetupServiceProvider.overrideWithValue(ImmediateMeetupService()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          navigatorObservers: [Analytics.instance.newNavigatorObserver()],
+          onGenerateRoute: (_) =>
+              screenRoute(ScreenNames.appShell, (_) => const AppShell()),
+        ),
+      ),
+    );
+    await _pumpUntil(tester, () => find.byType(AppShell).evaluate().isNotEmpty);
+    expect(analytics.currentScreen, ScreenNames.home);
+
+    await tester.fling(find.byType(PageView), const Offset(-400, 0), 1000);
+    await tester.pump();
+    await _pumpUntil(
+      tester,
+      () => container.read(currentTabIndexProvider) == 1,
+    );
+    expect(analytics.currentScreen, ScreenNames.events, reason: 'the swipe');
+
+    await tester.tap(find.text('Home'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(analytics.currentScreen, ScreenNames.home, reason: 'the tap');
+
+    expect(screenEvents(analytics), [
+      'screen_viewed:${ScreenNames.home}',
+      'screen_left:${ScreenNames.home}',
+      'screen_viewed:${ScreenNames.events}',
+      'screen_left:${ScreenNames.events}',
+      'screen_viewed:${ScreenNames.home}',
+    ]);
+  });
+
   testWidgets('the app returning to the foreground (AppLifecycleState.resumed) '
       'refetches the active-meetups list from the network — the actual fix '
       'for the reported "meetup card doesn\'t update when it auto-closes" '
@@ -674,28 +729,31 @@ void main() {
       await tester.pump(const Duration(milliseconds: 350));
     }
 
-    ProviderContainer containerWith(ScriptedMeetupService service) =>
-        ProviderContainer(
-          overrides: [
-            authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
-            authServiceProvider.overrideWithValue(_FakeAuthService()),
-            meetupServiceProvider.overrideWithValue(service),
-            // NEW, and a direct consequence of the fix under test: these
-            // tests visit the Profile tab, which reads this provider. It
-            // used to be disposed the moment the swipe back completed, so
-            // its in-flight read went with it. Now the page is kept alive
-            // deliberately, so an unresolved real read stays pending and
-            // the framework fails the test for a leaked Timer. Resolving it
-            // synchronously keeps these tests about keep-alive rather than
-            // about subscription plumbing.
-            subscriptionStatusProvider.overrideWith(
-              (ref) async => const SubscriptionStatus(
-                tier: SubscriptionTier.free,
-                status: SubscriptionLifecycleStatus.none,
-              ),
-            ),
-          ],
-        );
+    ProviderContainer containerWith(
+      ScriptedMeetupService service,
+    ) => ProviderContainer(
+      overrides: [
+        authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
+        authServiceProvider.overrideWithValue(_FakeAuthService()),
+        meetupServiceProvider.overrideWithValue(service),
+        // NEW, and a direct consequence of the fix under test: these
+        // tests visit the Profile tab, which reads this provider. It
+        // used to be disposed the moment the swipe back completed, so
+        // its in-flight read went with it. Now the page is kept alive
+        // deliberately, so an unresolved real read stays pending and
+        // the framework fails the test for a leaked Timer. Resolving it
+        // synchronously keeps these tests about keep-alive rather than
+        // about subscription plumbing.
+        walletProvider.overrideWith((ref) async => Wallet.empty),
+        appConfigProvider.overrideWith((ref) async => RemoteAppConfig.defaults),
+        subscriptionStatusProvider.overrideWith(
+          (ref) async => const SubscriptionStatus(
+            tier: SubscriptionTier.free,
+            status: SubscriptionLifecycleStatus.none,
+          ),
+        ),
+      ],
+    );
 
     testWidgets(
       'Home keeps its loaded data across a swipe to the far tab and back — '
@@ -878,6 +936,10 @@ void main() {
             authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
             authServiceProvider.overrideWithValue(_FakeAuthService()),
             meetupServiceProvider.overrideWithValue(service),
+            walletProvider.overrideWith((ref) async => Wallet.empty),
+            appConfigProvider.overrideWith(
+              (ref) async => RemoteAppConfig.defaults,
+            ),
             subscriptionStatusProvider.overrideWith(
               (ref) async => const SubscriptionStatus(
                 tier: SubscriptionTier.free,
@@ -996,6 +1058,10 @@ void main() {
             authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
             authServiceProvider.overrideWithValue(_FakeAuthService()),
             meetupServiceProvider.overrideWithValue(service),
+            walletProvider.overrideWith((ref) async => Wallet.empty),
+            appConfigProvider.overrideWith(
+              (ref) async => RemoteAppConfig.defaults,
+            ),
             subscriptionStatusProvider.overrideWith(
               (ref) async => const SubscriptionStatus(
                 tier: SubscriptionTier.free,
@@ -1053,6 +1119,10 @@ void main() {
             authSessionProvider.overrideWith(_FakeLoggedInNotifier.new),
             authServiceProvider.overrideWithValue(_FakeAuthService()),
             meetupServiceProvider.overrideWithValue(service),
+            walletProvider.overrideWith((ref) async => Wallet.empty),
+            appConfigProvider.overrideWith(
+              (ref) async => RemoteAppConfig.defaults,
+            ),
             subscriptionStatusProvider.overrideWith(
               (ref) async => const SubscriptionStatus(
                 tier: SubscriptionTier.free,
@@ -1118,6 +1188,10 @@ void main() {
           meetupServiceProvider.overrideWithValue(service),
           pushNotificationServiceProvider.overrideWithValue(
             _FakePushService(messages.stream),
+          ),
+          walletProvider.overrideWith((ref) async => Wallet.empty),
+          appConfigProvider.overrideWith(
+            (ref) async => RemoteAppConfig.defaults,
           ),
           subscriptionStatusProvider.overrideWith(
             (ref) async => const SubscriptionStatus(

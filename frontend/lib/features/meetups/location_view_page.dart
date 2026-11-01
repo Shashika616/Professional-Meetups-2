@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/maps/map_canvas.dart';
 import 'package:professional_connections_platform/core/maps/map_sheet_scaffold.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
@@ -64,6 +66,7 @@ class LocationViewPage extends StatefulWidget {
     Meetup meetup, {
     required int viewerTrustLevel,
   }) {
+    track(Cta.openMap);
     if (viewerTrustLevel < 1) {
       showSnack(
         context,
@@ -71,13 +74,21 @@ class LocationViewPage extends StatefulWidget {
         type: ToastType.locked,
       );
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const VerificationChecklistPage()),
+        MaterialPageRoute(
+          settings: const RouteSettings(
+            name: ScreenNames.verificationChecklist,
+          ),
+          builder: (_) => const VerificationChecklistPage(),
+        ),
       );
       return;
     }
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => LocationViewPage(meetup: meetup)));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.locationView),
+        builder: (_) => LocationViewPage(meetup: meetup),
+      ),
+    );
   }
 
   @override

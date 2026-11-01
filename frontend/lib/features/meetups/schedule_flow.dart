@@ -3,10 +3,18 @@ import 'dart:async' show unawaited;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/friction.dart';
+import 'package:professional_connections_platform/core/analytics/flow_tracker.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
+import 'package:professional_connections_platform/core/models/credits.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/services/credit_service.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
+import 'package:professional_connections_platform/core/utils/uuid.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/utils/toast.dart';
@@ -18,6 +26,8 @@ import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/step_hero.dart';
 import 'package:professional_connections_platform/core/widgets/time_field_24h.dart';
+import 'package:professional_connections_platform/features/credits/buy_credits_page.dart';
+import 'package:professional_connections_platform/features/credits/credits_format.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_tile.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_window_input.dart';
@@ -66,6 +76,108 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
   _Step _step = _Step.intent;
   bool _submitting = false;
 
+  /// How big and how far ahead this host may schedule, from the server's
+  /// entitlements (plan 29C). The free limits until it answers, and if it
+  /// cannot.
+  CreationLimits _limits = CreationLimits.fallback;
+
+  /// The review step's price, from the server. Null while it is asked.
+  CreditQuote? _quote;
+  Object? _quoteError;
+  bool _quoting = false;
+
+  /// A line above the cost when it needs saying again: the price changed,
+  /// or the server wants this submission confirmed afresh.
+  String? _costNotice;
+
+  /// The server says creating is blocked until owed credits are paid.
+  bool _debt = false;
+
+  /// This submission's Idempotency-Key. Made on the first CONFIRM, kept
+  /// for every retry of it (a timeout, a dropped connection) so the
+  /// server creates one meetup and charges once, and dropped when the
+  /// submission changes: a new price, or leaving the review step.
+  String? _idempotencyKey;
+
+  /// Plan 29E: the schedule-a-meetup funnel, one step per screen of the
+  /// flow (the step names are the registry's, which match [_Step]).
+  final FlowTracker _flow = Analytics.instance.flow(
+    AnalyticsFlow.scheduleMeetup,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _flow.start();
+    _flow.stepViewed(_step.name);
+    _loadLimits();
+  }
+
+  @override
+  void dispose() {
+    // Left without scheduling (back, or the system gesture on step one).
+    // Does nothing once the flow completed.
+    _flow.abandon(AnalyticsValue.flowAbandonedReasonBack);
+    super.dispose();
+  }
+
+  Future<void> _loadLimits() async {
+    try {
+      final e = await ref.read(creditServiceProvider).entitlements();
+      if (mounted) setState(() => _limits = e.limits);
+    } catch (_) {
+      // The free limits stand; the server enforces the real ones anyway.
+    }
+  }
+
+  /// Prices the draft. Called on reaching the review step and again after
+  /// buying credits or being told the price changed.
+  Future<void> _requestQuote() async {
+    setState(() {
+      _quoting = true;
+      _quoteError = null;
+    });
+    try {
+      final quote = await ref
+          .read(creditServiceProvider)
+          .quote(capacity: _draft.capacity, windowStart: _draft.windowStart!);
+      if (!mounted) return;
+      final old = _quote;
+      setState(() {
+        _quote = quote;
+        if (old == null ||
+            old.cost != quote.cost ||
+            old.priceVersion != quote.priceVersion) {
+          // A different price is a different submission.
+          _idempotencyKey = null;
+        }
+      });
+    } on CreditSessionExpiredException {
+      if (mounted) ref.read(authSessionProvider.notifier).forceSignOut();
+    } catch (e) {
+      if (mounted) setState(() => _quoteError = e);
+    } finally {
+      if (mounted) setState(() => _quoting = false);
+    }
+  }
+
+  Future<void> _buyCredits() async {
+    track(Cta.buyCredits);
+    final bought = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.buyCredits),
+        builder: (context) => const BuyCreditsPage(),
+      ),
+    );
+    if (!mounted) return;
+    if (bought == true) {
+      _debt = false;
+      _costNotice = null;
+    }
+    await _requestQuote();
+  }
+
   List<_Step> get _sequence => [
     _Step.intent,
     _Step.timing,
@@ -78,7 +190,13 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
     final sequence = _sequence;
     final index = sequence.indexOf(_step);
     if (index < sequence.length - 1) {
+      _flow.stepCompleted(_step.name);
       setState(() => _step = sequence[index + 1]);
+      _flow.stepViewed(_step.name);
+      if (_step == _Step.review) {
+        _costNotice = null;
+        unawaited(_requestQuote());
+      }
     }
   }
 
@@ -86,7 +204,15 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
     final sequence = _sequence;
     final index = sequence.indexOf(_step);
     if (index > 0) {
-      setState(() => _step = sequence[index - 1]);
+      setState(() {
+        if (_step == _Step.review) {
+          // Anything may change before the next review: a new submission.
+          _quote = null;
+          _idempotencyKey = null;
+        }
+        _step = sequence[index - 1];
+      });
+      _flow.stepViewed(_step.name);
     } else {
       Navigator.pop(context);
     }
@@ -132,7 +258,9 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
   }
 
   Future<void> _submit() async {
-    if (_submitting) return;
+    final quote = _quote;
+    if (_submitting || quote == null) return;
+    final key = _idempotencyKey ??= uuidV4();
     setState(() => _submitting = true);
     try {
       final meetup = await ref
@@ -145,12 +273,21 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
             locationLng: _draft.locationLng!,
             locationLabel: _draft.locationLabel,
             capacity: _draft.capacity,
+            charge: CreationCharge(
+              expectedCost: quote.cost,
+              priceVersion: quote.priceVersion,
+              idempotencyKey: key,
+            ),
           );
+      _flow.stepCompleted(_Step.review.name);
+      _flow.complete();
       if (!mounted) return;
+      ref.invalidate(walletProvider);
       showSnack(context, 'Meetup scheduled.', type: ToastType.success);
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
+          settings: const RouteSettings(name: ScreenNames.meetupDetail),
           builder: (context) => MeetupDetailPage(meetupId: meetup.id),
         ),
       );
@@ -168,6 +305,41 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
       // meetup in the way and how to free the time. The draft is kept,
       // so a different time can be picked with the back button.
       if (mounted) await showScheduleConflictSheet(context, error: error);
+    } on MeetupPriceChangedException catch (error) {
+      // The price moved under the review step. Show the new one and ask
+      // again; nothing was charged.
+      if (!mounted) return;
+      setState(() {
+        _costNotice =
+            'The price is now ${formatCredits(error.cost)}. Check it and '
+            'confirm again.';
+        _idempotencyKey = null;
+      });
+      await _requestQuote();
+    } on MeetupIdempotencyKeyReusedException {
+      if (!mounted) return;
+      setState(() {
+        _costNotice = 'Please confirm again.';
+        _idempotencyKey = null;
+      });
+      await _requestQuote();
+    } on MeetupInsufficientCreditsException catch (error) {
+      // Credits changed since the quote. The button becomes BUY CREDITS.
+      if (!mounted) return;
+      setState(
+        () => _costNotice =
+            'You need ${formatCredits(error.shortfall)} more to schedule this.',
+      );
+      await _requestQuote();
+    } on MeetupCreditsDebtException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _debt = true;
+        _costNotice = error.message;
+      });
+    } on MeetupUpdateRequiredException catch (error) {
+      // The server's own sentence ("Update TieHere to host a meetup.").
+      if (mounted) showSnack(context, error.message, type: ToastType.error);
     } catch (error) {
       if (mounted) {
         showSnack(
@@ -210,6 +382,13 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
       },
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        // On the location step the keyboard COVERS the lower sheet instead
+        // of shrinking the layout. Shrinking resized the native map view on
+        // every frame of the keyboard's slide — the stutter — and pushed up
+        // a sheet nobody needs while typing in the search field at the top.
+        // The suggestions list sizes itself to the room above the keyboard.
+        // Every other step keeps the default: its fields must stay visible.
+        resizeToAvoidBottomInset: _step != _Step.location,
         body: AppBackground(
           child: SafeArea(
             child: Column(
@@ -219,7 +398,13 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
                   step: _sequence.indexOf(_step) + 1,
                   total: _sequence.length,
                 ),
-                Expanded(child: _stepBody(trustLevel)),
+                // Plan 29E: a step left a minute without input is friction.
+                Expanded(
+                  child: DwellTracker(
+                    stepKey: _step,
+                    child: _stepBody(trustLevel),
+                  ),
+                ),
               ],
             ),
           ),
@@ -255,6 +440,7 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
       _Step.timing => _TimingStep(
         initialStart: _draft.windowStart,
         initialEnd: _draft.windowEnd,
+        maxAdvanceDays: _limits.maxAdvanceDays,
         onPick: _pickWindow,
       ),
       // MapLocationStep, not the commented-out _LocationStep
@@ -272,7 +458,8 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
         },
       ),
       _Step.capacity => _CapacityStep(
-        initial: _draft.capacity,
+        initial: _draft.capacity.clamp(1, _limits.maxCapacity),
+        max: _limits.maxCapacity,
         onSubmit: (capacity) {
           _draft.capacity = capacity;
           _goNext();
@@ -285,6 +472,13 @@ class _ScheduleFlowPageState extends ConsumerState<ScheduleFlowPage> {
         locationLabel: _draft.locationLabel,
         capacity: _draft.capacity,
         submitting: _submitting,
+        quote: _quote,
+        quoting: _quoting,
+        quoteFailed: _quoteError != null,
+        notice: _costNotice,
+        blockedByDebt: _debt,
+        onRetryQuote: _requestQuote,
+        onBuyCredits: _buyCredits,
         onConfirm: _submit,
       ),
     };
@@ -476,6 +670,9 @@ class _IntentStep extends StatelessWidget {
                     );
                     Navigator.of(context).push(
                       MaterialPageRoute(
+                        settings: const RouteSettings(
+                          name: ScreenNames.hostingUnlock,
+                        ),
                         builder: (_) => const HostingUnlockPage(),
                       ),
                     );
@@ -501,11 +698,16 @@ class _TimingStep extends StatefulWidget {
   const _TimingStep({
     required this.initialStart,
     required this.initialEnd,
+    required this.maxAdvanceDays,
     required this.onPick,
   });
 
   final DateTime? initialStart;
   final DateTime? initialEnd;
+
+  /// How far ahead the date picker reaches: the host's entitlement (14
+  /// days free, 30 with a plan), not a number written here.
+  final int maxAdvanceDays;
 
   /// Awaited: CONTINUE shows its spinner until this resolves, since the
   /// flow asks the server about the window before moving on.
@@ -549,7 +751,7 @@ class _TimingStepState extends State<_TimingStep> {
       context: context,
       initialDate: _date.isBefore(now) ? now : _date,
       firstDate: now,
-      lastDate: now.add(const Duration(days: 90)),
+      lastDate: now.add(Duration(days: widget.maxAdvanceDays)),
     );
     if (picked != null) setState(() => _date = picked);
   }
@@ -1009,9 +1211,16 @@ class _WindowSummary extends StatelessWidget {
 // }
 
 class _CapacityStep extends StatefulWidget {
-  const _CapacityStep({required this.initial, required this.onSubmit});
+  const _CapacityStep({
+    required this.initial,
+    required this.max,
+    required this.onSubmit,
+  });
 
   final int initial;
+
+  /// The host's limit from entitlements: 20 free, 30 with a plan.
+  final int max;
   final void Function(int capacity) onSubmit;
 
   @override
@@ -1021,10 +1230,8 @@ class _CapacityStep extends StatefulWidget {
 class _CapacityStepState extends State<_CapacityStep> {
   late int _capacity = widget.initial;
 
-  // Matches the backend's CHECK (capacity BETWEEN 1 AND 20) constraint —
-  // keep these in sync (frontend/meetup-scheduling-PLAN.md Step 7).
   static const _min = 1;
-  static const _max = 20;
+  int get _max => widget.max;
 
   @override
   Widget build(BuildContext context) {
@@ -1130,6 +1337,13 @@ class _ReviewStep extends StatelessWidget {
     required this.locationLabel,
     required this.capacity,
     required this.submitting,
+    required this.quote,
+    required this.quoting,
+    required this.quoteFailed,
+    required this.notice,
+    required this.blockedByDebt,
+    required this.onRetryQuote,
+    required this.onBuyCredits,
     required this.onConfirm,
   });
 
@@ -1139,6 +1353,16 @@ class _ReviewStep extends StatelessWidget {
   final String locationLabel;
   final int capacity;
   final bool submitting;
+
+  /// The server's price for this draft (plan 29C). Credits have no flag,
+  /// so the cost row always shows.
+  final CreditQuote? quote;
+  final bool quoting;
+  final bool quoteFailed;
+  final String? notice;
+  final bool blockedByDebt;
+  final VoidCallback onRetryQuote;
+  final VoidCallback onBuyCredits;
   final VoidCallback onConfirm;
 
   @override
@@ -1202,17 +1426,74 @@ class _ReviewStep extends StatelessWidget {
                 value: capacity == 1 ? '1 person' : '$capacity people',
                 detail: 'Including you',
               ),
+              const _ReviewDivider(),
+              _costRow(),
             ],
           ),
         ),
+        if (notice != null) ...[
+          const SizedBox(height: 12),
+          Text(
+            notice!,
+            key: const Key('reviewCostNotice'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppPalette.danger, fontSize: 12.5),
+          ),
+        ],
         const SizedBox(height: 20),
-        PrimaryButton(
-          label: 'Confirm & schedule',
-          isLoading: submitting,
-          onPressed: onConfirm,
-        ),
+        _button(),
         const SizedBox(height: 24),
       ],
+    );
+  }
+}
+
+extension on _ReviewStep {
+  /// The cost as the server quoted it, and the balance under it.
+  Widget _costRow() {
+    final q = quote;
+    if (q == null) {
+      return _ReviewRow(
+        key: const Key('reviewCost'),
+        icon: AppIcons.credits,
+        label: 'Cost',
+        value: quoteFailed ? 'Could not get the price' : 'Getting the price…',
+        detail: quoteFailed ? 'Check your connection and try again' : null,
+      );
+    }
+    return _ReviewRow(
+      key: const Key('reviewCost'),
+      icon: AppIcons.credits,
+      label: 'Cost',
+      value: q.coveredByPlan ? 'Included in your plan' : formatCredits(q.cost),
+      detail: 'Your balance: ${formatCredits(q.balanceAvailable)}',
+    );
+  }
+
+  /// CONFIRM, or what has to happen first: get the price, or buy credits.
+  Widget _button() {
+    final q = quote;
+    if (q == null) {
+      return PrimaryButton(
+        key: const Key('reviewConfirm'),
+        label: quoteFailed ? 'Try again' : 'Confirm & schedule',
+        isLoading: quoting,
+        onPressed: quoteFailed ? onRetryQuote : null,
+      );
+    }
+    if (blockedByDebt || !q.affordable) {
+      return PrimaryButton(
+        key: const Key('reviewConfirm'),
+        label: 'Buy credits',
+        isLoading: quoting,
+        onPressed: quoting ? null : onBuyCredits,
+      );
+    }
+    return PrimaryButton(
+      key: const Key('reviewConfirm'),
+      label: 'Confirm & schedule',
+      isLoading: submitting || quoting,
+      onPressed: quoting ? null : onConfirm,
     );
   }
 }
@@ -1223,6 +1504,7 @@ class _ReviewStep extends StatelessWidget {
 /// tomorrow) wrap as a paragraph instead of ragged-right against the label.
 class _ReviewRow extends StatelessWidget {
   const _ReviewRow({
+    super.key,
     required this.icon,
     required this.label,
     required this.value,

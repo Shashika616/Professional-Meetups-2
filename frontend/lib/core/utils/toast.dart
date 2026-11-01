@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
@@ -25,6 +26,8 @@ class ToastService {
     String message, {
     ToastType type = ToastType.info,
   }) {
+    // Plan 29E: an error toast is friction. Its kind only, never the text.
+    if (type == ToastType.error) trackError('error_toast');
     final overlay = Overlay.of(context);
     _currentId += 1;
     final id = _currentId;

@@ -5,6 +5,8 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 
 import 'package:professional_connections_platform/core/config/app_config.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
+import 'package:professional_connections_platform/core/services/client_info_http_client.dart';
+import 'package:professional_connections_platform/core/services/deadline_http_client.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 
 /// Real [SubscriptionService] wired to the gateway's `/v1/billing/*` REST
@@ -19,7 +21,9 @@ class HttpSubscriptionService implements SubscriptionService {
     String? baseUrl,
     Future<String?> Function()? getAccessToken,
     InAppPurchase? inAppPurchase,
-  }) : _httpClient = httpClient ?? http.Client(),
+  }) : _httpClient = DeadlineHttpClient(
+         ClientInfoHttpClient(httpClient ?? http.Client()),
+       ),
        _baseUrl = baseUrl ?? AppConfig.gatewayBaseUrl,
        _getAccessToken = getAccessToken ?? (() async => null),
        _injectedInAppPurchase = inAppPurchase;
@@ -102,12 +106,25 @@ class HttpSubscriptionService implements SubscriptionService {
     required String receiptOrToken,
     required String productId,
   }) async {
+    // Plan 29B's body: the store's token as `token`. The server answers
+    // with the wallet and the subscription; the subscription is what this
+    // service reports.
     final response = await _authenticatedPost('/v1/billing/purchases/verify', {
       'platform': platform,
-      'receipt_or_token': receiptOrToken,
       'product_id': productId,
+      'token': receiptOrToken,
     });
-    return SubscriptionStatus.fromJson(_decodeOrThrow(response));
+    if (response.statusCode == 503) {
+      throw const SubscriptionException(
+        'Purchases cannot be confirmed right now. Your purchase is safe; we '
+        'will try again.',
+      );
+    }
+    final body = _decodeOrThrow(response);
+    final sub = body['subscription'];
+    return SubscriptionStatus.fromJson(
+      sub is Map<String, dynamic> ? sub : body,
+    );
   }
 
   @override

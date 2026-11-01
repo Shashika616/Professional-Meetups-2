@@ -202,9 +202,15 @@ class PlaceSuggestionsDropdown extends StatelessWidget {
     required this.suggestions,
     required this.onSelect,
     this.searching = false,
+    this.maxListHeight,
   });
 
   final List<PlaceSuggestion> suggestions;
+
+  /// The most room the list may take, when the caller knows less is
+  /// available than [_maxVisibleRows] rows — the space left above an open
+  /// keyboard. Rows beyond it scroll instead of hiding under the keyboard.
+  final double? maxListHeight;
   final void Function(int index) onSelect;
 
   /// A lookup is in flight. With results already on screen they stay
@@ -253,8 +259,13 @@ class PlaceSuggestionsDropdown extends StatelessWidget {
             )
           else
             ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxHeight: _maxVisibleRows * _rowHeight,
+              constraints: BoxConstraints(
+                maxHeight: maxListHeight == null
+                    ? _maxVisibleRows * _rowHeight
+                    : maxListHeight!.clamp(
+                        _rowHeight,
+                        _maxVisibleRows * _rowHeight,
+                      ),
               ),
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(vertical: 6),

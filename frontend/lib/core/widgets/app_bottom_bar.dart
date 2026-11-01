@@ -1,5 +1,3 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -30,9 +28,14 @@ import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 /// sliding beneath is the prettier version and it is deliberately not what
 /// this does: it would require every scrollable in the app to grow bottom
 /// padding by hand, and the first one anybody forgot would hide a button
-/// under the pill. The pill is translucent anyway ([AppPalette.navSurface]
-/// + a blur) so it still reads as a floating layer, it simply has page
-/// colour behind it instead of content.
+/// under the pill. The pill is translucent anyway ([AppPalette.navSurface])
+/// so it still reads as a floating layer, it simply has page colour behind
+/// it instead of content.
+///
+/// No blur. It used to carry a BackdropFilter, which re-renders on every
+/// frame the screen draws — every scroll, every animation, on every tab —
+/// while having nothing but flat page colour to blur, so it cost real
+/// frames and showed nothing.
 ///
 /// That page colour is [AppPalette.onyx] — NOT a guess. The bar sits at the
 /// very bottom of the screen and [AppPalette.backgroundGradient]'s bottom
@@ -76,40 +79,32 @@ class AppBottomBar extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(_inset, 0, _inset, _inset),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(26),
-            child: BackdropFilter(
-              // Nothing scrolls under this bar (see the class doc), so the
-              // blur has only the flat page colour to work on. It is kept
-              // because a dialog, a sheet or an open keyboard CAN pass
-              // behind it, and because the saturation bump is what keeps
-              // the translucent fill from going grey.
-              filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: AppPalette.navSurface,
-                  borderRadius: BorderRadius.circular(26),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(
-                        alpha: AppPalette.isLight ? 0.08 : 0.3,
-                      ),
-                      blurRadius: 22,
-                      offset: const Offset(0, 8),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppPalette.navSurface,
+                borderRadius: BorderRadius.circular(26),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(
+                      alpha: AppPalette.isLight ? 0.08 : 0.3,
                     ),
-                  ],
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(4, 7, 4, 6),
-                  child: Row(
-                    children: List.generate(_items.length, (i) {
-                      return Expanded(
-                        child: _NavButton(
-                          item: _items[i],
-                          selected: i == index,
-                          onTap: () => onTap(i),
-                        ),
-                      );
-                    }),
+                    blurRadius: 22,
+                    offset: const Offset(0, 8),
                   ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(4, 7, 4, 6),
+                child: Row(
+                  children: List.generate(_items.length, (i) {
+                    return Expanded(
+                      child: _NavButton(
+                        item: _items[i],
+                        selected: i == index,
+                        onTap: () => onTap(i),
+                      ),
+                    );
+                  }),
                 ),
               ),
             ),

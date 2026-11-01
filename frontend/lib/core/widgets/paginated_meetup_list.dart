@@ -135,6 +135,20 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
   bool _hasMore = false;
   bool _loadingMore = false;
 
+  /// Rows already built for [_items], by index.
+  ///
+  /// Home shrink-wraps this list inside its own scroll view, and a
+  /// shrink-wrapped list builds EVERY row rather than just the visible ones.
+  /// Without this, each page append (and the `_loadingMore` toggle before it)
+  /// rebuilt every card on the page mid-fling — measured at 64-97 ms frames.
+  /// Handing Flutter the identical widget back lets it skip those subtrees.
+  ///
+  /// A row depends only on its own meetup and the one above it, so appending
+  /// never invalidates an earlier row. Cleared whenever the first page or the
+  /// parent's widget changes, since [PaginatedMeetupList.itemBuilder] may
+  /// then build something different.
+  final _builtRows = <int, Widget>{};
+
   /// Created unconditionally but ATTACHED only on the non-shrink-wrapped
   /// path — see [_listeningController] for which one actually drives
   /// pagination, and [dispose] for why ownership matters.
@@ -206,6 +220,7 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
   }
 
   void _resetFromWidget() {
+    _builtRows.clear();
     _items = List.of(widget.items);
     _nextCursor = widget.nextCursor;
     _hasMore = widget.hasMore;
@@ -236,6 +251,7 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
   @override
   void didUpdateWidget(covariant PaginatedMeetupList oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _builtRows.clear();
     // Re-point the listener if the caller swapped controllers (or switched
     // shrink-wrap mode) without remounting. Cheap, and it is the difference
     // between pagination quietly dying after a rebuild and continuing to
@@ -353,7 +369,7 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
                   ),
                 );
               }
-              return widget.itemBuilder(
+              return _builtRows[index] ??= widget.itemBuilder(
                 context,
                 _items[index],
                 index == 0 ? null : _items[index - 1],

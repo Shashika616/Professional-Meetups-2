@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/tracked_flow.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
@@ -69,81 +73,97 @@ class HostingUnlockPage extends ConsumerWidget {
     // and still not be Level 3, and the button would have lied to them.
     final canHost = levelTwoDone && companyNameDone && companyEmailDone;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      // Same Scaffold shape as VerificationChecklistPage — see its comment
-      // for why extendBodyBehindAppBar is load-bearing with AppBackground.
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('Unlock hosting meetups')),
-      body: AppBackground(
-        child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
-            children: [
-              Text(
-                'Add your organisation to reach Level 3 trust and host meetups.',
-                style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
-              ),
-              const SizedBox(height: 20),
-
-              // Shown only when the prerequisite is genuinely unmet, so the
-              // normal case is not cluttered with a block about steps the
-              // user finished long ago.
-              if (!levelTwoDone) ...[
-                _LevelTwoPrerequisite(
-                  linkedInConnected: linkedInConnected,
-                  phoneDone: phoneDone,
-                  emailDone: emailDone,
-                  detailsDone: detailsDone,
+    // Plan 29E: the hosting-unlock funnel. The checklist step is the Level 2
+    // prerequisite and the company name; unlock is reaching Level 3.
+    return TrackedFlow(
+      flowId: AnalyticsFlow.hostingUnlock,
+      firstStep: AnalyticsFlowStep.hostingUnlockChecklist,
+      doneSteps: {
+        if (levelTwoDone && companyNameDone)
+          AnalyticsFlowStep.hostingUnlockChecklist,
+        if (companyEmailDone) AnalyticsFlowStep.hostingUnlockCorporateEmail,
+        if (canHost) AnalyticsFlowStep.hostingUnlockUnlock,
+      },
+      completed: canHost,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        // Same Scaffold shape as VerificationChecklistPage — see its comment
+        // for why extendBodyBehindAppBar is load-bearing with AppBackground.
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(title: const Text('Unlock hosting meetups')),
+        body: AppBackground(
+          child: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 32),
+              children: [
+                Text(
+                  'Add your organisation to reach Level 3 trust and host meetups.',
+                  style: TextStyle(
+                    color: AppPalette.textSecondary,
+                    fontSize: 13,
+                  ),
                 ),
                 const SizedBox(height: 20),
-              ],
 
-              const SectionLabel('Your organisation'),
-              const SizedBox(height: 12),
-              FlatCard(
-                radius: 18,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 6,
+                // Shown only when the prerequisite is genuinely unmet, so the
+                // normal case is not cluttered with a block about steps the
+                // user finished long ago.
+                if (!levelTwoDone) ...[
+                  _LevelTwoPrerequisite(
+                    linkedInConnected: linkedInConnected,
+                    phoneDone: phoneDone,
+                    emailDone: emailDone,
+                    detailsDone: detailsDone,
+                  ),
+                  const SizedBox(height: 20),
+                ],
+
+                const SectionLabel('Your organisation'),
+                const SizedBox(height: 12),
+                FlatCard(
+                  radius: 18,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: Column(
+                    children: [
+                      _HostingRow(
+                        key: const Key('hostingUnlockCompanyNameRow'),
+                        icon: AppIcons.building,
+                        title: 'Company / Organisation',
+                        doneLabel: profile?.companyName ?? '',
+                        pendingLabel: 'Not added',
+                        done: companyNameDone,
+                        locked: !levelTwoDone,
+                        onTap: () => _openCompanyVerification(context, profile),
+                      ),
+                      const _HostingDivider(),
+                      _HostingRow(
+                        key: const Key('hostingUnlockCompanyEmailRow'),
+                        icon: AppIcons.mail,
+                        title: 'Company / Organisation Email',
+                        doneLabel: 'Verified',
+                        pendingLabel: 'Not verified',
+                        done: companyEmailDone,
+                        locked: !levelTwoDone,
+                        onTap: () => _openCompanyVerification(context, profile),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Column(
-                  children: [
-                    _HostingRow(
-                      key: const Key('hostingUnlockCompanyNameRow'),
-                      icon: AppIcons.building,
-                      title: 'Company / Organisation',
-                      doneLabel: profile?.companyName ?? '',
-                      pendingLabel: 'Not added',
-                      done: companyNameDone,
-                      locked: !levelTwoDone,
-                      onTap: () => _openCompanyVerification(context, profile),
-                    ),
-                    const _HostingDivider(),
-                    _HostingRow(
-                      key: const Key('hostingUnlockCompanyEmailRow'),
-                      icon: AppIcons.mail,
-                      title: 'Company / Organisation Email',
-                      doneLabel: 'Verified',
-                      pendingLabel: 'Not verified',
-                      done: companyEmailDone,
-                      locked: !levelTwoDone,
-                      onTap: () => _openCompanyVerification(context, profile),
-                    ),
-                  ],
+                const SizedBox(height: 28),
+                // Pops rather than retrying the host action that led here, the
+                // same choice VerificationChecklistPage makes (ADR-028 § 3):
+                // the next tap on HOST simply works now.
+                PrimaryButton(
+                  key: const Key('hostingUnlockComplete'),
+                  label: 'Complete',
+                  height: 48,
+                  onPressed: canHost ? () => Navigator.of(context).pop() : null,
                 ),
-              ),
-              const SizedBox(height: 28),
-              // Pops rather than retrying the host action that led here, the
-              // same choice VerificationChecklistPage makes (ADR-028 § 3):
-              // the next tap on HOST simply works now.
-              PrimaryButton(
-                key: const Key('hostingUnlockComplete'),
-                label: 'Complete',
-                height: 48,
-                onPressed: canHost ? () => Navigator.of(context).pop() : null,
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -151,9 +171,16 @@ class HostingUnlockPage extends ConsumerWidget {
   }
 
   static void _openCompanyVerification(BuildContext context, profile) {
+    track(Cta.unlockHosting);
+    Analytics.instance
+        .flow(AnalyticsFlow.hostingUnlock)
+        .stepViewed(AnalyticsFlowStep.hostingUnlockCorporateEmail);
     Navigator.push(
       context,
       MaterialPageRoute(
+        settings: const RouteSettings(
+          name: ScreenNames.corporateEmailVerification,
+        ),
         builder: (_) => CorporateEmailVerificationPage(
           currentDomainHint: profile?.companyDomain as String?,
         ),
@@ -222,6 +249,9 @@ class _LevelTwoPrerequisite extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(
+                settings: const RouteSettings(
+                  name: ScreenNames.verificationChecklist,
+                ),
                 builder: (_) => const VerificationChecklistPage(),
               ),
             ),

@@ -45,6 +45,10 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   late final Widget _mapCanvas = MapCanvas(
     initialCentre: _defaultCenter,
     initialZoom: 13,
+    // A preview, not a control. The place comes from search or from the
+    // device; dragging and pinching only moved the pin away from what was
+    // chosen, and every gesture redrew the native map under the sheet.
+    interactive: false,
     onReady: (canvas) => _canvas = canvas,
     // Kept in a plain field, not state: this fires every camera frame
     // and nothing on screen depends on the live value. It is read on
@@ -229,6 +233,7 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
       // Android step.
       final position = await resolveCurrentLocationForMap(context);
       if (!mounted || position == null) return;
+      _clearSearchedPlace();
       await _recenter(position.latitude, position.longitude);
       // Leave the search field as-is (ADR-029) — no placeholder text is
       // submitted; the server resolves a real label from the coordinates
@@ -244,6 +249,18 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
     final target = MapPoint(lat, lon);
     setState(() => _cameraTarget = target);
     await _canvas?.moveTo(target, zoom: 15);
+  }
+
+  /// Drops a previously searched place when the device's own position
+  /// replaces it. Without this the banner kept the old name and the old
+  /// name was submitted with the NEW coordinates, so the meetup showed one
+  /// place's name at another place. An empty label is what makes the
+  /// server look the address up from the coordinates.
+  void _clearSearchedPlace() {
+    if (_searchController.text.isEmpty) return;
+    _suppressNextSearch = true;
+    _searchController.clear();
+    _completions = [];
   }
 
   void _showError(String message) {

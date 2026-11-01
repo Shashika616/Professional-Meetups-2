@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/friction.dart';
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
@@ -32,10 +35,15 @@ class _EmailSignupStepState extends ConsumerState<EmailSignupStep> {
   _Step _step = _Step.email;
   final _emailController = TextEditingController();
 
+  /// Plan 29E: the onboarding funnel's email and code steps.
+  final _flow = Analytics.instance.flow(AnalyticsFlow.onboarding);
+
   @override
   void initState() {
     super.initState();
     _emailController.addListener(_onFieldChanged);
+    _flow.stepCompleted(AnalyticsFlowStep.onboardingChooseMethod);
+    _flow.stepViewed(AnalyticsFlowStep.onboardingEmail);
   }
 
   void _onFieldChanged() => setState(() {});
@@ -58,6 +66,8 @@ class _EmailSignupStepState extends ConsumerState<EmailSignupStep> {
   void _showOtp() {
     if (!_emailLooksValid) return;
     setState(() => _step = _Step.otp);
+    _flow.stepCompleted(AnalyticsFlowStep.onboardingEmail);
+    _flow.stepViewed(AnalyticsFlowStep.onboardingOtp);
   }
 
   Future<int> _startSignupOtp() => ref
@@ -83,25 +93,29 @@ class _EmailSignupStepState extends ConsumerState<EmailSignupStep> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      // Without this, the AppBar's own (transparent) region isn't covered
-      // by AppBackground at all — body painting starts below the app bar,
-      // so that strip shows through to nothing but plain black instead of
-      // the same image/gradient as the rest of the screen. This also
-      // widens MediaQuery's top padding to include the app bar's height,
-      // so the SafeArea below still pushes content clear of the title row.
-      // Same fix as profile_setup_screen.dart's identical Scaffold shape.
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(title: const Text('Sign up with email')),
-      body: AppBackground(
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: switch (_step) {
-              _Step.email => _emailStep(),
-              _Step.otp => _otpStep(),
-            },
+    // Plan 29E: a form left a minute without input is friction.
+    return DwellTracker(
+      stepKey: _step,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        // Without this, the AppBar's own (transparent) region isn't covered
+        // by AppBackground at all — body painting starts below the app bar,
+        // so that strip shows through to nothing but plain black instead of
+        // the same image/gradient as the rest of the screen. This also
+        // widens MediaQuery's top padding to include the app bar's height,
+        // so the SafeArea below still pushes content clear of the title row.
+        // Same fix as profile_setup_screen.dart's identical Scaffold shape.
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(title: const Text('Sign up with email')),
+        body: AppBackground(
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: switch (_step) {
+                _Step.email => _emailStep(),
+                _Step.otp => _otpStep(),
+              },
+            ),
           ),
         ),
       ),

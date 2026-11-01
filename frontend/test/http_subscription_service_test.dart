@@ -119,29 +119,95 @@ void main() {
   });
 
   group('verifyPurchase', () {
-    test('sends platform/receipt/productId and parses the response', () async {
-      final client = MockClient((request) async {
-        expect(request.method, 'POST');
-        expect(request.url.toString(), '$_baseUrl/v1/billing/purchases/verify');
-        final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['platform'], 'ios');
-        expect(body['receipt_or_token'], 'jws-token');
-        expect(body['product_id'], 'premium_monthly');
+    test(
+      'sends the 29B body and reads the subscription it answers with',
+      () async {
+        final client = MockClient((request) async {
+          expect(request.method, 'POST');
+          expect(
+            request.url.toString(),
+            '$_baseUrl/v1/billing/purchases/verify',
+          );
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          // Exactly these three: the gateway refuses unknown fields.
+          expect(body, {
+            'platform': 'ios',
+            'product_id': 'premium_monthly',
+            'token': 'jws-token',
+          });
+          expect(request.headers['X-App-Version'], isNotEmpty);
+          return http.Response(
+            jsonEncode({
+              'kind': 'subscription',
+              'product_id': 'premium_monthly',
+              'credits_granted': 0,
+              'already_processed': false,
+              'wallet': {'balance': 0, 'held': 0, 'available': 0, 'debt': 0},
+              'subscription': {
+                'status': 'active',
+                'plan_code': 'pro',
+                'product_id': 'premium_monthly',
+                'current_period_end_unix_seconds': 1893456000,
+                'auto_renew': true,
+                'entitled': true,
+              },
+            }),
+            200,
+          );
+        });
 
-        return http.Response(
-          jsonEncode({'tier': 'premium', 'status': 'active'}),
-          200,
+        final status = await _serviceWith(client).verifyPurchase(
+          platform: 'ios',
+          receiptOrToken: 'jws-token',
+          productId: 'premium_monthly',
         );
+
+        expect(status.isEntitled, isTrue);
+        expect(status.tier, SubscriptionTier.premium);
+        expect(status.productId, 'premium_monthly');
+        expect(status.autoRenewStatus, isTrue);
+      },
+    );
+
+    test('the 29B subscription shape: server entitlement wins over status', () {
+      final graceEnded = SubscriptionStatus.fromJson({
+        'status': 'grace_period',
+        'plan_code': 'pro',
+        'entitled': false,
       });
-
-      final status = await _serviceWith(client).verifyPurchase(
-        platform: 'ios',
-        receiptOrToken: 'jws-token',
-        productId: 'premium_monthly',
-      );
-
-      expect(status.isEntitled, isTrue);
+      expect(graceEnded.isEntitled, isFalse);
+      expect(graceEnded.tier, SubscriptionTier.free);
+      final revoked = SubscriptionStatus.fromJson({
+        'status': 'revoked',
+        'plan_code': 'pro',
+      });
+      expect(revoked.status, SubscriptionLifecycleStatus.revoked);
+      expect(revoked.isEntitled, isFalse);
+      final none = SubscriptionStatus.fromJson({
+        'status': 'none',
+        'auto_renew': false,
+        'entitled': false,
+      });
+      expect(none.tier, SubscriptionTier.free);
+      expect(none.productId, isNull);
     });
+
+    test(
+      '503 (store not reachable) throws, so the purchase stays pending',
+      () async {
+        final client = MockClient(
+          (request) async => http.Response(jsonEncode({'error': 'x'}), 503),
+        );
+        expect(
+          () => _serviceWith(client).verifyPurchase(
+            platform: 'ios',
+            receiptOrToken: 't',
+            productId: 'premium_monthly',
+          ),
+          throwsA(isA<SubscriptionException>()),
+        );
+      },
+    );
 
     test(
       'server rejection throws SubscriptionException, does not activate',

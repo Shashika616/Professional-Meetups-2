@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -36,6 +37,7 @@ Future<bool?> showAccountClaimSheet(
 }) {
   return showAppSheet<bool>(
     context,
+    screen: ScreenNames.accountClaim,
     // Not dismissible by a tap outside or a drag: this sheet is a fork in
     // the signup, and the two ways out of it are both deliberate taps.
     // Backing out of it by accident mid-code would leave the person on the

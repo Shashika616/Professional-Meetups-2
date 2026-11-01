@@ -3,8 +3,12 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
+import 'package:professional_connections_platform/core/models/credits.dart';
+import 'package:professional_connections_platform/core/services/credit_service.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 import 'package:professional_connections_platform/features/premium/purchase_flow_controller.dart';
+
+import 'support/fake_credit_service.dart';
 
 class _FakeSubscriptionService implements SubscriptionService {
   int verifyPurchaseCalls = 0;
@@ -79,15 +83,22 @@ void main() {
   late StreamController<List<PurchaseDetails>> purchaseUpdates;
   late List<PurchaseDetails> completedPurchases;
   late List<PurchaseParam> boughtParams;
+  late List<PurchaseParam> boughtConsumables;
+  late FakeCreditService creditService;
   late PurchaseFlowController controller;
 
   setUp(() {
     subscriptionService = _FakeSubscriptionService();
+    creditService = FakeCreditService();
     purchaseUpdates = StreamController<List<PurchaseDetails>>.broadcast();
     completedPurchases = [];
     boughtParams = [];
+    boughtConsumables = [];
     controller = PurchaseFlowController(
       subscriptionService: subscriptionService,
+      creditService: creditService,
+      consumableIds: const {'credits_50'},
+      accountToken: '86c0ac9d-aaeb-55cd-b903-7c60e6c93b6e',
       platform: 'ios',
       purchaseUpdates: purchaseUpdates.stream,
       completePurchase: (details) async {
@@ -95,6 +106,10 @@ void main() {
       },
       buyNonConsumable: (param) async {
         boughtParams.add(param);
+        return true;
+      },
+      buyConsumable: (param) async {
+        boughtConsumables.add(param);
         return true;
       },
     );
@@ -230,11 +245,174 @@ void main() {
 
     expect(boughtParams, hasLength(1));
     expect(boughtParams.single.productDetails.id, 'premium_monthly');
+    expect(
+      boughtParams.single.applicationUserName,
+      '86c0ac9d-aaeb-55cd-b903-7c60e6c93b6e',
+    );
+    expect(boughtConsumables, isEmpty);
   });
+
+  // --- plan 29C: credit packs ---
+
+  ProductDetails pack() => ProductDetails(
+    id: 'credits_50',
+    title: '50 credits',
+    description: 'Credits',
+    price: 'Rs 500.00',
+    rawPrice: 500,
+    currencyCode: 'LKR',
+  );
+
+  test(
+    'a credit pack is bought as a consumable, carrying the account token',
+    () async {
+      await controller.buy(pack());
+      expect(boughtConsumables, hasLength(1));
+      expect(boughtConsumables.single.productDetails.id, 'credits_50');
+      expect(
+        boughtConsumables.single.applicationUserName,
+        '86c0ac9d-aaeb-55cd-b903-7c60e6c93b6e',
+      );
+      expect(boughtParams, isEmpty);
+    },
+  );
+
+  test('without an account token nothing is bought', () async {
+    controller.accountToken = null;
+    await controller.buy(pack());
+    expect(boughtConsumables, isEmpty);
+    expect(controller.errorMessage, isNotNull);
+  });
+
+  test(
+    'a consumable is completed only after the server confirms the grant',
+    () async {
+      final verified = Completer<void>();
+      final details = _details(
+        status: PurchaseStatus.purchased,
+        productID: 'credits_50',
+        pendingCompletePurchase: true,
+      );
+      // Hold the server's answer: nothing may complete until it arrives.
+      creditService.verifyError = null;
+      final gated = _GatedCreditService(creditService, verified.future);
+      // Its own stream: the setUp controller must not see this purchase.
+      final updates = StreamController<List<PurchaseDetails>>();
+      addTearDown(updates.close);
+      final c = PurchaseFlowController(
+        subscriptionService: subscriptionService,
+        creditService: gated,
+        consumableIds: const {'credits_50'},
+        accountToken: 'tok',
+        platform: 'android',
+        purchaseUpdates: updates.stream,
+        completePurchase: (d) async => completedPurchases.add(d),
+        buyNonConsumable: (_) async => true,
+        buyConsumable: (_) async => true,
+      );
+      addTearDown(c.dispose);
+      updates.add([details]);
+      await pumpEventQueue();
+      expect(
+        completedPurchases,
+        isEmpty,
+        reason: 'completed before the server answered',
+      );
+      verified.complete();
+      await pumpEventQueue();
+      expect(creditService.verifyCalls.single, (
+        platform: 'android',
+        productId: 'credits_50',
+        token: 'server-token',
+      ));
+      expect(
+        subscriptionService.verifyPurchaseCalls,
+        0,
+        reason: 'a pack goes to the credits verify, not the subscription one',
+      );
+      expect(
+        completedPurchases.where((d) => identical(d, details)),
+        hasLength(1),
+      );
+      expect(c.lastGrant?.creditsGranted, 50);
+    },
+  );
+
+  test(
+    'a server failure leaves the consumable pending for the store to redeliver',
+    () async {
+      creditService.verifyError = const CreditUnavailableException();
+      final details = _details(
+        status: PurchaseStatus.purchased,
+        productID: 'credits_50',
+        pendingCompletePurchase: true,
+      );
+      purchaseUpdates.add([details]);
+      await pumpEventQueue();
+      expect(completedPurchases, isEmpty);
+      expect(controller.lastGrant, isNull);
+      expect(
+        controller.errorMessage,
+        const CreditUnavailableException().message,
+      );
+      expect(controller.busy, isFalse);
+    },
+  );
+
+  test(
+    'a completion error after the grant is not reported as a failure',
+    () async {
+      final c = PurchaseFlowController(
+        subscriptionService: subscriptionService,
+        creditService: creditService,
+        consumableIds: const {'credits_50'},
+        accountToken: 'tok',
+        platform: 'android',
+        purchaseUpdates: purchaseUpdates.stream,
+        completePurchase: (_) async =>
+            throw StateError('already consumed by the server'),
+        buyNonConsumable: (_) async => true,
+        buyConsumable: (_) async => true,
+      );
+      addTearDown(c.dispose);
+      purchaseUpdates.add([
+        _details(
+          status: PurchaseStatus.purchased,
+          productID: 'credits_50',
+          pendingCompletePurchase: true,
+        ),
+      ]);
+      await pumpEventQueue();
+      expect(c.lastGrant, isNotNull);
+      expect(c.errorMessage, isNull);
+    },
+  );
 
   test('restore() delegates to SubscriptionService.restorePurchases', () async {
     await controller.restore();
 
     expect(subscriptionService.restorePurchasesCalls, 1);
   });
+}
+
+/// Holds every verifyPurchase until [gate] completes.
+class _GatedCreditService extends FakeCreditService {
+  _GatedCreditService(this._inner, this._gate);
+
+  final FakeCreditService _inner;
+  final Future<void> _gate;
+
+  @override
+  Future<PurchaseGrant> verifyPurchase({
+    required String platform,
+    required String productId,
+    required String token,
+  }) async {
+    await _gate;
+    return _inner.verifyPurchase(
+      platform: platform,
+      productId: productId,
+      token: token,
+    );
+  }
 }

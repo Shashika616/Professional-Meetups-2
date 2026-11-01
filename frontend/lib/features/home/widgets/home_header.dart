@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/professional_avatar.dart';
@@ -54,6 +55,9 @@ class HomeHeader extends StatelessWidget {
               _NotificationBell(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
+                    settings: const RouteSettings(
+                      name: ScreenNames.notifications,
+                    ),
                     builder: (_) => const NotificationsPage(),
                   ),
                 ),

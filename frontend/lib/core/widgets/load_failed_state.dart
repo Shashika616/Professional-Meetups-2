@@ -3,7 +3,9 @@ import 'dart:io' show SocketException;
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
+import 'package:professional_connections_platform/core/services/credit_service.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
@@ -29,6 +31,13 @@ class LoadFailure {
     if (error is MeetupOfflineException) {
       // The service already told "no connection" from "too slow"; keep
       // its sentence.
+      return LoadFailure(
+        LoadFailureKind.offline,
+        'You look offline',
+        error.message,
+      );
+    }
+    if (error is CreditOfflineException) {
       return LoadFailure(
         LoadFailureKind.offline,
         'You look offline',
@@ -101,6 +110,13 @@ class LoadFailedState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pictureHeight = compact ? 120.0 : 190.0;
+    return _ReportedOnce(
+      kind: 'load_failed_${failure.kind.name}',
+      child: _content(pictureHeight),
+    );
+  }
+
+  Widget _content(double pictureHeight) {
     return Padding(
       padding: EdgeInsets.fromLTRB(24, compact ? 8 : 28, 24, compact ? 8 : 24),
       child: Column(
@@ -161,6 +177,29 @@ class LoadFailedState extends StatelessWidget {
 /// skeleton for [holdFor] makes the page read as "tried, then could not"
 /// instead of "broke on arrival". The hold starts when this widget appears,
 /// which is when the failure arrived.
+/// Reports `error_shown` once, when a failure state first appears (plan
+/// 29E), not on every rebuild.
+class _ReportedOnce extends StatefulWidget {
+  const _ReportedOnce({required this.kind, required this.child});
+
+  final String kind;
+  final Widget child;
+
+  @override
+  State<_ReportedOnce> createState() => _ReportedOnceState();
+}
+
+class _ReportedOnceState extends State<_ReportedOnce> {
+  @override
+  void initState() {
+    super.initState();
+    trackError(widget.kind);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class SkeletonThenFailure extends StatefulWidget {
   const SkeletonThenFailure({
     super.key,

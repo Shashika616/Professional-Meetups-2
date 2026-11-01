@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/app_shell.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -34,6 +35,11 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
+        settings: RouteSettings(
+          name: sessionState.isLoggedIn
+              ? ScreenNames.appShell
+              : ScreenNames.landing,
+        ),
         builder: (context) =>
             sessionState.isLoggedIn ? const AppShell() : const LandingPage(),
       ),
@@ -52,14 +58,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
         key: const ValueKey('splash-gradient-container'),
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppPalette.onyx, AppPalette.surface, AppPalette.deepBlue],
-            stops: [0.0, 0.55, 1.0],
-          ),
-        ),
+        // The app's own ground, so the splash hands over to the first
+        // screen without a colour change. It used to fade to deepBlue,
+        // which nothing else in the app uses any more.
+        decoration: BoxDecoration(gradient: AppPalette.backgroundGradient),
         child: SafeArea(
           // Stack rather than one Column: the mark and wordmark belong on the
           // optical centre of the screen, while the attribution belongs on the
@@ -111,7 +113,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
                       height: 20,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: AppPalette.candyBlue.withValues(alpha: 0.7),
+                        color: AppPalette.brandGreen.withValues(alpha: 0.8),
                       ),
                     ),
                   ],

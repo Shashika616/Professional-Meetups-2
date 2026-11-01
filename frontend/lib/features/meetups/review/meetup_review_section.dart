@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
@@ -95,6 +96,7 @@ class _MeetupReviewSectionState extends ConsumerState<MeetupReviewSection> {
   Future<void> _openFlow() async {
     final submitted = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
+        settings: const RouteSettings(name: ScreenNames.meetupReview),
         builder: (_) => MeetupReviewPage(
           meetupId: widget.meetupId,
           hostUserId: widget.hostUserId,
