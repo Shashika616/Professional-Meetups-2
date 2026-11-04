@@ -111,5 +111,5 @@ The nightly backup runs from `.github/workflows/backup-database.yml`. Check it f
 | Dependabot version and security updates | On |
 | Base images and actions pinned to digests | On |
 | Image scan and SBOM | On |
-| Protection on `main` (no force push, required checks) | **Planned** |
+| Protection on `main` | **Off, the owner's choice for now** (2026-11-04). The Deploy workflow still checks CI before any deploy |
 | Second reviewer | Not possible with one maintainer. Set **Prevent self-review** when a second person joins |
