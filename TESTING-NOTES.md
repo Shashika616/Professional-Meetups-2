@@ -469,3 +469,66 @@ plus the `analytics.daily_*` tables.
    test accounts, or on for everyone (runbook §15).
 9. Re-read this file top to bottom and delete every section whose mechanism no
    longer exists.
+
+## After plan 30B (security and location)
+
+The sign-in test codes, the seeded test users and the scoped bypass work
+exactly as before. The allowlisted test addresses and numbers are exempt from
+the new daily OTP budgets: a seeded account can sign in as often as needed
+(a test signs one in 20 times in a row).
+
+What a tester will notice:
+
+- **Any other address or number** gets 5 codes a day per purpose, and 10 wrong
+  guesses a day across all of them. A real tester address that hits either
+  works again the next Asia/Colombo day; locally, clear it with
+  `DELETE FROM auth.otp_budgets;`.
+- **Joining needs a recent location.** The app reports one when Home opens. On
+  an emulator, set a location (Extended controls → Location) and open Home
+  before asking to join, or the join is refused with "Turn on location to
+  join".
+- **Exact coordinates** on a meetup's page appear only for its host and
+  accepted people, or a signed-in viewer within 50 km whose location is from
+  the last 24 hours. Guests never see them; the place name still shows.
+- **Work email at a company not in the known list** now leaves the account at
+  Level 2, with the claim waiting for review. To reach Level 3 by hand, use a
+  known company and its domain (for example WSO2 and `@wso2.com`), or one of
+  the seeded Level 3 accounts.
+- **Profiles** list only meetups that have ended.
+- **Shares** of a meetup with trusted contacts: 3 a day, 2 contacts each, live
+  meetups only. **Trusted-contact changes**: 5 a day. Locally, clear both with
+  `DELETE FROM ops.rate_counters;`.
+
+## After plan 30C (SOS and trusted contacts)
+
+- Contacts are a name and a number, at most 2. Adding or editing one texts
+  nobody, and there is no confirmation link any more.
+- SOS texts the 2 oldest contacts. On a local stack the message is in the
+  monolith's log from the logging SMS sender. To see each variant: **GPS** set
+  a location on the emulator; **last known** turn location off after a read;
+  **approximate** deny the permission, with a location reported from Home in
+  the last day; **unknown** the same with none; **meetup section** host or be
+  accepted on a meetup, within 2 hours of its window.
+- A name outside GSM-7 (Sinhala, Tamil) reads "A TieHere member" in the text.
+- Clear the daily change limit locally with `DELETE FROM ops.rate_counters;`.
+
+## After plan 30D (profile photos)
+
+- Tap the avatar on Profile: Take photo, Choose from library, Remove photo
+  (only when there is one). The Android emulator's camera shows a test scene.
+- A photo is one JPEG in `auth.user_photos`, 320 px, at most 100 KB. Check with
+  `SELECT user_id, bytes, width, etag FROM auth.user_photos;`.
+- Upload limit is 10 an hour. Clear it locally with
+  `DELETE FROM ops.rate_counters;`.
+- Builds from before 30D show initials for everyone. That is expected.
+
+## After plan 30E (profiles and client fixes)
+
+The sign-in test codes, seeded users and scoped bypass are unchanged.
+
+- **Host reviews:** a host's profile lists finished meetups, then Reviews, each signed "A participant". Everyone sees the same thing, including the person who wrote it. A member who only joined shows counts only.
+- **Location explanation:** shows once, before the first system prompt. To see it again, uninstall the app or clear its data. Not now leaves Home's Try again card.
+- **Meetup page:** "Others happening soon" uses what Home already found. After a cold start straight onto a meetup, it shows Browse meetups. It never reads location itself.
+- **Update screen:** to test it locally, start the monolith with `MIN_SUPPORTED_APP_VERSION=9.9.9`. It checks on start and on every return to the foreground.
+- **Sign-out:** rotates the analytics install id, so a new `install_id` appears in `analytics.events` for whoever signs in next.
+- **Purchases:** a redelivered transaction is handled with no page open. With the catalog unreachable it stays pending and comes back on a later launch, so offline testing shows no grant until you reopen the app online.

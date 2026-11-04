@@ -173,3 +173,10 @@ defending legal claims (Art. 17(3)(e)), limited to 90 days, and disclosed.
 > **Subscriptions.** Premium is billed by the App Store or Google Play.
 > Deleting your account does not cancel it; cancel it in your store
 > account to stop future charges.
+
+## Addendum (plan 30D, 2026-11-04): profile photos
+
+A user's photo is one row in `auth.user_photos`, referencing `auth.users` with `ON DELETE CASCADE`, so it goes in the same transaction as the account. There is no copy elsewhere. `meetup.user_display_cache` holds only the path, and is removed by the existing `user.deleted` handling. The repeating LinkedIn photo sync recorded in round 9 is gone: a picture is fetched once, at account creation, and stored as our own.
+
+Host reviews (plan 30E) stay after an author deletes their account, because they carry no author at all on any public surface.
+

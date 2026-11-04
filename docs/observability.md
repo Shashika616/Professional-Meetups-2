@@ -156,5 +156,8 @@ day (runbook §14).
 
 Without `ANALYTICS_ARCHIVE_BUCKET` the archive is skipped with a warning, and the day
 is still dropped once it is aggregated. The Cloud Run service account needs
-`roles/storage.objectCreator` on that bucket. The upload is create-only, so a retry
-never overwrites an archive. See `docs/api/analytics.md` for the event contract.
+`roles/storage.objectCreator` on that bucket and nothing more: every upload, archives
+and reports alike, is create-only, so a retry never overwrites anything and a
+regenerated report is stored beside the daily one (runbook §14). The heavy sweeps
+(aggregate, archive, report) run on their own Scheduler job, the analytics tick
+(runbook §10). See `docs/api/analytics.md` for the event contract.

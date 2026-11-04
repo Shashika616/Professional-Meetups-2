@@ -55,7 +55,7 @@ the shape below is the whole contract.
 
 | Field | Rule | If it does not match |
 |---|---|---|
-| `install_id` | A random UUID made on first launch and kept on the device. Never a device identifier (no IDFA, no Android ID) | 400: the whole batch is refused |
+| `install_id` | A random UUID made on first launch and kept on the device, in the 36-character form. Never a device identifier (no IDFA, no Android ID). Checked at the gateway before anything else, since it keys the signed-out rate limit (plan 30B) | 400: the whole batch is refused |
 | `app_version` | `1.2.3` or `1.2.3+45` | Not stored |
 | `os_name` | `ios`, `android` or `other` | Not stored |
 | `os_version` | Digits and dots, for example `17.4` | Not stored |
@@ -73,7 +73,9 @@ the shape below is the whole contract.
 **Attributes** are checked one by one against the event's registry entry. An
 attribute the event does not list, of the wrong type, out of range, a string
 over 100 characters, or a string that is not an identifier (lowercase letters,
-digits and `_ . : -`) is removed. The rest of the event is kept. Free text cannot
+digits and `_ . : -`) is removed, and so is an `id` attribute shaped like a
+UUID (plan 30B): an `id` names a thing in the app, such as a filter, never a
+user, meetup or contact. The rest of the event is kept. Free text cannot
 get through as an attribute, so never try to send any.
 
 ### The response
