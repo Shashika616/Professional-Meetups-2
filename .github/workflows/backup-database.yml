@@ -63,7 +63,10 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-17
-          pg_dump --version
+          # The runner's own PostgreSQL 16 comes first on PATH otherwise, and
+          # pg_dump refuses a newer server.
+          echo /usr/lib/postgresql/17/bin >> "$GITHUB_PATH"
+          /usr/lib/postgresql/17/bin/pg_dump --version
 
       # Fail here with a clear message rather than deep inside the dump
       # script, where a missing secret reads as a connection error.
