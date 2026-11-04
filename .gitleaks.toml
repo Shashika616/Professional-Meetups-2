@@ -19,3 +19,14 @@ description = "CocoaPods lockfile checksums, which match the generic key pattern
 paths = [
   '''Podfile\.lock''',
 ]
+
+[[allowlists]]
+description = "A made-up account token in one purchase test, reviewed 2026-11-04: a fixed UUID with no account behind it, and the app sends it to no one"
+condition = "AND"
+paths = [
+  '''frontend/test/purchase_flow_controller_test\.dart''',
+]
+regexTarget = "match"
+regexes = [
+  '''accountToken: '86c0ac9d-aaeb-55cd-b903-7c60e6c93b6e'''',
+]
