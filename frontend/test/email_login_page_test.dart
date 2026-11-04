@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -186,9 +188,15 @@ class _FakeAuthService implements AuthService {
   @override
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber = '',
-    String email = '',
+    required String phoneNumber,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
+  }) => throw UnimplementedError();
 
   @override
   Future<List<TrustedContact>> listTrustedContacts() async =>
@@ -203,7 +211,17 @@ class _FakeAuthService implements AuthService {
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<String> uploadProfilePhoto(Uint8List jpeg) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteProfilePhoto() => throw UnimplementedError();
 
   @override
   Future<void> deleteAccount() async {}

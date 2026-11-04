@@ -54,6 +54,9 @@ dependencies:
   # package_info_plus/win32 bump conflicts with flutter_secure_storage's
   # own win32 constraint (this app has no Windows target, but pub still
   # resolves across all platforms a federated plugin declares).
+  # A user's own profile photo (plan 30D): pick, then crop on the phone.
+  image_picker: 1.2.4
+  image_cropper: 12.2.1
   geolocator: ^14.0.2 # "Use my current location" on the same step
   # iOS-only map rendering (ADR-013 §4's third correction, frontend/
   # meetup-scheduling-PLAN.md's 2026-08-18 platform-split addendum) —

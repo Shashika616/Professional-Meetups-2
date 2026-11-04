@@ -80,6 +80,14 @@ class CreditRejectedException extends CreditException {
   final int statusCode;
 }
 
+/// 426: this build is too old for this (N1-D4). The client also raises
+/// [UpdateRequired], which brings up the update screen.
+class CreditUpdateRequiredException extends CreditException {
+  const CreditUpdateRequiredException([
+    super.message = 'Update TieHere to continue.',
+  ]);
+}
+
 /// Anything else: a 5xx, an unreadable answer.
 class CreditServerException extends CreditException {
   const CreditServerException([

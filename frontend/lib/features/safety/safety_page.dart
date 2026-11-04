@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart' show LocationAccuracy;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -468,6 +467,8 @@ class _TrustedContactsSection extends ConsumerWidget {
                     remaining > 0
                         ? 'Add a contact · ${contacts.length} of '
                               '$maxTrustedContacts added'
+                        : remaining < 0
+                        ? 'Only two are alerted · tap to remove one'
                         : 'All $maxTrustedContacts contacts added · tap to '
                               'manage',
                     style: TextStyle(
@@ -592,8 +593,9 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
   /// itself is: somebody is waiting during an emergency. A fix that has
   /// not arrived in eight seconds is not going to change the outcome,
   /// and the alert is better sent without it.
-  static const Duration _sosLocationTimeout = Duration(seconds: 8);
-  static const Duration _sosLocationFallback = Duration(seconds: 5);
+  /// One id for this sheet: the automatic retry and the Retry button repeat
+  /// it, so a retry can never alert anyone twice.
+  final String _requestId = newSosRequestId();
 
   _SosDialogPhase _phase = _SosDialogPhase.confirming;
 
@@ -616,9 +618,8 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
 
   String _resultMessage = '';
 
-  /// True once an attempt has been made without a usable location, so
-  /// the success line can say so — a contact who gets "Location
-  /// unavailable" should not be a surprise to the person who sent it.
+  /// True once an attempt has been made with no location from the phone,
+  /// so the success line can say so.
   bool _sentWithoutLocation = false;
 
   Future<void> _confirm() async {
@@ -635,41 +636,40 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
     // disabled the one feature whose entire purpose is to work when
     // things have gone wrong.
     //
-    // Now a failed read costs the coordinates and nothing else: the
-    // alert goes out saying the location is unavailable, which a trusted
-    // contact can act on. Silence is not.
-    double? latitude;
-    double? longitude;
-    try {
-      final position = await requestCurrentLocation(
-        accuracy: LocationAccuracy.medium,
-        timeLimit: _sosLocationTimeout,
-        gpsFallbackLimit: _sosLocationFallback,
-      );
-      latitude = position.latitude;
-      longitude = position.longitude;
-    } catch (_) {
-      // Deliberately bare. Permission denied, services off, a timeout,
-      // or a platform channel that threw something undocumented all mean
-      // the same thing here — no coordinates — and none of them is worth
-      // failing an emergency alert over.
-    }
+    // Now a fresh fix, then the phone's last known position, then none
+    // (plan 2.2); the server adds what it stored, or says it is unknown.
+    final fix = await readSosLocation();
 
     try {
       final contactsNotified = await widget.ref
           .read(authServiceProvider)
           .triggerSos(
             contextMessage: 'Triggered from the Safety Center.',
-            latitude: latitude,
-            longitude: longitude,
+            latitude: fix?.latitude,
+            longitude: fix?.longitude,
+            capturedAt: fix?.capturedAt,
+            source: fix?.source,
+            clientRequestId: _requestId,
           );
       if (!mounted) return;
+      // Nobody was reached: that is a failure to act on, not a success with
+      // a zero in it. Retry sends again.
+      if (contactsNotified == 0) {
+        setState(() {
+          _phase = _SosDialogPhase.failed;
+          _flow.abandon(AnalyticsValue.flowAbandonedReasonError);
+          _resultMessage =
+              'None of your contacts could be reached. Try again, or call '
+              'emergency services.';
+        });
+        return;
+      }
       setState(() {
         _phase = _SosDialogPhase.succeeded;
         _flow.stepCompleted(AnalyticsFlowStep.sosSending);
         _flow.stepViewed(AnalyticsFlowStep.sosSent);
         _flow.complete();
-        _sentWithoutLocation = latitude == null || longitude == null;
+        _sentWithoutLocation = fix == null;
         _resultMessage = contactsNotified == 1
             ? '1 trusted contact was alerted.'
             : '$contactsNotified trusted contacts were alerted.';
@@ -743,7 +743,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
     switch (_phase) {
       case _SosDialogPhase.confirming:
         return Text(
-          'This will share your live location with your trusted contacts.',
+          'This will share your location with your trusted contacts.',
           style: TextStyle(color: AppPalette.textSecondary, fontSize: 13),
         );
       case _SosDialogPhase.sending:
@@ -791,15 +791,14 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
                 ),
               ],
             ),
-            // Said out loud, because the contact's message says it too:
-            // they were told the location is unavailable, and the person
-            // who sent it should know that before they assume help is on
-            // its way to the right place.
+            // Said out loud: the person who sent this should know before
+            // they assume help is on its way to the right place.
             if (_sentWithoutLocation) ...[
               const SizedBox(height: 8),
               Text(
-                'Your location could not be determined, so the alert says so. '
-                'Call your contacts if they need to find you.',
+                'Your phone could not find your location, so the alert uses '
+                'the last one we have, if any. Call your contacts if they '
+                'need to find you.',
                 style: TextStyle(
                   color: AppPalette.textSecondary,
                   fontSize: 12.5,

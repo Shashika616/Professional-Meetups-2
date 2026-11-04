@@ -214,7 +214,7 @@ class Meetup {
       // locked meetup indistinguishable from a real "no photo"/"no name"
       // case. lockedForViewer below is the field to check.
       hostFullName: json['host_full_name'] as String?,
-      hostProfilePhotoUrl: json['host_profile_photo_url'] as String?,
+      hostProfilePhotoUrl: json['host_photo_url'] as String?,
       hostTrustLevel: json['host_trust_level'] as int? ?? 0,
       hostRatingAverage: (json['host_rating_average'] as num?)?.toDouble() ?? 0,
       hostRatingCount: json['host_rating_count'] as int? ?? 0,
@@ -281,6 +281,35 @@ String formatMeetupWindow(DateTime start, DateTime end) {
       : '${_formatTime(start)} - ${_formatTime(end)}';
   return '$datePart, $rangePart';
 }
+
+/// "Sep 1, 2026": a date with no time, for a past meetup on a profile.
+String formatMeetupDay(DateTime day) =>
+    '${_monthAbbr[day.month - 1]} ${day.day}, ${day.year}';
+
+/// "September 2026" from the `YYYY-MM` a review carries, or empty if the
+/// value is not one.
+String formatReviewMonth(String month) {
+  final parts = month.split('-');
+  if (parts.length != 2) return '';
+  final index = int.tryParse(parts[1]);
+  if (index == null || index < 1 || index > 12) return '';
+  return '${_monthFull[index - 1]} ${parts[0]}';
+}
+
+const _monthFull = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
 
 /// "3:00 PM": one clock time, for copy that names a single moment (a
 /// meetup's end, say) rather than its whole window.
@@ -359,8 +388,7 @@ class MeetupRequestModel {
       meetupId: json['meetup_id'] as String,
       requesterId: json['requester_id'] as String,
       requesterFullName: json['requester_full_name'] as String? ?? '',
-      requesterProfilePhotoUrl:
-          json['requester_profile_photo_url'] as String? ?? '',
+      requesterProfilePhotoUrl: json['requester_photo_url'] as String? ?? '',
       requesterTrustLevel: json['requester_trust_level'] as int? ?? 0,
       requesterRatingAverage:
           (json['requester_rating_average'] as num?)?.toDouble() ?? 0,
@@ -386,7 +414,6 @@ class SafetyState {
   const SafetyState({
     required this.meetupId,
     this.checklistAckAt,
-    this.liveLocationOptIn = false,
     this.checkedInAt,
     this.declinedAt,
     this.declineReason,
@@ -395,7 +422,6 @@ class SafetyState {
 
   final String meetupId;
   final DateTime? checklistAckAt;
-  final bool liveLocationOptIn;
   final DateTime? checkedInAt;
 
   /// Set together, mutually exclusive with [checkedInAt] (ADR-024 §4) — the
@@ -421,7 +447,6 @@ class SafetyState {
     return SafetyState(
       meetupId: json['meetup_id'] as String,
       checklistAckAt: _secondsToDateTime(json['checklist_ack_at_unix_seconds']),
-      liveLocationOptIn: json['live_location_opt_in'] as bool? ?? false,
       checkedInAt: _secondsToDateTime(json['checked_in_at_unix_seconds']),
       declinedAt: _secondsToDateTime(json['declined_at_unix_seconds']),
       declineReason: json['decline_reason'] as String?,
@@ -464,7 +489,7 @@ class RatableParticipant {
     return RatableParticipant(
       userId: json['user_id'] as String,
       fullName: json['full_name'] as String? ?? '',
-      profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+      profilePhotoUrl: json['photo_url'] as String? ?? '',
       trustLevel: json['trust_level'] as int? ?? 0,
       alreadyRated: json['already_rated'] as bool? ?? false,
       contextNote: json['context_note'] as String?,
@@ -497,7 +522,7 @@ class MeetupParticipant {
         userId: json['user_id'] as String? ?? '',
         isHost: json['is_host'] as bool? ?? false,
         fullName: json['full_name'] as String? ?? '',
-        profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+        profilePhotoUrl: json['photo_url'] as String? ?? '',
         trustLevel: json['trust_level'] as int? ?? 0,
       );
 }
@@ -698,7 +723,7 @@ class ReviewedParticipant {
       ReviewedParticipant(
         userId: json['user_id'] as String,
         fullName: json['full_name'] as String? ?? '',
-        profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+        profilePhotoUrl: json['photo_url'] as String? ?? '',
         score: json['score'] as int? ?? 0,
         traits: ((json['traits'] as List<dynamic>?) ?? const [])
             .map((e) => e as String)

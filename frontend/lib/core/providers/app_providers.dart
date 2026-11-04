@@ -1,3 +1,4 @@
+import 'package:professional_connections_platform/core/services/photo_picker.dart';
 import 'dart:async' show unawaited;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -22,6 +23,7 @@ import 'package:professional_connections_platform/core/services/firebase_push_no
 import 'package:professional_connections_platform/core/services/http_subscription_service.dart';
 import 'package:professional_connections_platform/core/services/push_notification_service.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
+import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/services/token_refresher.dart';
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -223,7 +225,7 @@ final homeIntentFilterProvider = StateProvider<IntentType?>((ref) => null);
 /// bar itself.
 final currentTabIndexProvider = StateProvider<int>((ref) => 0);
 
-/// Open meetups for the currently-selected intent, within 40km of the
+/// Open meetups for the currently-selected intent, within 50 km of the
 /// caller's last on-demand location read (ADR-021 §2) — replaces the mock
 /// matchesProvider (ADR-013 § 7). `.autoDispose` so a stale page isn't kept
 /// alive after the user navigates away from the browse tab. The family key
@@ -363,8 +365,11 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
       );
       unawaited(_registerPushTokenIfAvailable());
       return state;
-    } on AuthNetworkException {
-      // Offline, or the backend too slow to answer, while the access token
+    } on Exception catch (error) {
+      if (error is! AuthNetworkException && error is! RateLimitedException) {
+        return const AuthSessionState();
+      }
+      // Rate limited (N1-D6), offline, or the backend too slow to answer, while the access token
       // had expired (V-17a). The refresh token was never rejected, so this
       // is still a valid session, and TokenRefresher has left it in
       // storage: open the app signed in with it rather than on the sign-in
@@ -614,6 +619,7 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     final session = state.value?.session;
     await ref.read(sessionStorageProvider).clearSession();
     state = const AsyncData(AuthSessionState(signedOutByUser: true));
+    unawaited(Analytics.instance.rotateInstallId());
     if (session == null) return;
 
     // Captured now: the closure below outlives any screen and may outlive
@@ -681,6 +687,7 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
       // Disposed mid-flight: nobody is signed in through this notifier
       // any more, which is the state this line was trying to reach.
     }
+    unawaited(Analytics.instance.rotateInstallId());
     unawaited(() async {
       try {
         await push.deleteToken().timeout(const Duration(seconds: 8));
@@ -757,6 +764,21 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     }
   }
 
+  /// Shows a new photo everywhere at once, and keeps it for the next launch.
+  Future<void> setProfilePhoto(String path) async {
+    final current = state.value;
+    final session = current?.session;
+    if (session == null) return;
+    final updated = session.withProfilePhoto(path);
+    await ref.read(sessionStorageProvider).saveSession(updated);
+    state = AsyncData(
+      AuthSessionState(
+        session: updated,
+        profile: current?.profile?.copyWith(profilePhotoUrl: path),
+      ),
+    );
+  }
+
   /// The minimal profile derivable from a session alone, for when the
   /// network cannot supply the real one.
   UserProfile _profileFromSession(AuthSession session) => UserProfile(
@@ -766,6 +788,11 @@ class AuthSessionNotifier extends AsyncNotifier<AuthSessionState> {
     trustLevel: session.trustLevel,
   );
 }
+
+/// Takes or chooses a profile photo. Overridden in tests.
+final photoPickerProvider = Provider<PhotoPicker>(
+  (ref) => const DevicePhotoPicker(),
+);
 
 final authSessionProvider =
     AsyncNotifierProvider<AuthSessionNotifier, AuthSessionState>(

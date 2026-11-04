@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
@@ -177,8 +179,14 @@ class ImmediateAuthService implements AuthService {
   @override
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber = '',
-    String email = '',
+    required String phoneNumber,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
   }) => throw UnimplementedError();
 
   @override
@@ -194,7 +202,17 @@ class ImmediateAuthService implements AuthService {
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   }) => throw UnimplementedError();
+
+  @override
+  Future<String> uploadProfilePhoto(Uint8List jpeg) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteProfilePhoto() => throw UnimplementedError();
 
   @override
   Future<void> deleteAccount() async {}

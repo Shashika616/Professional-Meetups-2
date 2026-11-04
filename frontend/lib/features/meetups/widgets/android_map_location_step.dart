@@ -35,9 +35,13 @@ class AndroidMapLocationStep extends StatefulWidget {
     required this.onSubmit,
     http.Client? httpClient,
     this.placeSearch,
+    this.startAt,
   }) : _httpClient = httpClient;
 
   final void Function(double lat, double lng, String label) onSubmit;
+
+  /// Where the map opens: the viewer's rounded location when it is known.
+  final MapPoint? startAt;
 
   /// Overridable so widget tests can inject a fake client and assert on
   /// real request counts (e.g. that debouncing actually collapses several
@@ -74,7 +78,7 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   // `flutter_test`, so `cameraPosition` never updates there), and it's
   // not dependent on `animateCamera`'s async settle timing on a real
   // device either.
-  MapPoint _pickedLocation = _defaultCenter;
+  late MapPoint _pickedLocation = widget.startAt ?? _defaultCenter;
 
   // Built ONCE and reused, instead of constructed inside build().
   //
@@ -89,10 +93,10 @@ class _AndroidMapLocationStepState extends State<AndroidMapLocationStep> {
   // Holding one instance makes the child identical between builds, which
   // Flutter short-circuits: the map subtree is not rebuilt at all. Safe
   // because none of these arguments ever change — the centre and zoom are
-  // compile-time constants, and both callbacks only assign fields.
+  // fixed when the page opens, and both callbacks only assign fields.
   // Camera movement goes through _canvas.moveTo(), never through props.
   late final Widget _mapCanvas = MapCanvas(
-    initialCentre: _defaultCenter,
+    initialCentre: widget.startAt ?? _defaultCenter,
     initialZoom: 13,
     // A preview, not a control. The place comes from search or from the
     // device; dragging and pinching only moved the pin away from what was

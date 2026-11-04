@@ -34,6 +34,9 @@ class Refused extends SendResult {
 abstract interface class AnalyticsTransport {
   Future<SendResult> send(Map<String, Object?> batch);
 
+  /// Stops a [send] in progress, if there is one (N1-D8).
+  void abort();
+
   /// `PUT /v1/analytics/consent`. Best effort; false when it did not reach
   /// the server or there is no session.
   Future<bool> setConsent({required bool optedOut});
@@ -54,6 +57,7 @@ class HttpAnalyticsTransport implements AnalyticsTransport {
        _getAccessToken = getAccessToken ?? (() async => null);
 
   final http.Client _http;
+  Completer<void>? _stop;
   final String _baseUrl;
   final Future<String?> Function() _getAccessToken;
 
@@ -80,10 +84,18 @@ class HttpAnalyticsTransport implements AnalyticsTransport {
         body = gzip.encode(json);
         headers['Content-Encoding'] = 'gzip';
       }
-      final response = await _http.post(
-        Uri.parse('$_baseUrl/v1/analytics/events'),
-        headers: headers,
-        body: body,
+      final stop = Completer<void>();
+      _stop = stop;
+      final request =
+          http.AbortableRequest(
+              'POST',
+              Uri.parse('$_baseUrl/v1/analytics/events'),
+              abortTrigger: stop.future,
+            )
+            ..headers.addAll(headers)
+            ..bodyBytes = body;
+      final response = await http.Response.fromStream(
+        await _http.send(request),
       );
       final status = response.statusCode;
       if (status == 202 || status == 200) return const Sent();
@@ -99,6 +111,12 @@ class HttpAnalyticsTransport implements AnalyticsTransport {
       // Offline, no answer in time: keep the events and try later.
       return const RetryLater();
     }
+  }
+
+  @override
+  void abort() {
+    final stop = _stop;
+    if (stop != null && !stop.isCompleted) stop.complete();
   }
 
   @override

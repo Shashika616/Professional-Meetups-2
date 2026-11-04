@@ -42,7 +42,7 @@ const happeningSoonWithinDays = 28;
 /// Home's browse section — the open-meetups list that used to be a whole
 /// separate "Matches" tab.
 ///
-/// It owns the on-demand location read that browsing needs (the 40km
+/// It owns the on-demand location read that browsing needs (the 50 km
 /// ST_DWithin filter, ADR-021 §2) because it is the only thing on Home that
 /// needs one. Same read the deleted browse page did: once on mount, again on
 /// pull-to-refresh, never on a timer.
@@ -189,6 +189,7 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
     final location = ref.watch(viewerLocationProvider);
     switch (location.status) {
       case ViewerLocationStatus.loading:
+      case ViewerLocationStatus.needsExplanation:
         return Padding(
           padding: const EdgeInsets.only(top: 8),
           child: Column(

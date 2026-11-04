@@ -60,6 +60,41 @@ mixin _AccountMethods on _HttpAuthBase {
   }
 
   @override
+  Future<String> uploadProfilePhoto(Uint8List jpeg) async {
+    final headers = await _authHeaders();
+    final http.Response response;
+    try {
+      response = await _httpClient
+          .put(
+            Uri.parse('$_baseUrl/v1/users/me/photo'),
+            headers: {...headers, 'Content-Type': 'image/jpeg'},
+            body: jpeg,
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {
+      throw const AuthNetworkException(
+        'We couldn’t upload your photo. Check your connection and try again.',
+      );
+    }
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+      return decoded['photo_url'] as String? ?? '';
+    }
+    throw _mapVerificationError(response, on400: AuthNetworkException.new);
+  }
+
+  @override
+  Future<void> deleteProfilePhoto() async {
+    final headers = await _authHeaders();
+    final response = await _httpClient.delete(
+      Uri.parse('$_baseUrl/v1/users/me/photo'),
+      headers: headers,
+    );
+    if (response.statusCode == 204) return;
+    throw _mapVerificationError(response, on400: AuthNetworkException.new);
+  }
+
+  @override
   Future<void> deleteAccount() async {
     final headers = await _authHeaders();
     final http.Response response;

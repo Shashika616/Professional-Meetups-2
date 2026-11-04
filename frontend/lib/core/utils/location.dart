@@ -50,7 +50,7 @@ class LocationUnavailableException implements Exception {
 /// Android indoors that can be tens of seconds or never. Home sat on a
 /// shimmer the whole time with nothing to say. So: ask for a fix with a
 /// [timeLimit]; if it does not arrive, take the platform's last known
-/// position (a 40km browse radius does not need metre accuracy or a fix
+/// position (a 50 km browse radius does not need metre accuracy or a fix
 /// from this minute); only with neither is the caller told, as
 /// [LocationUnavailableReason.timedOut], with a sentence it can show.
 ///
@@ -199,3 +199,49 @@ Future<Position?> _lastKnownOrNull() async {
     return null;
   }
 }
+
+/// Where the phone says it is for an SOS, and how it knows.
+class SosFix {
+  const SosFix({
+    required this.latitude,
+    required this.longitude,
+    required this.capturedAt,
+    required this.source,
+  });
+
+  final double latitude;
+  final double longitude;
+  final DateTime capturedAt;
+
+  /// `gps` for a fresh fix, `device_last_known` for the phone's last known
+  /// position. The contact's message says which.
+  final String source;
+}
+
+/// The phone's part of the SOS location chain (plan 2.2): a fresh fix within
+/// [freshLimit], then the phone's last known position, then null. Never
+/// throws: a location is never a reason not to send. Called only once SOS is
+/// confirmed; nothing else reads location for SOS.
+Future<SosFix?> readSosLocation({
+  Duration freshLimit = const Duration(seconds: 8),
+}) async {
+  try {
+    final position = await requestCurrentLocation(
+      accuracy: LocationAccuracy.high,
+      timeLimit: freshLimit,
+      fallbackToLastKnown: false,
+    );
+    return _sosFix(position, 'gps');
+  } catch (_) {
+    // Permission denied, services off or a timeout: try what the phone has.
+  }
+  final last = await _lastKnownOrNull();
+  return last == null ? null : _sosFix(last, 'device_last_known');
+}
+
+SosFix _sosFix(Position position, String source) => SosFix(
+  latitude: position.latitude,
+  longitude: position.longitude,
+  capturedAt: position.timestamp,
+  source: source,
+);

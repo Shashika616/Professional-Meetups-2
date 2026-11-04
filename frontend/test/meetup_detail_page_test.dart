@@ -579,9 +579,7 @@ void main() {
         ProviderScope(
           overrides: [
             meetupServiceProvider.overrideWithValue(service),
-            viewerLocationSourceProvider.overrideWithValue(
-              () async => testPosition(),
-            ),
+            knownViewerLocationProvider.overrideWith(_KnownLocation.new),
           ],
           child: const MaterialApp(
             home: MeetupDetailPage(meetupId: 'meetup-1'),
@@ -954,13 +952,11 @@ void main() {
       id: 'contact-1',
       name: 'Amma',
       phoneNumber: '+94771111111',
-      email: '',
     );
     const friend = TrustedContact(
       id: 'contact-2',
       name: 'Friend',
       phoneNumber: '+94772222222',
-      email: '',
     );
 
     testWidgets('the old live-location switch is gone', (tester) async {
@@ -1301,4 +1297,12 @@ Future<void> _pumpDetail(WidgetTester tester, Meetup meetup) async {
     ),
   );
   await tester.pumpAndSettle();
+}
+
+class _KnownLocation extends KnownViewerLocation {
+  @override
+  ({double lat, double lng})? build() {
+    final position = testPosition();
+    return (lat: position.latitude, lng: position.longitude);
+  }
 }

@@ -108,42 +108,63 @@ void main() {
     });
   });
 
-  group('trusted contact consent state (#80)', () {
-    Map<String, dynamic> json(String? status) => {
+  // A server older than plan 30C still sends email and status; they are
+  // ignored, and every contact is simply a contact.
+  test('a contact ignores the retired email and status fields', () {
+    final contact = TrustedContact.fromJson({
       'id': 'c1',
       'name': 'Amma',
       'phone_number': '+94771111111',
-      'email': '',
-      'status': ?status,
-    };
-
-    test('reads pending and expired', () {
-      expect(
-        TrustedContact.fromJson(json('pending')).status,
-        TrustedContactStatus.pending,
-      );
-      expect(
-        TrustedContact.fromJson(json('expired')).status,
-        TrustedContactStatus.expired,
-      );
-      expect(
-        TrustedContact.fromJson(json('confirmed')).status,
-        TrustedContactStatus.confirmed,
-      );
+      'email': 'old@example.com',
+      'status': 'pending',
     });
-
-    // A server from before consent sends no status, and every contact it
-    // has was alerted. Reading "absent" as anything but confirmed would show
-    // a waiting label on contacts that are, in fact, protected.
-    test('an absent or unknown status reads as confirmed', () {
-      expect(
-        TrustedContact.fromJson(json(null)).status,
-        TrustedContactStatus.confirmed,
-      );
-      expect(
-        TrustedContact.fromJson(json('something-new')).status,
-        TrustedContactStatus.confirmed,
-      );
-    });
+    expect(contact.name, 'Amma');
+    expect(contact.phoneNumber, '+94771111111');
   });
+
+  test('an id passed in is used by both attempts', () async {
+    final ids = <String?>[];
+    var calls = 0;
+    final client = MockClient((request) async {
+      ids.add(
+        (jsonDecode(request.body) as Map)['client_request_id'] as String?,
+      );
+      calls++;
+      if (calls == 1) throw http.ClientException('connection reset');
+      return _ok();
+    });
+    await _serviceWith(
+      client,
+    ).triggerSos(contextMessage: 'x', clientRequestId: 'sheet-1');
+    expect(ids, ['sheet-1', 'sheet-1']);
+  });
+
+  test(
+    'the fix travels with its time and source, and only as a pair',
+    () async {
+      Map<dynamic, dynamic>? body;
+      final client = MockClient((request) async {
+        body = jsonDecode(request.body) as Map;
+        return _ok();
+      });
+      final service = _serviceWith(client);
+      await service.triggerSos(
+        contextMessage: 'x',
+        latitude: 6.9,
+        longitude: 79.8,
+        capturedAt: DateTime.utc(2026, 10, 30, 13, 15),
+        source: 'device_last_known',
+      );
+      expect(body!['captured_at'], '2026-10-30T13:15:00.000Z');
+      expect(body!['source'], 'device_last_known');
+
+      await service.triggerSos(
+        contextMessage: 'x',
+        capturedAt: DateTime.utc(2026, 10, 30),
+        source: 'gps',
+      );
+      expect(body!.containsKey('captured_at'), isFalse);
+      expect(body!.containsKey('source'), isFalse);
+    },
+  );
 }

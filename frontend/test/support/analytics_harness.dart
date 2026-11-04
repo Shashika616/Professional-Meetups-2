@@ -7,6 +7,11 @@ import 'package:professional_connections_platform/core/analytics/analytics_trans
 
 /// Records every batch and consent call; answers with [next].
 class FakeAnalyticsTransport implements AnalyticsTransport {
+  int aborts = 0;
+
+  @override
+  void abort() => aborts++;
+
   final List<Map<String, Object?>> batches = [];
   final List<bool> consents = [];
   SendResult Function() next = () => const Sent();

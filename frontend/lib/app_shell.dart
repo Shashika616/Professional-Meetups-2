@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/services/push_notification_service.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/app_bottom_bar.dart';
+import 'package:professional_connections_platform/features/premium/purchase_listener.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
 import 'package:professional_connections_platform/features/meetups/events_page.dart';
@@ -61,6 +62,12 @@ class _AppShellState extends ConsumerState<AppShell>
     // Plan 29E: the tracker reports the tab showing, not "the shell".
     Analytics.instance.tabChanged(ref.read(currentTabIndexProvider));
 
+    // N1-D2: the app's one purchase listener starts with the signed-in
+    // shell. Never a reason to stop the app.
+    try {
+      ref.read(purchaseFlowProvider);
+    } catch (_) {}
+
     // ADR-030 (round-9 scaffolding) — initializes the push service and
     // subscribes to its message stream once, for the app's lifetime.
     // NoOpPushNotificationService.messages never emits, so
@@ -90,9 +97,9 @@ class _AppShellState extends ConsumerState<AppShell>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       ref.invalidate(activeMeetupsProvider);
-      // Plan 29C: flags and the balance can change while the app is away
-      // (a flag turned on, a refund, a purchase on another device).
-      ref.invalidate(appConfigProvider);
+      // Plan 29C: the balance can change while the app is away (a refund, a
+      // purchase on another device). Flags are re-read by UpdateGate, which
+      // is on every screen.
       ref.invalidate(walletProvider);
     }
   }

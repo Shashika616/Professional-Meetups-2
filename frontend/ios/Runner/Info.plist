@@ -53,10 +53,12 @@
 	<string>740861671089-8slra5pv1n6ios8qt9ncum67n8205jdq.apps.googleusercontent.com</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>TieHere uses your location to help you pick a public meetup spot near you. This is a one-time lookup, not background tracking.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>TieHere uses the camera only when you choose to take a new profile photo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>TieHere opens your photos only when you choose one for your profile.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>TieHere uses your location to help you pick a public meetup spot near you. This is a one-time lookup, not background tracking.</string>
+	<string>TieHere uses your location while you use the app, to show meetups near you, to help you pick a public meetup spot, and to include in an SOS you send.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

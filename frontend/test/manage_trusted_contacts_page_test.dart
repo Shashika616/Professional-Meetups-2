@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -54,21 +56,37 @@ class _FakeAuthService implements AuthService {
   int removeCallCount = 0;
   int _seq = 0;
 
+  int updateCallCount = 0;
+
+  @override
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
+  }) async {
+    updateCallCount++;
+    final contact = TrustedContact(
+      id: contactId,
+      name: name,
+      phoneNumber: phoneNumber,
+    );
+    contacts = [for (final c in contacts) c.id == contactId ? contact : c];
+    return contact;
+  }
+
   @override
   Future<List<TrustedContact>> listTrustedContacts() async => contacts;
 
   @override
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber = '',
-    String email = '',
+    required String phoneNumber,
   }) async {
     addCallCount++;
     final contact = TrustedContact(
       id: 'contact-${_seq++}',
       name: name,
       phoneNumber: phoneNumber,
-      email: email,
     );
     contacts = [...contacts, contact];
     return contact;
@@ -85,7 +103,17 @@ class _FakeAuthService implements AuthService {
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<String> uploadProfilePhoto(Uint8List jpeg) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteProfilePhoto() => throw UnimplementedError();
 
   @override
   Future<void> deleteAccount() async {}
@@ -223,31 +251,13 @@ void main() {
     FlutterSecureStoragePlatform.instance = FakeSecureStoragePlatform();
   });
 
-  // #80. A new contact is texted a link and is not alerted until they use
-  // it, so the list must say which contacts are actually protecting you.
-  testWidgets('shows which contacts have not confirmed yet', (tester) async {
+  // ADR-013: a contact is active from the moment they are added.
+  testWidgets('a contact is a name and a number, with no waiting state', (
+    tester,
+  ) async {
     final auth = _FakeAuthService(
       contacts: const [
-        TrustedContact(
-          id: 'a',
-          name: 'Amma',
-          phoneNumber: '+94771111111',
-          email: '',
-        ),
-        TrustedContact(
-          id: 'b',
-          name: 'Nimal',
-          phoneNumber: '+94772222222',
-          email: '',
-          status: TrustedContactStatus.pending,
-        ),
-        TrustedContact(
-          id: 'c',
-          name: 'Kumari',
-          phoneNumber: '+94773333333',
-          email: '',
-          status: TrustedContactStatus.expired,
-        ),
+        TrustedContact(id: 'a', name: 'Amma', phoneNumber: '+94771111111'),
       ],
     );
     final container = _containerWith(auth);
@@ -256,10 +266,87 @@ void main() {
     await tester.pumpWidget(_appWith(container));
     await tester.pumpAndSettle();
 
-    expect(find.text('Waiting for confirmation'), findsOneWidget);
-    expect(find.text('Link expired. Remove and add again.'), findsOneWidget);
-    // The confirmed contact carries no label at all.
     expect(find.text('Amma'), findsOneWidget);
+    expect(find.text('1 of 2 added'), findsOneWidget);
+    expect(find.textContaining('confirmation'), findsNothing);
+    expect(find.textContaining('Only two contacts'), findsNothing);
+  });
+
+  testWidgets('at the cap it reads 2 of 2 added', (tester) async {
+    final auth = _FakeAuthService(
+      contacts: const [
+        TrustedContact(id: 'a', name: 'Amma', phoneNumber: '+94771111111'),
+        TrustedContact(id: 'b', name: 'Nimal', phoneNumber: '+94772222222'),
+      ],
+    );
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+
+    expect(find.text('2 of 2 added'), findsOneWidget);
+    expect(find.textContaining('Only two contacts'), findsNothing);
+  });
+
+  // D5: an account from before the cap keeps three, and is asked to remove
+  // one.
+  testWidgets('an account with 3 contacts is asked to remove one', (
+    tester,
+  ) async {
+    final auth = _FakeAuthService(
+      contacts: const [
+        TrustedContact(id: 'a', name: 'Amma', phoneNumber: '+94771111111'),
+        TrustedContact(id: 'b', name: 'Nimal', phoneNumber: '+94772222222'),
+        TrustedContact(id: 'c', name: 'Kumari', phoneNumber: '+94773333333'),
+      ],
+    );
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Only two contacts are alerted. Remove one.'),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Remove Kumari'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove contact'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Only two contacts'), findsNothing);
+  });
+
+  testWidgets('a contact can be edited, and the form has no email field', (
+    tester,
+  ) async {
+    final auth = _FakeAuthService(
+      contacts: const [
+        TrustedContact(id: 'a', name: 'Amma', phoneNumber: '+94771111111'),
+      ],
+    );
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Edit Amma'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edit contact'), findsOneWidget);
+    expect(find.textContaining('Email'), findsNothing);
+    expect(
+      find.textContaining('They get a text only if you press SOS'),
+      findsOneWidget,
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Amma'), 'Thaththa');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(auth.updateCallCount, 1);
+    expect(find.text('Thaththa'), findsOneWidget);
   });
 
   testWidgets('empty state shows a prompt to add a contact', (tester) async {
@@ -322,8 +409,7 @@ void main() {
     expect(find.text('+94771234567'), findsOneWidget);
   });
 
-  testWidgets('SAVE stays disabled with a name and an email but no phone: '
-      'the phone is mandatory, the email optional', (tester) async {
+  testWidgets('SAVE stays disabled without a phone number', (tester) async {
     final auth = _FakeAuthService();
     final container = _containerWith(auth);
     addTearDown(container.dispose);
@@ -335,17 +421,12 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Grace');
-    await tester.enterText(
-      find.widgetWithText(TextField, 'Email (optional)'),
-      'grace@example.com',
-    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect(auth.addCallCount, 0);
 
-    // The number unlocks it; the email rides along.
     await tester.enterText(
       find.widgetWithText(TextField, 'Phone number'),
       '+94771234567',
@@ -364,7 +445,6 @@ void main() {
           id: 'c1',
           name: 'Grace',
           phoneNumber: '+94771234567',
-          email: '',
         ),
       ],
     );
@@ -393,7 +473,7 @@ void main() {
     expect(find.text('Grace'), findsNothing);
   });
 
-  testWidgets('ADD CONTACT is disabled once the soft cap of 3 is reached', (
+  testWidgets('ADD CONTACT is disabled once the cap of 2 is reached', (
     tester,
   ) async {
     final auth = _FakeAuthService(
@@ -403,7 +483,6 @@ void main() {
           id: 'c$i',
           name: 'Contact $i',
           phoneNumber: '+9477000000$i',
-          email: '',
         ),
       ),
     );

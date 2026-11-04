@@ -23,6 +23,7 @@ import 'package:professional_connections_platform/core/widgets/primary_button.da
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/features/premium/purchase_flow_controller.dart';
+import 'package:professional_connections_platform/features/premium/purchase_listener.dart';
 
 /// The Premium screen (ADR-031, Slice B; server-driven since plan 29C),
 /// reached from `ProfilePage`'s Preferences row.
@@ -65,6 +66,7 @@ class PremiumPage extends ConsumerStatefulWidget {
 
 class _PremiumPageState extends ConsumerState<PremiumPage> {
   late final PurchaseFlowController _controller;
+  late final bool _ownsController;
   late final String _platform =
       widget.platform ?? ClientInfoHttpClient.currentPlatform();
 
@@ -80,15 +82,23 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
   @override
   void initState() {
     super.initState();
-    _controller = PurchaseFlowController(
-      subscriptionService: ref.read(subscriptionServiceProvider),
-      platform: _platform,
-      purchaseUpdates: widget.purchaseUpdates,
-      buyNonConsumable: widget.buyNonConsumable,
-      completePurchase: widget.completePurchase,
-      analyticsFlow: AnalyticsFlow.subscribe,
-    )..addListener(_onControllerChanged);
-    _controller.startFlow();
+    // The app's one listener (N1-D2); a test seam builds its own.
+    final shared = widget.purchaseUpdates == null
+        ? ref.read(purchaseFlowProvider)
+        : null;
+    _ownsController = shared == null;
+    _controller =
+        shared ??
+        PurchaseFlowController(
+          subscriptionService: ref.read(subscriptionServiceProvider),
+          platform: _platform,
+          purchaseUpdates: widget.purchaseUpdates,
+          buyNonConsumable: widget.buyNonConsumable,
+          completePurchase: widget.completePurchase,
+        );
+    _controller
+      ..addListener(_onControllerChanged)
+      ..beginFlow(AnalyticsFlow.subscribe);
   }
 
   /// The plans on offer, for this platform, in catalog order.
@@ -152,7 +162,7 @@ class _PremiumPageState extends ConsumerState<PremiumPage> {
   void dispose() {
     _controller.endFlow();
     _controller.removeListener(_onControllerChanged);
-    _controller.dispose();
+    if (_ownsController) _controller.dispose();
     super.dispose();
   }
 

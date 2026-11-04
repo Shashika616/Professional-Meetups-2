@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:professional_connections_platform/core/models/meetup.dart'
-    show formatMeetupWindow;
+    show formatMeetupDay, formatReviewMonth;
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
@@ -18,6 +18,11 @@ import 'package:professional_connections_platform/core/widgets/trust_level_badge
 /// the same content can sit in a full page ([PublicProfilePage]) or in a
 /// bottom sheet (the join confirmation). Renders skeletons for a null
 /// [profile], so callers show it immediately and let it fill in.
+/// Reviews are about hosting, so a member who only joined has no such
+/// section.
+bool _hasHosted(PublicProfile profile) =>
+    profile.recentMeetups.isNotEmpty || profile.reviews.isNotEmpty;
+
 class PublicProfileBody extends StatelessWidget {
   const PublicProfileBody({
     super.key,
@@ -46,7 +51,11 @@ class PublicProfileBody extends StatelessWidget {
         _VerificationCard(profile: profile),
         if (profile != null) ...[
           const SizedBox(height: 22),
-          _RecentMeetups(meetups: profile!.recentMeetups),
+          _RecentMeetups(profile: profile!),
+          if (_hasHosted(profile!)) ...[
+            const SizedBox(height: 22),
+            _Reviews(reviews: profile!.reviews),
+          ],
         ],
       ],
     );
@@ -289,18 +298,21 @@ class _VerificationRow extends StatelessWidget {
   }
 }
 
-/// The member's last few meetups. Each card: the intent, when and where,
-/// whether they hosted or joined, how many came, the overall rating, and
-/// the written comments about the meetup — attributed only where the
-/// server chose to name the author (the viewer was there too), shown as
-/// "A participant" otherwise.
+/// The finished meetups this member hosted. Each card: the intent, the day,
+/// the area, how many came and the overall rating. A member who has joined
+/// meetups but hosted none lists nothing: their count and rating are in the
+/// record card above (plan 2.3).
 class _RecentMeetups extends StatelessWidget {
-  const _RecentMeetups({required this.meetups});
+  const _RecentMeetups({required this.profile});
 
-  final List<MemberMeetup> meetups;
+  final PublicProfile profile;
 
   @override
   Widget build(BuildContext context) {
+    final meetups = profile.recentMeetups;
+    if (meetups.isEmpty && profile.meetupsCompleted > 0) {
+      return const SizedBox.shrink();
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -331,7 +343,6 @@ class _MemberMeetupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final m = meetup;
-    final roleColor = m.hosted ? AppPalette.brandGreen : AppPalette.candyBlue;
     return FlatCard(
       radius: 18,
       padding: const EdgeInsets.all(16),
@@ -359,7 +370,7 @@ class _MemberMeetupCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      m.intentLabel,
+                      m.intent.label,
                       style: TextStyle(
                         color: AppPalette.textPrimary,
                         fontSize: 12,
@@ -369,31 +380,13 @@ class _MemberMeetupCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      formatMeetupWindow(m.windowStart, m.windowEnd),
+                      formatMeetupDay(m.day),
                       style: TextStyle(
                         color: AppPalette.textSecondary,
                         fontSize: 12,
                       ),
                     ),
                   ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: roleColor.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: roleColor.withValues(alpha: 0.35)),
-                ),
-                child: Text(
-                  m.hosted ? 'Hosted' : 'Joined',
-                  style: TextStyle(
-                    color: roleColor,
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.1,
-                  ),
                 ),
               ),
             ],
@@ -457,40 +450,52 @@ class _MemberMeetupCard extends StatelessWidget {
                 ),
             ],
           ),
-          if (m.comments.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(height: 1, color: AppPalette.hairline),
-            const SizedBox(height: 10),
-            for (final c in m.comments) ...[
-              _CommentRow(comment: c),
-              const SizedBox(height: 8),
-            ],
-          ],
         ],
       ),
     );
   }
 }
 
-class _CommentRow extends StatelessWidget {
-  const _CommentRow({required this.comment});
+/// What participants wrote about this host. Always anonymous, for every
+/// viewer: the server sends no name, and the UI has nothing to fill in.
+class _Reviews extends StatelessWidget {
+  const _Reviews({required this.reviews});
 
-  final MemberMeetupComment comment;
+  final List<MemberReview> reviews;
 
   @override
   Widget build(BuildContext context) {
-    final named = comment.authorName.isNotEmpty;
-    // A quote block: an accent rule down the left, the note in italics
-    // between real quotation marks, and the author on the line below in
-    // bold with an em-dash lead — the typographic shape of a quotation,
-    // which the old icon-plus-two-lines never quite read as.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 2, bottom: 10),
+          child: _StatLabel('Reviews'),
+        ),
+        if (reviews.isEmpty)
+          const EmptySection(icon: AppIcons.star, title: 'No reviews yet')
+        else
+          for (final r in reviews) ...[
+            _ReviewRow(review: r),
+            const SizedBox(height: 8),
+          ],
+      ],
+    );
+  }
+}
+
+class _ReviewRow extends StatelessWidget {
+  const _ReviewRow({required this.review});
+
+  final MemberReview review;
+
+  @override
+  Widget build(BuildContext context) {
+    final month = formatReviewMonth(review.month);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(12, 8, 10, 8),
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
-        // The 3px blue rule down the left is gone, so the corners can all
-        // be rounded again — the old comment here explained a constraint
-        // that only existed because of the rule.
         color: AppPalette.tintedSurface(
           AppPalette.candyBlue.withValues(alpha: 0.08),
         ),
@@ -499,8 +504,24 @@ class _CommentRow extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Row(
+            children: [
+              StarRating(average: review.score.toDouble(), count: 1, size: 13),
+              const Spacer(),
+              if (month.isNotEmpty)
+                Text(
+                  month,
+                  style: TextStyle(
+                    color: AppPalette.textSecondary,
+                    fontSize: 11.5,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Plain Text on purpose: a review never becomes a link.
           Text(
-            '\u201C${comment.note}\u201D',
+            '\u201C${review.text}\u201D',
             style: TextStyle(
               color: AppPalette.textPrimary,
               fontSize: 13.5,
@@ -510,9 +531,9 @@ class _CommentRow extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            named ? comment.authorName : 'A participant',
+            'A participant',
             style: TextStyle(
-              color: named ? AppPalette.textPrimary : AppPalette.textSecondary,
+              color: AppPalette.textSecondary,
               fontSize: 12,
               fontWeight: FontWeight.w800,
             ),

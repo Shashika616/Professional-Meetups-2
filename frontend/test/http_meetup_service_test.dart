@@ -26,7 +26,6 @@ HttpMeetupService _serviceWith(http.Client client) => HttpMeetupService(
 String _safetyStateBody({List<String> sharedWith = const []}) => jsonEncode({
   'meetup_id': 'meetup-1',
   'checklist_ack_at_unix_seconds': 1757000000,
-  'live_location_opt_in': false,
   'checked_in_at_unix_seconds': 1757003600,
   'shared_with_contact_ids': sharedWith,
 });

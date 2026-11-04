@@ -223,15 +223,6 @@ class HttpMeetupService implements MeetupService {
   }
 
   @override
-  Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn) async {
-    final response = await _authenticatedPost(
-      '/v1/meetups/$meetupId/safety/live-location',
-      {'opt_in': optIn},
-    );
-    return SafetyState.fromJson(_decodeOrThrow(response));
-  }
-
-  @override
   Future<SafetyState> shareWithContacts(
     String meetupId,
     List<String> contactIds,

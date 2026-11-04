@@ -132,6 +132,13 @@ class AppIcons {
       '<path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7"/>';
   static const String search =
       '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/>';
+  static const String camera =
+      '<path d="M4 8h3.5L9 5.5h6L16.5 8H20a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/>'
+      '<circle cx="12" cy="13.5" r="3.5"/>';
+  static const String image =
+      '<rect x="4" y="5" width="16" height="14" rx="3"/>'
+      '<circle cx="9" cy="10" r="1.5"/>'
+      '<path d="M4 16l5-4 4 3 3-2 4 3"/>';
   static const String edit = '<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/>';
 
   // ---------------------------------------------------------------------

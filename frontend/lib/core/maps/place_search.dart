@@ -201,7 +201,7 @@ class PhotonPlaceSearch implements PlaceSearch {
   }
 
   /// `minLon,minLat,maxLon,maxLat`, Photon's order. Fixed to four
-  /// decimals (about 11m, far finer than a 40km box needs) so binary
+  /// decimals (about 11m, far finer than a 50 km box needs) so binary
   /// floating point does not put `6.550000000000001` in a URL.
   static String _bboxAround(double lat, double lng) {
     const d = _suggestHalfSpanDegrees;

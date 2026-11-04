@@ -22,7 +22,7 @@ class SafetyTipCard extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Safety tip: always meet in public places for the first time and share your live location with a trusted contact.',
+                'Safety tip: always meet in public places for the first time and share your location with a trusted contact.',
                 style: TextStyle(
                   color: AppPalette.textSecondary.withValues(alpha: 0.9),
                   fontSize: 12,

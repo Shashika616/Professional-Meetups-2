@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,6 +15,7 @@ import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
+import 'package:professional_connections_platform/features/home/location_explanation_page.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
 import 'package:professional_connections_platform/features/home/widgets/home_header.dart';
 import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
@@ -103,7 +106,27 @@ class _HomePageState extends ConsumerState<HomePage>
     // and the fix waited until the user scrolled. Listening from here keeps
     // the autoDispose provider alive for the page's lifetime and starts it
     // now; the section still watches it for state.
-    _locationListener = ref.listenManual(viewerLocationProvider, (_, _) {});
+    _locationListener = ref.listenManual(viewerLocationProvider, (
+      previous,
+      next,
+    ) {
+      if (next.status == ViewerLocationStatus.needsExplanation &&
+          previous?.status != ViewerLocationStatus.needsExplanation) {
+        unawaited(_explainLocation());
+      }
+    });
+  }
+
+  /// The screen before the first system prompt (plan 3.3).
+  Future<void> _explainLocation() async {
+    final accepted = await LocationExplanationPage.show(context);
+    if (!mounted) return;
+    final location = ref.read(viewerLocationProvider.notifier);
+    if (accepted) {
+      unawaited(location.explanationAccepted());
+    } else {
+      location.explanationDeclined();
+    }
   }
 
   @override

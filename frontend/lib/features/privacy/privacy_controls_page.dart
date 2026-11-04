@@ -76,19 +76,18 @@ class PrivacyControlsPage extends StatelessWidget {
                       title: 'Your location',
                       body:
                           'We use your approximate location to find meetups near '
-                          'you, and we only read it while you have the browse '
-                          'screen open. A meetup\'s exact address is shared with '
-                          'the people going to it.',
+                          'you, only while you use the app. We store it rounded '
+                          'to about 100 metres and delete it after 30 days. A '
+                          'meetup\'s exact place is shown to people nearby and '
+                          'to the people going to it.',
                     ),
                     _Fact(
                       icon: AppIcons.shield,
                       title: 'Trusted contacts',
                       body:
-                          'When you add someone, we text them once to ask whether '
-                          'they agree. After that, nobody contacts them except you, '
-                          'by sharing a meetup with them or by triggering SOS, and '
-                          'only if they agreed. They are never shown to anyone else '
-                          'on the app.',
+                          'Adding someone does not message them. We text them only '
+                          'when you share a meetup with them or send an SOS. They '
+                          'are never shown to anyone else on the app.',
                     ),
                     _Fact(
                       icon: AppIcons.search,

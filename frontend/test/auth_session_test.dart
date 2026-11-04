@@ -41,7 +41,7 @@ void main() {
         'expires_in': 900,
         'is_new_user': true,
         'full_name': 'Ada Lovelace',
-        'profile_photo_url': 'https://example.com/p.jpg',
+        'photo_url': '/v1/users/u1/photo?v=abc',
       };
 
       final session = AuthSession.fromJson(json);
@@ -52,14 +52,14 @@ void main() {
       expect(session.trustLevel, 1);
       expect(session.isNewUser, isTrue);
       expect(session.fullName, 'Ada Lovelace');
-      expect(session.profilePhotoUrl, 'https://example.com/p.jpg');
+      expect(session.profilePhotoUrl, '/v1/users/u1/photo?v=abc');
       expect(
         session.accessTokenExpiresAt.difference(DateTime.now()).inSeconds,
         closeTo(900, 5),
       );
     });
 
-    test('tolerates a response with full_name/profile_photo_url omitted', () {
+    test('tolerates a response with full_name/photo_url omitted', () {
       final json = {
         'user_id': 'user-1',
         'access_token': _fakeJwt({'trust_level': 0}),

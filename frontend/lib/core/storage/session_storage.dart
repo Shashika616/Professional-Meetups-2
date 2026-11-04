@@ -1,3 +1,4 @@
+import 'package:professional_connections_platform/core/services/photo_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'package:professional_connections_platform/core/models/auth_session.dart';
@@ -31,6 +32,7 @@ class SecureSessionStorage {
   ];
 
   Future<void> saveSession(AuthSession session) async {
+    PhotoAuth.accessToken = session.accessToken;
     await Future.wait([
       _storage.write(key: _accessTokenKey, value: session.accessToken),
       _storage.write(key: _refreshTokenKey, value: session.refreshToken),
@@ -50,6 +52,7 @@ class SecureSessionStorage {
     final accessToken = await _storage.read(key: _accessTokenKey);
     final refreshToken = await _storage.read(key: _refreshTokenKey);
     final userId = await _storage.read(key: _userIdKey);
+    PhotoAuth.accessToken = accessToken;
     if (accessToken == null || refreshToken == null || userId == null) {
       return null;
     }
@@ -74,6 +77,7 @@ class SecureSessionStorage {
   }
 
   Future<void> clearSession() async {
+    PhotoAuth.accessToken = null;
     await Future.wait(_allKeys.map((key) => _storage.delete(key: key)));
   }
 }

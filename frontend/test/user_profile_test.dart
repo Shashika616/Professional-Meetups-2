@@ -8,7 +8,7 @@ void main() {
       final profile = UserProfile.fromJson({
         'user_id': 'user-1',
         'full_name': 'Ada Lovelace',
-        'profile_photo_url': 'https://example.com/ada.jpg',
+        'photo_url': '/v1/users/u1/photo?v=abc',
         'trust_level': 3,
         'phone_verified': true,
         'personal_email_verified': true,
@@ -22,7 +22,7 @@ void main() {
 
       expect(profile.id, 'user-1');
       expect(profile.fullName, 'Ada Lovelace');
-      expect(profile.profilePhotoUrl, 'https://example.com/ada.jpg');
+      expect(profile.profilePhotoUrl, '/v1/users/u1/photo?v=abc');
       expect(profile.trustLevel, 3);
       expect(profile.phoneVerified, isTrue);
       expect(profile.personalEmailVerified, isTrue);

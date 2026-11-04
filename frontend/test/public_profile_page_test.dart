@@ -118,54 +118,35 @@ void main() {
     expect(calls, 1);
   });
 
-  testWidgets('recent meetups render role, turnout, rating, and comments — '
-      'anonymous where the server withheld the author', (tester) async {
+  testWidgets('a host shows finished meetups and anonymous reviews', (
+    tester,
+  ) async {
     final auth = ImmediateAuthService()
       ..publicProfileFor = (id) => PublicProfile(
         id: id,
         fullName: 'Grace Hopper',
         trustLevel: 3,
+        meetupsCompleted: 2,
         recentMeetups: [
           MemberMeetup(
-            id: 'm-1',
             intent: IntentType.coffee,
-            status: 'completed',
-            windowStart: DateTime(2026, 9, 1, 15),
-            windowEnd: DateTime(2026, 9, 1, 16),
-            locationLabel: 'Colombo Fort Cafe',
-            hosted: true,
+            day: DateTime(2026, 9, 1, 12),
+            locationLabel: 'Colombo Fort',
             participantCount: 3,
             overallAverage: 4.5,
             reviewCount: 2,
-            viewerWasIn: false,
-            comments: [
-              MemberMeetupComment(
-                authorName: '',
-                note: 'Great chat.',
-                writtenAt: DateTime(2026, 9, 2),
-              ),
-            ],
           ),
           MemberMeetup(
-            id: 'm-2',
             intent: IntentType.lunch,
-            status: 'completed',
-            windowStart: DateTime(2026, 8, 20, 12),
-            windowEnd: DateTime(2026, 8, 20, 13),
-            locationLabel: 'Ministry of Crab',
-            hosted: false,
+            day: DateTime(2026, 8, 20, 12),
+            locationLabel: 'Kollupitiya',
             participantCount: 2,
             overallAverage: 0,
             reviewCount: 0,
-            viewerWasIn: true,
-            comments: [
-              MemberMeetupComment(
-                authorName: 'Ada Lovelace',
-                note: 'Lovely spot.',
-                writtenAt: DateTime(2026, 8, 21),
-              ),
-            ],
           ),
+        ],
+        reviews: const [
+          MemberReview(score: 4, text: 'Great chat.', month: '2026-09'),
         ],
       );
 
@@ -173,14 +154,103 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Recent meetups'), findsOneWidget);
-    expect(find.text('Hosted'), findsOneWidget);
-    expect(find.text('Joined'), findsOneWidget);
+    expect(find.text('Coffee'), findsOneWidget);
+    expect(find.text('Sep 1, 2026'), findsOneWidget);
     expect(find.text('3 people'), findsOneWidget);
     expect(find.text('Not rated yet'), findsOneWidget);
-    // Comments render as quotations with an attributed line under each.
-    expect(find.text('\u201CGreat chat.\u201D'), findsOneWidget);
+    // The date stands alone: no hour of the day.
+    expect(find.textContaining('PM'), findsNothing);
+    expect(find.text('Hosted'), findsNothing);
+    await tester.scrollUntilVisible(
+      find.text('\u201CGreat chat.\u201D'),
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('A participant'), findsOneWidget);
-    expect(find.text('Ada Lovelace'), findsOneWidget);
+    expect(find.text('September 2026'), findsOneWidget);
+  });
+
+  testWidgets('a host with no reviews says so', (tester) async {
+    final auth = ImmediateAuthService()
+      ..publicProfileFor = (id) => PublicProfile(
+        id: id,
+        fullName: 'Grace Hopper',
+        trustLevel: 3,
+        meetupsCompleted: 1,
+        recentMeetups: [
+          MemberMeetup(
+            intent: IntentType.coffee,
+            day: DateTime(2026, 9, 1, 12),
+            locationLabel: 'Colombo Fort',
+            participantCount: 3,
+            overallAverage: 0,
+            reviewCount: 0,
+          ),
+        ],
+      );
+    await tester.pumpWidget(pageWith(auth));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('No reviews yet'),
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('No reviews yet'), findsOneWidget);
+  });
+
+  testWidgets('a member with no meetups says so', (tester) async {
+    final auth = ImmediateAuthService()
+      ..publicProfileFor = (id) =>
+          PublicProfile(id: id, fullName: 'Ada', trustLevel: 2);
+    await tester.pumpWidget(pageWith(auth));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('No meetups yet'),
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Reviews'), findsNothing);
+  });
+
+  testWidgets('a member who only joined lists no meetups and no reviews', (
+    tester,
+  ) async {
+    final auth = ImmediateAuthService()
+      ..publicProfileFor = (id) => PublicProfile(
+        id: id,
+        fullName: 'Ada',
+        trustLevel: 2,
+        meetupsCompleted: 4,
+        ratingAverage: 4.5,
+        ratingCount: 3,
+      );
+    await tester.pumpWidget(pageWith(auth));
+    await tester.pumpAndSettle();
+    expect(find.text('Recent meetups'), findsNothing);
+    expect(find.text('No meetups yet'), findsNothing);
+    expect(find.text('Reviews'), findsNothing);
+  });
+
+  test('a review from the server keeps score, text and month only', () {
+    final profile = PublicProfile.fromJson({
+      'user_id': 'u',
+      'recent_meetups': [
+        {
+          'id': '',
+          'intent': 'coffee',
+          'status': 'completed',
+          'window_start_unix_seconds': 1788242400,
+          'window_end_unix_seconds': 1788242400,
+          'hosted': true,
+        },
+      ],
+      'reviews': [
+        {'score': 4, 'text': 'Nice.', 'month': '2026-09'},
+      ],
+    });
+    expect(profile.recentMeetups.single.intent, IntentType.coffee);
+    expect(profile.reviews.single.text, 'Nice.');
+    expect(profile.reviews.single.month, '2026-09');
   });
 
   testWidgets('a refused profile is shown as a locked state with the '

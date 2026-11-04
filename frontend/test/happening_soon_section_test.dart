@@ -652,7 +652,7 @@ void main() {
           final service = ScriptedMeetupService(openMeetups: const []);
           final auth = ImmediateAuthService();
           GeolocatorPlatform.instance = FakeGeolocatorPlatform(
-            position: testPosition(lat: 6.9271, lng: 79.8612),
+            position: testPosition(lat: 6.92714, lng: 79.86124),
           );
 
           await tester.pumpWidget(
@@ -667,8 +667,9 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(auth.updateLastKnownLocationCallCount, 1);
-          expect(auth.lastUpdateLastKnownLocationLat, 6.9271);
-          expect(auth.lastUpdateLastKnownLocationLng, 79.8612);
+          // Rounded on the phone: the exact fix is never sent (N1-D1).
+          expect(auth.lastUpdateLastKnownLocationLat, 6.927);
+          expect(auth.lastUpdateLastKnownLocationLng, 79.861);
         },
       );
 

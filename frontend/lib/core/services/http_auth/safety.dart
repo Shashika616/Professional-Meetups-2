@@ -10,18 +10,39 @@ mixin _SafetyMethods on _HttpAuthBase {
   @override
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber = '',
-    String email = '',
+    required String phoneNumber,
   }) async {
     final response = await _authenticatedPost('/v1/sos/contacts', {
       'name': name,
       'phone_number': phoneNumber,
-      'email': email,
     });
     if (response.statusCode == 200) {
       return TrustedContact.fromJson(
         jsonDecode(response.body) as Map<String, dynamic>,
       );
+    }
+    throw _mapVerificationError(response, on400: AuthNetworkException.new);
+  }
+
+  @override
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
+  }) async {
+    final headers = await _authHeaders();
+    final response = await _httpClient.put(
+      Uri.parse('$_baseUrl/v1/sos/contacts/$contactId'),
+      headers: headers,
+      body: jsonEncode({'name': name, 'phone_number': phoneNumber}),
+    );
+    if (response.statusCode == 200) {
+      return TrustedContact.fromJson(
+        jsonDecode(response.body) as Map<String, dynamic>,
+      );
+    }
+    if (response.statusCode == 403) {
+      throw ForbiddenActionException(_errorMessage(response.body));
     }
     throw _mapVerificationError(response, on400: AuthNetworkException.new);
   }
@@ -62,6 +83,9 @@ mixin _SafetyMethods on _HttpAuthBase {
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   }) async {
     // # SHORTER DEADLINE, AND ONE RETRY (tracker #78)
     //
@@ -77,9 +101,8 @@ mixin _SafetyMethods on _HttpAuthBase {
     // first attempt. When the first attempt did reach the server and was
     // still texting contacts as it timed out, the server sees the id,
     // sends nothing, and answers with that attempt's outcome — so a slow
-    // network can no longer alert everyone twice. A user pressing Retry on
-    // the failure screen calls this again and gets a fresh id: that is a
-    // new alert, on purpose.
+    // network can no longer alert everyone twice. The user's own Retry on
+    // the failure screen passes the sheet's id back in, for the same reason.
     //
     // A coordinate pair is sent only if BOTH are present. Half a
     // location is not a location, and the fields are omitted entirely
@@ -87,11 +110,15 @@ mixin _SafetyMethods on _HttpAuthBase {
     // having to interpret it.
     final body = <String, dynamic>{
       'context_message': contextMessage,
-      'client_request_id': _newRequestId(),
+      'client_request_id': clientRequestId ?? newSosRequestId(),
     };
     if (latitude != null && longitude != null) {
       body['latitude'] = latitude;
       body['longitude'] = longitude;
+      if (capturedAt != null) {
+        body['captured_at'] = capturedAt.toUtc().toIso8601String();
+      }
+      if (source != null) body['source'] = source;
     }
 
     Future<http.Response> attempt() =>
@@ -111,15 +138,6 @@ mixin _SafetyMethods on _HttpAuthBase {
       return decoded['contacts_notified'] as int? ?? 0;
     }
     throw _mapVerificationError(response, on400: AuthNetworkException.new);
-  }
-
-  /// 128 random bits as hex: unique per SOS, shared by its two attempts.
-  static String _newRequestId() {
-    final random = Random.secure();
-    return List<String>.generate(
-      16,
-      (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
-    ).join();
   }
 
   /// The second and last SOS attempt. Split out so the two failure modes

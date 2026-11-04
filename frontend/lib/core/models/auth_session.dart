@@ -67,12 +67,24 @@ class AuthSession {
         Duration(seconds: expiresInSeconds),
       ),
       fullName: json['full_name'] as String? ?? '',
-      profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+      profilePhotoUrl: json['photo_url'] as String? ?? '',
       // Absent from every response but a LinkedIn link's (the gateway omits
       // it entirely rather than sending ""), so the null case is the norm.
       suggestedNameUpdate: json['suggested_name_update'] as String? ?? '',
     );
   }
+
+  /// This session with a new photo path.
+  AuthSession withProfilePhoto(String path) => AuthSession(
+    userId: userId,
+    accessToken: accessToken,
+    refreshToken: refreshToken,
+    trustLevel: trustLevel,
+    isNewUser: isNewUser,
+    accessTokenExpiresAt: accessTokenExpiresAt,
+    fullName: fullName,
+    profilePhotoUrl: path,
+  );
 
   /// Decodes the (unverified) middle segment of a JWT and reads its
   /// `trust_level` claim. Returns 0 (the lowest trust level) if the token

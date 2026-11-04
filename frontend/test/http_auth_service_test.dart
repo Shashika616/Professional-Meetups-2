@@ -37,7 +37,7 @@ void main() {
             'expires_in': 900,
             'is_new_user': true,
             'full_name': 'Ada Lovelace',
-            'profile_photo_url': 'https://example.com/p.jpg',
+            'photo_url': '/v1/users/u1/photo?v=abc',
           }),
           200,
         );

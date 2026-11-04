@@ -96,10 +96,6 @@ class ImmediateMeetupService implements MeetupService {
       throw UnimplementedError();
 
   @override
-  Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn) =>
-      throw UnimplementedError();
-
-  @override
   Future<SafetyState> shareWithContacts(
     String meetupId,
     List<String> contactIds,

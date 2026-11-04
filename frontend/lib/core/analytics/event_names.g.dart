@@ -65,6 +65,7 @@ abstract final class AnalyticsScreen {
   static const events = 'events';
   static const meetupDetail = 'meetup_detail';
   static const locationView = 'location_view';
+  static const locationExplanation = 'location_explanation';
   static const participants = 'participants';
   static const scheduleMeetup = 'schedule_meetup';
   static const meetupReview = 'meetup_review';

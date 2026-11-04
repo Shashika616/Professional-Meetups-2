@@ -85,11 +85,15 @@ class FakeGeolocatorPlatform extends GeolocatorPlatform {
   }) async => lastKnownPosition;
 }
 
-Position testPosition({double lat = 6.9271, double lng = 79.8612}) {
+Position testPosition({
+  double lat = 6.9271,
+  double lng = 79.8612,
+  DateTime? timestamp,
+}) {
   return Position(
     latitude: lat,
     longitude: lng,
-    timestamp: DateTime.now(),
+    timestamp: timestamp ?? DateTime.now(),
     accuracy: 5,
     altitude: 0,
     altitudeAccuracy: 0,

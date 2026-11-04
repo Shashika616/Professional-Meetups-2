@@ -17,9 +17,12 @@ import 'package:professional_connections_platform/features/meetups/widgets/ios_l
 /// **No API key, no `AppConfig` entry, no billing setup** — settled as the
 /// iOS decision rather than provisional (unlike Android's Stadia choice).
 class IosMapLocationStep extends StatefulWidget {
-  const IosMapLocationStep({super.key, required this.onSubmit});
+  const IosMapLocationStep({super.key, required this.onSubmit, this.startAt});
 
   final void Function(double lat, double lng, String label) onSubmit;
+
+  /// Where the map opens: the viewer's rounded location when it is known.
+  final MapPoint? startAt;
 
   @override
   State<IosMapLocationStep> createState() => _IosMapLocationStepState();
@@ -33,7 +36,7 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   static const _search = IosLocalSearch();
 
   MapCanvasController? _canvas;
-  MapPoint _cameraTarget = _defaultCenter;
+  late MapPoint _cameraTarget = widget.startAt ?? _defaultCenter;
 
   // Built ONCE and reused, instead of constructed inside build(). Typing
   // rebuilds this widget on every keystroke, and a MapCanvas created in
@@ -41,9 +44,9 @@ class _IosMapLocationStepState extends State<IosMapLocationStep> {
   // map per character. Holding one instance makes the child identical
   // between builds, so Flutter skips that subtree entirely. Safe because
   // none of these arguments ever change: the centre and zoom are
-  // compile-time constants and both callbacks only assign fields.
+  // fixed when the page opens and both callbacks only assign fields.
   late final Widget _mapCanvas = MapCanvas(
-    initialCentre: _defaultCenter,
+    initialCentre: widget.startAt ?? _defaultCenter,
     initialZoom: 13,
     // A preview, not a control. The place comes from search or from the
     // device; dragging and pinching only moved the pin away from what was

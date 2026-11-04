@@ -1,3 +1,7 @@
+import 'dart:typed_data';
+
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -66,6 +70,9 @@ class _FakeAuthService implements AuthService {
   /// What the dialog actually sent. null/null is the #78 case: no usable
   /// fix, alert sent anyway.
   double? lastLatitude;
+  DateTime? lastCapturedAt;
+  String? lastSource;
+  final List<String> requestIds = [];
   double? lastLongitude;
 
   /// When true, triggerSosError applies to the first attempt only.
@@ -74,6 +81,13 @@ class _FakeAuthService implements AuthService {
   /// Proves a gated tap never reaches the service at all, rather than being
   /// refused after the call.
   int listContactsCallCount = 0;
+
+  @override
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
+  }) => throw UnimplementedError();
 
   @override
   Future<List<TrustedContact>> listTrustedContacts() async {
@@ -88,8 +102,14 @@ class _FakeAuthService implements AuthService {
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   }) async {
     triggerSosCallCount++;
+    lastCapturedAt = capturedAt;
+    lastSource = source;
+    if (clientRequestId != null) requestIds.add(clientRequestId);
     lastLatitude = latitude;
     lastLongitude = longitude;
     final error = triggerSosError;
@@ -104,13 +124,19 @@ class _FakeAuthService implements AuthService {
   @override
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber = '',
-    String email = '',
+    required String phoneNumber,
   }) async => throw UnimplementedError();
 
   @override
   Future<void> removeTrustedContact(String contactId) async =>
       throw UnimplementedError();
+
+  @override
+  Future<String> uploadProfilePhoto(Uint8List jpeg) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteProfilePhoto() => throw UnimplementedError();
 
   @override
   Future<void> deleteAccount() async {}
@@ -305,14 +331,8 @@ void main() {
           id: 'c1',
           name: 'Grace',
           phoneNumber: '+94771111111',
-          email: '',
         ),
-        const TrustedContact(
-          id: 'c2',
-          name: 'Ada',
-          phoneNumber: '',
-          email: 'ada@example.com',
-        ),
+        const TrustedContact(id: 'c2', name: 'Ada', phoneNumber: ''),
       ],
       triggerSosResult: 2,
     );
@@ -340,7 +360,6 @@ void main() {
           id: 'c1',
           name: 'Grace',
           phoneNumber: '+94771111111',
-          email: '',
         ),
       ],
       triggerSosError: const AuthNetworkException('Something went wrong.'),
@@ -369,7 +388,6 @@ void main() {
             id: 'c1',
             name: 'Grace',
             phoneNumber: '+94771111111',
-            email: '',
           ),
         ],
         triggerSosError: const AuthNetworkException('Something went wrong.'),
@@ -481,20 +499,8 @@ void main() {
       id: 'c1',
       name: 'Grace Hopper',
       phoneNumber: '+94771111111',
-      email: '',
     );
-    const ada = TrustedContact(
-      id: 'c2',
-      name: 'Ada Lovelace',
-      phoneNumber: '',
-      email: 'ada@example.com',
-    );
-    const alan = TrustedContact(
-      id: 'c3',
-      name: 'Alan Turing',
-      phoneNumber: '+94773333333',
-      email: '',
-    );
+    const ada = TrustedContact(id: 'c2', name: 'Ada Lovelace', phoneNumber: '');
 
     Future<void> pump(WidgetTester tester, _FakeAuthService auth) async {
       tester.view.physicalSize = const Size(1000, 2600);
@@ -520,14 +526,14 @@ void main() {
       expect(find.text('+94771111111'), findsNothing);
       expect(find.text('ada@example.com'), findsNothing);
       // The cap is stated before it is hit, not discovered by being refused.
-      expect(find.textContaining('2 of 3 added'), findsOneWidget);
+      expect(find.textContaining('All 2 contacts added'), findsOneWidget);
     });
 
-    testWidgets('with one contact the section still offers the other two '
+    testWidgets('with one contact the section still offers the other '
         'slots — this is the case that was unreachable', (tester) async {
       await pump(tester, _FakeAuthService(contacts: [grace]));
 
-      expect(find.textContaining('1 of 3 added'), findsOneWidget);
+      expect(find.textContaining('1 of 2 added'), findsOneWidget);
 
       await tester.tap(find.textContaining('Add a contact'));
       await tester.pumpAndSettle();
@@ -538,14 +544,27 @@ void main() {
     testWidgets('at the cap it says so instead of offering another', (
       tester,
     ) async {
-      await pump(tester, _FakeAuthService(contacts: [grace, ada, alan]));
+      await pump(tester, _FakeAuthService(contacts: [grace, ada]));
 
-      expect(find.textContaining('All 3 contacts added'), findsOneWidget);
+      expect(find.textContaining('All 2 contacts added'), findsOneWidget);
       expect(find.textContaining('Add a contact'), findsNothing);
       // Still reachable — removing one is how you make room.
-      await tester.tap(find.textContaining('All 3 contacts added'));
+      await tester.tap(find.textContaining('All 2 contacts added'));
       await tester.pumpAndSettle();
       expect(find.byType(ManageTrustedContactsPage), findsOneWidget);
+    });
+
+    testWidgets('an account with 3 is told only two are alerted', (
+      tester,
+    ) async {
+      const third = TrustedContact(
+        id: 'c3',
+        name: 'Alan Turing',
+        phoneNumber: '+94773333333',
+      );
+      await pump(tester, _FakeAuthService(contacts: [grace, ada, third]));
+
+      expect(find.textContaining('Only two are alerted'), findsOneWidget);
     });
 
     testWidgets('with none it prompts rather than showing an empty card', (
@@ -554,7 +573,7 @@ void main() {
       await pump(tester, _FakeAuthService(contacts: []));
 
       expect(find.textContaining('No one yet'), findsOneWidget);
-      expect(find.textContaining('0 of 3 added'), findsOneWidget);
+      expect(find.textContaining('0 of 2 added'), findsOneWidget);
     });
 
     testWidgets('below Level 2 it shows the lock and never asks the server '
@@ -657,12 +676,7 @@ void main() {
 // location, 5xx and session expired.
 void _sosFailurePathTests() {
   List<TrustedContact> oneContact() => const [
-    TrustedContact(
-      id: 'c1',
-      name: 'Grace',
-      phoneNumber: '+94771111111',
-      email: '',
-    ),
+    TrustedContact(id: 'c1', name: 'Grace', phoneNumber: '+94771111111'),
   ];
 
   Future<void> openAndConfirm(
@@ -701,10 +715,7 @@ void _sosFailurePathTests() {
     expect(auth.lastLongitude, isNull);
     expect(find.text('1 trusted contact was alerted.'), findsOneWidget);
     // And the sender is told, because their contact was told.
-    expect(
-      find.textContaining('location could not be determined'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('could not find your location'), findsOneWidget);
   });
 
   testWidgets(
@@ -740,6 +751,98 @@ void _sosFailurePathTests() {
 
     expect(auth.triggerSosCallCount, 2);
     expect(find.text('1 trusted contact was alerted.'), findsOneWidget);
+    expect(
+      auth.requestIds.toSet(),
+      hasLength(1),
+      reason: 'the Retry button looked like a second emergency',
+    );
+    expect(auth.requestIds.first, isNotEmpty);
+  });
+
+  testWidgets('a new sheet is a new alert', (tester) async {
+    final auth = _FakeAuthService(contacts: oneContact(), triggerSosResult: 1);
+    await openAndConfirm(tester, auth);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Trigger SOS'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirm'));
+    await tester.pumpAndSettle();
+    expect(auth.requestIds.toSet(), hasLength(2));
+  });
+
+  testWidgets('reaching nobody is a failure with Retry, not a success', (
+    tester,
+  ) async {
+    final auth = _FakeAuthService(contacts: oneContact(), triggerSosResult: 0);
+    await openAndConfirm(tester, auth);
+    expect(find.textContaining('could be reached'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(find.textContaining('alerted'), findsNothing);
+  });
+
+  group('the location chain', () {
+    final fresh = DateTime.utc(2026, 10, 30, 13, 15);
+    final older = DateTime.utc(2026, 10, 30, 9);
+
+    testWidgets('a fresh fix is sent as gps with its time', (tester) async {
+      GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+        position: testPosition(lat: 6.9, lng: 79.8, timestamp: fresh),
+        lastKnownPosition: testPosition(lat: 1, lng: 2, timestamp: older),
+      );
+      final auth = _FakeAuthService(
+        contacts: oneContact(),
+        triggerSosResult: 1,
+      );
+      await openAndConfirm(tester, auth);
+      expect(auth.lastLatitude, 6.9);
+      expect(auth.lastSource, 'gps');
+      expect(auth.lastCapturedAt, fresh);
+      expect(find.textContaining('could not find'), findsNothing);
+    });
+
+    testWidgets('no fresh fix falls back to the last known position', (
+      tester,
+    ) async {
+      GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+        getCurrentPositionError: TimeoutException('no fix'),
+        lastKnownPosition: testPosition(lat: 6.5, lng: 79.5, timestamp: older),
+      );
+      final auth = _FakeAuthService(
+        contacts: oneContact(),
+        triggerSosResult: 1,
+      );
+      await openAndConfirm(tester, auth);
+      expect(auth.lastLatitude, 6.5);
+      expect(auth.lastSource, 'device_last_known');
+      expect(auth.lastCapturedAt, older);
+    });
+
+    testWidgets('neither sends none', (tester) async {
+      GeolocatorPlatform.instance = FakeGeolocatorPlatform(
+        getCurrentPositionError: TimeoutException('no fix'),
+      );
+      final auth = _FakeAuthService(
+        contacts: oneContact(),
+        triggerSosResult: 1,
+      );
+      await openAndConfirm(tester, auth);
+      expect(auth.lastLatitude, isNull);
+      expect(auth.lastSource, isNull);
+      expect(auth.lastCapturedAt, isNull);
+    });
+  });
+
+  testWidgets('the copy says your location, not live location', (tester) async {
+    final auth = _FakeAuthService(contacts: oneContact(), triggerSosResult: 1);
+    final container = _containerWith(auth);
+    addTearDown(container.dispose);
+    await tester.pumpWidget(_appWith(container));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Trigger SOS'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('your location'), findsOneWidget);
+    expect(find.textContaining('live location'), findsNothing);
   });
 
   testWidgets('an unexpected error does not strand the sheet on "sending"', (

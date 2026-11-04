@@ -23,7 +23,7 @@ import 'package:professional_connections_platform/core/widgets/secondary_button.
 import 'package:professional_connections_platform/core/widgets/skeleton_box.dart';
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 
-const int maxTrustedContacts = 3;
+const int maxTrustedContacts = 2;
 
 /// Add/list/remove trusted contacts (ADR-026, `frontend/sos-trusted-
 /// contacts-PLAN.md` Step 2) — reachable from `ProfilePage`'s Safety
@@ -100,6 +100,37 @@ class _ManageTrustedContactsPageState
                   ),
                   const SizedBox(height: 16),
                 ],
+                if (contactsAsync.maybeWhen(
+                  data: (contacts) => contacts.length > maxTrustedContacts,
+                  orElse: () => false,
+                )) ...[
+                  FlatCard(
+                    radius: 18,
+                    tint: AppPalette.danger.withValues(alpha: 0.1),
+                    border: AppPalette.danger.withValues(alpha: 0.4),
+                    padding: const EdgeInsets.all(14),
+                    child: Row(
+                      children: [
+                        AppIcon(
+                          AppIcons.info,
+                          size: 18,
+                          color: AppPalette.danger,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Only two contacts are alerted. Remove one.',
+                            style: TextStyle(
+                              color: AppPalette.textPrimary,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
                 Expanded(
                   child: contactsAsync.when(
                     loading: () => const _ContactsSkeleton(),
@@ -118,6 +149,7 @@ class _ManageTrustedContactsPageState
                     ),
                     data: (contacts) => _ContactsList(
                       contacts: contacts,
+                      onEdit: _showEditContactSheet,
                       onRemove: _removeContact,
                     ),
                   ),
@@ -150,13 +182,21 @@ class _ManageTrustedContactsPageState
   /// Presents [_AddContactForm] as a bottom sheet — the app's one modal
   /// presentation (`showAppSheet`), the same arrival the join flow's
   /// "who is hosting" sheet uses. It was a centred dialog; a form with
-  /// three fields belongs near the keyboard that is about to cover half
-  /// the screen, not floating in the middle of it.
+  /// fields belongs near the keyboard that is about to cover half the
+  /// screen, not floating in the middle of it.
   Future<void> _showAddContactDialog() {
     track(Cta.addTrustedContact);
+    return _showContactSheet();
+  }
+
+  Future<void> _showEditContactSheet(TrustedContact contact) =>
+      _showContactSheet(existing: contact);
+
+  Future<void> _showContactSheet({TrustedContact? existing}) {
     return showAppSheet<void>(
       context,
-      builder: (dialogContext) => _AddContactForm(
+      builder: (dialogContext) => _ContactForm(
+        existing: existing,
         onCancel: () => Navigator.pop(dialogContext),
         onSaved: () {
           Navigator.pop(dialogContext);
@@ -190,9 +230,14 @@ class _ManageTrustedContactsPageState
 }
 
 class _ContactsList extends StatelessWidget {
-  const _ContactsList({required this.contacts, required this.onRemove});
+  const _ContactsList({
+    required this.contacts,
+    required this.onEdit,
+    required this.onRemove,
+  });
 
   final List<TrustedContact> contacts;
+  final void Function(TrustedContact contact) onEdit;
   final void Function(TrustedContact contact) onRemove;
 
   @override
@@ -220,9 +265,15 @@ class _ContactsList extends StatelessWidget {
     // One card, one row per contact — the shape the Safety tab already
     // shows these in. A card each made the same three people look like
     // three unrelated objects on one screen and one list on the other.
-    // There are at most three, so the card never needs to scroll.
     return ListView(
       children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            '${contacts.length} of $maxTrustedContacts added',
+            style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
+          ),
+        ),
         FlatCard(
           radius: 18,
           padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -261,39 +312,20 @@ class _ContactsList extends StatelessWidget {
                                   fontSize: 11,
                                 ),
                               ),
-                            if (contact.email.isNotEmpty)
-                              Text(
-                                contact.email,
-                                style: TextStyle(
-                                  color: AppPalette.textSecondary,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            // #80: a new contact is texted a link and is
-                            // not alerted until they agree through it.
-                            if (contact.status !=
-                                TrustedContactStatus.confirmed)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 2),
-                                child: Text(
-                                  contact.status == TrustedContactStatus.pending
-                                      ? 'Waiting for confirmation'
-                                      : 'Link expired. Remove and add again.',
-                                  style: TextStyle(
-                                    color:
-                                        contact.status ==
-                                            TrustedContactStatus.pending
-                                        ? AppPalette.textSecondary
-                                        : AppPalette.danger,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
                           ],
                         ),
                       ),
                       IconButton(
+                        tooltip: 'Edit ${contact.name}',
+                        icon: AppIcon(
+                          AppIcons.edit,
+                          color: AppPalette.textSecondary,
+                          size: 20,
+                        ),
+                        onPressed: () => onEdit(contact),
+                      ),
+                      IconButton(
+                        tooltip: 'Remove ${contact.name}',
                         icon: AppIcon(
                           AppIcons.trash,
                           color: AppPalette.danger,
@@ -313,20 +345,30 @@ class _ContactsList extends StatelessWidget {
   }
 }
 
-class _AddContactForm extends ConsumerStatefulWidget {
-  const _AddContactForm({required this.onCancel, required this.onSaved});
+class _ContactForm extends ConsumerStatefulWidget {
+  const _ContactForm({
+    required this.onCancel,
+    required this.onSaved,
+    this.existing,
+  });
 
   final VoidCallback onCancel;
   final VoidCallback onSaved;
 
+  /// The contact being edited; null when adding one.
+  final TrustedContact? existing;
+
   @override
-  ConsumerState<_AddContactForm> createState() => _AddContactFormState();
+  ConsumerState<_ContactForm> createState() => _ContactFormState();
 }
 
-class _AddContactFormState extends ConsumerState<_AddContactForm> {
-  final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
-  final _emailController = TextEditingController();
+class _ContactFormState extends ConsumerState<_ContactForm> {
+  late final _nameController = TextEditingController(
+    text: widget.existing?.name,
+  );
+  late final _phoneController = TextEditingController(
+    text: widget.existing?.phoneNumber,
+  );
   bool _saving = false;
   String? _error;
 
@@ -338,7 +380,6 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
     // pattern as the verification pages' own `_onFieldChanged`).
     _nameController.addListener(_onFieldChanged);
     _phoneController.addListener(_onFieldChanged);
-    _emailController.addListener(_onFieldChanged);
   }
 
   void _onFieldChanged() => setState(() {});
@@ -347,23 +388,15 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
   void dispose() {
     _nameController.removeListener(_onFieldChanged);
     _phoneController.removeListener(_onFieldChanged);
-    _emailController.removeListener(_onFieldChanged);
     _nameController.dispose();
     _phoneController.dispose();
-    _emailController.dispose();
     super.dispose();
   }
 
   bool get _canSave {
-    if (_nameController.text.trim().isEmpty) return false;
-    final phone = _phoneController.text.trim();
-    final email = _emailController.text.trim();
-    // Phone is the one channel an SOS can reach in minutes, so it is
-    // required; email is the optional second channel. The server applies
-    // the same rule.
-    if (Validators.phone(phone) != null) return false;
-    if (email.isNotEmpty && Validators.email(email) != null) return false;
-    return true;
+    final name = _nameController.text.trim();
+    if (name.isEmpty || name.length > 60) return false;
+    return Validators.phone(_phoneController.text.trim()) == null;
   }
 
   Future<void> _save() async {
@@ -372,13 +405,19 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
       _error = null;
     });
     try {
-      await ref
-          .read(authServiceProvider)
-          .addTrustedContact(
-            name: _nameController.text.trim(),
-            phoneNumber: _phoneController.text.trim(),
-            email: _emailController.text.trim(),
-          );
+      final auth = ref.read(authServiceProvider);
+      final name = _nameController.text.trim();
+      final phoneNumber = _phoneController.text.trim();
+      final existing = widget.existing;
+      if (existing == null) {
+        await auth.addTrustedContact(name: name, phoneNumber: phoneNumber);
+      } else {
+        await auth.updateTrustedContact(
+          existing.id,
+          name: name,
+          phoneNumber: phoneNumber,
+        );
+      }
       widget.onSaved();
     } on AuthException catch (error) {
       // The await above can outlive this dialog — the `finally` below has
@@ -397,7 +436,7 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
     // (fields, validation, save/loading, error display) is exactly what it
     // was — only where it arrives from changed.
     return AppSheet(
-      title: 'Add contact',
+      title: widget.existing == null ? 'Add contact' : 'Edit contact',
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -414,17 +453,10 @@ class _AddContactFormState extends ConsumerState<_AddContactForm> {
             hint: 'Phone number',
             keyboardType: TextInputType.phone,
           ),
-          const SizedBox(height: 10),
-          AppTextField(
-            controller: _emailController,
-            icon: AppIcons.mail,
-            hint: 'Email (optional)',
-            keyboardType: TextInputType.emailAddress,
-          ),
           const SizedBox(height: 6),
           Text(
-            'A phone number is required so we can reach them fast. Email '
-            'is optional.',
+            'We won\'t message them now. They get a text only if you press '
+            'SOS.',
             style: TextStyle(color: AppPalette.textSecondary, fontSize: 11),
           ),
           if (_error != null) ...[
@@ -474,7 +506,7 @@ class _ContactsSkeleton extends StatelessWidget {
   Widget _content(BuildContext context) {
     return Column(
       children: List.generate(
-        3,
+        2,
         (index) => const Padding(
           padding: EdgeInsets.only(bottom: 10),
           child: SkeletonBox(width: double.infinity, height: 64, radius: 16),

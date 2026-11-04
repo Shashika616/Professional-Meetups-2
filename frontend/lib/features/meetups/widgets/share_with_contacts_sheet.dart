@@ -24,7 +24,7 @@ import 'package:professional_connections_platform/features/safety/manage_trusted
 ///
 /// # WHAT IS ACTUALLY SENT
 ///
-/// A text (and/or email) naming the meetup's window and place, with a map
+/// A text naming the meetup's window and place, with a map
 /// pin at its coordinates. Not tracking — the copy here says so plainly,
 /// because a safety promise the product cannot keep is worse than no promise.
 ///
@@ -224,21 +224,12 @@ class _ContactRow extends StatelessWidget {
     // Someone who already knows is shown, not hidden: the user needs to see
     // who was told, and hiding them would make the list change shape between
     // visits for no visible reason.
-    // A contact who has not agreed yet (#80) is listed but cannot be picked:
-    // the server will not text them.
-    final confirmed = contact.status == TrustedContactStatus.confirmed;
-    final subtitle = alreadyShared
-        ? 'Already told'
-        : !confirmed
-        ? 'Waiting for confirmation'
-        : (contact.phoneNumber.isNotEmpty
-              ? contact.phoneNumber
-              : contact.email);
+    final subtitle = alreadyShared ? 'Already told' : contact.phoneNumber;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: InkWell(
-        onTap: alreadyShared || !confirmed ? null : onToggle,
+        onTap: alreadyShared ? null : onToggle,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),

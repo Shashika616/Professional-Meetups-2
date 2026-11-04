@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:professional_connections_platform/core/config/app_config.dart';
+
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
@@ -53,7 +55,7 @@ void main() {
             home: Scaffold(
               body: HomeHeader(
                 userName: 'Ada Lovelace',
-                imageUrl: 'https://example.com/photo.jpg',
+                imageUrl: '/v1/users/u1/photo?v=abc',
               ),
             ),
           ),
@@ -63,7 +65,7 @@ void main() {
         final avatar = tester.widget<ProfessionalAvatar>(
           find.byType(ProfessionalAvatar),
         );
-        expect(avatar.imageUrl, 'https://example.com/photo.jpg');
+        expect(avatar.imageUrl, '/v1/users/u1/photo?v=abc');
 
         final avatarImage = find.descendant(
           of: find.byType(ProfessionalAvatar),
@@ -77,7 +79,7 @@ void main() {
         final resized = image.image as ResizeImage;
         expect(
           (resized.imageProvider as NetworkImage).url,
-          'https://example.com/photo.jpg',
+          '${AppConfig.gatewayBaseUrl}/v1/users/u1/photo?v=abc',
         );
       },
     );
@@ -131,7 +133,7 @@ void main() {
         const profile = UserProfile(
           id: 'user-1',
           fullName: 'Grace Hopper',
-          profilePhotoUrl: 'https://example.com/grace.jpg',
+          profilePhotoUrl: '/v1/users/u2/photo?v=abc',
         );
 
         await tester.pumpWidget(
@@ -157,7 +159,7 @@ void main() {
         expect(find.text('Shashika Fernando'), findsNothing);
 
         final header = tester.widget<HomeHeader>(find.byType(HomeHeader));
-        expect(header.imageUrl, 'https://example.com/grace.jpg');
+        expect(header.imageUrl, '/v1/users/u2/photo?v=abc');
       },
     );
 

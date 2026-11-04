@@ -15,6 +15,7 @@ import 'package:professional_connections_platform/core/services/auth_service.dar
 import 'package:professional_connections_platform/core/services/meetup_service.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
+import 'package:professional_connections_platform/core/widgets/update_gate.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/features/splash/splash_screen.dart';
 import 'package:professional_connections_platform/firebase_options.dart';
@@ -218,7 +219,9 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
       // light ground. Annotating the whole tree keeps every screen honest.
       builder: (context, child) => AnnotatedRegion<SystemUiOverlayStyle>(
         value: overlayStyle,
-        child: AnalyticsScope(child: child ?? const SizedBox.shrink()),
+        child: UpdateGate(
+          child: AnalyticsScope(child: child ?? const SizedBox.shrink()),
+        ),
       ),
       // Plan 29E: which screen is showing, from every route's name. A new
       // observer per build: one navigator per observer, and the theme

@@ -341,12 +341,32 @@ class AnalyticsClient extends Analytics {
     _optedOut = optedOut;
     await settings.setOptedOut(optedOut);
     if (optedOut) {
+      // A batch on its way stops too: the choice applies from now (N1-D8).
+      transport.abort();
       queue.clear();
       await queue.persist();
     }
     // Server side too, when signed in (the server then drops anything that
     // still carries this account, and deletes what it has).
     unawaited(transport.setConsent(optedOut: optedOut));
+  }
+
+  @override
+  Future<void> rotateInstallId() async {
+    if (!_started) return;
+    try {
+      await flush().timeout(const Duration(seconds: 3));
+    } catch (_) {
+      // What did not get out in time goes with the old id, below.
+    }
+    transport.abort();
+    final id = uuidV4();
+    _installId = id;
+    _sessionId = uuidV4();
+    _sessionStart = clock.now();
+    await settings.setInstallId(id);
+    queue.clear();
+    await queue.persist();
   }
 
   @override

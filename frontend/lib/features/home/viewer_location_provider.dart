@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart' show LocationAccuracy, Position;
+import 'package:geolocator/geolocator.dart'
+    show Geolocator, LocationAccuracy, LocationPermission, Position;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:professional_connections_platform/core/utils/debug_log.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -31,7 +33,7 @@ final viewerLocationProvider =
 
 /// The position source, overridable in tests (and by anything that wants a
 /// different accuracy trade-off) without touching the platform singleton.
-/// Medium accuracy: a 40km radius does not need GPS precision, and network
+/// Medium accuracy: a 50 km radius does not need GPS precision, and network
 /// positioning answers in a second or two where a GPS fix indoors may not
 /// answer at all.
 ///
@@ -57,12 +59,81 @@ const browseFixTimeLimit = Duration(seconds: 6);
 /// How long its one GPS retry may take after that.
 const browseGpsFallbackLimit = Duration(seconds: 5);
 
-enum ViewerLocationStatus { loading, blocked, ready }
+enum ViewerLocationStatus {
+  loading,
 
-/// Rounded to three decimals (~110m) so two reads from a device that moved
-/// three metres on a desk produce the same provider key and the same
-/// cached page, instead of a refetch. The exact position still goes to
-/// `updateLastKnownLocation`; only what the UI keys on is quantised.
+  /// The system has not asked yet and the app has not explained why it
+  /// will: HomePage shows [LocationExplanationPage] and answers.
+  needsExplanation,
+  blocked,
+  ready,
+}
+
+/// Whether the explanation screen is still owed (plan 3.3).
+abstract interface class LocationExplanation {
+  /// True when the system prompt has not been shown and neither has the
+  /// explanation.
+  Future<bool> needed();
+
+  /// Remembers that the person has read it and chose to continue.
+  Future<void> markShown();
+}
+
+class DeviceLocationExplanation implements LocationExplanation {
+  const DeviceLocationExplanation();
+
+  static const _key = 'location.explained';
+
+  @override
+  Future<bool> needed() async {
+    try {
+      if (await Geolocator.checkPermission() != LocationPermission.denied) {
+        return false;
+      }
+      final prefs = await SharedPreferences.getInstance();
+      return !(prefs.getBool(_key) ?? false);
+    } catch (_) {
+      // Never a reason to hold up the list: the read asks for itself.
+      return false;
+    }
+  }
+
+  @override
+  Future<void> markShown() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_key, true);
+    } catch (_) {}
+  }
+}
+
+final locationExplanationProvider = Provider<LocationExplanation>(
+  (ref) => const DeviceLocationExplanation(),
+);
+
+/// The last position a browse read found, rounded, or null. Read-only and
+/// never starts a read, so a screen outside Home can use a location the app
+/// already has without touching the location service (N1-D1). Cleared when
+/// the signed-in user changes.
+final knownViewerLocationProvider =
+    NotifierProvider<KnownViewerLocation, ({double lat, double lng})?>(
+      KnownViewerLocation.new,
+    );
+
+class KnownViewerLocation extends Notifier<({double lat, double lng})?> {
+  @override
+  ({double lat, double lng})? build() {
+    ref.watch(authSessionProvider.select((s) => s.value?.session?.userId));
+    return null;
+  }
+
+  void set(({double lat, double lng}) position) => state = position;
+}
+
+/// Rounded to three decimals (~110m), so two reads from a device that moved
+/// three metres on a desk produce the same provider key and the same cached
+/// page, and so the exact position never leaves the phone (N1-D1): the
+/// server is sent this rounded value too.
 @visibleForTesting
 double quantiseViewerCoordinate(double value) =>
     (value * 1000).roundToDouble() / 1000;
@@ -78,6 +149,9 @@ class ViewerLocation {
   });
 
   const ViewerLocation.loading() : this._(status: ViewerLocationStatus.loading);
+
+  const ViewerLocation.needsExplanation()
+    : this._(status: ViewerLocationStatus.needsExplanation);
 
   final ViewerLocationStatus status;
 
@@ -151,6 +225,37 @@ class ViewerLocationNotifier extends Notifier<ViewerLocation> {
         }
       });
     }
+    if (await ref.read(locationExplanationProvider).needed()) {
+      if (generation != _generation) return;
+      _slowTimer?.cancel();
+      state = const ViewerLocation.needsExplanation();
+      return;
+    }
+    if (generation != _generation) return;
+    await _read(generation);
+  }
+
+  /// The person read the explanation and chose to continue.
+  Future<void> explanationAccepted() async {
+    await ref.read(locationExplanationProvider).markShown();
+    final generation = ++_generation;
+    state = const ViewerLocation.loading();
+    await _read(generation);
+  }
+
+  /// Not now: nothing is asked, and Try again offers the explanation again.
+  void explanationDeclined() {
+    ++_generation;
+    state = const ViewerLocation._(
+      status: ViewerLocationStatus.blocked,
+      blockReason: LocationUnavailableException(
+        'Turn on location to see meetups near you.',
+        reason: LocationUnavailableReason.other,
+      ),
+    );
+  }
+
+  Future<void> _read(int generation) async {
     try {
       final position = await ref.read(viewerLocationSourceProvider)();
       if (generation != _generation) return;
@@ -164,6 +269,7 @@ class ViewerLocationNotifier extends Notifier<ViewerLocation> {
       // (nearby-meetup notifications). Fire-and-forget: a slow call here
       // must never hold up the list. Skipped when nothing has changed.
       final rounded = (lat: state.lat!, lng: state.lng!);
+      ref.read(knownViewerLocationProvider.notifier).set(rounded);
       final now = DateTime.now();
       if (rounded == _lastReported &&
           _lastReportedAt != null &&
@@ -174,8 +280,8 @@ class ViewerLocationNotifier extends Notifier<ViewerLocation> {
         ref
             .read(authServiceProvider)
             .updateLastKnownLocation(
-              latitude: position.latitude,
-              longitude: position.longitude,
+              latitude: rounded.lat,
+              longitude: rounded.lng,
             )
             // Recorded only once the server has it, so a failed send is
             // retried on the next refresh rather than an hour later.

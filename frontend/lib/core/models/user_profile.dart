@@ -118,7 +118,7 @@ class UserProfile {
     return UserProfile(
       id: json['user_id'] as String,
       fullName: json['full_name'] as String? ?? '',
-      profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+      profilePhotoUrl: json['photo_url'] as String? ?? '',
       trustLevel: json['trust_level'] as int? ?? 0,
       phoneVerified: json['phone_verified'] as bool? ?? false,
       personalEmailVerified: json['personal_email_verified'] as bool? ?? false,

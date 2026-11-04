@@ -25,7 +25,7 @@ void main() {
     isNewUser: true,
     accessTokenExpiresAt: DateTime.utc(2026, 1, 1, 12),
     fullName: 'Ada Lovelace',
-    profilePhotoUrl: 'https://example.com/p.jpg',
+    profilePhotoUrl: '/v1/users/u1/photo?v=abc',
   );
 
   test('loadSession returns null when nothing has been saved', () async {

@@ -94,14 +94,12 @@ void main() {
       final state = SafetyState.fromJson({
         'meetup_id': 'meetup-1',
         'checklist_ack_at_unix_seconds': 1757000000,
-        'live_location_opt_in': true,
         'checked_in_at_unix_seconds': 1757003600,
         'shared_with_contact_ids': ['contact-1', 'contact-2'],
       });
 
       expect(state.meetupId, 'meetup-1');
       expect(state.checklistAcknowledged, isTrue);
-      expect(state.liveLocationOptIn, isTrue);
       expect(state.checkedIn, isTrue);
       expect(state.sharedWithContactIds, ['contact-1', 'contact-2']);
       expect(state.sharedWithAnyContact, isTrue);
@@ -142,7 +140,6 @@ void main() {
       expect(state.checklistAcknowledged, isFalse);
       expect(state.checkedIn, isFalse);
       expect(state.declined, isFalse);
-      expect(state.liveLocationOptIn, isFalse);
       // An older server that omits the key entirely must read as "told
       // nobody", not crash.
       expect(state.sharedWithContactIds, isEmpty);

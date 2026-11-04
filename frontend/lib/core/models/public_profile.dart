@@ -23,12 +23,13 @@ class PublicProfile {
     this.workEmailVerified = false,
     this.phoneVerified = false,
     this.recentMeetups = const [],
+    this.reviews = const [],
   });
 
   factory PublicProfile.fromJson(Map<String, dynamic> json) => PublicProfile(
     id: json['user_id'] as String,
     fullName: json['full_name'] as String? ?? '',
-    profilePhotoUrl: json['profile_photo_url'] as String? ?? '',
+    profilePhotoUrl: json['photo_url'] as String? ?? '',
     trustLevel: (json['trust_level'] as num?)?.toInt() ?? 0,
     ratingAverage: (json['rating_average'] as num?)?.toDouble() ?? 0,
     ratingCount: (json['rating_count'] as num?)?.toInt() ?? 0,
@@ -39,6 +40,10 @@ class PublicProfile {
     recentMeetups: [
       for (final m in (json['recent_meetups'] as List<dynamic>? ?? const []))
         MemberMeetup.fromJson(m as Map<String, dynamic>),
+    ],
+    reviews: [
+      for (final r in (json['reviews'] as List<dynamic>? ?? const []))
+        MemberReview.fromJson(r as Map<String, dynamic>),
     ],
   );
 
@@ -59,89 +64,66 @@ class PublicProfile {
   /// Phone number verified by OTP — shown as "Phone verified".
   final bool phoneVerified;
 
-  /// The member's last few meetups as host or participant, newest first.
+  /// The finished meetups this member hosted, newest first. Empty for a
+  /// member who only joined: they show a count and a rating, nothing more.
   final List<MemberMeetup> recentMeetups;
+
+  /// What participants wrote about this host, always anonymous.
+  final List<MemberReview> reviews;
 }
 
-/// One meetup on a member's profile. Comment authors are named only when
-/// the VIEWER was on that meetup ([viewerWasIn]); the server sends an
-/// empty [MemberMeetupComment.authorName] otherwise, and the UI must not
-/// try to fill it in from anywhere else.
+/// One finished meetup a member hosted: what it was, the day, the area, the
+/// turnout and the rating. [day] is a date; its time of day means nothing.
 @immutable
 class MemberMeetup {
   const MemberMeetup({
-    required this.id,
     required this.intent,
-    required this.status,
-    required this.windowStart,
-    required this.windowEnd,
+    required this.day,
     required this.locationLabel,
-    required this.hosted,
     required this.participantCount,
     required this.overallAverage,
     required this.reviewCount,
-    required this.viewerWasIn,
-    this.comments = const [],
   });
 
   factory MemberMeetup.fromJson(Map<String, dynamic> json) => MemberMeetup(
-    id: json['id'] as String,
     intent: IntentType.fromWire(json['intent'] as String? ?? ''),
-    status: json['status'] as String? ?? '',
-    windowStart: DateTime.fromMillisecondsSinceEpoch(
+    day: DateTime.fromMillisecondsSinceEpoch(
       ((json['window_start_unix_seconds'] as num?)?.toInt() ?? 0) * 1000,
     ),
-    windowEnd: DateTime.fromMillisecondsSinceEpoch(
-      ((json['window_end_unix_seconds'] as num?)?.toInt() ?? 0) * 1000,
-    ),
     locationLabel: json['location_label'] as String? ?? '',
-    hosted: json['hosted'] as bool? ?? false,
     participantCount: (json['participant_count'] as num?)?.toInt() ?? 0,
     overallAverage: (json['overall_average'] as num?)?.toDouble() ?? 0,
     reviewCount: (json['review_count'] as num?)?.toInt() ?? 0,
-    viewerWasIn: json['viewer_was_in'] as bool? ?? false,
-    comments: [
-      for (final c in (json['comments'] as List<dynamic>? ?? const []))
-        MemberMeetupComment.fromJson(c as Map<String, dynamic>),
-    ],
   );
 
-  final String id;
   final IntentType intent;
-  final String status;
-  final DateTime windowStart;
-  final DateTime windowEnd;
+  final DateTime day;
   final String locationLabel;
-  final bool hosted;
   final int participantCount;
   final double overallAverage;
   final int reviewCount;
-  final bool viewerWasIn;
-  final List<MemberMeetupComment> comments;
-
-  /// See [Meetup.intentLabel]: the meal intent names its sitting.
-  String get intentLabel => intent.labelFor(windowStart);
 }
 
+/// One anonymous review: a score, the text and a month. The server sends
+/// nothing that could name the author, for any viewer, and there is no field
+/// here to hold it.
 @immutable
-class MemberMeetupComment {
-  const MemberMeetupComment({
-    required this.authorName,
-    required this.note,
-    required this.writtenAt,
+class MemberReview {
+  const MemberReview({
+    required this.score,
+    required this.text,
+    required this.month,
   });
 
-  factory MemberMeetupComment.fromJson(Map<String, dynamic> json) =>
-      MemberMeetupComment(
-        authorName: json['author_name'] as String? ?? '',
-        note: json['note'] as String? ?? '',
-        writtenAt: DateTime.fromMillisecondsSinceEpoch(
-          ((json['written_at_unix_seconds'] as num?)?.toInt() ?? 0) * 1000,
-        ),
-      );
+  factory MemberReview.fromJson(Map<String, dynamic> json) => MemberReview(
+    score: (json['score'] as num?)?.toInt() ?? 0,
+    text: json['text'] as String? ?? '',
+    month: json['month'] as String? ?? '',
+  );
 
-  /// Empty when the viewer was not on the meetup.
-  final String authorName;
-  final String note;
-  final DateTime writtenAt;
+  final int score;
+  final String text;
+
+  /// `YYYY-MM`.
+  final String month;
 }

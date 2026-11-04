@@ -27,10 +27,13 @@ import 'package:professional_connections_platform/features/home/widgets/happenin
 ///
 /// # WHAT IT REUSES
 ///
-/// The same [viewerLocationProvider] and [openMeetupsProvider] Home's
-/// "Happening Soon" watches, with the all-intents key, so if the user has
-/// been on Home this round the list is already cached and no request is
-/// made. Nothing new is fetched from the server for this section.
+/// The same [openMeetupsProvider] Home's "Happening Soon" watches, with the
+/// all-intents key, so if the user has been on Home this round the list is
+/// already cached and no request is made.
+///
+/// The location comes from [knownViewerLocationProvider], which only holds
+/// what Home already found. This page never starts a location read: with
+/// Home not mounted, the section falls back to the browse button (N1-D1).
 ///
 /// # WHAT IT NEVER SHOWS
 ///
@@ -58,60 +61,54 @@ class OtherMeetupsNearby extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final location = ref.watch(viewerLocationProvider);
-    switch (location.status) {
-      case ViewerLocationStatus.loading:
-        return const _Frame(child: _Rows());
-      case ViewerLocationStatus.blocked:
-        return _Frame(child: _Fallback(onBrowse: () => _browse(context, ref)));
-      case ViewerLocationStatus.ready:
-        final key = (
-          intent: null,
-          viewerLat: location.lat!,
-          viewerLng: location.lng!,
-          withinDays: happeningSoonWithinDays,
-        );
-        final page = ref.watch(openMeetupsProvider(key));
-        // Whatever the async state, a value beats a spinner and a fallback
-        // beats an error. See "WHAT IT NEVER SHOWS" above.
-        final items = page.value?.items;
-        if (items == null) {
-          return page.hasError
-              ? _Frame(child: _Fallback(onBrowse: () => _browse(context, ref)))
-              : const _Frame(child: _Rows());
-        }
-        final picks = items
-            .where(
-              (m) =>
-                  m.id != excludeMeetupId &&
-                  !m.isHostedByMe &&
-                  m.myRequestStatus == null &&
-                  !m.lockedForViewer &&
-                  m.status == MeetupStatus.open,
-            )
-            .take(maxSuggestions)
-            .toList();
-        if (picks.isEmpty) {
-          return _Frame(
-            child: _Fallback(onBrowse: () => _browse(context, ref)),
-          );
-        }
-        return _Frame(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final meetup in picks)
-                _SuggestionRow(meetup: meetup, onTap: () => onOpen(meetup)),
-              const SizedBox(height: 4),
-              SecondaryButton(
-                label: 'See all nearby',
-                height: 40,
-                onPressed: () => _browse(context, ref),
-              ),
-            ],
-          ),
-        );
+    final known = ref.watch(knownViewerLocationProvider);
+    if (known == null) {
+      return _Frame(child: _Fallback(onBrowse: () => _browse(context, ref)));
     }
+    final key = (
+      intent: null,
+      viewerLat: known.lat,
+      viewerLng: known.lng,
+      withinDays: happeningSoonWithinDays,
+    );
+    final page = ref.watch(openMeetupsProvider(key));
+    // Whatever the async state, a value beats a spinner and a fallback
+    // beats an error. See "WHAT IT NEVER SHOWS" above.
+    final items = page.value?.items;
+    if (items == null) {
+      return page.hasError
+          ? _Frame(child: _Fallback(onBrowse: () => _browse(context, ref)))
+          : const _Frame(child: _Rows());
+    }
+    final picks = items
+        .where(
+          (m) =>
+              m.id != excludeMeetupId &&
+              !m.isHostedByMe &&
+              m.myRequestStatus == null &&
+              !m.lockedForViewer &&
+              m.status == MeetupStatus.open,
+        )
+        .take(maxSuggestions)
+        .toList();
+    if (picks.isEmpty) {
+      return _Frame(child: _Fallback(onBrowse: () => _browse(context, ref)));
+    }
+    return _Frame(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final meetup in picks)
+            _SuggestionRow(meetup: meetup, onTap: () => onOpen(meetup)),
+          const SizedBox(height: 4),
+          SecondaryButton(
+            label: 'See all nearby',
+            height: 40,
+            onPressed: () => _browse(context, ref),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Back to Home's browse list: pop every pushed page and land on the

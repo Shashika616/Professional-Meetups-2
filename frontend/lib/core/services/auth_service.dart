@@ -1,7 +1,19 @@
+import 'dart:math';
+import 'dart:typed_data';
+
 import 'package:professional_connections_platform/core/models/auth_session.dart';
 import 'package:professional_connections_platform/core/models/trusted_contact.dart';
 import 'package:professional_connections_platform/core/models/public_profile.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
+
+/// 128 random bits as hex: one per SOS sheet, shared by all its attempts.
+String newSosRequestId() {
+  final random = Random.secure();
+  return List<String>.generate(
+    16,
+    (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
+}
 
 /// Contract for authentication and Level 2/3 verification (ADR-011,
 /// ADR-012, `frontend/PLAN.md`'s matching addendum).
@@ -165,8 +177,14 @@ abstract interface class AuthService {
   /// rather than the app making a second call to fetch it server-side.
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber,
-    String email,
+    required String phoneNumber,
+  });
+
+  /// Changes a contact's name or number. Like adding one, it sends nothing.
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
   });
   Future<List<TrustedContact>> listTrustedContacts();
   Future<void> removeTrustedContact(String contactId);
@@ -179,11 +197,21 @@ abstract interface class AuthService {
   /// wrong, and it used to refuse to send at all without a GPS fix — so
   /// being indoors, denying the permission once, or simply waiting out a
   /// slow read disabled it. Null means "no usable fix": the alert goes
-  /// out anyway and tells the contact the location is unavailable.
+  /// out anyway, with the location the server has or saying there is none.
+  ///
+  /// [capturedAt] and [source] say when the phone took that fix and how:
+  /// `gps` or `device_last_known`.
+  ///
+  /// [clientRequestId] is the same for every attempt from one SOS sheet
+  /// ([newSosRequestId]), its automatic retry and the user's Retry alike,
+  /// so a retry can never alert anyone twice.
   Future<int> triggerSos({
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   });
 
   /// The browse screen's on-demand location read (Slice D, ADR-021) — its
@@ -198,6 +226,13 @@ abstract interface class AuthService {
   /// clears the local session. Throws [AccountDeletionBlockedException]
   /// while the account still has meetups or requests to join that have
   /// not happened yet, carrying the server's sentence for what to do.
+  /// Stores the user's own picture (the JPEG the phone cropped) and returns
+  /// its new path.
+  Future<String> uploadProfilePhoto(Uint8List jpeg);
+
+  /// Removes the user's picture.
+  Future<void> deleteProfilePhoto();
+
   Future<void> deleteAccount();
 }
 
@@ -628,27 +663,48 @@ class MockAuthService implements AuthService {
   @override
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber = '',
-    String email = '',
+    required String phoneNumber,
   }) async {
     await Future<void>.delayed(latency);
-    if (phoneNumber.isEmpty && email.isEmpty) {
+    if (_mockTrustedContacts.length >= 2) {
       throw const AuthNetworkException(
-        'Add a phone number or email for this contact.',
-      );
-    }
-    if (_mockTrustedContacts.length >= 3) {
-      throw const AuthNetworkException(
-        'You can only have up to 3 trusted contacts.',
+        'You can only have up to 2 trusted contacts.',
       );
     }
     final contact = TrustedContact(
       id: 'mock-contact-${_mockContactSeq++}',
       name: name,
       phoneNumber: phoneNumber,
-      email: email,
     );
     _mockTrustedContacts.add(contact);
+    return contact;
+  }
+
+  @override
+  Future<String> uploadProfilePhoto(Uint8List jpeg) async {
+    await Future<void>.delayed(latency);
+    return '';
+  }
+
+  @override
+  Future<void> deleteProfilePhoto() async {
+    await Future<void>.delayed(latency);
+  }
+
+  @override
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
+  }) async {
+    await Future<void>.delayed(latency);
+    final contact = TrustedContact(
+      id: contactId,
+      name: name,
+      phoneNumber: phoneNumber,
+    );
+    final index = _mockTrustedContacts.indexWhere((c) => c.id == contactId);
+    if (index >= 0) _mockTrustedContacts[index] = contact;
     return contact;
   }
 
@@ -669,6 +725,9 @@ class MockAuthService implements AuthService {
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   }) async {
     await Future<void>.delayed(latency);
     if (_mockTrustedContacts.isEmpty) {

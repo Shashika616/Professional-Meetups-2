@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' show AppLifecycleState;
 
 import 'package:fake_async/fake_async.dart';
@@ -301,4 +302,64 @@ void main() {
       });
     });
   });
+
+  group('leaving the phone (N1-D5) and opting out (N1-D8)', () {
+    test('rotating sends what is queued, then takes a new id', () async {
+      final transport = FakeAnalyticsTransport();
+      final settings = MemoryAnalyticsSettings(install: testInstallId);
+      final client = newTestClient(transport: transport, settings: settings);
+      addTearDown(client.dispose);
+      await client.start();
+
+      await client.rotateInstallId();
+      expect(transport.batches.single['install_id'], testInstallId);
+      expect(client.installId, isNot(testInstallId));
+      expect(client.installId, hasLength(36));
+      expect(settings.install, client.installId);
+
+      client.record(AnalyticsEvent.appOpened);
+      await client.flush();
+      expect(transport.batches.last['install_id'], client.installId);
+    });
+
+    test('what could not be sent does not go out under the new id', () async {
+      final transport = FakeAnalyticsTransport()
+        ..next = () => const RetryLater();
+      final client = newTestClient(transport: transport);
+      addTearDown(client.dispose);
+      await client.start();
+      await client.rotateInstallId();
+      expect(client.queue.isEmpty, isTrue);
+    });
+
+    test('opting out stops a batch on its way, and no other follows', () async {
+      final gate = Completer<SendResult>();
+      final transport = _HeldTransport(gate);
+      final client = newTestClient(transport: transport);
+      addTearDown(client.dispose);
+      await client.start();
+      unawaited(client.flush());
+      await pumpEventQueue();
+      expect(transport.batches, hasLength(1));
+
+      await client.setOptedOut(true);
+      expect(transport.aborts, 1);
+      gate.complete(const RetryLater());
+      await pumpEventQueue();
+      expect(transport.batches, hasLength(1));
+      expect(client.queue.isEmpty, isTrue);
+    });
+  });
+}
+
+class _HeldTransport extends FakeAnalyticsTransport {
+  _HeldTransport(this.gate);
+
+  final Completer<SendResult> gate;
+
+  @override
+  Future<SendResult> send(Map<String, Object?> batch) {
+    batches.add(batch);
+    return gate.future;
+  }
 }

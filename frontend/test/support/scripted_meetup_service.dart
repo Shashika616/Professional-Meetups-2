@@ -343,10 +343,6 @@ class ScriptedMeetupService implements MeetupService {
   Future<SafetyState> acknowledgeSafetyChecklist(String meetupId) async =>
       SafetyState(meetupId: meetupId, checklistAckAt: DateTime.now());
 
-  @override
-  Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn) async =>
-      SafetyState(meetupId: meetupId, liveLocationOptIn: optIn);
-
   /// Recorded so a test can assert WHICH contacts were shared with, not just
   /// that the call happened.
   final List<String> sharedContactIds = [];

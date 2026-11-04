@@ -75,6 +75,11 @@ abstract class Analytics {
   /// recording, and tells the server when signed in.
   Future<void> setOptedOut(bool optedOut);
 
+  /// A new install id, so what follows cannot be joined to the account that
+  /// just left this phone (N1-D5). Sends what is queued first, then starts
+  /// clean.
+  Future<void> rotateInstallId();
+
   /// The server's `analytics.enabled` and `analytics.sample_rate` (0-100).
   void applyRemoteConfig({required bool enabled, required int sampleRate});
 
@@ -118,6 +123,9 @@ class NoopAnalytics extends Analytics {
 
   @override
   Future<void> setOptedOut(bool optedOut) async {}
+
+  @override
+  Future<void> rotateInstallId() async {}
 
   @override
   void applyRemoteConfig({required bool enabled, required int sampleRate}) {}

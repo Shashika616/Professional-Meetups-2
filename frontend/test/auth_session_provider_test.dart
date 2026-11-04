@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -226,9 +228,15 @@ class _FakeAuthService implements AuthService {
   @override
   Future<TrustedContact> addTrustedContact({
     required String name,
-    String phoneNumber = '',
-    String email = '',
+    required String phoneNumber,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<TrustedContact> updateTrustedContact(
+    String contactId, {
+    required String name,
+    required String phoneNumber,
+  }) => throw UnimplementedError();
 
   @override
   Future<List<TrustedContact>> listTrustedContacts() async =>
@@ -243,7 +251,17 @@ class _FakeAuthService implements AuthService {
     required String contextMessage,
     double? latitude,
     double? longitude,
+    DateTime? capturedAt,
+    String? source,
+    String? clientRequestId,
   }) async => throw UnimplementedError();
+
+  @override
+  Future<String> uploadProfilePhoto(Uint8List jpeg) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteProfilePhoto() => throw UnimplementedError();
 
   @override
   Future<void> deleteAccount() async {}
@@ -351,6 +369,39 @@ void main() {
       expect(state.profile?.fullName, expired.fullName);
     },
   );
+
+  test('a 429 from refresh at launch stays signed in (N1-D6)', () async {
+    final expired = _sessionExpiringIn(const Duration(minutes: -5));
+    await storage.saveSession(expired);
+
+    final container = ProviderContainer(
+      overrides: [
+        sessionStorageProvider.overrideWithValue(storage),
+        tokenRefresherProvider.overrideWithValue(
+          TokenRefresher(
+            storage: storage,
+            refreshSession: (token) async => throw const RateLimitedException(),
+          ),
+        ),
+        authServiceProvider.overrideWithValue(
+          _FakeAuthService(
+            const UserProfile(id: 'user-1', fullName: 'Ada Lovelace'),
+          ),
+        ),
+        meetupServiceProvider.overrideWithValue(ScriptedMeetupService()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final state = await container.read(authSessionProvider.future);
+    expect(
+      state.isLoggedIn,
+      isTrue,
+      reason: 'a rate-limited refresh showed the sign-in screen',
+    );
+    expect(state.session!.refreshToken, expired.refreshToken);
+    expect(state.profile?.fullName, expired.fullName);
+  });
 
   // The other side of the same line: a refresh token the server REJECTS
   // still means signed out.

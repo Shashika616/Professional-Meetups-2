@@ -49,15 +49,23 @@ void main() {
 
   // #80: adding a contact now texts them once. The page used to say nobody
   // contacts them but you, which stopped being true.
-  testWidgets('says a new trusted contact is texted once to agree', (
+  testWidgets('says adding a trusted contact does not message them', (
     tester,
   ) async {
     await pumpPage(tester);
     await open(tester, 'Trusted contacts');
     expect(
-      find.textContaining('we text them once to ask whether they agree'),
+      find.textContaining('Adding someone does not message them'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('says location is rounded and how long it is kept', (
+    tester,
+  ) async {
+    await pumpPage(tester);
+    await open(tester, 'Your location');
+    expect(find.textContaining('rounded to about 100 metres'), findsOneWidget);
   });
 
   // Plan 29E: the first real control replaces "Controls are coming".

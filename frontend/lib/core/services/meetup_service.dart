@@ -116,7 +116,6 @@ abstract interface class MeetupService {
   /// state to route around.
   Future<SafetyState> getSafetyState(String meetupId);
   Future<SafetyState> acknowledgeSafetyChecklist(String meetupId);
-  Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn);
 
   /// Tells the caller's chosen trusted contacts where and when this meetup
   /// is.
@@ -614,20 +613,6 @@ class MockMeetupService implements MeetupService {
   }
 
   @override
-  Future<SafetyState> setLiveLocationOptIn(String meetupId, bool optIn) async {
-    await Future<void>.delayed(latency);
-    final current = _safetyStates[meetupId] ?? SafetyState(meetupId: meetupId);
-    final state = SafetyState(
-      meetupId: meetupId,
-      checklistAckAt: current.checklistAckAt,
-      liveLocationOptIn: optIn,
-      checkedInAt: current.checkedInAt,
-    );
-    _safetyStates[meetupId] = state;
-    return state;
-  }
-
-  @override
   Future<SafetyState> shareWithContacts(
     String meetupId,
     List<String> contactIds,
@@ -640,7 +625,6 @@ class MockMeetupService implements MeetupService {
     final state = SafetyState(
       meetupId: meetupId,
       checklistAckAt: current.checklistAckAt,
-      liveLocationOptIn: current.liveLocationOptIn,
       checkedInAt: current.checkedInAt,
       declinedAt: current.declinedAt,
       declineReason: current.declineReason,
@@ -662,7 +646,6 @@ class MockMeetupService implements MeetupService {
     final state = SafetyState(
       meetupId: meetupId,
       checklistAckAt: current.checklistAckAt,
-      liveLocationOptIn: current.liveLocationOptIn,
       checkedInAt: DateTime.now(),
     );
     _safetyStates[meetupId] = state;
@@ -684,7 +667,6 @@ class MockMeetupService implements MeetupService {
     final state = SafetyState(
       meetupId: meetupId,
       checklistAckAt: current?.checklistAckAt,
-      liveLocationOptIn: current?.liveLocationOptIn ?? false,
       declinedAt: DateTime.now(),
       declineReason: reason,
     );

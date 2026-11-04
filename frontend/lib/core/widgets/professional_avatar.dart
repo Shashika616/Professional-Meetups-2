@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/services/photo_auth.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
 /// The user's profile picture. Shows initials until a real photo URL
@@ -26,6 +27,14 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 /// blue outline to a flat [AppPalette.raised]: a gradient inside a
 /// gradient ring is mud, and the initials need a calm ground to be read
 /// against at 12px in a list row.
+///
+/// # A PHOTO IS OUR OWN, AND NEEDS THE TOKEN
+///
+/// [imageUrl] is the path from a payload (`/v1/users/{id}/photo?v=...`), and
+/// is fetched from this app's gateway with the signed-in user's token through
+/// [PhotoAuth]. Anything else draws initials, so a token can never be sent to
+/// another host. While it loads, and if it fails, initials show: an avatar
+/// never holds up a screen.
 class ProfessionalAvatar extends StatelessWidget {
   const ProfessionalAvatar({
     super.key,
@@ -65,6 +74,7 @@ class ProfessionalAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final photoUrl = PhotoAuth.url(imageUrl);
     final avatar = Container(
       width: size,
       height: size,
@@ -73,9 +83,10 @@ class ProfessionalAvatar extends StatelessWidget {
         color: AppPalette.raised,
       ),
       child: ClipOval(
-        child: imageUrl != null
+        child: photoUrl != null
             ? Image.network(
-                imageUrl!,
+                photoUrl,
+                headers: PhotoAuth.headers,
                 fit: BoxFit.cover,
                 // 2026-08-31 round-3 hardening, Fix 3: without
                 // cacheWidth/cacheHeight, Image.network decodes and caches

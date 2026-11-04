@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/maps/map_canvas.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/ios_map_location_step.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/android_map_location_step.dart';
 
@@ -25,14 +26,17 @@ import 'package:professional_connections_platform/features/meetups/widgets/andro
 /// runtime platform-branching convention elsewhere in this codebase to
 /// follow instead.
 class MapLocationStep extends StatelessWidget {
-  const MapLocationStep({super.key, required this.onSubmit});
+  const MapLocationStep({super.key, required this.onSubmit, this.startAt});
 
   final void Function(double lat, double lng, String label) onSubmit;
+
+  /// Where the map opens; null for the default.
+  final MapPoint? startAt;
 
   @override
   Widget build(BuildContext context) {
     return defaultTargetPlatform == TargetPlatform.iOS
-        ? IosMapLocationStep(onSubmit: onSubmit)
-        : AndroidMapLocationStep(onSubmit: onSubmit);
+        ? IosMapLocationStep(onSubmit: onSubmit, startAt: startAt)
+        : AndroidMapLocationStep(onSubmit: onSubmit, startAt: startAt);
   }
 }

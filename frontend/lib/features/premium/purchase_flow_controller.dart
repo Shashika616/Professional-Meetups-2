@@ -49,6 +49,16 @@ import 'package:professional_connections_platform/core/services/subscription_ser
 /// (Apple's appAccountToken, Google's obfuscatedAccountId): the server
 /// refuses a purchase without it, which is what stops a receipt being
 /// replayed on another account. The rule above holds for both kinds.
+///
+/// # ONE LISTENER FOR THE APP (N1-D2)
+///
+/// [purchaseFlowProvider] holds the one instance, started after sign-in, so
+/// a transaction the store redelivers is handled with no page open. With
+/// [loadCatalog] set, a delivered product is routed by id against the
+/// catalog: a credit pack to the credit verifier, a plan to the subscription
+/// verifier. The catalog is awaited first, and a transaction the catalog
+/// cannot place, or that arrives when there is no catalog, is left pending
+/// and comes back on a later launch. Pages attach with [beginFlow].
 class PurchaseFlowController extends ChangeNotifier {
   PurchaseFlowController({
     required SubscriptionService subscriptionService,
@@ -61,11 +71,13 @@ class PurchaseFlowController extends ChangeNotifier {
     Future<bool> Function(PurchaseParam)? buyNonConsumable,
     Future<bool> Function(PurchaseParam)? buyConsumable,
     String? analyticsFlow,
+    Future<Catalog> Function()? loadCatalog,
   }) : _subscriptionService = subscriptionService,
        _flow = analyticsFlow == null
            ? null
            : Analytics.instance.flow(analyticsFlow),
        _platform = platform,
+       _loadCatalog = loadCatalog,
        _creditService = creditService,
        _consumableIds = consumableIds,
        accountToken = accountToken,
@@ -99,7 +111,10 @@ class PurchaseFlowController extends ChangeNotifier {
 
   /// Plan 29E: the buy-credits or subscribe funnel this purchase is part
   /// of (null: none). Choose, store sheet, confirmed by the server.
-  final FlowTracker? _flow;
+  FlowTracker? _flow;
+
+  final Future<Catalog> Function()? _loadCatalog;
+  Catalog? _catalog;
 
   String get _chooseStep => _flow?.flowId == AnalyticsFlow.subscribe
       ? AnalyticsFlowStep.subscribeChoosePlan
@@ -111,11 +126,23 @@ class PurchaseFlowController extends ChangeNotifier {
       ? AnalyticsFlowStep.subscribeConfirmed
       : AnalyticsFlowStep.buyCreditsConfirmed;
 
+  /// A page opening: its funnel starts at the choose step, and it does not
+  /// inherit a message from a background redelivery.
+  void beginFlow(String flow) {
+    _flow = Analytics.instance.flow(flow);
+    errorMessage = null;
+    startFlow();
+  }
+
   /// Starts the funnel at its choose step (the page opening).
   void startFlow() => _flow?.stepViewed(_chooseStep);
 
   /// Abandons the funnel if it did not finish (the page closing).
-  void endFlow() => _flow?.abandon(AnalyticsValue.flowAbandonedReasonBack);
+  void endFlow() {
+    _flow?.abandon(AnalyticsValue.flowAbandonedReasonBack);
+    _flow = null;
+  }
+
   late final StreamSubscription<List<PurchaseDetails>> _subscription;
 
   bool busy = false;
@@ -160,9 +187,9 @@ class PurchaseFlowController extends ChangeNotifier {
           errorMessage = null;
           notifyListeners();
         case PurchaseStatus.purchased:
-          await _verifyAndComplete(details, bought: true);
+          await _route(details, bought: true);
         case PurchaseStatus.restored:
-          await _verifyAndComplete(details);
+          await _route(details);
         case PurchaseStatus.error:
           busy = false;
           // Never the store's own text: it is SDK vocabulary
@@ -181,6 +208,47 @@ class PurchaseFlowController extends ChangeNotifier {
           notifyListeners();
           await _completeIfPending(details);
       }
+    }
+  }
+
+  /// Sends a delivered product to the verifier its catalog entry names, or
+  /// leaves it pending. See the class doc.
+  Future<void> _route(PurchaseDetails details, {bool bought = false}) async {
+    if (_loadCatalog == null) {
+      return _verifyAndComplete(details, bought: bought);
+    }
+    final catalog = await _catalogFor(details.productID);
+    if (catalog == null || !_places(catalog, details.productID)) {
+      busy = false;
+      if (bought) {
+        errorMessage =
+            'We could not confirm your purchase yet. We will try again the '
+            'next time you open the app.';
+        _flow?.abandon(AnalyticsValue.flowAbandonedReasonError);
+      }
+      notifyListeners();
+      return;
+    }
+    _consumableIds = {for (final p in catalog.creditPacks) p.productId};
+    await _verifyAndComplete(details, bought: bought);
+  }
+
+  bool _places(Catalog catalog, String productId) =>
+      catalog.creditPacks.any((p) => p.productId == productId) ||
+      catalog.plans.any((p) => p.productIds.containsValue(productId));
+
+  /// The cached catalog if it knows [productId], otherwise a fresh one. Null
+  /// if neither can be had: an unreachable server reads as an empty catalog
+  /// (version 0), which is not an answer about this product.
+  Future<Catalog?> _catalogFor(String productId) async {
+    final cached = _catalog;
+    if (cached != null && _places(cached, productId)) return cached;
+    try {
+      final fresh = await _loadCatalog!();
+      if (fresh.version == 0) return cached;
+      return _catalog = fresh;
+    } catch (_) {
+      return cached;
     }
   }
 

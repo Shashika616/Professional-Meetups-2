@@ -19,6 +19,7 @@ import 'package:professional_connections_platform/core/widgets/skeleton_box.dart
 import 'package:professional_connections_platform/core/widgets/skeleton_loader.dart';
 import 'package:professional_connections_platform/features/credits/credits_format.dart';
 import 'package:professional_connections_platform/features/premium/purchase_flow_controller.dart';
+import 'package:professional_connections_platform/features/premium/purchase_listener.dart';
 
 /// Buy credits (plan 29C): the packs the catalog lists, at the price the
 /// store shows, bought through [PurchaseFlowController]'s consumable path.
@@ -53,6 +54,7 @@ class BuyCreditsPage extends ConsumerStatefulWidget {
 
 class _BuyCreditsPageState extends ConsumerState<BuyCreditsPage> {
   late final PurchaseFlowController _controller;
+  late final bool _ownsController;
   late final String _platform =
       widget.platform ?? ClientInfoHttpClient.currentPlatform();
 
@@ -66,16 +68,24 @@ class _BuyCreditsPageState extends ConsumerState<BuyCreditsPage> {
   @override
   void initState() {
     super.initState();
-    _controller = PurchaseFlowController(
-      subscriptionService: ref.read(subscriptionServiceProvider),
-      creditService: ref.read(creditServiceProvider),
-      platform: _platform,
-      purchaseUpdates: widget.purchaseUpdates,
-      buyConsumable: widget.buyConsumable,
-      completePurchase: widget.completePurchase,
-      analyticsFlow: AnalyticsFlow.buyCredits,
-    )..addListener(_onControllerChanged);
-    _controller.startFlow();
+    // The app's one listener (N1-D2); a test seam builds its own.
+    final shared = widget.purchaseUpdates == null
+        ? ref.read(purchaseFlowProvider)
+        : null;
+    _ownsController = shared == null;
+    _controller =
+        shared ??
+        PurchaseFlowController(
+          subscriptionService: ref.read(subscriptionServiceProvider),
+          creditService: ref.read(creditServiceProvider),
+          platform: _platform,
+          purchaseUpdates: widget.purchaseUpdates,
+          buyConsumable: widget.buyConsumable,
+          completePurchase: widget.completePurchase,
+        );
+    _controller
+      ..addListener(_onControllerChanged)
+      ..beginFlow(AnalyticsFlow.buyCredits);
   }
 
   Future<void> _loadProducts(Catalog catalog) async {
@@ -128,7 +138,7 @@ class _BuyCreditsPageState extends ConsumerState<BuyCreditsPage> {
   void dispose() {
     _controller.endFlow();
     _controller.removeListener(_onControllerChanged);
-    _controller.dispose();
+    if (_ownsController) _controller.dispose();
     super.dispose();
   }
 

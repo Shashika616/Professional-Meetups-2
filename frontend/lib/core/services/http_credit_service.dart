@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'package:professional_connections_platform/core/config/app_config.dart';
+import 'package:professional_connections_platform/core/config/update_required.dart';
 import 'package:professional_connections_platform/core/models/credits.dart';
 import 'package:professional_connections_platform/core/services/auth_service.dart';
 import 'package:professional_connections_platform/core/services/client_info_http_client.dart';
@@ -101,6 +102,9 @@ class HttpCreditService implements CreditService {
     switch (r.statusCode) {
       case 401:
         throw const CreditSessionExpiredException();
+      case 426:
+        UpdateRequired.signalled.value = true;
+        throw const CreditUpdateRequiredException();
       case 503:
         throw const CreditUnavailableException();
       case 400 || 403 || 409 || 402:
