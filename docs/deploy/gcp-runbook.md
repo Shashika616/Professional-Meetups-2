@@ -1,11 +1,14 @@
 # Google Cloud deployment record and redeploy runbook
 
-> **Status 2026-09-25:** Cloud Run `meetups-backend` serves revision
-> `r32b` against Supabase (Mumbai). The database moved to Supabase on
-> 2026-09-15 and the Cloud SQL instance `meetups-db` was deleted (see §6);
-> §1–§5 below describe the Cloud SQL era as it was, so it can be recreated
-> if Supabase is ever left. See §7 for the 2026-09-25 outage and what it
-> changed about scaling.
+> **Status 2026-11-01:** Cloud Run `meetups-backend` against Supabase
+> (Mumbai), last deployed as `r38` (2026-10-22). The database moved to
+> Supabase on 2026-09-15 and the Cloud SQL instance `meetups-db` was deleted
+> (see §6); the Cloud SQL parts of §1–§5 are kept so it can be recreated if
+> Supabase is ever left. The service scales to zero with CPU only during
+> requests (§7, §10). **The next deploy** goes through the Deploy workflow
+> and the order in §3a: migrations 0017-0032 are pending since the last
+> recorded version, two need a pre-flight check, and Cloud Scheduler needs
+> a second job.
 
 Snapshot of the production deployment as it stood before the move (revision
 `meetups-backend-r22`), written so the whole thing can be torn down for a
@@ -21,23 +24,25 @@ as `service.yaml.template` (the real `backend/service.yaml` is gitignored).
 | GCP project | `project-285b9289-549d-4fef-92c` (project number `740861671089`) |
 | Region | `asia-south1` (Mumbai) |
 | Cloud Run service | `meetups-backend`, public URL `https://meetups-backend-k7eklebcwq-el.a.run.app` (also `https://meetups-backend-740861671089.asia-south1.run.app`) |
-| Last serving revision | `meetups-backend-r22`, images tagged `r22` |
+| Last serving revision | `meetups-backend-r38` (2026-10-22); the Cloud SQL era ended at `r22` |
 | Containers (sidecars, one Cloud Run service) | `gateway` (HTTP :8080, 1 CPU / 512Mi) and `monolith` (gRPC :9090 on localhost, 1 CPU / 1Gi); `container-dependencies: gateway → monolith` |
-| Scaling | maxScale 8, containerConcurrency 80, timeout 300s, minScale **1** with `cpu-throttling: "false"` (2026-10-21, #77 — the background pollers need CPU Cloud Run does not give an idle instance; §7) |
-| Service account | `740861671089-compute@developer.gserviceaccount.com` (needs Secret Manager accessor + Cloud SQL client) |
+| Scaling | maxScale 8, containerConcurrency 80, request timeout 600s (the analytics tick needs up to 480s, §10), minScale **0** with CPU only during requests: the free tier (2026-10-22). Minscale 1 with `cpu-throttling: "false"` was tried on 2026-10-21 (#77) and reverted; Cloud Scheduler drives the background work instead (§10). `deploy_manifest_test.go` refuses either annotation |
+| Service account | `740861671089-compute@developer.gserviceaccount.com` (needs Secret Manager accessor on every secret below, and `roles/storage.objectCreator` on the analytics bucket, §14; Cloud SQL client only in the Cloud SQL era) |
 | Artifact Registry | `asia-south1-docker.pkg.dev/project-285b9289-549d-4fef-92c/meetups-repo` (Docker), images `gateway:rNN`, `monolith:rNN` |
-| Cloud SQL instance | `meetups-db`, PostgreSQL 18, tier `db-g1-small`, zonal, 10 GB PD_SSD, public IPv4 with NO authorized networks (access only via the Cloud SQL connector/proxy), IAM auth flag on, automated backups + PITR (7-day log retention), deletion protection ON |
+| Cloud SQL instance (deleted 2026-09-15) | `meetups-db`, PostgreSQL 18, tier `db-g1-small`, zonal, 10 GB PD_SSD, public IPv4 with NO authorized networks (access only via the Cloud SQL connector/proxy), IAM auth flag on, automated backups + PITR (7-day log retention), deletion protection ON |
 | Cloud SQL connection name | `project-285b9289-549d-4fef-92c:asia-south1:meetups-db` |
 | Databases / users | database `monolith_db`; users `app` (application), `postgres` (admin) |
 | Postgres extensions | `pgcrypto`, `postgis` (created by migrations 0001/0002) |
-| Schema | golang-migrate, `backend/migrations/`, 32 files = versions 0001-0016, current version **16** (`0014_account_deletion_indexes`, `0015_user_deleted_outbox` and `0016_safety_holds` applied 2026-10-01 over the SESSION connection, not the transaction pooler the app uses: port 6543 is transaction-pooled and breaks the advisory lock golang-migrate takes, so migrations go to port 5432. All three are additive, so they were applied while r33 was still serving. 0014 adds the six user-id indexes the account purge needs, including `meetup.idx_meetup_user_ratings_rater` — `rater_user_id` previously existed only as the second column of a composite unique and could not be seeked on, measured at cost 4773 (seq scan) versus 8.44 (index scan) over 200k rows.) |
+| Schema | golang-migrate, `backend/migrations/`, versions 0001-**0037** in the repository. The monolith refuses to start below the version it was built for (`cmd/monolith/schema_check.go`). Production was last recorded at 16 (r34, 2026-10-01); check the live version before each deploy (§3a) rather than trusting this row. Migrations go over the SESSION connection (port 5432), never the transaction pooler (6543), which breaks golang-migrate's advisory lock |
 | Auth bridge page | LinkedIn redirect `https://professional-meetups-976d2.web.app` (Firebase Hosting, project `professional-meetups-976d2`) — separate from this GCP project |
 
 ### Secret Manager secrets (names; values live only in Secret Manager and the owner's password manager)
 
 | Secret | Used as |
 |---|---|
-| `database-url` | `DATABASE_URL` env (monolith). Shape: `postgres://app:<password>@/monolith_db?host=/cloudsql/<connection name>` |
+| `database-url` | `DATABASE_URL` env (monolith). Today the Supabase transaction pooler URL (§6); in the Cloud SQL era `postgres://app:<password>@/monolith_db?host=/cloudsql/<connection name>` |
+| `cron-shared-secret` | `CRON_SHARED_SECRET` (gateway): authenticates Cloud Scheduler to both tick routes (§10). Without it neither is mounted and no background work runs |
+| `metrics-token` | `METRICS_TOKEN` (gateway): guards `/metrics` and `/metrics/monolith`. The manifest references it, so it must exist; any long random value |
 | `internal-grpc-secret` | `MONOLITH_SHARED_SECRET` (gateway) and `INTERNAL_GRPC_SHARED_SECRET` (monolith) |
 | `jwt-private-key` / `jwt-public-key` | mounted as files at `/secrets-priv/jwt_private.pem`, `/secrets-pub/jwt_public.pem` (RS256, 15-min access tokens) |
 | `work-email-hmac` | mounted at `/secrets-hmac/work_email_hmac.key` |
@@ -114,7 +119,9 @@ gcloud projects add-iam-policy-binding project-285b9289-549d-4fef-92c \
   --role=roles/cloudsql.client
 ```
 
-Schema (from `backend/`, with the proxy on a local port):
+Schema, in the Cloud SQL era (from `backend/`, with the Cloud SQL Auth
+proxy on a local port). On Supabase there is no proxy: migrate over the
+session connection instead (§3a, §6).
 
 ```bash
 cloud-sql-proxy project-285b9289-549d-4fef-92c:asia-south1:meetups-db --port 6543 &
@@ -132,8 +139,11 @@ gcloud auth print-access-token | docker login -u oauth2accesstoken \
 REPO=asia-south1-docker.pkg.dev/project-285b9289-549d-4fef-92c/meetups-repo
 docker buildx build --platform linux/amd64 -f cmd/gateway/Dockerfile  -t $REPO/gateway:rNN  --push .
 docker buildx build --platform linux/amd64 -f cmd/monolith/Dockerfile -t $REPO/monolith:rNN --push .
-# Copy docs/deploy/service.yaml.template to backend/service.yaml, fill the
-# <PLACEHOLDERS>, set the revision name and both image tags to rNN, then:
+# Render the manifest from docs/deploy/service.yaml.template: export every
+# variable the script lists (it refuses to render with a required one
+# empty), then:
+REVISION=rNN scripts/render-service-yaml.sh service.yaml
+go test ./cmd/monolith -run 'Manifest|Template|Render' -count=1
 gcloud run services replace service.yaml --region asia-south1
 gcloud run services describe meetups-backend --region asia-south1 \
   --format='value(status.traffic[0].revisionName,status.traffic[0].percent)'
@@ -141,6 +151,71 @@ gcloud run services describe meetups-backend --region asia-south1 \
 
 Client: the mobile app's production gateway URL is set at build time in
 `frontend/build.sh` (`PROD_URL`); update it if the service URL changes.
+
+## 3a. Deploying the next revision (from 2026-11-01)
+
+Normally through the **Deploy** workflow (§11), which does steps 3-5
+itself. By hand, the same order:
+
+1. **Check the live schema version** over the session connection:
+   `migrate -path migrations -database "$SUPABASE_DIRECT_URL" version`.
+   Everything above it up to 0037 is pending.
+2. **Pre-flight the two migrations that can fail on real data** (read-only):
+
+   ```sql
+   -- 0017: personal e-mails that differ only by case (must be 0; resolve
+   -- any by hand first, see ADR-009). Counts only, so no address is shown.
+   SELECT count(*) FROM (SELECT 1 FROM auth.users WHERE personal_email IS NOT NULL
+    GROUP BY lower(personal_email) HAVING count(*) > 1) d;
+
+   -- 0036 (ADR-013): contacts it will delete, and accounts past the new cap
+   -- of 2 (they keep their contacts; SOS alerts the 2 oldest).
+   SELECT count(*) FROM auth.trusted_contacts WHERE phone_number IS NULL OR btrim(phone_number) = '';
+   SELECT count(*) FROM (SELECT 1 FROM auth.trusted_contacts GROUP BY user_id HAVING count(*) > 2) d;
+
+   -- 0019 (#101): the same person both pending and accepted on one meetup.
+   -- 0019 itself now marks the extra pending row 'withdrawn' and keeps the
+   -- accepted one; this says how many it will touch.
+   SELECT count(*) FROM meetup.meetup_requests p
+    WHERE p.status = 'pending' AND EXISTS (
+          SELECT 1 FROM meetup.meetup_requests a
+           WHERE a.meetup_id = p.meetup_id AND a.requester_id = p.requester_id
+             AND a.status = 'accepted');
+   ```
+
+3. **Create what the new manifest references** before deploying, or Cloud
+   Run refuses the revision: the secrets `cron-shared-secret` (exists since
+   r35), `metrics-token`, `analytics-user-key-secret`,
+   `apple-app-store-private-key` and `google-play-service-account` (a
+   placeholder value is fine until the store is set up: purchases then fail
+   closed with 503), each readable by the runtime service account (§1); and
+   the `production` environment's values for the render script (§11). No
+   analytics bucket is used for now (§14).
+4. **Apply migrations** 0017-0037 in one `migrate up`. In order:
+   0017-0018 identity (ADR-009); 0019 one live request per person (cleans
+   up first); 0020 verification target; 0021 and 0023 SOS location and
+   idempotency; 0022 refresh-token index; 0024 contact consent; 0025 feature
+   flags; 0026-0029 billing, meetup billing, ledger guard, store purchases;
+   0030-0032 analytics, the meetup activity outbox, the report; 0033 OTP
+   budgets and shared rate counters, 0034 the company-claim review status,
+   0035 the meetup creation request hash (plan 30B); 0036 reshapes trusted
+   contacts (plan 30C); 0037 the photos table (plan 30D, additive). All are additive except 0017 and 0019, covered by
+   step 2, and **0036, which is destructive**: it deletes contact emails,
+   email-only contacts, duplicate numbers, pending invitations and the
+   live-location flags, and the down migration restores the columns, not the
+   data. Take a backup first (§9). Until the new revision serves, the old one
+   cannot read contacts, so SOS fails for those minutes: run this and the
+   deploy together, in a quiet hour.
+5. **Deploy** the revision, then confirm `/readyz` and that traffic is on it.
+5a. **Photos, once, after the deploy** (plan 30D). In this order, because the
+   second copies the paths the first writes:
+   `DATABASE_URL=... go run ./cmd/backfill-photos --dry-run`, then without
+   `--dry-run`, then `go run ./cmd/backfill-user-display-cache`. A picture
+   that cannot be
+   fetched leaves initials. Both are safe to re-run.
+6. **Cloud Scheduler** (§10): create the analytics job
+   `monolith-cron-analytics` if it does not exist, and make sure both jobs
+   are ENABLED with the attempt deadlines in §10. Run each once by hand.
 
 ## 4. Teardown checklist (only after the replacement host is verified)
 
@@ -170,7 +245,7 @@ Client: the mobile app's production gateway URL is set at build time in
 | Supabase project | ref `wvsrtbactwawxhcyokep`, region `ap-south-1` (Mumbai), Postgres 17.6, PostGIS 3.3.7, pgcrypto. (A first project in Tokyo, `vglymgqqljzywxownoma`, served for ~30 minutes on 2026-09-15 and was deleted; its data was re-seeded from the Cloud SQL final backup.) |
 | Database | a dedicated `monolith_db` inside the project (NOT `postgres`): Supabase's own `auth` schema in `postgres` collides with this app's `auth` schema. Created with `CREATE DATABASE monolith_db` as the `postgres` role; the Supavisor pooler routes to it by database name. |
 | App connection (Cloud Run) | transaction pooler, IPv4: `postgresql://postgres.<ref>:<pw>@aws-0-ap-south-1.pooler.supabase.com:6543/monolith_db?sslmode=require&default_query_exec_mode=cache_describe&application_name=monolith-cloudrun` — stored as Secret Manager `database-url` version 3 (v1 = old Cloud SQL URL, v2 = the deleted Tokyo project). `cache_describe` keeps pgx compatible with transaction pooling; the app has no session-level SQL. |
-| Admin / migrations | direct connection (IPv6 only on the free tier; works from a Mac on IPv6): `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/monolith_db`. `migrate -path migrations -database '<direct url>' up`. Applied schema version is 16 (as of r34, 2026-10-01). Migrations `0017_email_is_the_identity_anchor` and `0018_account_claim_verification_purpose` are pending (ADR-009): apply both over this session connection (port 5432) BEFORE deploying code that uses them; 0017 can fail if existing rows differ only by email case, so check for duplicates first. The direct host is IPv6-only on the free tier and resolves to `db.wvsrtbactwawxhcyokep.supabase.co`; `migrate` over the POOLER does not work, since golang-migrate holds a session-scoped advisory lock and the pooler hands each transaction a different server connection. The `postgres` password is the same one embedded in the `database-url` secret's pooler URL. |
+| Admin / migrations | direct connection (IPv6 only on the free tier; works from a Mac on IPv6): `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/monolith_db`, or the IPv4 session pooler on port 5432 (what CI and the Deploy workflow use, secret `SUPABASE_DIRECT_URL`, §9). `migrate -path migrations -database '<url>' up`. `migrate` over the 6543 transaction pooler does not work: golang-migrate holds a session-scoped advisory lock and the pooler hands each transaction a different server connection. The live schema version and the pending migrations: §3a. The `postgres` password is the same one embedded in the `database-url` secret's pooler URL. |
 | Data | full copy of Cloud SQL taken 2026-09-15 (all 20 tables, row counts verified equal). Final Cloud SQL backups kept at `~/Documents/Professional Meetups/backups/` (custom-format `.dump` + plain data `.sql`), outside git. |
 | Cloud Run change | `run.googleapis.com/cloudsql-instances` annotation removed from `service.yaml`; `r23`/`r24` reused the `r22` images; `r25` (2026-09-15) adds email-address validation on the unauthenticated start endpoints; `r28`/`r28b` (2026-09-16) carry ADR-005 (one meetup at a time, logout with `fcm_token`) and the Android notification icon/colour on every push; `r29` (2026-09-16) adds the advisory `GET /v1/meetups/schedule-check` and the x/crypto + compress bumps; `r30` (2026-09-17) rewords the `request_declined` and `meetup_full` push copy per ADR-006 ("Not this time"), no wire change; `r31` (2026-09-17) drops the dash from the starting-soon push; `r32` (2026-09-25) carries the five commits that had accumulated since r31 — Plan 22's `full_name_hint`/`suggested_name_update` (proto change, so `auth.pb.go` regenerated), the `FindScheduleConflict` rewrite, the starting-soon push wording and the traits comment — and was briefly deployed with `minScale: "1"` during the 2026-09-25 incident (since set back to `"0"`, see §7); `r32b` (2026-09-25) is the same images rolled again so instances re-read `firebase-sa` version 2; `r32c` (2026-09-25) adds the missing `GOOGLE_CLIENT_ID` and `APPLE_SERVICES_ID` env vars, without which Apple/Google sign-in failed in production (see §7).; `r34` (2026-10-01) carries account deletion end to end (`DELETE /v1/users/me`, the auth-side purge with its transactional outbox and 90-day SOS safety hold, and the meetup-side purge that anonymises ratings and hosted meetups rather than deleting them — ADR-008), the host-sees-every-requester fix in `CanViewMemberProfile` (a host could not open the profile of someone who had asked to join, which is the one decision the host is being asked to make), and the user-facing error rewrite: every message the app shows now goes through `apperror.UserMessage`, and the gateway's own replies (`invalid request body`, `unauthorized`, `rate limited`) are plain sentences. Migrations 0014-0016 were applied FIRST — the new code writes to `auth.user_deleted_outbox` and `auth.safety_holds`, and the hourly guest sweeper would have failed without them. |
 | Free-tier caveats | project pauses after 7 idle days (unpause in the dashboard); no PITR and no managed backups on free, so the backup is ours: `.github/workflows/backup-database.yml` runs `backend/scripts/backup-database.sh` daily at 18:00 UTC (and on demand via *Run workflow*), a `pg_dump -Fc` over the direct URL uploaded to the GCS bucket in the `BACKUP_GCS_BUCKET` secret, kept 30 days by the bucket's lifecycle policy (`backend/scripts/backup-lifecycle.json`); a failed run shows as a failed workflow. See ADR-007. Pooler ~15 server connections shared, 200 client connections. |
@@ -534,9 +609,27 @@ rate, which `cpu-throttling: "false"` specifically opts out of.)
 
 ### What replaced them
 
-Cloud Scheduler (3 jobs always free) calls `POST /internal/cron/tick` every
-15 minutes. The gateway forwards it to the monolith's `OpsService`, which
-runs all eleven sweeps once and reports each one's row count.
+Cloud Scheduler (3 jobs always free) runs two jobs every 15 minutes. The
+gateway forwards each to the monolith's `OpsService`, which runs that
+group's sweeps once and reports each one's row count (tracker #102):
+
+| Job | Route | Sweeps | Total the gateway allows | Scheduler attempt deadline |
+| --- | --- | --- | --- | --- |
+| `monolith-cron-tick` | `POST /internal/cron/tick` | the 27 core sweeps: lifecycle, outboxes, retention, auth, billing, analytics partitions, and last the analytics flush | 240s | 300s |
+| `monolith-cron-analytics` | `POST /internal/cron/tick/analytics` | the 3 analytics sweeps: aggregate, archive and retention, daily report | 480s | 540s |
+
+- **Each sweep has its own budget** (30s by default, 120s for the
+  analytics sweeps, whose statements run under a 120s limit) and the
+  monolith stops starting sweeps when the total is nearly spent. A sweep it
+  had no time for is reported as skipped and counts as a failure, so the
+  report always reaches Scheduler before its deadline and names what did
+  not run.
+- **Each route sets its own write deadline**, past the gateway's 30s
+  `WriteTimeout` for ordinary requests; Cloud Run's request timeout is 600s
+  (`service.yaml`).
+- **Why two jobs:** the analytics sweeps need minutes on a big day and the
+  core sweeps must never wait behind them (the account-deletion purge has a
+  legal deadline). Two jobs fit the free tier's three.
 
 - **One sweep failing never stops the others.** They are unrelated, and the
   account-deletion purge has a legal deadline.
@@ -581,30 +674,72 @@ The worst an attacker holding the secret achieves is making idempotent,
 claim-based sweeps run more often than scheduled, which is what they are
 built to tolerate. No user data is returned.
 
-### State as of 2026-10-22
+### The jobs
 
-The job was created and then **PAUSED**, because `/internal/cron/tick` does
-not exist on the deployed revision (r34) — only on r35 and later. Leaving it
-running would have been 96 false failures a day.
-
-Resume it in the same step that deploys r35:
+`monolith-cron-tick` was created on 2026-10-22 and PAUSED until a revision
+with the route was deployed (r35). Check its state, and that the attempt
+deadline is 300s (it was created with the old 180s):
 
 ```sh
-gcloud scheduler jobs resume monolith-cron-tick --location=asia-south1
-gcloud scheduler jobs run    monolith-cron-tick --location=asia-south1   # verify once by hand
+gcloud scheduler jobs describe monolith-cron-tick --location=asia-south1 \
+  --format='value(state,attemptDeadline,schedule)'
+gcloud scheduler jobs update http monolith-cron-tick --location=asia-south1 \
+  --attempt-deadline=300s
+gcloud scheduler jobs resume monolith-cron-tick --location=asia-south1   # if PAUSED
 ```
 
-If it is still paused, no periodic work is running at all. `gcloud scheduler
-jobs describe monolith-cron-tick --location=asia-south1` reports the state.
+The analytics job, created with the next deploy (§3a step 6). The secret
+goes in a header, never the URL:
+
+```sh
+URL="$(gcloud run services describe meetups-backend --region asia-south1 --format='value(status.url)')"
+gcloud scheduler jobs create http monolith-cron-analytics --location=asia-south1 \
+  --schedule='*/15 * * * *' --time-zone=Etc/UTC \
+  --uri="$URL/internal/cron/tick/analytics" --http-method=POST \
+  --headers="X-Cron-Secret=$(gcloud secrets versions access latest --secret=cron-shared-secret)" \
+  --attempt-deadline=540s --max-retry-attempts=1
+gcloud scheduler jobs run monolith-cron-analytics --location=asia-south1   # verify once by hand
+```
+
+If either job is paused or missing, that group's work does not run: the
+core job's absence stops reminders, auto-close, outbox retries and
+retention; the analytics job's absence stops aggregation, the archive and
+the report, and raw events then grow without being dropped.
 
 ---
 
 ## 11. The Deploy workflow (manual, Workload Identity)
 
 `.github/workflows/deploy.yml` does what §3 does by hand — build and push
-both images, apply migrations, deploy the revision, confirm `/readyz` — from
-a clean checkout. It runs only when someone presses **Run workflow** and
-types a new revision name such as `r38`. Nothing deploys on push.
+both images, apply migrations, render and check the manifest, deploy the
+revision, confirm `/readyz` — from a clean checkout. It runs only when
+someone presses **Run workflow** and types a new revision name such as
+`r39`. Nothing deploys on push.
+
+Two gates before anything is built (#95, #100):
+
+- **A green Backend CI run on the same commit.** The workflow asks the
+  Actions API and stops if there is none (CI runs on every push to main).
+- **The protected `production` environment.** The job waits for an
+  approver there. Create it once in *Settings → Environments*: required
+  reviewer Shashika, deployment branches `main` only.
+
+`backend/service.yaml` is not in git. The workflow renders it from
+`docs/deploy/service.yaml.template` with `backend/scripts/render-service-yaml.sh`,
+which refuses to run with a required value empty and refuses values that
+would break the YAML, then runs the manifest tests on the result. Its
+values are the `production` environment's secrets (identifiers and test
+allowlists rather than credentials, but the repository is public):
+required `GOOGLE_CLIENT_ID`, `APPLE_SERVICES_ID`,
+`LINKEDIN_CLIENT_ID`, `TWILIO_ACCOUNT_SID`, `TWILIO_PHONE_NUMBER`,
+`GMAIL_ADDRESS`, `MIN_CREDITS_APP_VERSION` (`1.1.0`), `OTEL_EXPORTER`
+(`none`); optional, with a warning when empty, `ANALYTICS_ARCHIVE_BUCKET`
+(leave it empty for now, §14), `ANALYTICS_REPORT_RECIPIENTS`, `MIN_SUPPORTED_APP_VERSION`,
+`APPLE_APP_STORE_ISSUER_ID`, `APPLE_APP_STORE_KEY_ID`,
+`GOOGLE_PUBSUB_PUSH_AUDIENCE`, `GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT`,
+`TEST_OTP_BYPASS_PHONES`, `TEST_OTP_BYPASS_EMAILS`. Copy the values of the
+last two exactly from the r38 manifest: the sign-in test codes depend on
+them (`TESTING-NOTES.md`).
 
 Migrations run before the deploy on purpose: the monolith refuses to start
 against a schema older than it was built for (`cmd/monolith/schema_check.go`),
@@ -779,6 +914,13 @@ accounts on the `billing.plans.visible` allowlist (App Review uses the sandbox).
 
 ## 14. Analytics, the daily report and telemetry (plans 29D-29F)
 
+> **Decision (Shashika, 2026-11-04): no analytics bucket for now.** Leave
+> `ANALYTICS_ARCHIVE_BUCKET` empty. Raw events are dropped after the
+> retention with no archive copy, the daily aggregates stay in Postgres, and
+> the report is only emailed, so set `ANALYTICS_REPORT_RECIPIENTS` or it goes
+> nowhere. The bucket, IAM and lifecycle notes below apply only if a bucket is
+> added later.
+
 Migrations 0030-0032 add the `analytics` schema (day-partitioned raw events,
 daily aggregates, opt-outs, report runs, per-day active accounts) and
 `meetup.activity_outbox`. Additive: run them, then deploy. The monolith then
@@ -789,7 +931,7 @@ refuses to start below schema 32.
 | Variable | Default | Effect when missing |
 |---|---|---|
 | `ANALYTICS_USER_KEY_SECRET` (secret) | none | **Production collects nothing** and logs `analytics disabled: collecting nothing` at start-up. Locally a fixed development key is used |
-| `ANALYTICS_ARCHIVE_BUCKET` | none | Raw days are still dropped after the retention, without an archive copy (logged at start-up and per day). The daily report is not stored. Give the Cloud Run service account `roles/storage.objectCreator` on the bucket |
+| `ANALYTICS_ARCHIVE_BUCKET` | none | Raw days are still dropped after the retention, without an archive copy (logged at start-up and per day). The daily report is not stored. Give the Cloud Run service account `roles/storage.objectCreator` on the bucket, and nothing more: every upload is create-only (below) |
 | `ANALYTICS_RAW_RETENTION_DAYS` | `14` | Raw events stay this many days (1-90) |
 | `ANALYTICS_REPORT_RECIPIENTS` | none | Comma-separated plain addresses (at most 20). Empty: the report is built and stored, not emailed. It goes out through the configured sender (Gmail, then Resend, then the logging sender) |
 | `OTEL_EXPORTER` | `none` | `stdout` or `otlp` (with `OTEL_EXPORTER_OTLP_ENDPOINT`). See `docs/observability.md` |
@@ -815,9 +957,39 @@ go run ./cmd/billingadmin flags set --flag analytics.enabled --enabled false --o
 | `analytics: aggregate` | Aggregates each complete Asia/Colombo day once (`analytics.aggregate_runs`) |
 | `analytics: archive and retention` | Archives raw days past the retention to `gs://$ANALYTICS_ARCHIVE_BUCKET/analytics/raw/YYYY/MM/DD.ndjson.gz`, then drops them; keeps 120 days of active-account rows |
 | `analytics: daily report` | After 06:00 Asia/Colombo, once: yesterday's report, emailed and stored at `analytics/reports/YYYY-MM-DD.xlsx`. A failed email or upload is retried on the next tick (only the part that failed), up to 24 attempts |
+| `auth: otp budgets`, `ops: rate counters` | Plan 30B: trim the daily OTP budgets (today and yesterday kept) and finished shared-limit windows |
+| `auth: location retention` | Plan 30B: forgets last known locations older than 30 days, deletes SOS events older than 90 |
+| `meetup: stale locations`, `meetup: old meetup coordinates` | Plan 30B: deletes cached locations older than 30 days; coarsens the coordinates of meetups that ended more than 180 days ago to 2 decimals (D4) |
+| `analytics: flush` | Last in the core tick (#117): writes the server events the outbox drains just handed to the in-memory buffer, so an instance that idles after the tick loses none |
 
-The 15-minute tick (§10) is frequent enough for the report: it lands between
-06:00 and 06:15 Colombo. No second Scheduler job is needed.
+Partitions and the flush run on the core job; aggregate, archive and
+retention, and the report on the analytics job (§10), every 15 minutes. The
+report lands between 06:00 and 06:15 Colombo.
+
+**Bucket permissions (#116).** Every object is written create-only
+(`ifGenerationMatch=0`), so `roles/storage.objectCreator` is enough and
+nothing the service runs can replace or delete a stored file. A retry after
+an upload that landed but was not recorded gets 412, which counts as done.
+A regenerated report is stored beside the daily one, never over it. Keep
+raw archives no longer than the privacy policy says.
+
+**Archive lifecycle (#110).** Raw archives are deleted after 90 days by a
+bucket lifecycle rule, set once:
+
+```sh
+cat > /tmp/lifecycle.json <<'JSON'
+{"rule": [{"action": {"type": "Delete"},
+           "condition": {"age": 90, "matchesPrefix": ["analytics/raw/"]}}]}
+JSON
+gcloud storage buckets update gs://$ANALYTICS_ARCHIVE_BUCKET --lifecycle-file=/tmp/lifecycle.json
+```
+
+Since plan 30B an archived line carries no `user_key` or `install_id`:
+account deletion and opt-out erase what is in Postgres, and cannot reach a
+file in a bucket, so the file holds nothing that links an event to a person
+or a device. Sessions, screens, flows and attributes stay. Reports are kept
+(aggregates only). The upload is streamed in 8 MiB chunks (resumable
+upload), so a busy day is never held in memory.
 
 ### Regenerating a report
 
@@ -825,11 +997,16 @@ The 15-minute tick (§10) is frequent enough for the report: it lands between
 cd backend
 export DATABASE_URL='<session pooler URL for monolith_db>'
 go run ./cmd/analyticsreport --date=2026-10-31 --out=report.xlsx      # just the file
-go run ./cmd/analyticsreport --date=2026-10-31 --deliver              # email and replace the stored copy
+go run ./cmd/analyticsreport --date=2026-10-31 --deliver              # email it and store a regenerated copy
 ```
 
 It re-aggregates the day from its raw events, so it works while they are still
-in Postgres (the retention window).
+in Postgres (the retention window). `--deliver` stores the workbook as
+`analytics/reports/YYYY-MM-DD.regenerated-<UTC time>.xlsx` beside the daily
+copy. The upload authenticates through the metadata server, so it works only
+on Google Cloud (for example as a Cloud Run job running as the service
+account); from a laptop the email goes out and the upload fails with
+`metadata token`, which changes nothing in the bucket.
 
 ### Checking
 

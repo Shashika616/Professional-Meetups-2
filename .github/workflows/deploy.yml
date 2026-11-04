@@ -17,6 +17,17 @@ name: Deploy backend
 #
 # Needs the SUPABASE_DIRECT_URL secret the backup already uses (the session
 # pooler URL, runbook §9) and the deployer service account (runbook §11).
+#
+# Two gates before anything is built (#95, #100):
+#   - the job runs in the protected `production` environment, so it waits
+#     for an approver and only main can use it (runbook §11);
+#   - Backend CI must have passed on this exact commit.
+#
+# backend/service.yaml is not in git (it holds project identifiers and test
+# allowlists). It is rendered here from docs/deploy/service.yaml.template
+# with the `production` environment's secrets, checked by the manifest
+# tests, and used once. scripts/render-service-yaml.sh refuses to render
+# with a required value missing.
 
 on:
   workflow_dispatch:
@@ -28,6 +39,7 @@ on:
 permissions:
   contents: read
   id-token: write
+  actions: read # to read Backend CI's result for this commit
 
 concurrency:
   group: deploy-backend
@@ -44,6 +56,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: production
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -51,10 +64,57 @@ jobs:
         env:
           REVISION: ${{ inputs.revision }}
         run: |
-          if ! [[ "$REVISION" =~ ^r[0-9]+$ ]]; then
+          if ! [[ "$REVISION" =~ ^r[0-9]+[a-z]?$ ]]; then
             echo "revision must look like r38, got '$REVISION'" >&2
             exit 1
           fi
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "deploys run from main only, not $GITHUB_REF" >&2
+            exit 1
+          fi
+
+      - name: Require a green Backend CI run for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          passed="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/backend-ci.yml/runs?head_sha=$GITHUB_SHA&status=success" --jq '.total_count')"
+          if [ "${passed:-0}" -lt 1 ]; then
+            echo "Backend CI has not passed on $GITHUB_SHA; wait for it or fix it first" >&2
+            exit 1
+          fi
+
+      - name: Render the service manifest
+        working-directory: backend
+        env:
+          REVISION: ${{ inputs.revision }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          APPLE_SERVICES_ID: ${{ secrets.APPLE_SERVICES_ID }}
+          LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+          TWILIO_ACCOUNT_SID: ${{ secrets.TWILIO_ACCOUNT_SID }}
+          TWILIO_PHONE_NUMBER: ${{ secrets.TWILIO_PHONE_NUMBER }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          ANALYTICS_ARCHIVE_BUCKET: ${{ secrets.ANALYTICS_ARCHIVE_BUCKET }}
+          ANALYTICS_REPORT_RECIPIENTS: ${{ secrets.ANALYTICS_REPORT_RECIPIENTS }}
+          MIN_CREDITS_APP_VERSION: ${{ secrets.MIN_CREDITS_APP_VERSION }}
+          MIN_SUPPORTED_APP_VERSION: ${{ secrets.MIN_SUPPORTED_APP_VERSION }}
+          OTEL_EXPORTER: ${{ secrets.OTEL_EXPORTER }}
+          APPLE_APP_STORE_ISSUER_ID: ${{ secrets.APPLE_APP_STORE_ISSUER_ID }}
+          APPLE_APP_STORE_KEY_ID: ${{ secrets.APPLE_APP_STORE_KEY_ID }}
+          GOOGLE_PUBSUB_PUSH_AUDIENCE: ${{ secrets.GOOGLE_PUBSUB_PUSH_AUDIENCE }}
+          GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_PUBSUB_PUSH_SERVICE_ACCOUNT }}
+          TEST_OTP_BYPASS_PHONES: ${{ secrets.TEST_OTP_BYPASS_PHONES }}
+          TEST_OTP_BYPASS_EMAILS: ${{ secrets.TEST_OTP_BYPASS_EMAILS }}
+        run: scripts/render-service-yaml.sh service.yaml
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.10"
+
+      # The same checks CI runs on the template, now on the rendered file:
+      # free tier, the silent-failure settings, every production setting.
+      - name: Check the rendered manifest
+        working-directory: backend
+        run: go test ./cmd/monolith -run 'Manifest|Template|Render' -count=1
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2
@@ -87,20 +147,16 @@ jobs:
             exit 1
           fi
           docker run --rm -v "$PWD/backend/migrations:/migrations:ro" \
-            migrate/migrate:v4.17.1 -path=/migrations -database "$DATABASE_URL" up
+            migrate/migrate:v4.17.1@sha256:de154de4b7f9d0d751aacb1ec6023f5fc96f874eb88b65d050f761a33376aa4b -path=/migrations -database "$DATABASE_URL" up
 
       - name: Deploy the revision
         working-directory: backend
         env:
           REVISION: ${{ inputs.revision }}
         run: |
-          sed -E -i \
-            -e "s|name: ${SERVICE}-r[0-9]+|name: ${SERVICE}-${REVISION}|" \
-            -e "s|(meetups-repo/gateway):r[0-9]+|\1:${REVISION}|" \
-            -e "s|(meetups-repo/monolith):r[0-9]+|\1:${REVISION}|" \
-            service.yaml
           grep -E "name: ${SERVICE}-${REVISION}|gateway:${REVISION}|monolith:${REVISION}" service.yaml
           gcloud run services replace service.yaml --region "$REGION"
+          rm -f service.yaml
 
       - name: Confirm it is serving
         run: |

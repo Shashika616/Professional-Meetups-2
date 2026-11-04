@@ -30,7 +30,7 @@ jobs:
     # nothing here needs it.
     services:
       postgres:
-        image: postgis/postgis:16-3.4
+        image: postgis/postgis:16-3.4@sha256:44126d872ac91993766c341e369c539e8196614321765d36a6f1bab0419a5fa5
         env:
           POSTGRES_USER: app
           POSTGRES_PASSWORD: app
@@ -165,7 +165,7 @@ jobs:
 
       - name: Scan history for secrets
         run: |
-          docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0 \
+          docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.28.0@sha256:cdbb7c955abce02001a9f6c9f602fb195b7fadc1e812065883f695d1eeaba854 \
             git /repo --config /repo/.gitleaks.toml --redact --no-banner
 
   generated-code:
@@ -257,6 +257,37 @@ jobs:
               exit 1
             fi
           done
+
+      # #95: a software bill of materials and a vulnerability scan for each
+      # image, kept as artifacts so a later advisory can be checked against
+      # exactly what was built. The tools run as images pinned by digest
+      # rather than as third-party actions (tags of a scanner's action have
+      # been repointed before). The scan fails on a CRITICAL finding that has
+      # a fix; everything else is in the report.
+      - name: SBOM and image scan
+        env:
+          SYFT: anchore/syft:v1.54.1@sha256:3eb5379ba7b409c3f4069b686110527af0c47df993fa5c10d13e7cf34f49b1aa
+          TRIVY: aquasec/trivy:0.76.0@sha256:2416d1f74045b57274df1a340eee6b510cacd73c66a6ccb8da092b117eb7d222
+        run: |
+          set -euo pipefail
+          mkdir -p image-reports
+          for name in monolith gateway; do
+            image="professional-meetups-$name:ci"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$SYFT" \
+              "docker:$image" -o spdx-json > "image-reports/$name.sbom.spdx.json"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY" \
+              image --quiet --format table "$image" > "image-reports/$name.trivy.txt"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY" \
+              image --quiet --exit-code 1 --severity CRITICAL --ignore-unfixed "$image"
+          done
+
+      - name: Upload SBOMs and scans
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-reports
+          path: image-reports/
+          retention-days: 90
 
       # §D4: the .dockerignore is only useful if it actually excludes what it
       # claims to. This asserts secrets/ never entered the build context,
