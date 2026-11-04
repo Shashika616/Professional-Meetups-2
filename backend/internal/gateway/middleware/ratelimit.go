@@ -42,6 +42,13 @@ var pathLimits = map[string]int{
 	"/v1/billing/webhooks/google": 600,
 }
 
+// patternLimits are pathLimits for a route with an id in it. A screen of
+// avatars is one photo request each, all from one phone on first load (they
+// are cached for a day after), and many phones share a carrier address.
+var patternLimits = map[string]int{
+	"GET /v1/users/{id}/photo": 300,
+}
+
 // emailKeyedPaths are the two email auth routes where a rotating set of IPs
 // hammering ONE account would sail past the IP-keyed limit below — an
 // extension of that limiter, not a second subsystem. Every other
@@ -124,9 +131,11 @@ func RateLimit(limiter ratelimit.Limiter, opts ...RateLimitOption) func(http.Han
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ipKey := fmt.Sprintf("ratelimit:%s:%s", clientIP(r), r.URL.Path)
+			ipKey := fmt.Sprintf("ratelimit:%s:%s", clientIP(r), cfg.routeKey(r))
 			limit := requestsPerMinute
 			if l, ok := pathLimits[r.URL.Path]; ok {
+				limit = l
+			} else if l, ok := patternLimits[cfg.routeKey(r)]; ok {
 				limit = l
 			}
 			if !limiter.Allow(ipKey, limit, time.Minute) {
@@ -146,7 +155,12 @@ func RateLimit(limiter ratelimit.Limiter, opts ...RateLimitOption) func(http.Han
 			}
 
 			if emailKeyedPaths[r.URL.Path] {
-				if email, ok := peekRequestField(r, "email"); ok && email != "" {
+				email, ok, ambiguous := peekRequestField(r, "email")
+				if ambiguous {
+					writeAmbiguousBody(w)
+					return
+				}
+				if ok && email != "" {
 					// Normalised, or the bucket is per-spelling (#82).
 					emailKey := fmt.Sprintf("ratelimit:email:%s:%s", r.URL.Path, identity.NormalizeEmail(email))
 					if !limiter.Allow(emailKey, requestsPerMinute, time.Minute) {
@@ -157,7 +171,12 @@ func RateLimit(limiter ratelimit.Limiter, opts ...RateLimitOption) func(http.Han
 			}
 
 			if field, ok := targetKeyedPaths[r.URL.Path]; ok {
-				if target, ok := peekRequestField(r, field); ok && target != "" {
+				target, ok, ambiguous := peekRequestField(r, field)
+				if ambiguous {
+					writeAmbiguousBody(w)
+					return
+				}
+				if ok && target != "" {
 					targetKey := fmt.Sprintf("ratelimit:target:%s:%s", r.URL.Path,
 						normalizeLimiterTarget(field, target))
 					if !limiter.Allow(targetKey, targetKeyedLimit, targetKeyedWindow) {
@@ -259,22 +278,88 @@ func writeRateLimited(w http.ResponseWriter, window time.Duration) {
 // to the same cap now; anything larger is left for MaxBytes to reject, with
 // the buffered prefix stitched back in front of the unread remainder so the
 // downstream handler still sees the exact original stream.
-func peekRequestField(r *http.Request, field string) (string, bool) {
+//
+// # KEYS ARE MATCHED WITHOUT REGARD TO CASE (#107)
+//
+// encoding/json, which the handlers decode with, matches a key to a struct
+// field case-insensitively. A peek that read only parsed["email"] therefore
+// let {"EMAIL": ...} or {"Email": ...} past every keyed limit while the
+// handler still read the address. The field is found the way the handler
+// will find it.
+//
+// And a body that names any top-level key twice, exactly or in another
+// case, is ambiguous: which value the limiter and the handler each take
+// depends on rules nobody should rely on. ambiguous reports that, and the
+// caller refuses the request.
+func peekRequestField(r *http.Request, field string) (value string, ok, ambiguous bool) {
 	buffered, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBodyBytes+1))
 	// Deliberately no r.Body.Close() before reassigning: the remainder of the
 	// original stream is still needed below, and net/http closes the request
 	// body itself once the handler returns.
 	r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(buffered), r.Body))
 	if err != nil || len(buffered) > maxRequestBodyBytes {
-		return "", false
+		return "", false, false
 	}
 
-	var parsed map[string]any
+	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal(buffered, &parsed); err != nil {
-		return "", false
+		return "", false, false
 	}
-	value, ok := parsed[field].(string)
-	return value, ok
+	keys, err := topLevelKeys(buffered)
+	if err != nil {
+		return "", false, false
+	}
+	seen := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		folded := strings.ToLower(k)
+		if seen[folded] {
+			return "", false, true
+		}
+		seen[folded] = true
+	}
+	for k, raw := range parsed {
+		if strings.EqualFold(k, field) {
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return "", false, false
+			}
+			return value, true, false
+		}
+	}
+	return "", false, false
+}
+
+// topLevelKeys lists an object's keys in order, duplicates included (a map
+// would have kept only one of each).
+func topLevelKeys(body []byte) ([]string, error) {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil, fmt.Errorf("not an object")
+	}
+	var keys []string
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		key, ok := t.(string)
+		if !ok {
+			return nil, fmt.Errorf("not a key")
+		}
+		keys = append(keys, key)
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return nil, err
+		}
+	}
+	return keys, nil
+}
+
+// writeAmbiguousBody refuses a body whose keys repeat (#107), in the same
+// words the handlers use for any body they cannot read.
+func writeAmbiguousBody(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	_, _ = w.Write([]byte(`{"error":"That didn't go through. Please try again."}`))
 }
 
 // RateLimitOption configures RateLimit.
@@ -282,6 +367,34 @@ type RateLimitOption func(*rateLimitConfig)
 
 type rateLimitConfig struct {
 	trustedProxyHops int
+	routes           RouteMatcher
+}
+
+// RouteMatcher is the slice of *http.ServeMux the limiter needs: which
+// registered pattern a request will be routed to.
+type RouteMatcher interface {
+	Handler(r *http.Request) (h http.Handler, pattern string)
+}
+
+// routeKey is the per-route part of the IP key. With a mux, the pattern the
+// request matches ("GET /v1/meetups/{id}"), so every id shares one bucket
+// and every unknown path shares "unmatched" (#81). Without one, the raw
+// path, as before.
+func (c rateLimitConfig) routeKey(r *http.Request) string {
+	if c.routes == nil {
+		return r.URL.Path
+	}
+	if _, pattern := c.routes.Handler(r); pattern != "" {
+		return pattern
+	}
+	return "unmatched"
+}
+
+// WithRoutePatterns keys the blanket per-IP limit on the route pattern the
+// mux will pick rather than on the raw path (#81): keyed on the raw path,
+// a caller cycling meetup ids or 404 paths got a fresh bucket for each.
+func WithRoutePatterns(mux RouteMatcher) RateLimitOption {
+	return func(c *rateLimitConfig) { c.routes = mux }
 }
 
 // WithTrustedProxyHops says how many proxies in front of this process append

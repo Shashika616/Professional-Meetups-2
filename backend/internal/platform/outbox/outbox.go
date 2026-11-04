@@ -52,6 +52,22 @@ type Row struct {
 	ID       string
 	Payload  []byte
 	Attempts int
+	// Lease identifies this claim of the row, for a Leaser store; opaque
+	// to the poller.
+	Lease string
+}
+
+// Leaser is a Store whose claims are leases that can be renewed per row and
+// are checked when the row is finished (#115, review N1-B4).
+//
+// A batch claim hides its rows for a visibility timeout. A slow batch can
+// outlast it, and then another instance claims the same rows and both
+// deliver. With a Leaser, each row's lease is renewed just before it is
+// delivered (false: another claimer holds it now, so it is skipped), and
+// marking it processed succeeds only under the lease that delivered it.
+type Leaser interface {
+	Renew(ctx context.Context, r Row) (renewed Row, held bool, err error)
+	MarkProcessedLeased(ctx context.Context, r Row) (held bool, err error)
 }
 
 // Store is the persistence this poller drives. The implementation lives with
@@ -325,6 +341,20 @@ func (p *Poller) claimAndProcess(ctx context.Context) (int, error) {
 // user gets a duplicate for no reason. Losing the bookkeeping for work that
 // actually happened is the one avoidable source of duplicates here.
 func (p *Poller) deliver(ctx context.Context, row Row) {
+	leaser, leased := p.store.(Leaser)
+	if leased {
+		renewed, held, err := leaser.Renew(ctx, row)
+		if err != nil {
+			p.logger.Error("outbox: renew claim", "row_id", row.ID, "error", err)
+			return // left for the next claim; nothing was delivered
+		}
+		if !held {
+			p.logger.Warn("outbox: another claimer holds this row now; skipping it", "row_id", row.ID)
+			return
+		}
+		row = renewed
+	}
+
 	// Plan 29D: one span per delivery, named by the outbox it came from.
 	ctx, span := otel.Tracer("outbox").Start(ctx, "outbox deliver", trace.WithAttributes(
 		attribute.String("outbox.store", fmt.Sprintf("%T", p.store)),
@@ -339,6 +369,21 @@ func (p *Poller) deliver(ctx context.Context, row Row) {
 	recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
+	if err == nil && leased {
+		held, markErr := leaser.MarkProcessedLeased(recordCtx, row)
+		switch {
+		case markErr != nil:
+			p.logger.Error("outbox: delivered but failed to mark processed — this row will be redelivered",
+				"row_id", row.ID, "error", markErr)
+		case !held:
+			p.logger.Warn("outbox: delivered, but the claim had passed to another claimer", "row_id", row.ID)
+		default:
+			if p.observer != nil {
+				p.observer.Delivered()
+			}
+		}
+		return
+	}
 	if err == nil {
 		if markErr := p.store.MarkProcessed(recordCtx, row.ID); markErr != nil {
 			// The side effect DID happen; only the bookkeeping failed. The

@@ -63,13 +63,14 @@ func TestDeleteUser_RemovesOnlyTheAccountsOwnRowsAndAnnouncesIt(t *testing.T) {
 	mustExec(t, h.pool, `INSERT INTO auth.unverified_company_claims (user_id, company_name_entered, domain) VALUES ($1, 'Analytical Engines', 'engines.example')`, ada)
 	// Ada's emergency contact is not a user of the app at all, which is the
 	// normal case. It is still Ada's data and goes with her.
-	mustExec(t, h.pool, `INSERT INTO auth.trusted_contacts (user_id, name, phone_number) VALUES ($1, 'Mum', '+94770000002')`, ada)
+	mustExec(t, h.pool, `INSERT INTO auth.trusted_contacts (user_id, name, phone_number, phone_normalized) VALUES ($1, 'Mum', '+94770000002', '+94770000002')`, ada)
+	mustExec(t, h.pool, `INSERT INTO auth.user_photos (user_id, jpeg, etag, width, height, bytes) VALUES ($1, '\xff', 'e', 320, 320, 1)`, ada)
 	mustExec(t, h.pool, `INSERT INTO auth.sos_events (user_id, context_message, latitude, longitude, contacts_notified) VALUES ($1, 'help', 6.9, 79.8, 1)`, ada)
 
 	// Grace lists ADA as HER emergency contact, by Ada's own name and number.
 	// That row is Grace's address book, not Ada's data, and must survive
 	// Ada's deletion untouched — as must everything else Grace owns.
-	mustExec(t, h.pool, `INSERT INTO auth.trusted_contacts (user_id, name, phone_number) VALUES ($1, 'Ada Lovelace', '+94770000001')`, grace)
+	mustExec(t, h.pool, `INSERT INTO auth.trusted_contacts (user_id, name, phone_number, phone_normalized) VALUES ($1, 'Ada Lovelace', '+94770000001', '+94770000001')`, grace)
 	mustExec(t, h.pool, `INSERT INTO auth.refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, 'h-grace', now() + interval '1 day')`, grace)
 	mustExec(t, h.pool, `INSERT INTO auth.sos_events (user_id, context_message, latitude, longitude, contacts_notified) VALUES ($1, 'fine', 6.9, 79.8, 1)`, grace)
 
@@ -80,6 +81,7 @@ func TestDeleteUser_RemovesOnlyTheAccountsOwnRowsAndAnnouncesIt(t *testing.T) {
 	for _, table := range []string{
 		"auth.refresh_tokens", "auth.verification_codes", "auth.user_identities",
 		"auth.unverified_company_claims", "auth.trusted_contacts", "auth.sos_events",
+		"auth.user_photos",
 	} {
 		if n := countRows(t, h.pool, "SELECT count(*) FROM "+table+" WHERE user_id = $1", ada); n != 0 {
 			t.Errorf("%s still holds %d row(s) for the deleted account", table, n)
@@ -149,7 +151,7 @@ func TestDeleteUser_NoSOSMeansNoHold(t *testing.T) {
 	h := newHarness(t)
 	repo := repository.NewUserRepository(h.pool, h.bus, slog.New(slog.DiscardHandler))
 	ada := seedUser(t, h.pool, "Ada Lovelace")
-	mustExec(t, h.pool, `INSERT INTO auth.trusted_contacts (user_id, name, phone_number) VALUES ($1, 'Mum', '+94770000002')`, ada)
+	mustExec(t, h.pool, `INSERT INTO auth.trusted_contacts (user_id, name, phone_number, phone_normalized) VALUES ($1, 'Mum', '+94770000002', '+94770000002')`, ada)
 
 	if err := repo.Delete(context.Background(), ada); err != nil {
 		t.Fatalf("Delete() error: %v", err)

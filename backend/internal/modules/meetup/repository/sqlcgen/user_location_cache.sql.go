@@ -12,6 +12,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteStaleUserLocationCache = `-- name: DeleteStaleUserLocationCache :execrows
+DELETE FROM meetup.user_location_cache WHERE updated_at < now() - interval '30 days'
+`
+
+// Plan 30B, 3.3: cached locations older than 30 days are deleted. Every
+// reader wants the last 24 hours, so an older row only records where
+// someone used to be.
+func (q *Queries) DeleteStaleUserLocationCache(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteStaleUserLocationCache)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteUserLocationCache = `-- name: DeleteUserLocationCache :exec
 DELETE FROM meetup.user_location_cache WHERE user_id = $1
 `
@@ -30,20 +45,29 @@ SELECT ST_DWithin(
 )::bool AS within
 FROM meetup.user_location_cache
 WHERE user_id = $3
+  AND updated_at > $4::timestamptz
 `
 
 type IsUserLocationWithinRadiusParams struct {
-	CenterLng float64   `json:"center_lng"`
-	CenterLat float64   `json:"center_lat"`
-	UserID    uuid.UUID `json:"user_id"`
+	CenterLng float64            `json:"center_lng"`
+	CenterLat float64            `json:"center_lat"`
+	UserID    uuid.UUID          `json:"user_id"`
+	NotBefore pgtype.Timestamptz `json:"not_before"`
 }
 
 // Whether a user's last known location is within 50 km of a point — the
 // same ST_DWithin on geography, and the same 50000 m, as browse uses, so
 // the join rule (D4) is exactly the rule that decided what they could see.
-// No row means the location is unknown, which the caller decides about.
+// No row means the location is unknown, or older than not_before (plan
+// 30B: a day-old location says nothing about where someone is now), which
+// the caller decides about.
 func (q *Queries) IsUserLocationWithinRadius(ctx context.Context, arg IsUserLocationWithinRadiusParams) (bool, error) {
-	row := q.db.QueryRow(ctx, isUserLocationWithinRadius, arg.CenterLng, arg.CenterLat, arg.UserID)
+	row := q.db.QueryRow(ctx, isUserLocationWithinRadius,
+		arg.CenterLng,
+		arg.CenterLat,
+		arg.UserID,
+		arg.NotBefore,
+	)
 	var within bool
 	err := row.Scan(&within)
 	return within, err

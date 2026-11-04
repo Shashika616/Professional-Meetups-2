@@ -42,11 +42,14 @@ const (
 	AuthService_CompleteProfileSetup_FullMethodName            = "/auth.v1.AuthService/CompleteProfileSetup"
 	AuthService_UpdateLastKnownLocation_FullMethodName         = "/auth.v1.AuthService/UpdateLastKnownLocation"
 	AuthService_DeleteAccount_FullMethodName                   = "/auth.v1.AuthService/DeleteAccount"
+	AuthService_SetProfilePhoto_FullMethodName                 = "/auth.v1.AuthService/SetProfilePhoto"
+	AuthService_DeleteProfilePhoto_FullMethodName              = "/auth.v1.AuthService/DeleteProfilePhoto"
+	AuthService_GetProfilePhoto_FullMethodName                 = "/auth.v1.AuthService/GetProfilePhoto"
 	AuthService_AddTrustedContact_FullMethodName               = "/auth.v1.AuthService/AddTrustedContact"
 	AuthService_ListTrustedContacts_FullMethodName             = "/auth.v1.AuthService/ListTrustedContacts"
+	AuthService_UpdateTrustedContact_FullMethodName            = "/auth.v1.AuthService/UpdateTrustedContact"
 	AuthService_RemoveTrustedContact_FullMethodName            = "/auth.v1.AuthService/RemoveTrustedContact"
 	AuthService_TriggerSOS_FullMethodName                      = "/auth.v1.AuthService/TriggerSOS"
-	AuthService_ConfirmTrustedContact_FullMethodName           = "/auth.v1.AuthService/ConfirmTrustedContact"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -222,22 +225,22 @@ type AuthServiceClient interface {
 	// while the caller still has a live meetup or join request outstanding;
 	// the message says what is outstanding and how to clear it.
 	DeleteAccount(ctx context.Context, in *DeleteAccountRequest, opts ...grpc.CallOption) (*DeleteAccountResponse, error)
+	// A user's own photo (plan 2.1): one small JPEG, re-encoded here. The
+	// gateway decides who may see it.
+	SetProfilePhoto(ctx context.Context, in *SetProfilePhotoRequest, opts ...grpc.CallOption) (*SetProfilePhotoResponse, error)
+	DeleteProfilePhoto(ctx context.Context, in *DeleteProfilePhotoRequest, opts ...grpc.CallOption) (*DeleteProfilePhotoResponse, error)
+	GetProfilePhoto(ctx context.Context, in *GetProfilePhotoRequest, opts ...grpc.CallOption) (*GetProfilePhotoResponse, error)
 	// Trusted contacts + SOS (ADR-026) — all four self-scoped via the
 	// verified JWT's user_id, never a client-supplied one.
 	AddTrustedContact(ctx context.Context, in *AddTrustedContactRequest, opts ...grpc.CallOption) (*TrustedContactResponse, error)
 	ListTrustedContacts(ctx context.Context, in *ListTrustedContactsRequest, opts ...grpc.CallOption) (*ListTrustedContactsResponse, error)
+	UpdateTrustedContact(ctx context.Context, in *UpdateTrustedContactRequest, opts ...grpc.CallOption) (*TrustedContactResponse, error)
 	RemoveTrustedContact(ctx context.Context, in *RemoveTrustedContactRequest, opts ...grpc.CallOption) (*RemoveTrustedContactResponse, error)
-	// TriggerSOS looks up the caller's trusted contacts and alerts each one
-	// directly (SmsSender/EmailSender's new SendAlert, not Notification
-	// Dispatch — a trusted contact isn't necessarily a registered app user).
-	// Rejects with InvalidArgument if the caller has zero trusted contacts.
+	// TriggerSOS texts the caller's two oldest trusted contacts directly
+	// (SmsSender's SendAlert, not Notification Dispatch — a trusted contact
+	// isn't necessarily a registered app user). Rejects with InvalidArgument
+	// if the caller has zero trusted contacts.
 	TriggerSOS(ctx context.Context, in *TriggerSOSRequest, opts ...grpc.CallOption) (*TriggerSOSResponse, error)
-	// ConfirmTrustedContact records a contact's own consent, from the link
-	// texted to them when they were added (#80). The ONE RPC here with no
-	// caller user: the gateway's public confirmation page calls it, and the
-	// single-use token is the proof. NotFound for a token that is unknown,
-	// expired or already used, deliberately not distinguished.
-	ConfirmTrustedContact(ctx context.Context, in *ConfirmTrustedContactRequest, opts ...grpc.CallOption) (*ConfirmTrustedContactResponse, error)
 }
 
 type authServiceClient struct {
@@ -478,6 +481,36 @@ func (c *authServiceClient) DeleteAccount(ctx context.Context, in *DeleteAccount
 	return out, nil
 }
 
+func (c *authServiceClient) SetProfilePhoto(ctx context.Context, in *SetProfilePhotoRequest, opts ...grpc.CallOption) (*SetProfilePhotoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetProfilePhotoResponse)
+	err := c.cc.Invoke(ctx, AuthService_SetProfilePhoto_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) DeleteProfilePhoto(ctx context.Context, in *DeleteProfilePhotoRequest, opts ...grpc.CallOption) (*DeleteProfilePhotoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteProfilePhotoResponse)
+	err := c.cc.Invoke(ctx, AuthService_DeleteProfilePhoto_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) GetProfilePhoto(ctx context.Context, in *GetProfilePhotoRequest, opts ...grpc.CallOption) (*GetProfilePhotoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetProfilePhotoResponse)
+	err := c.cc.Invoke(ctx, AuthService_GetProfilePhoto_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authServiceClient) AddTrustedContact(ctx context.Context, in *AddTrustedContactRequest, opts ...grpc.CallOption) (*TrustedContactResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TrustedContactResponse)
@@ -498,6 +531,16 @@ func (c *authServiceClient) ListTrustedContacts(ctx context.Context, in *ListTru
 	return out, nil
 }
 
+func (c *authServiceClient) UpdateTrustedContact(ctx context.Context, in *UpdateTrustedContactRequest, opts ...grpc.CallOption) (*TrustedContactResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrustedContactResponse)
+	err := c.cc.Invoke(ctx, AuthService_UpdateTrustedContact_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *authServiceClient) RemoveTrustedContact(ctx context.Context, in *RemoveTrustedContactRequest, opts ...grpc.CallOption) (*RemoveTrustedContactResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RemoveTrustedContactResponse)
@@ -512,16 +555,6 @@ func (c *authServiceClient) TriggerSOS(ctx context.Context, in *TriggerSOSReques
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TriggerSOSResponse)
 	err := c.cc.Invoke(ctx, AuthService_TriggerSOS_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *authServiceClient) ConfirmTrustedContact(ctx context.Context, in *ConfirmTrustedContactRequest, opts ...grpc.CallOption) (*ConfirmTrustedContactResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ConfirmTrustedContactResponse)
-	err := c.cc.Invoke(ctx, AuthService_ConfirmTrustedContact_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -701,22 +734,22 @@ type AuthServiceServer interface {
 	// while the caller still has a live meetup or join request outstanding;
 	// the message says what is outstanding and how to clear it.
 	DeleteAccount(context.Context, *DeleteAccountRequest) (*DeleteAccountResponse, error)
+	// A user's own photo (plan 2.1): one small JPEG, re-encoded here. The
+	// gateway decides who may see it.
+	SetProfilePhoto(context.Context, *SetProfilePhotoRequest) (*SetProfilePhotoResponse, error)
+	DeleteProfilePhoto(context.Context, *DeleteProfilePhotoRequest) (*DeleteProfilePhotoResponse, error)
+	GetProfilePhoto(context.Context, *GetProfilePhotoRequest) (*GetProfilePhotoResponse, error)
 	// Trusted contacts + SOS (ADR-026) — all four self-scoped via the
 	// verified JWT's user_id, never a client-supplied one.
 	AddTrustedContact(context.Context, *AddTrustedContactRequest) (*TrustedContactResponse, error)
 	ListTrustedContacts(context.Context, *ListTrustedContactsRequest) (*ListTrustedContactsResponse, error)
+	UpdateTrustedContact(context.Context, *UpdateTrustedContactRequest) (*TrustedContactResponse, error)
 	RemoveTrustedContact(context.Context, *RemoveTrustedContactRequest) (*RemoveTrustedContactResponse, error)
-	// TriggerSOS looks up the caller's trusted contacts and alerts each one
-	// directly (SmsSender/EmailSender's new SendAlert, not Notification
-	// Dispatch — a trusted contact isn't necessarily a registered app user).
-	// Rejects with InvalidArgument if the caller has zero trusted contacts.
+	// TriggerSOS texts the caller's two oldest trusted contacts directly
+	// (SmsSender's SendAlert, not Notification Dispatch — a trusted contact
+	// isn't necessarily a registered app user). Rejects with InvalidArgument
+	// if the caller has zero trusted contacts.
 	TriggerSOS(context.Context, *TriggerSOSRequest) (*TriggerSOSResponse, error)
-	// ConfirmTrustedContact records a contact's own consent, from the link
-	// texted to them when they were added (#80). The ONE RPC here with no
-	// caller user: the gateway's public confirmation page calls it, and the
-	// single-use token is the proof. NotFound for a token that is unknown,
-	// expired or already used, deliberately not distinguished.
-	ConfirmTrustedContact(context.Context, *ConfirmTrustedContactRequest) (*ConfirmTrustedContactResponse, error)
 	mustEmbedUnimplementedAuthServiceServer()
 }
 
@@ -796,20 +829,29 @@ func (UnimplementedAuthServiceServer) UpdateLastKnownLocation(context.Context, *
 func (UnimplementedAuthServiceServer) DeleteAccount(context.Context, *DeleteAccountRequest) (*DeleteAccountResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAccount not implemented")
 }
+func (UnimplementedAuthServiceServer) SetProfilePhoto(context.Context, *SetProfilePhotoRequest) (*SetProfilePhotoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SetProfilePhoto not implemented")
+}
+func (UnimplementedAuthServiceServer) DeleteProfilePhoto(context.Context, *DeleteProfilePhotoRequest) (*DeleteProfilePhotoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteProfilePhoto not implemented")
+}
+func (UnimplementedAuthServiceServer) GetProfilePhoto(context.Context, *GetProfilePhotoRequest) (*GetProfilePhotoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetProfilePhoto not implemented")
+}
 func (UnimplementedAuthServiceServer) AddTrustedContact(context.Context, *AddTrustedContactRequest) (*TrustedContactResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AddTrustedContact not implemented")
 }
 func (UnimplementedAuthServiceServer) ListTrustedContacts(context.Context, *ListTrustedContactsRequest) (*ListTrustedContactsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTrustedContacts not implemented")
 }
+func (UnimplementedAuthServiceServer) UpdateTrustedContact(context.Context, *UpdateTrustedContactRequest) (*TrustedContactResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateTrustedContact not implemented")
+}
 func (UnimplementedAuthServiceServer) RemoveTrustedContact(context.Context, *RemoveTrustedContactRequest) (*RemoveTrustedContactResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveTrustedContact not implemented")
 }
 func (UnimplementedAuthServiceServer) TriggerSOS(context.Context, *TriggerSOSRequest) (*TriggerSOSResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method TriggerSOS not implemented")
-}
-func (UnimplementedAuthServiceServer) ConfirmTrustedContact(context.Context, *ConfirmTrustedContactRequest) (*ConfirmTrustedContactResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method ConfirmTrustedContact not implemented")
 }
 func (UnimplementedAuthServiceServer) mustEmbedUnimplementedAuthServiceServer() {}
 func (UnimplementedAuthServiceServer) testEmbeddedByValue()                     {}
@@ -1246,6 +1288,60 @@ func _AuthService_DeleteAccount_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_SetProfilePhoto_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetProfilePhotoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).SetProfilePhoto(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_SetProfilePhoto_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).SetProfilePhoto(ctx, req.(*SetProfilePhotoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_DeleteProfilePhoto_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteProfilePhotoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).DeleteProfilePhoto(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_DeleteProfilePhoto_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).DeleteProfilePhoto(ctx, req.(*DeleteProfilePhotoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_GetProfilePhoto_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetProfilePhotoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GetProfilePhoto(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GetProfilePhoto_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GetProfilePhoto(ctx, req.(*GetProfilePhotoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthService_AddTrustedContact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AddTrustedContactRequest)
 	if err := dec(in); err != nil {
@@ -1282,6 +1378,24 @@ func _AuthService_ListTrustedContacts_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_UpdateTrustedContact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTrustedContactRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).UpdateTrustedContact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_UpdateTrustedContact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).UpdateTrustedContact(ctx, req.(*UpdateTrustedContactRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthService_RemoveTrustedContact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RemoveTrustedContactRequest)
 	if err := dec(in); err != nil {
@@ -1314,24 +1428,6 @@ func _AuthService_TriggerSOS_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).TriggerSOS(ctx, req.(*TriggerSOSRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AuthService_ConfirmTrustedContact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ConfirmTrustedContactRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AuthServiceServer).ConfirmTrustedContact(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AuthService_ConfirmTrustedContact_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AuthServiceServer).ConfirmTrustedContact(ctx, req.(*ConfirmTrustedContactRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1436,6 +1532,18 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AuthService_DeleteAccount_Handler,
 		},
 		{
+			MethodName: "SetProfilePhoto",
+			Handler:    _AuthService_SetProfilePhoto_Handler,
+		},
+		{
+			MethodName: "DeleteProfilePhoto",
+			Handler:    _AuthService_DeleteProfilePhoto_Handler,
+		},
+		{
+			MethodName: "GetProfilePhoto",
+			Handler:    _AuthService_GetProfilePhoto_Handler,
+		},
+		{
 			MethodName: "AddTrustedContact",
 			Handler:    _AuthService_AddTrustedContact_Handler,
 		},
@@ -1444,16 +1552,16 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AuthService_ListTrustedContacts_Handler,
 		},
 		{
+			MethodName: "UpdateTrustedContact",
+			Handler:    _AuthService_UpdateTrustedContact_Handler,
+		},
+		{
 			MethodName: "RemoveTrustedContact",
 			Handler:    _AuthService_RemoveTrustedContact_Handler,
 		},
 		{
 			MethodName: "TriggerSOS",
 			Handler:    _AuthService_TriggerSOS_Handler,
-		},
-		{
-			MethodName: "ConfirmTrustedContact",
-			Handler:    _AuthService_ConfirmTrustedContact_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

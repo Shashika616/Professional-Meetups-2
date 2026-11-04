@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -15,15 +16,25 @@ import (
 // handler needs. An interface so a test can drive the success, partial
 // failure and unreachable cases without a real gRPC server.
 type ScheduledWorkRunner interface {
-	RunScheduledWork(ctx context.Context) (monolithclient.ScheduledWorkReport, error)
+	RunScheduledWork(ctx context.Context, group string) (monolithclient.ScheduledWorkReport, error)
 }
 
-// tickTimeout bounds one whole tick. The monolith already bounds each sweep
-// at 30s; this is the outer limit for the eleven of them together, and it
-// sits under Cloud Scheduler's 180s attempt deadline so the scheduler sees
-// our 500 rather than its own timeout — the difference between a log line
-// that names the sweep that hung and one that says nothing.
-const tickTimeout = 150 * time.Second
+// Each tick's total (tracker #102). The monolith bounds each sweep by its
+// own budget and stops starting sweeps when the total runs out, answering
+// with a report that names what was skipped. Each total sits under its
+// Cloud Scheduler job's attempt deadline (runbook §10: 300s core, 540s
+// analytics), so the scheduler sees our status rather than its own
+// timeout, and under Cloud Run's 600s request timeout (service.yaml). Vars
+// so a test can shrink them.
+var (
+	coreTickTimeout      = 240 * time.Second
+	analyticsTickTimeout = 480 * time.Second
+)
+
+// writeGrace is how long after the tick's total the response may still be
+// written. The server's WriteTimeout (30s, cmd/gateway) is for ordinary
+// requests and would cut a tick's reply off long before it is ready.
+const writeGrace = 15 * time.Second
 
 // cronSecretHeader carries the shared secret. A header rather than a query
 // parameter on purpose: query strings are logged in full by Cloud Run's
@@ -31,7 +42,9 @@ const tickTimeout = 150 * time.Second
 // in places nobody meant to put it.
 const cronSecretHeader = "X-Cron-Secret" // #nosec G101 -- the header's name; the secret comes from CRON_SHARED_SECRET
 
-// RegisterCron mounts POST /internal/cron/tick (§10 of the runbook).
+// RegisterCron mounts POST /internal/cron/tick (the core sweeps) and
+// POST /internal/cron/tick/analytics (the heavy analytics sweeps), one
+// Cloud Scheduler job each (§10 of the runbook).
 //
 // # WHY THIS ROUTE EXISTS
 //
@@ -70,7 +83,16 @@ func RegisterCron(mux *http.ServeMux, runner ScheduledWorkRunner, secret string,
 		logger = slog.Default()
 	}
 
-	mux.HandleFunc("POST /internal/cron/tick", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /internal/cron/tick", cronTick(runner, secret, "", coreTickTimeout, logger))
+	mux.HandleFunc("POST /internal/cron/tick/analytics", cronTick(runner, secret, "analytics", analyticsTickTimeout, logger))
+
+	return true
+}
+
+// cronTick serves one tick route: the secret check, then the group's sweeps
+// within total.
+func cronTick(runner ScheduledWorkRunner, secret, group string, total time.Duration, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		presented := r.Header.Get(cronSecretHeader)
 		// ConstantTimeCompare returns 0 for unequal lengths without looking
 		// at the contents, so check the length separately to keep the
@@ -83,13 +105,21 @@ func RegisterCron(mux *http.ServeMux, runner ScheduledWorkRunner, secret string,
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(r.Context(), tickTimeout)
+		// This route's own write deadline, past the server's WriteTimeout.
+		// A writer that cannot take one (only test recorders) is fine: it
+		// has no deadline to outlive.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(total + writeGrace)); err != nil &&
+			!errors.Is(err, http.ErrNotSupported) {
+			logger.Warn("cron tick: could not extend the write deadline", "error", err)
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), total)
 		defer cancel()
 
 		started := time.Now()
-		report, err := runner.RunScheduledWork(ctx)
+		report, err := runner.RunScheduledWork(ctx, group)
 		if err != nil {
-			logger.Error("cron tick: could not run", "error", err)
+			logger.Error("cron tick: could not run", "group", group, "error", err)
 			// 503 so Cloud Scheduler retries: the tick did not happen at
 			// all, which is different from a tick where one sweep failed.
 			writeStatusJSON(w, http.StatusServiceUnavailable, map[string]string{
@@ -106,16 +136,14 @@ func RegisterCron(mux *http.ServeMux, runner ScheduledWorkRunner, secret string,
 			// ones that succeeded this time find nothing to do next time.
 			status = http.StatusInternalServerError
 			logger.Error("cron tick: sweeps failed",
-				"failed", report.Failed, "duration", time.Since(started))
+				"group", group, "failed", report.Failed, "duration", time.Since(started))
 		} else {
 			logger.Info("cron tick: done",
-				"sweeps", len(report.Results), "duration", time.Since(started))
+				"group", group, "sweeps", len(report.Results), "duration", time.Since(started))
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(report)
-	})
-
-	return true
+	}
 }

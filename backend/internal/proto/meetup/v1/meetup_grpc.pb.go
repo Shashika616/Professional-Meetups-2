@@ -33,7 +33,6 @@ const (
 	MeetupService_UnregisterDeviceToken_FullMethodName      = "/meetup.v1.MeetupService/UnregisterDeviceToken"
 	MeetupService_GetSafetyState_FullMethodName             = "/meetup.v1.MeetupService/GetSafetyState"
 	MeetupService_AcknowledgeSafetyChecklist_FullMethodName = "/meetup.v1.MeetupService/AcknowledgeSafetyChecklist"
-	MeetupService_SetLiveLocationOptIn_FullMethodName       = "/meetup.v1.MeetupService/SetLiveLocationOptIn"
 	MeetupService_ShareWithContacts_FullMethodName          = "/meetup.v1.MeetupService/ShareWithContacts"
 	MeetupService_CheckIn_FullMethodName                    = "/meetup.v1.MeetupService/CheckIn"
 	MeetupService_DeclineCheckIn_FullMethodName             = "/meetup.v1.MeetupService/DeclineCheckIn"
@@ -140,7 +139,7 @@ type MeetupServiceClient interface {
 	// the caller's own registration of the token.
 	UnregisterDeviceToken(ctx context.Context, in *UnregisterDeviceTokenRequest, opts ...grpc.CallOption) (*UnregisterDeviceTokenResponse, error)
 	// Safety Gate sub-flow (ADR-013 § 3, Safety UX Flows.md): checklist
-	// acknowledgment, live-location opt-in, check-in, post-meetup feedback.
+	// acknowledgment, check-in, post-meetup feedback.
 	// Available once a meetup has at least one accepted request.
 	//
 	// Returns NotFound if the meetup has no Safety Gate state yet (no
@@ -149,7 +148,6 @@ type MeetupServiceClient interface {
 	// "started, nothing acknowledged yet."
 	GetSafetyState(ctx context.Context, in *GetSafetyStateRequest, opts ...grpc.CallOption) (*SafetyStateResponse, error)
 	AcknowledgeSafetyChecklist(ctx context.Context, in *AcknowledgeSafetyChecklistRequest, opts ...grpc.CallOption) (*SafetyStateResponse, error)
-	SetLiveLocationOptIn(ctx context.Context, in *SetLiveLocationOptInRequest, opts ...grpc.CallOption) (*SafetyStateResponse, error)
 	// ShareWithContacts texts/emails the caller's CHOSEN trusted contacts the
 	// meetup's window and place. The message body is built server-side from
 	// the meetup row — the client supplies only which of its own contacts to
@@ -372,16 +370,6 @@ func (c *meetupServiceClient) AcknowledgeSafetyChecklist(ctx context.Context, in
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SafetyStateResponse)
 	err := c.cc.Invoke(ctx, MeetupService_AcknowledgeSafetyChecklist_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *meetupServiceClient) SetLiveLocationOptIn(ctx context.Context, in *SetLiveLocationOptInRequest, opts ...grpc.CallOption) (*SafetyStateResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SafetyStateResponse)
-	err := c.cc.Invoke(ctx, MeetupService_SetLiveLocationOptIn_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -618,7 +606,7 @@ type MeetupServiceServer interface {
 	// the caller's own registration of the token.
 	UnregisterDeviceToken(context.Context, *UnregisterDeviceTokenRequest) (*UnregisterDeviceTokenResponse, error)
 	// Safety Gate sub-flow (ADR-013 § 3, Safety UX Flows.md): checklist
-	// acknowledgment, live-location opt-in, check-in, post-meetup feedback.
+	// acknowledgment, check-in, post-meetup feedback.
 	// Available once a meetup has at least one accepted request.
 	//
 	// Returns NotFound if the meetup has no Safety Gate state yet (no
@@ -627,7 +615,6 @@ type MeetupServiceServer interface {
 	// "started, nothing acknowledged yet."
 	GetSafetyState(context.Context, *GetSafetyStateRequest) (*SafetyStateResponse, error)
 	AcknowledgeSafetyChecklist(context.Context, *AcknowledgeSafetyChecklistRequest) (*SafetyStateResponse, error)
-	SetLiveLocationOptIn(context.Context, *SetLiveLocationOptInRequest) (*SafetyStateResponse, error)
 	// ShareWithContacts texts/emails the caller's CHOSEN trusted contacts the
 	// meetup's window and place. The message body is built server-side from
 	// the meetup row — the client supplies only which of its own contacts to
@@ -757,9 +744,6 @@ func (UnimplementedMeetupServiceServer) GetSafetyState(context.Context, *GetSafe
 }
 func (UnimplementedMeetupServiceServer) AcknowledgeSafetyChecklist(context.Context, *AcknowledgeSafetyChecklistRequest) (*SafetyStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AcknowledgeSafetyChecklist not implemented")
-}
-func (UnimplementedMeetupServiceServer) SetLiveLocationOptIn(context.Context, *SetLiveLocationOptInRequest) (*SafetyStateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SetLiveLocationOptIn not implemented")
 }
 func (UnimplementedMeetupServiceServer) ShareWithContacts(context.Context, *ShareWithContactsRequest) (*SafetyStateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ShareWithContacts not implemented")
@@ -1072,24 +1056,6 @@ func _MeetupService_AcknowledgeSafetyChecklist_Handler(srv interface{}, ctx cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MeetupServiceServer).AcknowledgeSafetyChecklist(ctx, req.(*AcknowledgeSafetyChecklistRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _MeetupService_SetLiveLocationOptIn_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SetLiveLocationOptInRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(MeetupServiceServer).SetLiveLocationOptIn(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: MeetupService_SetLiveLocationOptIn_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(MeetupServiceServer).SetLiveLocationOptIn(ctx, req.(*SetLiveLocationOptInRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1408,10 +1374,6 @@ var MeetupService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AcknowledgeSafetyChecklist",
 			Handler:    _MeetupService_AcknowledgeSafetyChecklist_Handler,
-		},
-		{
-			MethodName: "SetLiveLocationOptIn",
-			Handler:    _MeetupService_SetLiveLocationOptIn_Handler,
 		},
 		{
 			MethodName: "ShareWithContacts",

@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -81,32 +79,30 @@ func TestRefuseGlobalOTPBypassOnCloudRun(t *testing.T) {
 // ALLOW_TEST_OTP_BYPASS to "false" and relies on the SCOPED allowlists,
 // which this guard deliberately leaves alone.
 func TestRefuseGlobalOTPBypassOnCloudRun_AcceptsTheDeployedManifest(t *testing.T) {
-	manifest, err := os.ReadFile(filepath.Join("..", "..", "service.yaml"))
-	if err != nil {
-		t.Fatalf("read backend/service.yaml: %v", err)
-	}
-	text := string(manifest)
+	for _, m := range deployManifests(t) {
+		text := m.text
 
-	// Read the value the manifest actually sets, rather than assuming it.
-	value := ""
-	if idx := strings.Index(text, "- name: ALLOW_TEST_OTP_BYPASS"); idx >= 0 {
-		rest := text[idx:]
-		if v := strings.Index(rest, "value: "); v >= 0 {
-			value = strings.Trim(strings.SplitN(rest[v+len("value: "):], "\n", 2)[0], `" `)
+		// Read the value the manifest actually sets, rather than assuming it.
+		value := ""
+		if idx := strings.Index(text, "- name: ALLOW_TEST_OTP_BYPASS"); idx >= 0 {
+			rest := text[idx:]
+			if v := strings.Index(rest, "value: "); v >= 0 {
+				value = strings.Trim(strings.SplitN(rest[v+len("value: "):], "\n", 2)[0], `" `)
+			}
 		}
-	}
 
-	err = refuseGlobalOTPBypassOnCloudRun(func(name string) string {
-		switch name {
-		case "ALLOW_TEST_OTP_BYPASS":
-			return value
-		case "K_SERVICE":
-			return "meetups-backend"
+		err := refuseGlobalOTPBypassOnCloudRun(func(name string) string {
+			switch name {
+			case "ALLOW_TEST_OTP_BYPASS":
+				return value
+			case "K_SERVICE":
+				return "meetups-backend"
+			}
+			return ""
+		})
+		if err != nil {
+			t.Fatalf("the deployed manifest would be refused at startup: %v\n"+
+				"%s sets ALLOW_TEST_OTP_BYPASS=%q", err, m.path, value)
 		}
-		return ""
-	})
-	if err != nil {
-		t.Fatalf("the deployed manifest would be refused at startup: %v\n"+
-			"backend/service.yaml sets ALLOW_TEST_OTP_BYPASS=%q", err, value)
 	}
 }

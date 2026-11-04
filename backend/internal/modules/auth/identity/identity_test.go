@@ -5,9 +5,11 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -462,5 +464,53 @@ func TestNormalizePhone(t *testing.T) {
 		if got := NormalizePhone(tc.in); got != tc.want {
 			t.Errorf("NormalizePhone(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// #120 (review N1-A5): a token with a key id the cached set does not know
+// may mean the provider rotated its keys, so the set is fetched again, but
+// at most once a minute: a stream of made-up key ids must not turn into a
+// stream of fetches, and must not hold requests waiting for one.
+func TestJWKSRefetchForUnknownKeyIDsIsLimitedToOncePerMinute(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fetches atomic.Int32
+	jwk, _ := jwkset.NewJWKFromKey(&key.PublicKey, jwkset.JWKOptions{
+		Metadata: jwkset.JWKMetadataOptions{KID: testKID, ALG: jwkset.AlgRS256, USE: jwkset.UseSig},
+	})
+	body, _ := json.Marshal(jwkset.JWKSMarshal{Keys: []jwkset.JWKMarshal{jwk.Marshal()}})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fetches.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p, err := newJWKSProvider(ctx, "test", srv.URL, "aud", []string{"iss"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := fetches.Load()
+	started := time.Now()
+	for i := 0; i < 20; i++ {
+		token := jwtlib.NewWithClaims(jwtlib.SigningMethodRS256, jwtlib.RegisteredClaims{Issuer: "iss", Audience: jwtlib.ClaimStrings{"aud"}})
+		token.Header["kid"] = fmt.Sprintf("made-up-%d", i)
+		signed, _ := token.SignedString(key)
+		if _, err := p.Verify(context.Background(), signed, "a-nonce"); err == nil {
+			t.Fatal("a token with an unknown key id verified")
+		}
+	}
+	if extra := fetches.Load() - initial; extra > 1 {
+		t.Errorf("20 unknown key ids caused %d refetches, want at most 1 a minute", extra)
+	}
+	if extra := fetches.Load() - initial; extra < 1 {
+		t.Error("an unknown key id caused no refetch at all; a key rotation would fail sign-in for an hour")
+	}
+	if d := time.Since(started); d > 5*time.Second {
+		t.Errorf("20 refused tokens took %v; refusals must not wait for the limit", d)
 	}
 }

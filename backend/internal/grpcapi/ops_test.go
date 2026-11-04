@@ -5,7 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
 	opsv1 "professional-meetups-monolith/backend/internal/proto/ops/v1"
 )
@@ -129,5 +131,120 @@ func TestRunScheduledWorkStopsWhenTheCallerGoesAway(t *testing.T) {
 	}
 	if ran != 1 {
 		t.Errorf("%d sweeps ran after the caller went away, want 1", ran)
+	}
+}
+
+// Tracker #102: a sweep's own budget, not one fixed cap for all. The
+// analytics aggregation is allowed 120s of statements; a 30s cap on its
+// sweep cut it off.
+func TestRunScheduledWorkGivesEachSweepItsOwnBudget(t *testing.T) {
+	budgets := map[string]time.Duration{}
+	record := func(name string) func(context.Context) (int64, error) {
+		return func(ctx context.Context) (int64, error) {
+			deadline, ok := ctx.Deadline()
+			if !ok {
+				t.Errorf("%s ran without a deadline", name)
+			}
+			budgets[name] = time.Until(deadline)
+			return 0, nil
+		}
+	}
+	server := NewOpsServer(quietLogger(),
+		Sweep{Name: "default", Run: record("default")},
+		Sweep{Name: "long", Run: record("long"), Budget: 2 * time.Minute},
+	)
+	if _, err := server.RunScheduledWork(context.Background(), &opsv1.RunScheduledWorkRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := budgets["default"]; got > DefaultSweepBudget || got < DefaultSweepBudget-time.Second {
+		t.Errorf("a sweep without a budget got %v, want about %v", got, DefaultSweepBudget)
+	}
+	if got := budgets["long"]; got < 2*time.Minute-time.Second {
+		t.Errorf("a sweep with a 2m budget got %v", got)
+	}
+}
+
+// Tracker #102: the tick must answer before the caller's deadline, however
+// long the sweeps are allowed, so Cloud Scheduler sees our report (naming
+// what was cut short) rather than its own timeout. A slow sweep is cut at
+// the deadline less the reply margin, and the sweeps after it are reported
+// as skipped, which counts as a failure so the tick is retried.
+func TestRunScheduledWorkAnswersBeforeTheCallersDeadline(t *testing.T) {
+	defer func(m time.Duration) { replyMargin = m }(replyMargin)
+	replyMargin = 50 * time.Millisecond
+
+	ranAfter := false
+	server := NewOpsServer(quietLogger(),
+		Sweep{Name: "slow", Budget: time.Hour, Run: func(ctx context.Context) (int64, error) {
+			<-ctx.Done() // a wedged query: runs until its context ends
+			return 0, ctx.Err()
+		}},
+		Sweep{Name: "after", Run: func(context.Context) (int64, error) {
+			ranAfter = true
+			return 0, nil
+		}},
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+	resp, err := server.RunScheduledWork(ctx, &opsv1.RunScheduledWorkRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left := time.Until(deadline); left < 20*time.Millisecond {
+		t.Errorf("answered %v before the caller's deadline; the reply would not arrive in time", left)
+	}
+	if ranAfter {
+		t.Error("a sweep started with no time left")
+	}
+	if resp.GetFailed() != 2 {
+		t.Errorf("failed = %d, want 2 (the cut sweep and the skipped one)", resp.GetFailed())
+	}
+	if got := len(resp.GetResults()); got != 2 {
+		t.Fatalf("got %d results, want 2: a skipped sweep must still be reported", got)
+	}
+	if e := resp.GetResults()[1].GetError(); !strings.Contains(e, "skipped") {
+		t.Errorf("the skipped sweep reports %q", e)
+	}
+}
+
+// Tracker #102: the heavy analytics sweeps have their own group, run by
+// their own Scheduler job.
+func TestRunScheduledWorkRunsOnlyTheRequestedGroup(t *testing.T) {
+	var ran []string
+	sweep := func(name, group string) Sweep {
+		return Sweep{Name: name, Group: group, Run: func(context.Context) (int64, error) {
+			ran = append(ran, name)
+			return 0, nil
+		}}
+	}
+	server := NewOpsServer(quietLogger(),
+		sweep("core one", GroupCore),
+		sweep("aggregate", GroupAnalytics),
+		sweep("core two", GroupCore),
+	)
+
+	if _, err := server.RunScheduledWork(context.Background(), &opsv1.RunScheduledWorkRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ran, ",") != "core one,core two" {
+		t.Errorf("the core tick ran %v", ran)
+	}
+
+	ran = nil
+	if _, err := server.RunScheduledWork(context.Background(), &opsv1.RunScheduledWorkRequest{Group: GroupAnalytics}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(ran, ",") != "aggregate" {
+		t.Errorf("the analytics tick ran %v", ran)
+	}
+
+	ran = nil
+	if _, err := server.RunScheduledWork(context.Background(), &opsv1.RunScheduledWorkRequest{Group: "nope"}); err == nil {
+		t.Error("an unknown group was accepted")
+	}
+	if len(ran) != 0 {
+		t.Errorf("an unknown group ran %v", ran)
 	}
 }

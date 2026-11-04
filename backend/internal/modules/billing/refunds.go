@@ -92,7 +92,8 @@ func (s *Service) HandleMeetupEnded(ctx context.Context, e MeetupEnded) error {
 		}
 		logRefund := func(outcome string, pct int, amount int64) error {
 			_, err := q.InsertRefundLog(ctx, sqlcgen.InsertRefundLogParams{
-				UserID: t.UserID(), HoldID: holdID, MeetupID: meetupID, Event: e.Event,
+				CreatedAt: ts(t.Now()),
+				UserID:    t.UserID(), HoldID: holdID, MeetupID: meetupID, Event: e.Event,
 				Outcome: outcome, Percent: int32(pct), Amount: amount,
 			})
 			return err

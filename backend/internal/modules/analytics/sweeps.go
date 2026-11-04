@@ -1,10 +1,10 @@
 package analytics
 
 import (
-	"bytes"
 	"compress/gzip"
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -44,6 +44,17 @@ func LocalDay(t time.Time) time.Time {
 }
 
 func date(t time.Time) pgtype.Date { return pgtype.Date{Time: t, Valid: true} }
+
+// SweepFlush writes everything the buffer holds and returns how many events
+// it wrote (tracker #117). It is the last sweep of the core tick: the
+// outbox drains before it hand server events to the buffer and mark their
+// rows done, so without it those events would live only in memory until
+// the next timed flush, and an instance idled or stopped after the tick
+// would lose them.
+func (s *Service) SweepFlush(ctx context.Context) (int, error) {
+	written := s.buffer.Sync(ctx)
+	return written, ctx.Err()
+}
 
 // SweepPartitions makes sure today and the next PartitionsAhead days have a
 // partition, and returns how many it created. Idempotent; also run once at
@@ -136,19 +147,25 @@ func (s *Service) SweepRetention(ctx context.Context) (int, error) {
 }
 
 func (s *Service) archiveDay(ctx context.Context, d time.Time) error {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	n, err := s.store.ExportDay(ctx, d, zw)
-	if err != nil {
-		return err
-	}
-	if err := zw.Close(); err != nil {
-		return err
-	}
+	// Streamed (#119): the export is gzipped into a pipe the upload reads
+	// in chunks, so a busy day is never held in memory whole.
+	pr, pw := io.Pipe()
+	var n int
+	go func() {
+		zw := gzip.NewWriter(pw)
+		count, err := s.store.ExportDay(ctx, d, zw)
+		if err == nil {
+			err = zw.Close()
+		}
+		n = count
+		_ = pw.CloseWithError(err)
+	}()
 	object := ArchiveObject(d)
-	if err := s.archive.Upload(ctx, s.cfg.ArchiveBucket, object, buf.Bytes(), UploadOptions{
+	err := s.archive.UploadStream(ctx, s.cfg.ArchiveBucket, object, pr, UploadOptions{
 		ContentType: "application/gzip", CreateOnly: true,
-	}); err != nil {
+	})
+	_ = pr.CloseWithError(err) // stops the export if the upload gave up
+	if err != nil {
 		return fmt.Errorf("analytics: archive %s: %w", d.Format(time.DateOnly), err)
 	}
 	uri := "gs://" + s.cfg.ArchiveBucket + "/" + object

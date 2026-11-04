@@ -63,6 +63,9 @@ func (s *service) SubmitMeetupReview(ctx context.Context, req SubmitMeetupReview
 		// the case this review exists for.
 		return fmt.Errorf("meetup: %s is not over yet: %w", req.MeetupID, apperror.ErrConflict)
 	}
+	if err := withinReviewWindow(m, time.Now()); err != nil {
+		return err
+	}
 
 	// Already finished? Reviews are made of immutable ratings, so there is
 	// nothing a second submission could do except fail partway.
@@ -171,4 +174,23 @@ func (s *service) GetMeetupReview(ctx context.Context, meetupID, viewerID string
 		})
 	}
 	return out, nil
+}
+
+// errReviewWindowClosed: a review or rating more than reviewWindow after
+// the meetup ended or was cancelled (N1-B7). Home stopped offering it at
+// that point; the submit paths now agree.
+var errReviewWindowClosed = fmt.Errorf("meetup: the time to review this meetup has passed: %w", apperror.ErrConflict)
+
+// withinReviewWindow measures from when the meetup was cancelled, or else
+// from the end of its window, the same reference ListMeetupIDsAwaitingReview
+// uses.
+func withinReviewWindow(m repository.Meetup, now time.Time) error {
+	from := m.WindowEnd
+	if m.Status == repository.MeetupStatusCancelled && m.CancelledAt != nil {
+		from = *m.CancelledAt
+	}
+	if now.Sub(from) > reviewWindow {
+		return errReviewWindowClosed
+	}
+	return nil
 }

@@ -379,6 +379,13 @@ var freeEmailDomains = parseDomainList(freeEmailDomainsFile)
 //go:embed free_email_domains.txt
 var freeEmailDomainsFile string
 
+// disposableEmailDomains are throwaway inbox services (#111): never a work
+// address.
+var disposableEmailDomains = parseDomainList(disposableEmailDomainsFile)
+
+//go:embed disposable_email_domains.txt
+var disposableEmailDomainsFile string
+
 // parseDomainList reads one domain per line, ignoring blanks and # comments.
 func parseDomainList(file string) map[string]bool {
 	out := map[string]bool{}
@@ -413,7 +420,7 @@ func isRejectedCorporateEmail(email string) bool {
 	if !ok {
 		return true
 	}
-	if freeEmailDomains[strings.ToLower(domain)] {
+	if freeEmailDomains[strings.ToLower(domain)] || disposableEmailDomains[strings.ToLower(domain)] {
 		return true
 	}
 	// "info+anything@" is still the shared info@ mailbox (#91).

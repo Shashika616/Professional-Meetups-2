@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -824,79 +825,53 @@ func (f *fakeUnverifiedCompanyClaimRepository) Insert(_ context.Context, claim r
 // repository.TrustedContactRepository, including the #80 consent state and
 // the invitation caps.
 type fakeTrustedContactRepository struct {
-	byID          map[string]repository.TrustedContact
-	nextID        int
-	pendingTokens map[string]string // token hash -> contact id
-	invites       []fakeInvite
-	// requesterNames is what Confirm reports, by user id.
-	requesterNames map[string]string
-}
-
-type fakeInvite struct {
-	userID, phoneHash string
-	sentAt            time.Time
+	byID   map[string]repository.TrustedContact
+	nextID int
 }
 
 func newFakeTrustedContactRepository() *fakeTrustedContactRepository {
-	return &fakeTrustedContactRepository{
-		byID:           map[string]repository.TrustedContact{},
-		pendingTokens:  map[string]string{},
-		requesterNames: map[string]string{},
-	}
+	return &fakeTrustedContactRepository{byID: map[string]repository.TrustedContact{}}
 }
 
-// Insert seeds an ALREADY-CONFIRMED contact — the state every contact added
-// before consent existed is in (migration 0024, D2). Test-only; it is not
-// part of the repository interface.
-func (f *fakeTrustedContactRepository) Insert(_ context.Context, userID, name, phoneNumber, email string) (repository.TrustedContact, error) {
+// seed puts a contact in directly, past the cap, the way an account from
+// before it holds three. Test-only.
+func (f *fakeTrustedContactRepository) seed(userID, name, phoneNumber string) repository.TrustedContact {
 	f.nextID++
 	c := repository.TrustedContact{
-		ID: fmt.Sprintf("contact-%d", f.nextID), UserID: userID, Name: name,
-		PhoneNumber: phoneNumber, Email: email, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		ID: fmt.Sprintf("contact-%d", f.nextID), UserID: userID, Name: name, PhoneNumber: phoneNumber,
+		CreatedAt: time.Now().Add(time.Duration(f.nextID) * time.Second), UpdatedAt: time.Now(),
 	}
 	f.byID[c.ID] = c
-	return c, nil
+	return c
 }
 
-func (f *fakeTrustedContactRepository) InsertPending(_ context.Context, c repository.NewPendingContact) (repository.TrustedContact, error) {
+func (f *fakeTrustedContactRepository) Insert(_ context.Context, c repository.NewContact) (repository.TrustedContact, error) {
 	existing := 0
 	for _, tc := range f.byID {
 		if tc.UserID == c.UserID {
 			existing++
+			if tc.PhoneNumber == c.PhoneNumber {
+				return repository.TrustedContact{}, fmt.Errorf("fake: %w", repository.ErrDuplicateTrustedContact)
+			}
 		}
 	}
 	if existing >= c.MaxContacts {
 		return repository.TrustedContact{}, fmt.Errorf("fake: %w", repository.ErrTooManyTrustedContacts)
 	}
-	since := time.Now().Add(-c.CapWindow)
-	byUser, toPhone := 0, 0
-	for _, inv := range f.invites {
-		if inv.sentAt.Before(since) {
-			continue
-		}
-		if inv.userID == c.UserID {
-			byUser++
-		}
-		if inv.phoneHash == c.PhoneHash {
-			toPhone++
-		}
-	}
-	if byUser >= c.MaxInvitesPerUser || toPhone >= c.MaxInvitesPerPhone {
-		return repository.TrustedContact{}, fmt.Errorf("fake: %w", repository.ErrContactInviteLimit)
-	}
-
-	f.nextID++
-	tc := repository.TrustedContact{
-		ID: fmt.Sprintf("contact-%d", f.nextID), UserID: c.UserID, Name: c.Name,
-		PhoneNumber: c.PhoneNumber, Email: c.Email, CreatedAt: time.Now(), UpdatedAt: time.Now(),
-		PendingUntil: c.ExpiresAt,
-	}
-	f.byID[tc.ID] = tc
-	f.pendingTokens[c.TokenHash] = tc.ID
-	f.invites = append(f.invites, fakeInvite{userID: c.UserID, phoneHash: c.PhoneHash, sentAt: time.Now()})
-	return tc, nil
+	return f.seed(c.UserID, c.Name, c.PhoneNumber), nil
 }
 
+func (f *fakeTrustedContactRepository) Update(_ context.Context, contactID, userID, name, phoneNumber string) (repository.TrustedContact, error) {
+	c, ok := f.byID[contactID]
+	if !ok || c.UserID != userID {
+		return repository.TrustedContact{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	c.Name, c.PhoneNumber = name, phoneNumber
+	f.byID[contactID] = c
+	return c, nil
+}
+
+// ListForUser is oldest first, as the real query is.
 func (f *fakeTrustedContactRepository) ListForUser(_ context.Context, userID string) ([]repository.TrustedContact, error) {
 	var out []repository.TrustedContact
 	for _, c := range f.byID {
@@ -904,36 +879,8 @@ func (f *fakeTrustedContactRepository) ListForUser(_ context.Context, userID str
 			out = append(out, c)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
-}
-
-func (f *fakeTrustedContactRepository) Confirm(_ context.Context, tokenHash string) (string, error) {
-	id, ok := f.pendingTokens[tokenHash]
-	if !ok {
-		return "", fmt.Errorf("fake: %w", apperror.ErrNotFound)
-	}
-	c := f.byID[id]
-	if !time.Now().Before(c.PendingUntil) {
-		return "", fmt.Errorf("fake: %w", apperror.ErrNotFound)
-	}
-	delete(f.pendingTokens, tokenHash)
-	c.PendingUntil = time.Time{}
-	f.byID[id] = c
-	return f.requesterNames[c.UserID], nil
-}
-
-func (f *fakeTrustedContactRepository) DeleteInvitesSentBefore(_ context.Context, before time.Time, _ int) (int, error) {
-	kept := f.invites[:0]
-	deleted := 0
-	for _, inv := range f.invites {
-		if inv.sentAt.Before(before) {
-			deleted++
-			continue
-		}
-		kept = append(kept, inv)
-	}
-	f.invites = kept
-	return deleted, nil
 }
 
 func (f *fakeTrustedContactRepository) Delete(_ context.Context, contactID, userID string) error {
@@ -942,11 +889,6 @@ func (f *fakeTrustedContactRepository) Delete(_ context.Context, contactID, user
 		return fmt.Errorf("fake: %w", apperror.ErrNotFound)
 	}
 	delete(f.byID, contactID)
-	for hash, id := range f.pendingTokens { // ON DELETE CASCADE
-		if id == contactID {
-			delete(f.pendingTokens, hash)
-		}
-	}
 	return nil
 }
 
@@ -1112,3 +1054,47 @@ func (f *fakeSmsSender) SendAlert(_ context.Context, to, message string) error {
 // repository (users_postgres.go) writes the outbox row transactionally
 // inside Create itself — one createCalls entry IS one onboarding event,
 // by construction.
+
+type fakeUserPhotoRepository struct {
+	byUser map[string]repository.UserPhoto
+}
+
+func newFakeUserPhotoRepository() *fakeUserPhotoRepository {
+	return &fakeUserPhotoRepository{byUser: map[string]repository.UserPhoto{}}
+}
+
+func (f *fakeUserPhotoRepository) Upsert(_ context.Context, userID string, p repository.UserPhoto) error {
+	f.byUser[userID] = p
+	return nil
+}
+
+func (f *fakeUserPhotoRepository) Get(_ context.Context, userID string) (repository.UserPhoto, error) {
+	p, ok := f.byUser[userID]
+	if !ok {
+		return repository.UserPhoto{}, fmt.Errorf("fake: %w", apperror.ErrNotFound)
+	}
+	return p, nil
+}
+
+func (f *fakeUserPhotoRepository) Etag(ctx context.Context, userID string) (string, error) {
+	p, err := f.Get(ctx, userID)
+	return p.Etag, err
+}
+
+func (f *fakeUserPhotoRepository) Delete(_ context.Context, userID string) error {
+	delete(f.byUser, userID)
+	return nil
+}
+
+type fakePhotoFetcher struct {
+	calls int
+	err   error
+}
+
+func (f *fakePhotoFetcher) Fetch(context.Context, string) ([]byte, int, int, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, 0, 0, f.err
+	}
+	return []byte("jpeg"), 320, 320, nil
+}

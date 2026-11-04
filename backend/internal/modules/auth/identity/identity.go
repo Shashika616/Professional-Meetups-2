@@ -25,16 +25,19 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MicahParks/jwkset"
 	"github.com/MicahParks/keyfunc/v3"
 	jwtlib "github.com/golang-jwt/jwt/v5"
+	"golang.org/x/time/rate"
 )
 
 // defaultTimeout bounds every JWKS HTTP fetch (both the initial one at
@@ -52,6 +55,10 @@ const defaultTimeout = 5 * time.Second
 // any real rotation window without needing to special-case key-not-found
 // into an immediate out-of-band refresh.
 const jwksRefreshInterval = time.Hour
+
+// jwksUnknownKIDRefetch is the most often a token with an unknown key id
+// may cause the set to be fetched again (#120).
+const jwksUnknownKIDRefetch = time.Minute
 
 // VerifiedIdentity is what a successful Provider.Verify call yields — the
 // caller's stable subject id plus best-effort display fields. Name is
@@ -186,16 +193,19 @@ type jwksProvider struct {
 func newJWKSProvider(ctx context.Context, name, jwksURL, audience string, validIssuers []string) (*jwksProvider, error) {
 	httpClient := &http.Client{Timeout: defaultTimeout}
 
-	storage, err := jwkset.NewStorageFromHTTP(jwksURL, jwkset.HTTPClientStorageOptions{
-		Client:                    httpClient,
-		Ctx:                       ctx,
-		HTTPTimeout:               defaultTimeout,
-		RefreshInterval:           jwksRefreshInterval,
-		NoErrorReturnFirstHTTPReq: true,
-		RefreshErrorHandler: func(_ context.Context, refreshErr error) {
-			slog.Default().Error("identity: JWKS refresh failed", "provider", name, "url", jwksURL, "error", refreshErr)
-		},
-	})
+	build := func(ctx context.Context) (jwkset.Storage, error) {
+		return jwkset.NewStorageFromHTTP(jwksURL, jwkset.HTTPClientStorageOptions{
+			Client:                    httpClient,
+			Ctx:                       ctx,
+			HTTPTimeout:               defaultTimeout,
+			RefreshInterval:           jwksRefreshInterval,
+			NoErrorReturnFirstHTTPReq: true,
+			RefreshErrorHandler: func(_ context.Context, refreshErr error) {
+				slog.Default().Error("identity: JWKS refresh failed", "provider", name, "url", jwksURL, "error", refreshErr)
+			},
+		})
+	}
+	storage, err := newRotatingJWKS(ctx, build)
 	if err != nil {
 		// Only reachable for a genuine misconfiguration (e.g. a malformed
 		// URL, caught by jwkset before any network call) — never a
@@ -332,4 +342,69 @@ func NormalizePhone(phone string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// rotatingJWKS is a provider's key set that is fetched again when a token
+// names a key id it does not know (#120), at most once per
+// jwksUnknownKIDRefetch: a provider that rotates its keys is picked up
+// within the minute rather than at the next hourly refresh, and a stream
+// of made-up key ids costs at most one fetch a minute. Within the minute
+// an unknown id is refused at once (the limiter is the negative cache;
+// nothing waits on it).
+type rotatingJWKS struct {
+	jwkset.Storage // the first set, for the methods keyfunc never calls
+
+	parent  context.Context
+	build   func(context.Context) (jwkset.Storage, error)
+	limiter *rate.Limiter
+
+	mu      sync.RWMutex
+	current jwkset.Storage
+	cancel  context.CancelFunc
+}
+
+func newRotatingJWKS(ctx context.Context, build func(context.Context) (jwkset.Storage, error)) (*rotatingJWKS, error) {
+	inner, cancel := context.WithCancel(ctx)
+	first, err := build(inner)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return &rotatingJWKS{
+		Storage: first, parent: ctx, build: build,
+		limiter: rate.NewLimiter(rate.Every(jwksUnknownKIDRefetch), 1),
+		current: first, cancel: cancel,
+	}, nil
+}
+
+func (r *rotatingJWKS) set() jwkset.Storage {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.current
+}
+
+// KeyRead finds keyID, fetching the set again first if it is unknown and
+// the limiter allows.
+func (r *rotatingJWKS) KeyRead(ctx context.Context, keyID string) (jwkset.JWK, error) {
+	jwk, err := r.set().KeyRead(ctx, keyID)
+	if !errors.Is(err, jwkset.ErrKeyNotFound) || !r.limiter.Allow() {
+		return jwk, err
+	}
+	inner, cancel := context.WithCancel(r.parent)
+	fresh, buildErr := r.build(inner)
+	if buildErr != nil {
+		cancel()
+		return jwk, err
+	}
+	r.mu.Lock()
+	old := r.cancel
+	r.current, r.cancel = fresh, cancel
+	r.mu.Unlock()
+	old() // the replaced set's refresh goroutine
+	return fresh.KeyRead(ctx, keyID)
+}
+
+// KeyReadAll reads the current set.
+func (r *rotatingJWKS) KeyReadAll(ctx context.Context) ([]jwkset.JWK, error) {
+	return r.set().KeyReadAll(ctx)
 }

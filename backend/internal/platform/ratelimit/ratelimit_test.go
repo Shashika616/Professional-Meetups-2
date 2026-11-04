@@ -195,3 +195,28 @@ func TestLimiterInterface_IsSatisfiedByAnAlternativeImplementation(t *testing.T)
 type alwaysDeny struct{}
 
 func (alwaysDeny) Allow(string, int, time.Duration) bool { return false }
+
+// Tracker #81: the map is capped. A caller cycling through fresh keys (one
+// per 404 path, say) evicts the oldest bucket rather than growing the map
+// without bound.
+func TestInMemoryEvictsTheOldestKeyAtTheCap(t *testing.T) {
+	now := time.Unix(0, 0)
+	l := newWithClockAndCap(func() time.Time { return now }, 3)
+	defer l.Close()
+	for _, k := range []string{"a", "b", "c"} {
+		l.Allow(k, 1, time.Hour)
+	}
+	if l.Allow("a", 1, time.Hour) {
+		t.Fatal("a's second use was allowed inside its window")
+	}
+	l.Allow("d", 1, time.Hour) // over the cap: the oldest, a, goes
+	if got := l.size(); got != 3 {
+		t.Errorf("%d buckets, want the cap of 3", got)
+	}
+	if !l.Allow("a", 1, time.Hour) {
+		t.Error("a was not the one evicted")
+	}
+	if l.Allow("c", 1, time.Hour) {
+		t.Error("c, newer than a, was evicted too")
+	}
+}

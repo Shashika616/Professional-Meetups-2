@@ -184,22 +184,23 @@ service AuthService {
   // the message says what is outstanding and how to clear it.
   rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountResponse);
 
+  // A user's own photo (plan 2.1): one small JPEG, re-encoded here. The
+  // gateway decides who may see it.
+  rpc SetProfilePhoto(SetProfilePhotoRequest) returns (SetProfilePhotoResponse);
+  rpc DeleteProfilePhoto(DeleteProfilePhotoRequest) returns (DeleteProfilePhotoResponse);
+  rpc GetProfilePhoto(GetProfilePhotoRequest) returns (GetProfilePhotoResponse);
+
   // Trusted contacts + SOS (ADR-026) — all four self-scoped via the
   // verified JWT's user_id, never a client-supplied one.
   rpc AddTrustedContact(AddTrustedContactRequest) returns (TrustedContactResponse);
   rpc ListTrustedContacts(ListTrustedContactsRequest) returns (ListTrustedContactsResponse);
+  rpc UpdateTrustedContact(UpdateTrustedContactRequest) returns (TrustedContactResponse);
   rpc RemoveTrustedContact(RemoveTrustedContactRequest) returns (RemoveTrustedContactResponse);
-  // TriggerSOS looks up the caller's trusted contacts and alerts each one
-  // directly (SmsSender/EmailSender's new SendAlert, not Notification
-  // Dispatch — a trusted contact isn't necessarily a registered app user).
-  // Rejects with InvalidArgument if the caller has zero trusted contacts.
+  // TriggerSOS texts the caller's two oldest trusted contacts directly
+  // (SmsSender's SendAlert, not Notification Dispatch — a trusted contact
+  // isn't necessarily a registered app user). Rejects with InvalidArgument
+  // if the caller has zero trusted contacts.
   rpc TriggerSOS(TriggerSOSRequest) returns (TriggerSOSResponse);
-  // ConfirmTrustedContact records a contact's own consent, from the link
-  // texted to them when they were added (#80). The ONE RPC here with no
-  // caller user: the gateway's public confirmation page calls it, and the
-  // single-use token is the proof. NotFound for a token that is unknown,
-  // expired or already used, deliberately not distinguished.
-  rpc ConfirmTrustedContact(ConfirmTrustedContactRequest) returns (ConfirmTrustedContactResponse);
 }
 
 // IdentityProviderProto — LINKEDIN is valid for LinkIdentityRequest (the
@@ -312,11 +313,9 @@ message SessionResponse {
   reserved 4;                 // was access_token_expires_in_seconds — derived from the gateway's own jwt.AccessTokenTTL now
   reserved "access_token_expires_in_seconds";
   bool is_new_user = 5;
-  // full_name and profile_photo_url are the values captured from LinkedIn's
-  // userinfo response at account creation (see internal/modules/auth's
-  // CompleteLinkedInOnboarding) and already persisted on the user row —
-  // returned here because there is no separate GET /v1/users/me endpoint
-  // yet for a client to fetch them from afterward.
+  // full_name and profile_photo_url (our own /v1/users/{id}/photo path, or
+  // empty) are on the user row — returned here so the client has them from
+  // the moment it signs in.
   string full_name = 6;
   string profile_photo_url = 7;
   // trust_level is new relative to the sibling repo's SessionResponse
@@ -539,35 +538,28 @@ message UpdateLastKnownLocationResponse {
 message AddTrustedContactRequest {
   string user_id = 1; // set by the gateway from the verified JWT
   string name = 2;
-  // At least one of phone_number/email is required — enforced server-side,
-  // mirroring the DB CHECK constraint (migration 0009).
   string phone_number = 3;
-  string email = 4;
+  reserved 4; // email, removed in plan 30C
   // ADR-003 — set by the gateway from the verified JWT's trust_level claim,
   // never a client-supplied value. AddTrustedContact/TriggerSOS require
   // Level 2, the same floor as joining a meetup.
   int32 caller_trust_level = 5;
 }
 
+message UpdateTrustedContactRequest {
+  string user_id = 1; // set by the gateway from the verified JWT
+  string contact_id = 2;
+  string name = 3;
+  string phone_number = 4;
+  int32 caller_trust_level = 5; // as in AddTrustedContactRequest
+}
+
 message TrustedContactResponse {
   string id = 1;
   string name = 2;
   string phone_number = 3;
-  string email = 4;
+  reserved 4, 6; // email and consent status, removed in plan 30C
   int64 created_at_unix_seconds = 5;
-  // "confirmed", "pending" or "expired" (#80). Only a confirmed contact is
-  // alerted. A new field, so app builds that predate it simply ignore it.
-  string status = 6;
-}
-
-message ConfirmTrustedContactRequest {
-  string token = 1;
-}
-
-message ConfirmTrustedContactResponse {
-  // Whose emergency contact the person confirming has become, for the
-  // confirmation page.
-  string requester_name = 1;
 }
 
 message ListTrustedContactsRequest {
@@ -605,8 +597,8 @@ message TriggerSOSRequest {
   // still decodes, and a new client omitting them is read as absent
   // rather than as the equator.
   //
-  // An alert without coordinates still goes out. It says the location is
-  // unavailable, which is strictly better than no alert at all.
+  // An alert without coordinates still goes out, with the location we
+  // stored or saying there is none, which is strictly better than no alert.
   optional double latitude = 3;
   optional double longitude = 4;
   // ADR-003 — see AddTrustedContactRequest.caller_trust_level.
@@ -615,6 +607,10 @@ message TriggerSOSRequest {
   // the first attempt's outcome instead of alerting everyone twice. Empty
   // from app builds that predate it, which are not deduplicated.
   string client_request_id = 6;
+  // When the phone took that fix, and how: "gps" or "device_last_known".
+  // Absent from older builds, whose coordinates are always a fresh fix.
+  optional int64 captured_at_unix_seconds = 7;
+  string location_source = 8;
 }
 
 message TriggerSOSResponse {
@@ -622,4 +618,30 @@ message TriggerSOSResponse {
   // individual send failures don't fail the whole call (ADR-026 §4), so
   // this may be less than the caller's total contact count.
   int32 contacts_notified = 1;
+}
+
+message SetProfilePhotoRequest {
+  string user_id = 1; // set by the gateway from the verified JWT
+  bytes image = 2;
+}
+
+message SetProfilePhotoResponse {
+  string photo_path = 1;
+}
+
+message DeleteProfilePhotoRequest {
+  string user_id = 1;
+}
+
+message DeleteProfilePhotoResponse {}
+
+message GetProfilePhotoRequest {
+  string user_id = 1;
+  // The etag the caller has. If it still matches, jpeg comes back empty.
+  string known_etag = 2;
+}
+
+message GetProfilePhotoResponse {
+  bytes jpeg = 1;
+  string etag = 2;
 }

@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -163,10 +165,71 @@ func (r *postgresNotificationOutboxRepository) ClaimBatch(ctx context.Context, l
 			ID:       row.ID.String(),
 			Payload:  payload,
 			Attempts: int(row.Attempts),
+			Lease:    leaseOf(row.NextAttemptAt),
 		})
 	}
 	return claimed, nil
 }
+
+// The claim's stamp is the row's lease (#115): a claimer holds a row while
+// next_attempt_at is still the value it wrote. Carried as text, exact to
+// the microsecond Postgres keeps.
+func leaseOf(t pgtype.Timestamptz) string {
+	return t.Time.UTC().Format(time.RFC3339Nano)
+}
+
+func parseLease(s string) (pgtype.Timestamptz, error) {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return pgtype.Timestamptz{}, fmt.Errorf("repository: bad outbox lease %q: %w", s, apperror.ErrInvalidInput)
+	}
+	return pgtype.Timestamptz{Time: t, Valid: true}, nil
+}
+
+// Renew extends this claimer's hold on one row just before it is
+// delivered, by another ClaimVisibilityTimeout, or reports that another
+// claimer holds it now (#115).
+func (r *postgresNotificationOutboxRepository) Renew(ctx context.Context, row outbox.Row) (outbox.Row, bool, error) {
+	id, err := parseUUID(row.ID)
+	if err != nil {
+		return row, false, fmt.Errorf("repository: invalid outbox row id %q: %w", row.ID, apperror.ErrInvalidInput)
+	}
+	lease, err := parseLease(row.Lease)
+	if err != nil {
+		return row, false, err
+	}
+	next, err := r.q.RenewNotificationClaim(ctx, sqlcgen.RenewNotificationClaimParams{
+		VisibilityTimeout: intervalFromDuration(ClaimVisibilityTimeout), ID: id, Lease: lease,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return row, false, nil
+	}
+	if err != nil {
+		return row, false, fmt.Errorf("repository: renew notification claim: %w", err)
+	}
+	row.Lease = leaseOf(next)
+	return row, true, nil
+}
+
+// MarkProcessedLeased marks the row processed if this claimer still holds
+// it (#115).
+func (r *postgresNotificationOutboxRepository) MarkProcessedLeased(ctx context.Context, row outbox.Row) (bool, error) {
+	id, err := parseUUID(row.ID)
+	if err != nil {
+		return false, fmt.Errorf("repository: invalid outbox row id %q: %w", row.ID, apperror.ErrInvalidInput)
+	}
+	lease, err := parseLease(row.Lease)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.q.MarkNotificationProcessedLeased(ctx, sqlcgen.MarkNotificationProcessedLeasedParams{ID: id, Lease: lease})
+	if err != nil {
+		return false, fmt.Errorf("repository: mark notification processed: %w", err)
+	}
+	return n == 1, nil
+}
+
+var _ outbox.Leaser = (*postgresNotificationOutboxRepository)(nil)
 
 // intervalFromDuration converts a Go duration to the pgtype.Interval the
 // claim query's visibility timeout expects.

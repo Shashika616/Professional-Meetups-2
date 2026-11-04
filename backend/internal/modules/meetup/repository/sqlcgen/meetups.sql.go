@@ -76,7 +76,7 @@ func (q *Queries) AnonymiseRatingsGivenByUser(ctx context.Context, raterUserID u
 const cancelMeetup = `-- name: CancelMeetup :one
 UPDATE meetup.meetups SET status = 'cancelled', cancelled_at = now(), cancellation_reason = $2
 WHERE id = $1 AND host_user_id = $3 AND status IN ('open', 'full')
-RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id
+RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id, creation_request_hash
 `
 
 type CancelMeetupParams struct {
@@ -131,6 +131,7 @@ func (q *Queries) CancelMeetup(ctx context.Context, arg CancelMeetupParams) (Mee
 		&i.Location,
 		&i.CreationKey,
 		&i.ChargeHoldID,
+		&i.CreationRequestHash,
 	)
 	return i, err
 }
@@ -147,7 +148,7 @@ WHERE id IN (
   LIMIT $1
   FOR UPDATE SKIP LOCKED
 )
-RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id
+RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id, creation_request_hash
 `
 
 // The lifecycle poller's starting-soon sweep (ADR-025 §4), reshaped into an
@@ -203,6 +204,7 @@ func (q *Queries) ClaimMeetupsStartingSoon(ctx context.Context, batchSize int32)
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 		); err != nil {
 			return nil, err
 		}
@@ -224,7 +226,7 @@ WHERE id IN (
   LIMIT $1
   FOR UPDATE SKIP LOCKED
 )
-RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id
+RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id, creation_request_hash
 `
 
 // The lifecycle poller's auto-close sweep (ADR-025 §4), same reshaping and
@@ -270,6 +272,7 @@ func (q *Queries) ClaimMeetupsToAutoClose(ctx context.Context, batchSize int32) 
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 		); err != nil {
 			return nil, err
 		}
@@ -285,7 +288,7 @@ const closeMeetup = `-- name: CloseMeetup :one
 UPDATE meetup.meetups
 SET status = 'completed', closed_at = now()
 WHERE id = $1 AND host_user_id = $2 AND status IN ('open', 'full') AND now() >= window_start
-RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id
+RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id, creation_request_hash
 `
 
 type CloseMeetupParams struct {
@@ -322,8 +325,34 @@ func (q *Queries) CloseMeetup(ctx context.Context, arg CloseMeetupParams) (Meetu
 		&i.Location,
 		&i.CreationKey,
 		&i.ChargeHoldID,
+		&i.CreationRequestHash,
 	)
 	return i, err
+}
+
+const coarsenOldMeetupCoordinates = `-- name: CoarsenOldMeetupCoordinates :execrows
+UPDATE meetup.meetups
+   SET location_lat = round(location_lat::numeric, 2)::float8,
+       location_lng = round(location_lng::numeric, 2)::float8
+ WHERE id IN (
+   SELECT id FROM meetup.meetups
+    WHERE window_end < now() - interval '180 days'
+      AND (location_lat <> round(location_lat::numeric, 2)::float8
+        OR location_lng <> round(location_lng::numeric, 2)::float8)
+    LIMIT 1000
+ )
+`
+
+// Plan 30 D4: a meetup that ended more than 180 days ago keeps its place
+// to 2 decimals (about 1 km). It is history; for a "use my current
+// location" meetup the exact point is where the host once stood. The
+// location column follows through the meetups_sync_location trigger.
+func (q *Queries) CoarsenOldMeetupCoordinates(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, coarsenOldMeetupCoordinates)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countActiveCommitments = `-- name: CountActiveCommitments :one
@@ -406,22 +435,23 @@ func (q *Queries) CountMeetupsCreatedByHostSince(ctx context.Context, arg CountM
 }
 
 const createMeetup = `-- name: CreateMeetup :one
-INSERT INTO meetup.meetups (host_user_id, intent, window_start, window_end, location_lat, location_lng, location_label, capacity, creation_key, charge_hold_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id
+INSERT INTO meetup.meetups (host_user_id, intent, window_start, window_end, location_lat, location_lng, location_label, capacity, creation_key, charge_hold_id, creation_request_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id, creation_request_hash
 `
 
 type CreateMeetupParams struct {
-	HostUserID    uuid.UUID          `json:"host_user_id"`
-	Intent        MeetupIntentType   `json:"intent"`
-	WindowStart   pgtype.Timestamptz `json:"window_start"`
-	WindowEnd     pgtype.Timestamptz `json:"window_end"`
-	LocationLat   float64            `json:"location_lat"`
-	LocationLng   float64            `json:"location_lng"`
-	LocationLabel string             `json:"location_label"`
-	Capacity      int16              `json:"capacity"`
-	CreationKey   pgtype.Text        `json:"creation_key"`
-	ChargeHoldID  pgtype.UUID        `json:"charge_hold_id"`
+	HostUserID          uuid.UUID          `json:"host_user_id"`
+	Intent              MeetupIntentType   `json:"intent"`
+	WindowStart         pgtype.Timestamptz `json:"window_start"`
+	WindowEnd           pgtype.Timestamptz `json:"window_end"`
+	LocationLat         float64            `json:"location_lat"`
+	LocationLng         float64            `json:"location_lng"`
+	LocationLabel       string             `json:"location_label"`
+	Capacity            int16              `json:"capacity"`
+	CreationKey         pgtype.Text        `json:"creation_key"`
+	ChargeHoldID        pgtype.UUID        `json:"charge_hold_id"`
+	CreationRequestHash pgtype.Text        `json:"creation_request_hash"`
 }
 
 func (q *Queries) CreateMeetup(ctx context.Context, arg CreateMeetupParams) (MeetupMeetup, error) {
@@ -436,6 +466,7 @@ func (q *Queries) CreateMeetup(ctx context.Context, arg CreateMeetupParams) (Mee
 		arg.Capacity,
 		arg.CreationKey,
 		arg.ChargeHoldID,
+		arg.CreationRequestHash,
 	)
 	var i MeetupMeetup
 	err := row.Scan(
@@ -457,6 +488,7 @@ func (q *Queries) CreateMeetup(ctx context.Context, arg CreateMeetupParams) (Mee
 		&i.Location,
 		&i.CreationKey,
 		&i.ChargeHoldID,
+		&i.CreationRequestHash,
 	)
 	return i, err
 }
@@ -539,7 +571,7 @@ WITH hosting AS (
   SELECT id FROM requested
 )
 SELECT
-  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id,
+  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -589,6 +621,7 @@ type FindScheduleConflictRow struct {
 	Location               interface{}                   `json:"location"`
 	CreationKey            pgtype.Text                   `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID                   `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text                   `json:"creation_request_hash"`
 	HostFullName           string                        `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text                   `json:"host_profile_photo_url"`
 	HostTrustLevel         int16                         `json:"host_trust_level"`
@@ -651,6 +684,7 @@ func (q *Queries) FindScheduleConflict(ctx context.Context, arg FindScheduleConf
 		&i.Location,
 		&i.CreationKey,
 		&i.ChargeHoldID,
+		&i.CreationRequestHash,
 		&i.HostFullName,
 		&i.HostProfilePhotoUrl,
 		&i.HostTrustLevel,
@@ -663,8 +697,47 @@ func (q *Queries) FindScheduleConflict(ctx context.Context, arg FindScheduleConf
 	return i, err
 }
 
+const getActiveMeetupForUser = `-- name: GetActiveMeetupForUser :one
+SELECT m.intent, m.location_label, m.location_lat, m.location_lng
+FROM meetup.meetups m
+WHERE m.status IN ('open', 'full')
+  AND $1::timestamptz BETWEEN m.window_start - interval '2 hours' AND m.window_end + interval '2 hours'
+  AND (m.host_user_id = $2::uuid OR EXISTS (
+        SELECT 1 FROM meetup.meetup_requests r
+         WHERE r.meetup_id = m.id AND r.requester_id = $2::uuid AND r.status = 'accepted'))
+ORDER BY abs(extract(epoch FROM m.window_start - $1::timestamptz))
+LIMIT 1
+`
+
+type GetActiveMeetupForUserParams struct {
+	AtTime pgtype.Timestamptz `json:"at_time"`
+	UserID uuid.UUID          `json:"user_id"`
+}
+
+type GetActiveMeetupForUserRow struct {
+	Intent        MeetupIntentType `json:"intent"`
+	LocationLabel string           `json:"location_label"`
+	LocationLat   float64          `json:"location_lat"`
+	LocationLng   float64          `json:"location_lng"`
+}
+
+// The meetup an SOS message mentions (plan 2.2): one the user hosts or is
+// accepted on, still open or full, with now inside its window give or take
+// two hours. The nearest to now if there are two.
+func (q *Queries) GetActiveMeetupForUser(ctx context.Context, arg GetActiveMeetupForUserParams) (GetActiveMeetupForUserRow, error) {
+	row := q.db.QueryRow(ctx, getActiveMeetupForUser, arg.AtTime, arg.UserID)
+	var i GetActiveMeetupForUserRow
+	err := row.Scan(
+		&i.Intent,
+		&i.LocationLabel,
+		&i.LocationLat,
+		&i.LocationLng,
+	)
+	return i, err
+}
+
 const getMeetupByCreationKey = `-- name: GetMeetupByCreationKey :one
-SELECT id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id FROM meetup.meetups WHERE host_user_id = $1 AND creation_key = $2
+SELECT id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id, creation_request_hash FROM meetup.meetups WHERE host_user_id = $1 AND creation_key = $2
 `
 
 type GetMeetupByCreationKeyParams struct {
@@ -697,13 +770,14 @@ func (q *Queries) GetMeetupByCreationKey(ctx context.Context, arg GetMeetupByCre
 		&i.Location,
 		&i.CreationKey,
 		&i.ChargeHoldID,
+		&i.CreationRequestHash,
 	)
 	return i, err
 }
 
 const getMeetupByID = `-- name: GetMeetupByID :one
 SELECT
-  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id,
+  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -752,6 +826,7 @@ type GetMeetupByIDRow struct {
 	Location               interface{}                   `json:"location"`
 	CreationKey            pgtype.Text                   `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID                   `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text                   `json:"creation_request_hash"`
 	HostFullName           string                        `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text                   `json:"host_profile_photo_url"`
 	HostTrustLevel         int16                         `json:"host_trust_level"`
@@ -811,6 +886,7 @@ func (q *Queries) GetMeetupByID(ctx context.Context, arg GetMeetupByIDParams) (G
 		&i.Location,
 		&i.CreationKey,
 		&i.ChargeHoldID,
+		&i.CreationRequestHash,
 		&i.HostFullName,
 		&i.HostProfilePhotoUrl,
 		&i.HostTrustLevel,
@@ -824,7 +900,7 @@ func (q *Queries) GetMeetupByID(ctx context.Context, arg GetMeetupByIDParams) (G
 }
 
 const getMeetupByIDForUpdate = `-- name: GetMeetupByIDForUpdate :one
-SELECT id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id FROM meetup.meetups WHERE id = $1 FOR UPDATE
+SELECT id, host_user_id, intent, location_lat, location_lng, location_label, capacity, status, created_at, cancelled_at, window_start, window_end, closed_at, cancellation_reason, starting_soon_notified_at, location, creation_key, charge_hold_id, creation_request_hash FROM meetup.meetups WHERE id = $1 FOR UPDATE
 `
 
 // Plain, no join — used only inside AcceptRequest's transaction to lock the
@@ -851,6 +927,7 @@ func (q *Queries) GetMeetupByIDForUpdate(ctx context.Context, id uuid.UUID) (Mee
 		&i.Location,
 		&i.CreationKey,
 		&i.ChargeHoldID,
+		&i.CreationRequestHash,
 	)
 	return i, err
 }
@@ -954,7 +1031,7 @@ func (q *Queries) ListMeetupParticipants(ctx context.Context, meetupID uuid.UUID
 
 const listMeetupsByHostAfterCursor = `-- name: ListMeetupsByHostAfterCursor :many
 SELECT
-  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id,
+  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -999,6 +1076,7 @@ type ListMeetupsByHostAfterCursorRow struct {
 	Location               interface{}        `json:"location"`
 	CreationKey            pgtype.Text        `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID        `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text        `json:"creation_request_hash"`
 	HostFullName           string             `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text        `json:"host_profile_photo_url"`
 	HostTrustLevel         int16              `json:"host_trust_level"`
@@ -1043,6 +1121,7 @@ func (q *Queries) ListMeetupsByHostAfterCursor(ctx context.Context, arg ListMeet
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 			&i.HostFullName,
 			&i.HostProfilePhotoUrl,
 			&i.HostTrustLevel,
@@ -1062,7 +1141,7 @@ func (q *Queries) ListMeetupsByHostAfterCursor(ctx context.Context, arg ListMeet
 
 const listMeetupsByHostFirstPage = `-- name: ListMeetupsByHostFirstPage :many
 SELECT
-  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id,
+  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -1104,6 +1183,7 @@ type ListMeetupsByHostFirstPageRow struct {
 	Location               interface{}        `json:"location"`
 	CreationKey            pgtype.Text        `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID        `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text        `json:"creation_request_hash"`
 	HostFullName           string             `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text        `json:"host_profile_photo_url"`
 	HostTrustLevel         int16              `json:"host_trust_level"`
@@ -1147,6 +1227,7 @@ func (q *Queries) ListMeetupsByHostFirstPage(ctx context.Context, arg ListMeetup
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 			&i.HostFullName,
 			&i.HostProfilePhotoUrl,
 			&i.HostTrustLevel,
@@ -1172,7 +1253,7 @@ WITH latest_request AS (
   ORDER BY meetup_id, created_at DESC
 )
 SELECT
-  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id,
+  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -1219,6 +1300,7 @@ type ListMeetupsRequestedByUserAfterCursorRow struct {
 	Location               interface{}               `json:"location"`
 	CreationKey            pgtype.Text               `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID               `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text               `json:"creation_request_hash"`
 	HostFullName           string                    `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text               `json:"host_profile_photo_url"`
 	HostTrustLevel         int16                     `json:"host_trust_level"`
@@ -1263,6 +1345,7 @@ func (q *Queries) ListMeetupsRequestedByUserAfterCursor(ctx context.Context, arg
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 			&i.HostFullName,
 			&i.HostProfilePhotoUrl,
 			&i.HostTrustLevel,
@@ -1290,7 +1373,7 @@ WITH latest_request AS (
   ORDER BY meetup_id, created_at DESC
 )
 SELECT
-  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id,
+  m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -1334,6 +1417,7 @@ type ListMeetupsRequestedByUserFirstPageRow struct {
 	Location               interface{}               `json:"location"`
 	CreationKey            pgtype.Text               `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID               `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text               `json:"creation_request_hash"`
 	HostFullName           string                    `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text               `json:"host_profile_photo_url"`
 	HostTrustLevel         int16                     `json:"host_trust_level"`
@@ -1381,6 +1465,7 @@ func (q *Queries) ListMeetupsRequestedByUserFirstPage(ctx context.Context, arg L
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 			&i.HostFullName,
 			&i.HostProfilePhotoUrl,
 			&i.HostTrustLevel,
@@ -1402,7 +1487,7 @@ func (q *Queries) ListMeetupsRequestedByUserFirstPage(ctx context.Context, arg L
 
 const listOpenMeetupsAfterCursor = `-- name: ListOpenMeetupsAfterCursor :many
 WITH page AS (
-  SELECT m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id
+  SELECT m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash
   FROM meetup.meetups m
   WHERE m.status = 'open'
     -- A meetup whose window has ENDED is not browsable, whatever its status
@@ -1431,7 +1516,7 @@ WITH page AS (
   LIMIT $8
 )
 SELECT
-  p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location, p.creation_key, p.charge_hold_id,
+  p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location, p.creation_key, p.charge_hold_id, p.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -1484,6 +1569,7 @@ type ListOpenMeetupsAfterCursorRow struct {
 	Location               interface{}                   `json:"location"`
 	CreationKey            pgtype.Text                   `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID                   `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text                   `json:"creation_request_hash"`
 	HostFullName           string                        `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text                   `json:"host_profile_photo_url"`
 	HostTrustLevel         int16                         `json:"host_trust_level"`
@@ -1551,6 +1637,7 @@ func (q *Queries) ListOpenMeetupsAfterCursor(ctx context.Context, arg ListOpenMe
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 			&i.HostFullName,
 			&i.HostProfilePhotoUrl,
 			&i.HostTrustLevel,
@@ -1571,7 +1658,7 @@ func (q *Queries) ListOpenMeetupsAfterCursor(ctx context.Context, arg ListOpenMe
 
 const listOpenMeetupsFirstPage = `-- name: ListOpenMeetupsFirstPage :many
 WITH page AS (
-  SELECT m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id
+  SELECT m.id, m.host_user_id, m.intent, m.location_lat, m.location_lng, m.location_label, m.capacity, m.status, m.created_at, m.cancelled_at, m.window_start, m.window_end, m.closed_at, m.cancellation_reason, m.starting_soon_notified_at, m.location, m.creation_key, m.charge_hold_id, m.creation_request_hash
   FROM meetup.meetups m
   WHERE m.status = 'open'
     -- A meetup whose window has ENDED is not browsable, whatever its status
@@ -1599,7 +1686,7 @@ WITH page AS (
   LIMIT $6
 )
 SELECT
-  p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location, p.creation_key, p.charge_hold_id,
+  p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location, p.creation_key, p.charge_hold_id, p.creation_request_hash,
   COALESCE(u.full_name, '') AS host_full_name,
   u.profile_photo_url AS host_profile_photo_url,
   COALESCE(u.trust_level, 0) AS host_trust_level,
@@ -1650,6 +1737,7 @@ type ListOpenMeetupsFirstPageRow struct {
 	Location               interface{}                   `json:"location"`
 	CreationKey            pgtype.Text                   `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID                   `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text                   `json:"creation_request_hash"`
 	HostFullName           string                        `json:"host_full_name"`
 	HostProfilePhotoUrl    pgtype.Text                   `json:"host_profile_photo_url"`
 	HostTrustLevel         int16                         `json:"host_trust_level"`
@@ -1737,6 +1825,7 @@ func (q *Queries) ListOpenMeetupsFirstPage(ctx context.Context, arg ListOpenMeet
 			&i.Location,
 			&i.CreationKey,
 			&i.ChargeHoldID,
+			&i.CreationRequestHash,
 			&i.HostFullName,
 			&i.HostProfilePhotoUrl,
 			&i.HostTrustLevel,

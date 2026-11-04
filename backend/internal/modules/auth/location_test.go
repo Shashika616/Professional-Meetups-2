@@ -27,12 +27,13 @@ func TestUpdateLastKnownLocation_UpsertsCorrectly(t *testing.T) {
 		t.Fatalf("UpdateLastKnownLocation() error: %v", err)
 	}
 
+	// Stored to 3 decimals, about 110 m (plan 30B, 3.3).
 	stored := users.byID["user-1"]
-	if stored.LastLocationLat == nil || *stored.LastLocationLat != 6.9271 {
-		t.Errorf("LastLocationLat = %v, want 6.9271", stored.LastLocationLat)
+	if stored.LastLocationLat == nil || *stored.LastLocationLat != 6.927 {
+		t.Errorf("LastLocationLat = %v, want 6.927", stored.LastLocationLat)
 	}
-	if stored.LastLocationLng == nil || *stored.LastLocationLng != 79.8612 {
-		t.Errorf("LastLocationLng = %v, want 79.8612", stored.LastLocationLng)
+	if stored.LastLocationLng == nil || *stored.LastLocationLng != 79.861 {
+		t.Errorf("LastLocationLng = %v, want 79.861", stored.LastLocationLng)
 	}
 	if stored.LastLocationUpdatedAt == nil {
 		t.Error("LastLocationUpdatedAt = nil, want set")

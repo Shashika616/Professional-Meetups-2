@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,10 +35,13 @@ import (
 type fakeMonolith struct {
 	monolithclient.Client // embedded: any method a test doesn't need panics loudly rather than silently no-op'ing
 
-	activity    monolithclient.MemberActivity
-	activityErr error
-	gotViewerID string
-	gotTargetID string
+	activity            monolithclient.MemberActivity
+	activityErr         error
+	gotViewerID         string
+	gotViewerTrustLevel int32
+	gotFix              monolithclient.SOSFix
+	gotPhoto            []byte
+	gotTargetID         string
 
 	session monolithclient.Session
 	profile monolithclient.Profile
@@ -98,9 +102,31 @@ func (f *fakeMonolith) RevokeSession(_ context.Context, refreshToken string) err
 	return f.err
 }
 
-func (f *fakeMonolith) GetMemberActivity(_ context.Context, viewerID, targetID string) (monolithclient.MemberActivity, error) {
+func (f *fakeMonolith) GetMemberActivity(_ context.Context, viewerID string, viewerTrustLevel int32, targetID string) (monolithclient.MemberActivity, error) {
 	f.gotViewerID, f.gotTargetID = viewerID, targetID
+	f.gotViewerTrustLevel = viewerTrustLevel
 	return f.activity, f.activityErr
+}
+
+func (f *fakeMonolith) SetProfilePhoto(_ context.Context, userID string, image []byte) (string, error) {
+	f.gotUserID, f.gotPhoto = userID, image
+	return "/v1/users/" + userID + "/photo?v=e1", f.err
+}
+
+func (f *fakeMonolith) DeleteProfilePhoto(_ context.Context, userID string) error {
+	f.gotUserID = userID
+	return f.err
+}
+
+func (f *fakeMonolith) GetProfilePhoto(_ context.Context, userID, knownEtag string) ([]byte, string, error) {
+	f.gotUserID = userID
+	if f.err != nil {
+		return nil, "", f.err
+	}
+	if knownEtag == "e1" {
+		return nil, "e1", nil
+	}
+	return []byte("jpeg bytes"), "e1", nil
 }
 
 func (f *fakeMonolith) GetProfile(_ context.Context, userID string) (monolithclient.Profile, error) {
@@ -123,10 +149,16 @@ func (f *fakeMonolith) StartPhoneVerification(_ context.Context, userID, _ strin
 	return 60, f.err
 }
 
-func (f *fakeMonolith) AddTrustedContact(_ context.Context, userID, name, phone, email string, callerTrustLevel int32) (monolithclient.TrustedContact, error) {
+func (f *fakeMonolith) AddTrustedContact(_ context.Context, userID, name, phone string, callerTrustLevel int32) (monolithclient.TrustedContact, error) {
 	f.gotUserID = userID
 	f.gotCallerTrustLevel = callerTrustLevel
-	return monolithclient.TrustedContact{ID: "contact-1", Name: name, PhoneNumber: phone, Email: email}, f.err
+	return monolithclient.TrustedContact{ID: "contact-1", Name: name, PhoneNumber: phone}, f.err
+}
+
+func (f *fakeMonolith) UpdateTrustedContact(_ context.Context, userID, contactID, name, phone string, callerTrustLevel int32) (monolithclient.TrustedContact, error) {
+	f.gotUserID, f.gotContactID = userID, contactID
+	f.gotCallerTrustLevel = callerTrustLevel
+	return monolithclient.TrustedContact{ID: contactID, Name: name, PhoneNumber: phone}, f.err
 }
 
 func (f *fakeMonolith) ListTrustedContacts(_ context.Context, userID string) ([]monolithclient.TrustedContact, error) {
@@ -139,11 +171,12 @@ func (f *fakeMonolith) RemoveTrustedContact(_ context.Context, userID, contactID
 	return f.err
 }
 
-func (f *fakeMonolith) TriggerSOS(_ context.Context, userID, contextMessage, clientRequestID string, lat, lng *float64, callerTrustLevel int32) (int32, error) {
+func (f *fakeMonolith) TriggerSOS(_ context.Context, userID, contextMessage, clientRequestID string, fix monolithclient.SOSFix, callerTrustLevel int32) (int32, error) {
 	f.gotUserID, f.gotContextMessage = userID, contextMessage
 	// Recorded as pointers so a test can tell "no location" from 0,0
 	// (#78); the existing assertions compare the dereferenced values.
-	f.gotLat, f.gotLng = lat, lng
+	f.gotLat, f.gotLng = fix.Latitude, fix.Longitude
+	f.gotFix = fix
 	f.gotCallerTrustLevel = callerTrustLevel
 	return 2, f.err
 }
@@ -727,6 +760,61 @@ func TestTriggerSOS_ForwardsBodyAndTokenIdentity(t *testing.T) {
 	}
 }
 
+// Plan 2.2: the fix's time and source travel with it, and nothing about them
+// can refuse an SOS.
+func TestTriggerSOS_ForwardsTheFixAndNeverRefusesOverIt(t *testing.T) {
+	s := newTestServer(t)
+	token := s.tokenFor(t, "user-7", 2)
+	rec := s.do(http.MethodPost, "/v1/sos/trigger",
+		`{"latitude":6.9,"longitude":79.8,"captured_at":"2026-10-30T13:15:00Z","source":"device_last_known"}`, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if f := s.monolith.gotFix; f.CapturedAtUnix == nil || *f.CapturedAtUnix != 1793366100 || f.Source != "device_last_known" {
+		t.Errorf("forwarded %+v", f)
+	}
+	rec = s.do(http.MethodPost, "/v1/sos/trigger",
+		`{"latitude":6.9,"longitude":79.8,"captured_at":"not a time","source":"made up"}`, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("a bad timestamp refused an SOS: %d", rec.Code)
+	}
+	if f := s.monolith.gotFix; f.CapturedAtUnix != nil || f.Source != "device_last_known" {
+		t.Errorf("forwarded %+v", f)
+	}
+}
+
+// ADR-013: a contact is a name and a number. An older build still sends
+// email; it goes nowhere, and no response carries one.
+func TestTrustedContactRoutes(t *testing.T) {
+	s := newTestServer(t)
+	token := s.tokenFor(t, "user-7", 2)
+	rec := s.do(http.MethodPost, "/v1/sos/contacts", `{"name":"Amma","phone_number":"+94771234567","email":"a@b.com"}`, token)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("add: %d", rec.Code)
+	}
+	body := decodeBody(t, rec)
+	for _, gone := range []string{"email", "status"} {
+		if _, present := body[gone]; present {
+			t.Errorf("the response still carries %q", gone)
+		}
+	}
+	rec = s.do(http.MethodPut, "/v1/sos/contacts/contact-9", `{"name":"Thaththa","phone_number":"+94771234568"}`, token)
+	if rec.Code != http.StatusOK || s.monolith.gotContactID != "contact-9" || s.monolith.gotUserID != "user-7" || s.monolith.gotCallerTrustLevel != 2 {
+		t.Errorf("edit: %d, contact %q, user %q", rec.Code, s.monolith.gotContactID, s.monolith.gotUserID)
+	}
+}
+
+// The retired routes are gone.
+func TestRetiredConsentAndLiveLocationRoutes(t *testing.T) {
+	s := newTestServer(t)
+	if rec := s.do(http.MethodGet, "/c/some-token", "", ""); rec.Code != http.StatusNotFound {
+		t.Errorf("the confirmation page: %d", rec.Code)
+	}
+	if rec := s.do(http.MethodPost, "/v1/meetups/m-1/safety/live-location", `{"opt_in":true}`, s.tokenFor(t, "user-7", 2)); rec.Code != http.StatusNotFound {
+		t.Errorf("the live-location route: %d", rec.Code)
+	}
+}
+
 // --- signing failure ----------------------------------------------------
 
 // TestSigningFailureIs500NotAPartialSession: if the token can't be minted,
@@ -813,11 +901,13 @@ func TestGetPublicProfile_ExposesBadgesButNeverContactDetails(t *testing.T) {
 		CompanyName:   "US Navy",
 	}
 
-	s.monolith.activity = monolithclient.MemberActivity{RecentMeetups: []monolithclient.MemberMeetup{{
-		ID: "m-1", Intent: "coffee", Status: "completed", Hosted: true,
-		ParticipantCount: 3, OverallAverage: 4.5, ReviewCount: 2, ViewerWasIn: false,
-		Comments: []monolithclient.MemberMeetupComment{{AuthorName: "", Note: "Great chat."}},
-	}}}
+	s.monolith.activity = monolithclient.MemberActivity{
+		RecentMeetups: []monolithclient.MemberMeetup{{
+			Intent: "coffee", Status: "completed", DayUnixSeconds: 1788242400,
+			ParticipantCount: 3, OverallAverage: 4.5, ReviewCount: 2,
+		}},
+		Reviews: []monolithclient.MemberReview{{Score: 4, Text: "Great chat.", Month: "2026-09"}},
+	}
 
 	rec := s.do(http.MethodGet, "/v1/users/user-2", "", s.tokenFor(t, "user-1", 2))
 	if rec.Code != http.StatusOK {
@@ -857,8 +947,23 @@ func TestGetPublicProfile_ExposesBadgesButNeverContactDetails(t *testing.T) {
 	if mm["intent"] != "coffee" || mm["hosted"] != true || mm["overall_average"] != 4.5 {
 		t.Errorf("recent meetup = %v, want coffee/hosted/4.5", mm)
 	}
-	if c := mm["comments"].([]any)[0].(map[string]any); c["note"] != "Great chat." || c["author_name"] != "" {
-		t.Errorf("comment = %v, want the note with an empty author for an outsider", c)
+	// Builds on phones read id as a required string and hosted as the role.
+	if mm["id"] != "" || mm["window_end_unix_seconds"] != mm["window_start_unix_seconds"] {
+		t.Errorf("recent meetup = %v, want an empty id and the day in both window fields", mm)
+	}
+	for key := range mm {
+		if key == "comments" || key == "viewer_was_in" {
+			t.Errorf("recent meetup still carries %q", key)
+		}
+	}
+	reviews, _ := body["reviews"].([]any)
+	if len(reviews) != 1 {
+		t.Fatalf("reviews = %v, want one", body["reviews"])
+	}
+	review := reviews[0].(map[string]any)
+	want := map[string]any{"score": float64(4), "text": "Great chat.", "month": "2026-09"}
+	if !reflect.DeepEqual(review, want) {
+		t.Errorf("review = %v, want exactly %v: nothing that could name the author", review, want)
 	}
 
 	// Belt and braces: the raw values must not be anywhere in the body.
@@ -1014,5 +1119,39 @@ func TestCheckSchedule_ReportsTheMeetupInTheWayOrNull(t *testing.T) {
 	rec = s.do(http.MethodGet, "/v1/meetups/schedule-check?window_start_unix_seconds=x", "", s.tokenFor(t, "user-1", 3))
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("malformed query: status = %d, want 400", rec.Code)
+	}
+}
+
+// #103: the gateway passes the caller's trust level from the token, and
+// leaves out the name and photo when the monolith says this viewer may not
+// see who it is.
+func TestGetPublicProfileHidesIdentityWhenTheMonolithSaysSo(t *testing.T) {
+	s := newTestServer(t)
+	s.monolith.profile = monolithclient.Profile{UserID: "user-2", FullName: "Grace Hopper", ProfilePhotoURL: "/v1/users/user-2/photo?v=e", TrustLevel: 3}
+	s.monolith.activity = monolithclient.MemberActivity{IdentityHidden: true}
+	rec := s.do(http.MethodGet, "/v1/users/user-2", "", s.tokenFor(t, "user-1", 0))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if s.monolith.gotViewerTrustLevel != 0 {
+		t.Errorf("trust level passed %d, want the token's 0", s.monolith.gotViewerTrustLevel)
+	}
+	body := decodeBody(t, rec)
+	if body["full_name"] != "" || body["photo_url"] != "" {
+		t.Errorf("a hidden identity was shown: %v / %v", body["full_name"], body["photo_url"])
+	}
+}
+
+// The app retries an SOS with the same request id. Five an hour is counted
+// in the monolith, which recognises a retry; the gateway's memory cannot, so
+// its own limit is only a coarse ceiling that a real emergency never meets.
+func TestSOSRetriesAreNotCountedAgainstTheHourlyLimitAtTheGateway(t *testing.T) {
+	s := newTestServerWithLimiter(t)
+	token := s.tokenFor(t, "user-7", 2)
+	for i := 1; i <= 12; i++ {
+		rec := s.do(http.MethodPost, "/v1/sos/trigger", `{"client_request_id":"one"}`, token)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("attempt %d: %d", i, rec.Code)
+		}
 	}
 }

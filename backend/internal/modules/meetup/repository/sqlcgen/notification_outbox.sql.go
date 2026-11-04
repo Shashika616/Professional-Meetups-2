@@ -25,7 +25,7 @@ WHERE id IN (
   LIMIT $2
   FOR UPDATE SKIP LOCKED
 )
-RETURNING id, fcm_tokens, title, body, data, attempts
+RETURNING id, fcm_tokens, title, body, data, attempts, next_attempt_at
 `
 
 type ClaimNotificationOutboxBatchParams struct {
@@ -34,12 +34,13 @@ type ClaimNotificationOutboxBatchParams struct {
 }
 
 type ClaimNotificationOutboxBatchRow struct {
-	ID        uuid.UUID `json:"id"`
-	FcmTokens []string  `json:"fcm_tokens"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body"`
-	Data      []byte    `json:"data"`
-	Attempts  int32     `json:"attempts"`
+	ID            uuid.UUID          `json:"id"`
+	FcmTokens     []string           `json:"fcm_tokens"`
+	Title         string             `json:"title"`
+	Body          string             `json:"body"`
+	Data          []byte             `json:"data"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
 }
 
 // Claims up to $1 due rows for delivery.
@@ -98,6 +99,7 @@ func (q *Queries) ClaimNotificationOutboxBatch(ctx context.Context, arg ClaimNot
 			&i.Body,
 			&i.Data,
 			&i.Attempts,
+			&i.NextAttemptAt,
 		); err != nil {
 			return nil, err
 		}
@@ -343,4 +345,50 @@ WHERE id = $1
 func (q *Queries) MarkNotificationProcessed(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markNotificationProcessed, id)
 	return err
+}
+
+const markNotificationProcessedLeased = `-- name: MarkNotificationProcessedLeased :execrows
+UPDATE meetup.notification_outbox
+SET processed_at = now(), last_error = NULL
+WHERE id = $1 AND next_attempt_at = $2::timestamptz
+`
+
+type MarkNotificationProcessedLeasedParams struct {
+	ID    uuid.UUID          `json:"id"`
+	Lease pgtype.Timestamptz `json:"lease"`
+}
+
+// #115: processed only by the claimer that holds the row.
+func (q *Queries) MarkNotificationProcessedLeased(ctx context.Context, arg MarkNotificationProcessedLeasedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markNotificationProcessedLeased, arg.ID, arg.Lease)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const renewNotificationClaim = `-- name: RenewNotificationClaim :one
+UPDATE meetup.notification_outbox
+SET next_attempt_at = now() + $1::interval
+WHERE id = $2
+  AND next_attempt_at = $3::timestamptz
+  AND processed_at IS NULL AND dead_lettered_at IS NULL
+RETURNING next_attempt_at
+`
+
+type RenewNotificationClaimParams struct {
+	VisibilityTimeout pgtype.Interval    `json:"visibility_timeout"`
+	ID                uuid.UUID          `json:"id"`
+	Lease             pgtype.Timestamptz `json:"lease"`
+}
+
+// #115: the claim's stamp is the lease. Renewed just before the row is
+// delivered, and only if the stamp is still the one this claimer wrote: a
+// different stamp means another claimer took the row after this one's
+// timeout passed, and that one delivers it.
+func (q *Queries) RenewNotificationClaim(ctx context.Context, arg RenewNotificationClaimParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, renewNotificationClaim, arg.VisibilityTimeout, arg.ID, arg.Lease)
+	var next_attempt_at pgtype.Timestamptz
+	err := row.Scan(&next_attempt_at)
+	return next_attempt_at, err
 }

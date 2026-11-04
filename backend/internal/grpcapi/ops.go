@@ -13,14 +13,27 @@ import (
 	opsv1 "professional-meetups-monolith/backend/internal/proto/ops/v1"
 )
 
-// sweepTimeout bounds ONE sweep, not the whole tick. The sweeps run in
-// sequence, so without a per-sweep bound a single wedged query would eat the
-// caller's deadline and every sweep after it would be skipped — including
-// the account-deletion purge, which has a legal deadline. Thirty seconds is
-// far longer than any of these batched, indexed claims needs and still
-// leaves room for the rest of the list inside Cloud Scheduler's 180s
-// attempt deadline.
-const sweepTimeout = 30 * time.Second
+// DefaultSweepBudget bounds ONE sweep that sets no Budget of its own. The
+// sweeps run in sequence, so without a per-sweep bound a single wedged
+// query would eat the caller's deadline and every sweep after it would be
+// skipped — including the account-deletion purge, which has a legal
+// deadline. Thirty seconds is far longer than any of these batched, indexed
+// claims needs.
+const DefaultSweepBudget = 30 * time.Second
+
+// Sweep groups (tracker #102). Each group is one Cloud Scheduler job and
+// one gateway route with its own total deadline (runbook §10), so the heavy
+// analytics work, which needs minutes, cannot crowd the core sweeps out of
+// a tick, and the core sweeps cannot starve it.
+const (
+	GroupCore      = ""
+	GroupAnalytics = "analytics"
+)
+
+// replyMargin is kept back from the caller's deadline: no sweep runs into
+// it, so the report still reaches the caller in time and names what was
+// cut short. A var so a test can shrink it.
+var replyMargin = 3 * time.Second
 
 // Sweep is one unit of periodic work: a name for the logs and a function
 // that does the work once and reports how many rows it touched.
@@ -33,6 +46,11 @@ const sweepTimeout = 30 * time.Second
 type Sweep struct {
 	Name string
 	Run  func(context.Context) (int64, error)
+	// Budget bounds this sweep; zero is DefaultSweepBudget. It is a ceiling,
+	// not a reservation: the caller's deadline can cut it shorter.
+	Budget time.Duration
+	// Group is the tick that runs it: GroupCore or GroupAnalytics.
+	Group string
 }
 
 // OpsServer implements OpsService over a fixed list of sweeps.
@@ -96,7 +114,8 @@ func NewOpsServer(logger *slog.Logger, sweeps ...Sweep) *OpsServer {
 	return &OpsServer{sweeps: sweeps, logger: logger}
 }
 
-// RunScheduledWork runs every sweep once.
+// RunScheduledWork runs every sweep of the requested group once, each
+// within its own budget and all of them within the caller's deadline.
 //
 // It returns nil error even when sweeps fail, and reports the failures in
 // the response instead. The distinction is deliberate: a gRPC error means
@@ -110,13 +129,22 @@ func NewOpsServer(logger *slog.Logger, sweeps ...Sweep) *OpsServer {
 // outbox that cannot reach FCM must not hold up the retention passes.
 func (s *OpsServer) RunScheduledWork(
 	ctx context.Context,
-	_ *opsv1.RunScheduledWorkRequest,
+	req *opsv1.RunScheduledWorkRequest,
 ) (*opsv1.RunScheduledWorkResponse, error) {
+	group := req.GetGroup()
+	if group != GroupCore && group != GroupAnalytics {
+		return nil, apperror.ToGRPCStatus(fmt.Errorf("ops: unknown sweep group %q: %w", group, apperror.ErrInvalidInput))
+	}
 	resp := &opsv1.RunScheduledWorkResponse{
 		Results: make([]*opsv1.SweepResult, 0, len(s.sweeps)),
 	}
+	deadline, hasDeadline := ctx.Deadline()
+	outOfTime := false
 
 	for _, sweep := range s.sweeps {
+		if sweep.Group != group {
+			continue
+		}
 		// Stop if the caller has gone away. Carrying on would do work whose
 		// result nobody will read, while holding database connections that
 		// the next tick needs.
@@ -126,7 +154,30 @@ func (s *OpsServer) RunScheduledWork(
 			break
 		}
 
-		sweepCtx, cancel := context.WithTimeout(ctx, sweepTimeout)
+		budget := sweep.Budget
+		if budget <= 0 {
+			budget = DefaultSweepBudget
+		}
+		if hasDeadline {
+			left := time.Until(deadline) - replyMargin
+			if left <= 0 {
+				outOfTime = true
+			} else if left < budget {
+				budget = left
+			}
+		}
+		if outOfTime {
+			// Reported, and counted as a failure, so the tick is retried
+			// and the log names every sweep that did not run.
+			resp.Results = append(resp.Results, &opsv1.SweepResult{
+				Name: sweep.Name, Error: "skipped: the tick ran out of time",
+			})
+			resp.Failed++
+			s.logger.Error("scheduled work: sweep skipped, the tick ran out of time", "sweep", sweep.Name)
+			continue
+		}
+
+		sweepCtx, cancel := context.WithTimeout(ctx, budget)
 		affected, err := sweep.Run(sweepCtx)
 		cancel()
 

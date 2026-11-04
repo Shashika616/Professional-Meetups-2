@@ -175,8 +175,10 @@ type harness struct {
 type fakeContactNotifier struct {
 	mu    sync.Mutex
 	owned map[string]bool
-	calls []meetup.ContactShare
-	err   error
+	// unreachable contacts are owned, but their send fails.
+	unreachable map[string]bool
+	calls       []meetup.ContactShare
+	err         error
 }
 
 func newFakeContactNotifier(ownedIDs ...string) *fakeContactNotifier {
@@ -184,24 +186,28 @@ func newFakeContactNotifier(ownedIDs ...string) *fakeContactNotifier {
 	for _, id := range ownedIDs {
 		owned[id] = true
 	}
-	return &fakeContactNotifier{owned: owned}
+	return &fakeContactNotifier{owned: owned, unreachable: map[string]bool{}}
 }
 
-func (f *fakeContactNotifier) NotifyMeetupShare(_ context.Context, _ string, share meetup.ContactShare) (int, error) {
+func (f *fakeContactNotifier) NotifyMeetupShare(_ context.Context, _ string, share meetup.ContactShare) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
-		return 0, f.err
+		return nil, f.err
 	}
 	f.calls = append(f.calls, share)
-	notified := 0
+	var notified []string
+	owned := 0
 	for _, id := range share.ContactIDs {
 		if f.owned[id] {
-			notified++
+			owned++
+			if !f.unreachable[id] {
+				notified = append(notified, id)
+			}
 		}
 	}
-	if notified == 0 {
-		return 0, fmt.Errorf("fake: none of those contacts belong to you: %w", apperror.ErrInvalidInput)
+	if owned == 0 {
+		return nil, fmt.Errorf("fake: none of those contacts belong to you: %w", apperror.ErrInvalidInput)
 	}
 	return notified, nil
 }
@@ -334,6 +340,7 @@ func newHarness(t *testing.T) *harness {
 		Ratings:         meetuprepo.NewRatingRepository(pool, bus, logger),
 		DeviceTokens:    deviceTokens,
 		UserLocations:   userLocationCache,
+		Retention:       meetuprepo.NewRetentionRepository(pool),
 		Outbox:          notificationOutbox,
 		Geocoder:        stubGeocoder{label: "Reverse Geocoded Place"},
 		Logger:          logger,
@@ -388,7 +395,29 @@ func newUserID(t *testing.T, h *harness) string {
 	if err := h.pool.QueryRow(context.Background(), `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
 		t.Fatalf("generate user id: %v", err)
 	}
+	// Joining needs a known, recent location (plan 30B): every test user
+	// has opened Home in Colombo an hour ago, unless a test says otherwise.
+	setUserLocation(t, h, id, colomboLat, colomboLng, time.Now().Add(-time.Hour))
 	return id
+}
+
+// setUserLocation writes a user's last known location as the app's report
+// would have, at the given time.
+func setUserLocation(t *testing.T, h *harness, userID string, lat, lng float64, at time.Time) {
+	t.Helper()
+	if _, err := h.pool.Exec(context.Background(), `
+		INSERT INTO meetup.user_location_cache (user_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id) DO UPDATE SET lat = excluded.lat, lng = excluded.lng, updated_at = excluded.updated_at`,
+		userID, lat, lng, at); err != nil {
+		t.Fatalf("set user location: %v", err)
+	}
+}
+
+func clearUserLocation(t *testing.T, h *harness, userID string) {
+	t.Helper()
+	if _, err := h.pool.Exec(context.Background(), `DELETE FROM meetup.user_location_cache WHERE user_id = $1`, userID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // newUUID is a bare uuid with no row behind it — for ids that stand in for
@@ -816,10 +845,14 @@ func TestGetMeetup_RedactionAndParticipantException(t *testing.T) {
 	if !got.LockedForViewer || got.HostFullName != nil || got.WindowStart != nil {
 		t.Error("GetMeetup returned unredacted host/time data to a guest — the ListOpenMeetups bypass is open")
 	}
-	// ...but location and count survive, per ADR-002 §5. Asserted here too,
-	// not only in the unit test, because this is the path a real client hits.
-	if got.LocationLabel == nil || got.LocationLat == nil {
-		t.Error("location was nulled for a guest on GetMeetup — ADR-002 §5 keeps it visible")
+	// ...the place label and count survive, per ADR-002 §5, but not the
+	// exact coordinates: plan 30B (3.3) gives a guest none, since for a
+	// "use my current location" meetup they are where the host stood.
+	if got.LocationLabel == nil {
+		t.Error("the place label was nulled for a guest on GetMeetup — ADR-002 §5 keeps it visible")
+	}
+	if got.LocationLat != nil || got.LocationLng != nil {
+		t.Error("a guest got exact coordinates on GetMeetup (plan 30B, 3.3)")
 	}
 
 	// A LEVEL 2 stranger — below the dating meetup's join bar of 4, and below
@@ -1153,10 +1186,6 @@ func TestSafetyGate_RejectsNonParticipantOnEveryMethod(t *testing.T) {
 		}},
 		{"AcknowledgeSafetyChecklist", func() error {
 			_, err := h.svc.AcknowledgeSafetyChecklist(ctx, meetup.SafetyStateRequest{MeetupID: m.ID, UserID: outsider})
-			return err
-		}},
-		{"SetLiveLocationOptIn", func() error {
-			_, err := h.svc.SetLiveLocationOptIn(ctx, meetup.SetLiveLocationOptInRequest{MeetupID: m.ID, UserID: outsider, OptIn: true})
 			return err
 		}},
 		{"CheckIn", func() error {
@@ -1722,6 +1751,7 @@ func TestNearbyNotify_ExcludesHostAndFarAwayAndStale(t *testing.T) {
 	now := time.Now()
 	mustUpsert := func(user string, lat, lng float64, at time.Time) {
 		t.Helper()
+		clearUserLocation(t, h, user) // newUserID's default is newer than a stale row
 		if _, err := h.userLocationCache.Upsert(ctx, user, lat, lng, at); err != nil {
 			t.Fatalf("seed location cache: %v", err)
 		}
@@ -1877,7 +1907,9 @@ func TestListMyMeetups_And_ListActiveMeetups(t *testing.T) {
 	requester := newUserID(t, h)
 
 	// Far away from everyone — these two reads have no distance filter at all.
+	// The requester is there too, so the join itself is allowed.
 	hosted := h.createMeetup(t, host, meetup.IntentCoffee, farAwayLat, farAwayLng)
+	setUserLocation(t, h, requester, farAwayLat, farAwayLng, time.Now())
 	r, _ := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{
 		MeetupID: hosted.ID, RequesterID: requester, RequesterTrustLevel: 2,
 	})
@@ -2582,6 +2614,81 @@ func TestShareWithContacts_RequiresParticipation_Integration(t *testing.T) {
 	}
 }
 
+// Plan 30B, D1: only the contacts actually told are recorded. A row here
+// is a reassurance shown to the user ("Shared with ..."), so a contact
+// whose text failed must not get one.
+func TestShareWithContacts_RecordsOnlyTheContactsActuallyNotified_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	reached, failed := newUUID(t), newUUID(t)
+	h.contacts.owned[reached] = true
+	h.contacts.owned[failed] = true
+	h.contacts.unreachable[failed] = true
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+
+	state, err := h.svc.ShareWithContacts(ctx, meetup.ShareWithContactsRequest{
+		MeetupID: m.ID, UserID: host, ContactIDs: []string{reached, failed},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.SharedWithContactIDs) != 1 || state.SharedWithContactIDs[0] != reached {
+		t.Errorf("recorded %v, want only the contact who was reached", state.SharedWithContactIDs)
+	}
+}
+
+// D1: at most two contacts per share, and a repeated id is one contact.
+func TestShareWithContacts_DeduplicatesAndCapsTheContacts_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	a, b, c := newUUID(t), newUUID(t), newUUID(t)
+	for _, id := range []string{a, b, c} {
+		h.contacts.owned[id] = true
+	}
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+
+	if _, err := h.svc.ShareWithContacts(ctx, meetup.ShareWithContactsRequest{
+		MeetupID: m.ID, UserID: host, ContactIDs: []string{a, a, a, b, b},
+	}); err != nil {
+		t.Fatalf("two distinct contacts, repeated: %v", err)
+	}
+	call, _ := h.contacts.lastCall()
+	if len(call.ContactIDs) != 2 {
+		t.Errorf("the notifier got %v, want the two distinct ids", call.ContactIDs)
+	}
+	_, err := h.svc.ShareWithContacts(ctx, meetup.ShareWithContactsRequest{
+		MeetupID: m.ID, UserID: host, ContactIDs: []string{a, b, c},
+	})
+	if !isSentinel(err, apperror.ErrInvalidInput) {
+		t.Errorf("three contacts: %v, want invalid input", err)
+	}
+}
+
+// D1: sharing is for a meetup that is still going to happen. A cancelled
+// one has no place and time worth telling anyone.
+func TestShareWithContacts_RefusesAMeetupThatIsNotLive_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	contact := newUUID(t)
+	h.contacts.owned[contact] = true
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	if err := h.svc.CancelMeetup(ctx, meetup.CancelMeetupRequest{MeetupID: m.ID, HostUserID: host, Reason: "something came up"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := h.svc.ShareWithContacts(ctx, meetup.ShareWithContactsRequest{
+		MeetupID: m.ID, UserID: host, ContactIDs: []string{contact},
+	})
+	if !isSentinel(err, apperror.ErrConflict) {
+		t.Errorf("sharing a cancelled meetup: %v, want conflict", err)
+	}
+	if h.contacts.callCount() != 0 {
+		t.Error("the notifier was called for a cancelled meetup")
+	}
+}
+
 func TestShareWithContacts_RejectsAnEmptySelection_Integration(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -2831,5 +2938,276 @@ func TestJoinAndAcceptAlwaysLeaveAnActivityRecord(t *testing.T) {
 	}
 	if len(got) != 2 || got[0] != meetuprepo.ActivityTopicRequestCreated || got[1] != meetuprepo.ActivityTopicRequestAccepted {
 		t.Errorf("activity rows = %v, want request.created then request.accepted", got)
+	}
+}
+
+// Plan 30B, 3.3: joining needs a known location from the last 24 hours.
+// It used to be skipped when none was known, which made the 50 km rule
+// optional for anyone who never let the app report one.
+func TestRequestToJoin_NeedsARecentLocation_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	join := func(user string) error {
+		_, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: user, RequesterTrustLevel: 2})
+		return err
+	}
+
+	unknown := newUserID(t, h)
+	clearUserLocation(t, h, unknown)
+	err := join(unknown)
+	if !isSentinel(err, apperror.ErrForbidden) || !strings.Contains(err.Error(), "Turn on location") {
+		t.Errorf("no known location: %v, want refused with \"Turn on location to join\"", err)
+	}
+
+	stale := newUserID(t, h)
+	setUserLocation(t, h, stale, colomboLat, colomboLng, time.Now().Add(-25*time.Hour))
+	if err := join(stale); !isSentinel(err, apperror.ErrForbidden) {
+		t.Errorf("a location 25 hours old: %v, want refused", err)
+	}
+
+	fresh := newUserID(t, h)
+	if err := join(fresh); err != nil {
+		t.Errorf("a recent location nearby: %v", err)
+	}
+}
+
+// Plan 30B, 3.3 (#108): exact coordinates go to the host and accepted
+// participants, and to a signed-in member whose recent location is within
+// the browse radius. Anyone else, and every guest, gets none: for a
+// "use my current location" meetup they are where the host was standing.
+func TestGetMeetup_CoordinatesOnlyWithinTheRadiusOrToParticipants_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	get := func(user string, level int) meetup.Meetup {
+		t.Helper()
+		got, err := h.svc.GetMeetup(ctx, meetup.GetMeetupRequest{MeetupID: m.ID, UserID: user, ViewerTrustLevel: level})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := get(host, 2); got.LocationLat == nil || got.LocationLng == nil {
+		t.Error("the host lost the meetup's own coordinates")
+	}
+	near := newUserID(t, h)
+	if got := get(near, 2); got.LocationLat == nil {
+		t.Error("a member within 50 km got no coordinates")
+	}
+	far := newUserID(t, h)
+	setUserLocation(t, h, far, farAwayLat, farAwayLng, time.Now())
+	if got := get(far, 2); got.LocationLat != nil || got.LocationLng != nil {
+		t.Error("a member 200 km away got exact coordinates")
+	}
+	unknown := newUserID(t, h)
+	clearUserLocation(t, h, unknown)
+	if got := get(unknown, 2); got.LocationLat != nil {
+		t.Error("a member with no known location got exact coordinates")
+	}
+	guest := newUserID(t, h)
+	if got := get(guest, 0); got.LocationLat != nil || got.LocationLng != nil {
+		t.Error("a guest got exact coordinates")
+	}
+	accepted := newUserID(t, h)
+	r, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: accepted, RequesterTrustLevel: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{RequestID: r.ID, HostUserID: host, Accept: true}); err != nil {
+		t.Fatal(err)
+	}
+	setUserLocation(t, h, accepted, farAwayLat, farAwayLng, time.Now()) // travelled since
+	if got := get(accepted, 2); got.LocationLat == nil {
+		t.Error("an accepted participant lost the coordinates of a meetup they are on")
+	}
+}
+
+// Plan 30B, 3.3 and D4: cached locations go after 30 days, and a meetup
+// that ended more than 180 days ago keeps its place only to about 1 km.
+func TestLocationRetentionSweeps_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	old, recent := newUserID(t, h), newUserID(t, h)
+	setUserLocation(t, h, old, colomboLat, colomboLng, time.Now().Add(-31*24*time.Hour))
+	n, err := h.svc.SweepStaleUserLocations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("deleted %d cached locations, want the one older than 30 days", n)
+	}
+	var left int
+	_ = h.pool.QueryRow(ctx, `SELECT count(*) FROM meetup.user_location_cache WHERE user_id = $1`, recent).Scan(&left)
+	if left != 1 {
+		t.Error("a recent location was deleted")
+	}
+
+	host := newUserID(t, h)
+	ended := h.createMeetup(t, host, meetup.IntentCoffee, 6.927123, 79.861234)
+	current := h.createMeetup(t, host, meetup.IntentCoffee, 6.927123, 79.861234)
+	if _, err := h.pool.Exec(ctx, `UPDATE meetup.meetups SET window_start = now() - interval '200 days',
+		window_end = now() - interval '200 days' + interval '2 hours', status = 'completed' WHERE id = $1`, ended.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := h.svc.SweepOldMeetupCoordinates(ctx); err != nil || n != 1 {
+		t.Fatalf("coarsened %d, %v; want 1", n, err)
+	}
+	var lat, lng, geoLat float64
+	_ = h.pool.QueryRow(ctx, `SELECT location_lat, location_lng, ST_Y(location::geometry) FROM meetup.meetups WHERE id = $1`, ended.ID).Scan(&lat, &lng, &geoLat)
+	if lat != 6.93 || lng != 79.86 || geoLat != 6.93 {
+		t.Errorf("an old meetup is at (%v, %v; geography %v), want (6.93, 79.86)", lat, lng, geoLat)
+	}
+	_ = h.pool.QueryRow(ctx, `SELECT location_lat FROM meetup.meetups WHERE id = $1`, current.ID).Scan(&lat)
+	if lat != 6.927123 {
+		t.Errorf("a current meetup was coarsened to %v", lat)
+	}
+	if n, _ := h.svc.SweepOldMeetupCoordinates(ctx); n != 0 {
+		t.Errorf("a second pass changed %d rows; it must be idempotent", n)
+	}
+}
+
+// #114 (review N1-B3): a meetup whose window has ended, but which auto-
+// close has not swept yet (it waits for a tick), can neither be joined nor
+// have a request accepted.
+func TestJoinAndAcceptRefuseAMeetupThatHasEnded_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	pendingUser := newUserID(t, h)
+	r, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: pendingUser, RequesterTrustLevel: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE meetup.meetups SET window_start = now() - interval '3 hours', window_end = now() - interval '1 minute' WHERE id = $1`, m.ID); err != nil {
+		t.Fatal(err)
+	}
+	late := newUserID(t, h)
+	if _, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: late, RequesterTrustLevel: 2}); !isSentinel(err, apperror.ErrConflict) {
+		t.Errorf("joining an ended meetup: %v, want conflict", err)
+	}
+	if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{RequestID: r.ID, HostUserID: host, Accept: true}); !isSentinel(err, apperror.ErrConflict) {
+		t.Errorf("accepting into an ended meetup: %v, want conflict", err)
+	}
+}
+
+// #115 (review N1-B4), against real Postgres: instance A claims a row and
+// is slow; its visibility timeout passes; instance B claims the same row.
+// A's renewal and A's mark-processed both fail, B's both succeed, so one
+// push goes out, not two.
+func TestNotificationOutboxLeasesHoldAcrossClaimers_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx, `INSERT INTO meetup.notification_outbox (fcm_tokens, title, body, data)
+		VALUES ('{tok}', 't', 'b', '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	store := meetuprepo.NewNotificationOutboxRepository(h.pool).(outbox.Leaser)
+	claimA, err := h.outbox.ClaimBatch(ctx, 10)
+	if err != nil || len(claimA) != 1 {
+		t.Fatalf("A's claim: %v, %v", claimA, err)
+	}
+	if _, err := h.pool.Exec(ctx, `UPDATE meetup.notification_outbox SET next_attempt_at = now() - interval '1 second'`); err != nil {
+		t.Fatal(err)
+	}
+	claimB, err := h.outbox.ClaimBatch(ctx, 10)
+	if err != nil || len(claimB) != 1 {
+		t.Fatalf("B's claim: %v, %v", claimB, err)
+	}
+	if _, held, err := store.Renew(ctx, claimA[0]); err != nil || held {
+		t.Errorf("A renewed a row B holds: held %v, %v", held, err)
+	}
+	rowB, held, err := store.Renew(ctx, claimB[0])
+	if err != nil || !held {
+		t.Fatalf("B could not renew its own claim: %v", err)
+	}
+	if held, _ := store.MarkProcessedLeased(ctx, claimA[0]); held {
+		t.Error("A marked processed a row it no longer holds")
+	}
+	if held, err := store.MarkProcessedLeased(ctx, rowB); err != nil || !held {
+		t.Errorf("B could not mark its own row processed: %v", err)
+	}
+}
+
+// Plan 30B (review N1-B6): an Idempotency-Key replayed with the same
+// request returns the meetup it made; replayed with a different request it
+// is a 409, not the old meetup with a 200 as though the new one was made.
+func TestCreateMeetup_ReusedKeyWithDifferentParametersIsAConflict_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	start, end := h.nextWindow()
+	req := meetup.CreateMeetupRequest{
+		HostUserID: host, HostTrustLevel: 4, Intent: meetup.IntentCoffee,
+		WindowStart: start, WindowEnd: end, LocationLat: colomboLat, LocationLng: colomboLng,
+		LocationLabel: "Test Cafe", Capacity: 5, IdempotencyKey: "create-1",
+	}
+	first, err := h.svc.CreateMeetup(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := h.svc.CreateMeetup(ctx, req)
+	if err != nil || again.ID != first.ID {
+		t.Fatalf("an exact replay: %v, %v; want the same meetup", again.ID, err)
+	}
+	changed := req
+	changed.Capacity = 3
+	if _, err := h.svc.CreateMeetup(ctx, changed); !isSentinel(err, apperror.ErrConflict) {
+		t.Errorf("the key reused for a different meetup: %v, want conflict", err)
+	}
+}
+
+// Plan 2.2: the meetup an SOS message mentions. The user's own, hosting or
+// accepted; open or full; with now inside its window give or take 2 hours.
+func TestActiveMeetupForSOS_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host, accepted, pending, stranger := newUserID(t, h), newUserID(t, h), newUserID(t, h), newUserID(t, h)
+	m := h.createMeetup(t, host, meetup.IntentCoffee, colomboLat, colomboLng)
+	r, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: accepted, RequesterTrustLevel: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.RespondToRequest(ctx, meetup.RespondToRequestRequest{RequestID: r.ID, HostUserID: host, Accept: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.RequestToJoin(ctx, meetup.RequestToJoinRequest{MeetupID: m.ID, RequesterID: pending, RequesterTrustLevel: 2}); err != nil {
+		t.Fatal(err)
+	}
+	start, end := *m.WindowStart, *m.WindowEnd
+	for _, tc := range []struct {
+		name string
+		user string
+		at   time.Time
+		want bool
+	}{
+		{"the host, during", host, start.Add(time.Minute), true},
+		{"accepted, during", accepted, start.Add(time.Minute), true},
+		{"just inside 2 hours before", host, start.Add(-119 * time.Minute), true},
+		{"just inside 2 hours after", host, end.Add(119 * time.Minute), true},
+		{"over 2 hours before", host, start.Add(-121 * time.Minute), false},
+		{"over 2 hours after", host, end.Add(121 * time.Minute), false},
+		{"only pending", pending, start.Add(time.Minute), false},
+		{"not on it", stranger, start.Add(time.Minute), false},
+	} {
+		got, ok, err := h.svc.ActiveMeetup(ctx, tc.user, tc.at)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if ok != tc.want {
+			t.Errorf("%s: found %v, want %v", tc.name, ok, tc.want)
+		}
+		if ok && (got.Intent != "coffee" || got.LocationLabel != "Test Cafe" || got.Lat != colomboLat) {
+			t.Errorf("%s: got %+v", tc.name, got)
+		}
+	}
+	if err := h.svc.CancelMeetup(ctx, meetup.CancelMeetupRequest{MeetupID: m.ID, HostUserID: host, Reason: "something came up"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := h.svc.ActiveMeetup(ctx, host, start.Add(time.Minute)); ok {
+		t.Error("a cancelled meetup was mentioned")
 	}
 }

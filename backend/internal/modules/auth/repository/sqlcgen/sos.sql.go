@@ -14,17 +14,20 @@ import (
 
 const claimSOSEvent = `-- name: ClaimSOSEvent :one
 INSERT INTO auth.sos_events
-  (user_id, client_request_id, context_message, latitude, longitude, contacts_notified)
-VALUES ($1, $2, $3, $4, $5, 0)
+  (user_id, client_request_id, context_message, latitude, longitude,
+   location_source, location_captured_at, contacts_notified)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
 RETURNING id
 `
 
 type ClaimSOSEventParams struct {
-	UserID          uuid.UUID     `json:"user_id"`
-	ClientRequestID pgtype.Text   `json:"client_request_id"`
-	ContextMessage  pgtype.Text   `json:"context_message"`
-	Latitude        pgtype.Float8 `json:"latitude"`
-	Longitude       pgtype.Float8 `json:"longitude"`
+	UserID             uuid.UUID          `json:"user_id"`
+	ClientRequestID    pgtype.Text        `json:"client_request_id"`
+	ContextMessage     pgtype.Text        `json:"context_message"`
+	Latitude           pgtype.Float8      `json:"latitude"`
+	Longitude          pgtype.Float8      `json:"longitude"`
+	LocationSource     pgtype.Text        `json:"location_source"`
+	LocationCapturedAt pgtype.Timestamptz `json:"location_captured_at"`
 }
 
 // Written BEFORE any alert is sent, so a retry carrying the same
@@ -37,6 +40,8 @@ func (q *Queries) ClaimSOSEvent(ctx context.Context, arg ClaimSOSEventParams) (u
 		arg.ContextMessage,
 		arg.Latitude,
 		arg.Longitude,
+		arg.LocationSource,
+		arg.LocationCapturedAt,
 	)
 	var id uuid.UUID
 	err := row.Scan(&id)
@@ -57,63 +62,6 @@ type CompleteSOSEventParams struct {
 func (q *Queries) CompleteSOSEvent(ctx context.Context, arg CompleteSOSEventParams) error {
 	_, err := q.db.Exec(ctx, completeSOSEvent, arg.ID, arg.ContactsNotified)
 	return err
-}
-
-const confirmTrustedContactByToken = `-- name: ConfirmTrustedContactByToken :one
-WITH confirmed AS (
-  DELETE FROM auth.pending_trusted_contacts
-  WHERE token_hash = $1 AND expires_at > now()
-  RETURNING contact_id
-)
-SELECT u.full_name
-FROM confirmed
-JOIN auth.trusted_contacts c ON c.id = confirmed.contact_id
-JOIN auth.users u ON u.id = c.user_id
-`
-
-// The contact's own consent, from the link they were texted. Deleting the
-// pending row IS the confirmation, so it is single-use by construction: a
-// second press of the same link matches nothing. An expired link matches
-// nothing either. Returns whose contact they have become, for the page.
-func (q *Queries) ConfirmTrustedContactByToken(ctx context.Context, tokenHash string) (string, error) {
-	row := q.db.QueryRow(ctx, confirmTrustedContactByToken, tokenHash)
-	var full_name string
-	err := row.Scan(&full_name)
-	return full_name, err
-}
-
-const countContactInvitesSentByUserSince = `-- name: CountContactInvitesSentByUserSince :one
-SELECT count(*) FROM auth.contact_invites_sent
-WHERE user_id = $1 AND sent_at > $2::timestamptz
-`
-
-type CountContactInvitesSentByUserSinceParams struct {
-	UserID uuid.UUID          `json:"user_id"`
-	Since  pgtype.Timestamptz `json:"since"`
-}
-
-func (q *Queries) CountContactInvitesSentByUserSince(ctx context.Context, arg CountContactInvitesSentByUserSinceParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countContactInvitesSentByUserSince, arg.UserID, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const countContactInvitesSentToPhoneSince = `-- name: CountContactInvitesSentToPhoneSince :one
-SELECT count(*) FROM auth.contact_invites_sent
-WHERE phone_hash = $1 AND sent_at > $2::timestamptz
-`
-
-type CountContactInvitesSentToPhoneSinceParams struct {
-	PhoneHash string             `json:"phone_hash"`
-	Since     pgtype.Timestamptz `json:"since"`
-}
-
-func (q *Queries) CountContactInvitesSentToPhoneSince(ctx context.Context, arg CountContactInvitesSentToPhoneSinceParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countContactInvitesSentToPhoneSince, arg.PhoneHash, arg.Since)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const countSOSEventsForUserSince = `-- name: CountSOSEventsForUserSince :one
@@ -156,7 +104,9 @@ SELECT
     'latitude',          s.latitude,
     'longitude',         s.longitude,
     'triggered_at',      s.triggered_at,
-    'contacts_notified', s.contacts_notified
+    'contacts_notified', s.contacts_notified,
+    'location_source',   s.location_source,
+    'location_captured_at', s.location_captured_at
   ) ORDER BY s.triggered_at),
   now() + $1::interval
 FROM auth.users u
@@ -184,29 +134,6 @@ func (q *Queries) CreateSafetyHoldForDeletedUser(ctx context.Context, arg Create
 	return result.RowsAffected(), nil
 }
 
-const deleteContactInvitesSentBefore = `-- name: DeleteContactInvitesSentBefore :execrows
-DELETE FROM auth.contact_invites_sent
-WHERE id IN (
-  SELECT id FROM auth.contact_invites_sent
-  WHERE sent_at < $1::timestamptz
-  LIMIT $2
-)
-`
-
-type DeleteContactInvitesSentBeforeParams struct {
-	SentBefore pgtype.Timestamptz `json:"sent_before"`
-	BatchSize  int32              `json:"batch_size"`
-}
-
-// The cap log only ever looks back one day; batched like every other sweep.
-func (q *Queries) DeleteContactInvitesSentBefore(ctx context.Context, arg DeleteContactInvitesSentBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteContactInvitesSentBefore, arg.SentBefore, arg.BatchSize)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteExpiredSafetyHolds = `-- name: DeleteExpiredSafetyHolds :execrows
 DELETE FROM auth.safety_holds
 WHERE id IN (
@@ -220,6 +147,21 @@ WHERE id IN (
 // holds a long lock.
 func (q *Queries) DeleteExpiredSafetyHolds(ctx context.Context, batchSize int32) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredSafetyHolds, batchSize)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteOldSOSEvents = `-- name: DeleteOldSOSEvents :execrows
+DELETE FROM auth.sos_events WHERE id IN (
+  SELECT id FROM auth.sos_events WHERE triggered_at < now() - interval '90 days' LIMIT 1000
+)
+`
+
+// Plan 30B, 3.3: SOS events, with their coordinates, are kept 90 days.
+func (q *Queries) DeleteOldSOSEvents(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldSOSEvents)
 	if err != nil {
 		return 0, err
 	}
@@ -267,7 +209,7 @@ DELETE FROM auth.trusted_contacts WHERE user_id = $1
 // trusted_contacts.user_id is a logical FK with no constraint, by design
 // (0001_auth_schema's header). Without this the rows would outlive the
 // account — and they are the most sensitive thing in the schema, because
-// they are OTHER PEOPLE's names, phone numbers and email addresses, entered
+// they are OTHER PEOPLE's names and phone numbers, entered
 // by someone who has now asked to be forgotten.
 func (q *Queries) DeleteTrustedContactsForUser(ctx context.Context, userID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteTrustedContactsForUser, userID)
@@ -298,117 +240,57 @@ func (q *Queries) GetSOSEventByClientRequest(ctx context.Context, arg GetSOSEven
 	return i, err
 }
 
-const insertContactInviteSent = `-- name: InsertContactInviteSent :exec
-INSERT INTO auth.contact_invites_sent (user_id, phone_hash) VALUES ($1, $2)
-`
-
-type InsertContactInviteSentParams struct {
-	UserID    uuid.UUID `json:"user_id"`
-	PhoneHash string    `json:"phone_hash"`
-}
-
-func (q *Queries) InsertContactInviteSent(ctx context.Context, arg InsertContactInviteSentParams) error {
-	_, err := q.db.Exec(ctx, insertContactInviteSent, arg.UserID, arg.PhoneHash)
-	return err
-}
-
-const insertPendingTrustedContact = `-- name: InsertPendingTrustedContact :exec
-INSERT INTO auth.pending_trusted_contacts (contact_id, token_hash, expires_at)
-VALUES ($1, $2, $3)
-`
-
-type InsertPendingTrustedContactParams struct {
-	ContactID uuid.UUID          `json:"contact_id"`
-	TokenHash string             `json:"token_hash"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-}
-
-func (q *Queries) InsertPendingTrustedContact(ctx context.Context, arg InsertPendingTrustedContactParams) error {
-	_, err := q.db.Exec(ctx, insertPendingTrustedContact, arg.ContactID, arg.TokenHash, arg.ExpiresAt)
-	return err
-}
-
 const insertTrustedContact = `-- name: InsertTrustedContact :one
 
-INSERT INTO auth.trusted_contacts (user_id, name, phone_number, email)
-VALUES ($1, $2, $3, $4)
-RETURNING id, user_id, name, phone_number, email, created_at, updated_at
+INSERT INTO auth.trusted_contacts (user_id, name, phone_number, phone_normalized)
+VALUES ($1, $2, $3, $3)
+RETURNING id, user_id, name, phone_number, created_at, updated_at, phone_normalized
 `
 
 type InsertTrustedContactParams struct {
-	UserID      uuid.UUID   `json:"user_id"`
-	Name        string      `json:"name"`
-	PhoneNumber pgtype.Text `json:"phone_number"`
-	Email       pgtype.Text `json:"email"`
+	UserID      uuid.UUID `json:"user_id"`
+	Name        string    `json:"name"`
+	PhoneNumber string    `json:"phone_number"`
 }
 
 // Minimal real SOS + trusted contacts (ADR-026, Slice H).
 func (q *Queries) InsertTrustedContact(ctx context.Context, arg InsertTrustedContactParams) (AuthTrustedContact, error) {
-	row := q.db.QueryRow(ctx, insertTrustedContact,
-		arg.UserID,
-		arg.Name,
-		arg.PhoneNumber,
-		arg.Email,
-	)
+	row := q.db.QueryRow(ctx, insertTrustedContact, arg.UserID, arg.Name, arg.PhoneNumber)
 	var i AuthTrustedContact
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
 		&i.Name,
 		&i.PhoneNumber,
-		&i.Email,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PhoneNormalized,
 	)
 	return i, err
 }
 
 const listTrustedContactsForUser = `-- name: ListTrustedContactsForUser :many
-SELECT
-  c.id, c.user_id, c.name, c.phone_number, c.email, c.created_at, c.updated_at,
-  p.expires_at AS pending_expires_at
-FROM auth.trusted_contacts c
-LEFT JOIN auth.pending_trusted_contacts p ON p.contact_id = c.id
-WHERE c.user_id = $1
-ORDER BY c.created_at ASC
+SELECT id, user_id, name, phone_number, created_at, updated_at, phone_normalized FROM auth.trusted_contacts WHERE user_id = $1 ORDER BY created_at ASC, id ASC
 `
 
-type ListTrustedContactsForUserRow struct {
-	ID               uuid.UUID          `json:"id"`
-	UserID           uuid.UUID          `json:"user_id"`
-	Name             string             `json:"name"`
-	PhoneNumber      pgtype.Text        `json:"phone_number"`
-	Email            pgtype.Text        `json:"email"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	PendingExpiresAt pgtype.Timestamptz `json:"pending_expires_at"`
-}
-
-// With each contact's consent state (#80, migration 0024): a contact with a
-// pending row has not confirmed yet, and pending_expires_at says whether the
-// link it was sent can still be used. No pending row means confirmed —
-// including every contact added before consent existed (D2).
-//
-// Explicit columns, not c.*: a star query here is what made 0024 keep its
-// state out of this table, and it should not come back.
-func (q *Queries) ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]ListTrustedContactsForUserRow, error) {
+// Oldest first: SOS alerts the first two (decision D5).
+func (q *Queries) ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]AuthTrustedContact, error) {
 	rows, err := q.db.Query(ctx, listTrustedContactsForUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListTrustedContactsForUserRow
+	var items []AuthTrustedContact
 	for rows.Next() {
-		var i ListTrustedContactsForUserRow
+		var i AuthTrustedContact
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
 			&i.Name,
 			&i.PhoneNumber,
-			&i.Email,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.PendingExpiresAt,
+			&i.PhoneNormalized,
 		); err != nil {
 			return nil, err
 		}
@@ -431,26 +313,48 @@ func (q *Queries) LockSOSForUser(ctx context.Context, userID string) error {
 	return err
 }
 
-const lockTrustedContactInvitesForPhone = `-- name: LockTrustedContactInvitesForPhone :exec
-SELECT pg_advisory_xact_lock(4, hashtext($1::text))
-`
-
-// The same for one destination number, across every user, for the
-// per-number cap. Always taken AFTER the user lock, so two additions can
-// never wait on each other in opposite orders.
-func (q *Queries) LockTrustedContactInvitesForPhone(ctx context.Context, phoneHash string) error {
-	_, err := q.db.Exec(ctx, lockTrustedContactInvitesForPhone, phoneHash)
-	return err
-}
-
-const lockTrustedContactInvitesForUser = `-- name: LockTrustedContactInvitesForUser :exec
+const lockTrustedContactsForUser = `-- name: LockTrustedContactsForUser :exec
 SELECT pg_advisory_xact_lock(3, hashtext($1::text))
 `
 
-// Serialises one user's contact additions, so the contact cap and the daily
-// invite cap are a count and an insert that cannot interleave (#80).
-// Namespace 3; ratings use 2.
-func (q *Queries) LockTrustedContactInvitesForUser(ctx context.Context, userID string) error {
-	_, err := q.db.Exec(ctx, lockTrustedContactInvitesForUser, userID)
+// Serialises one user's contact additions, so the cap is a count and an
+// insert that cannot interleave. Namespace 3; ratings use 2.
+func (q *Queries) LockTrustedContactsForUser(ctx context.Context, userID string) error {
+	_, err := q.db.Exec(ctx, lockTrustedContactsForUser, userID)
 	return err
+}
+
+const updateTrustedContact = `-- name: UpdateTrustedContact :one
+UPDATE auth.trusted_contacts
+   SET name = $3, phone_number = $4, phone_normalized = $4
+ WHERE id = $1 AND user_id = $2
+RETURNING id, user_id, name, phone_number, created_at, updated_at, phone_normalized
+`
+
+type UpdateTrustedContactParams struct {
+	ID          uuid.UUID `json:"id"`
+	UserID      uuid.UUID `json:"user_id"`
+	Name        string    `json:"name"`
+	PhoneNumber string    `json:"phone_number"`
+}
+
+// Scoped to (id, user_id), like the delete.
+func (q *Queries) UpdateTrustedContact(ctx context.Context, arg UpdateTrustedContactParams) (AuthTrustedContact, error) {
+	row := q.db.QueryRow(ctx, updateTrustedContact,
+		arg.ID,
+		arg.UserID,
+		arg.Name,
+		arg.PhoneNumber,
+	)
+	var i AuthTrustedContact
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.PhoneNumber,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PhoneNormalized,
+	)
+	return i, err
 }

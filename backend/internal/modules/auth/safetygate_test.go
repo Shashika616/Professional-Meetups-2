@@ -55,7 +55,7 @@ func TestSafetyFeatures_AllowedAtTheFloorAndAbove(t *testing.T) {
 	ctx := context.Background()
 
 	for _, level := range []int{safetyFeatureTrustFloor, safetyFeatureTrustFloor + 1} {
-		svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+		svc, users, contacts, _, _, _ := newTestServiceForSOS(t)
 		seedUser(t, users, "user-1")
 
 		if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
@@ -74,8 +74,6 @@ func TestSafetyFeatures_AllowedAtTheFloorAndAbove(t *testing.T) {
 		if len(stored) != 1 {
 			t.Errorf("level %d stored %d contact(s), want 1", level, len(stored))
 		}
-		// A new contact must agree before an alert can reach them (#80).
-		confirmFromInvite(t, svc, smsSender)
 
 		if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
 			CallerTrustLevel: level,

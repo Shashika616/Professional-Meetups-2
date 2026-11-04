@@ -307,37 +307,73 @@ func TestTheDailyRunIsIdempotentAndRetriesOnlyWhatFailed(t *testing.T) {
 	}
 }
 
-func TestRegenerationOverwritesCleanly(t *testing.T) {
+// #116: regenerating never replaces a stored object, so the service
+// account needs only roles/storage.objectCreator. The daily object stays
+// as first written; each regeneration is stored beside it under its own
+// name, and the run records the newest.
+func TestRegenerationStoresANewObjectAndNeverOverwrites(t *testing.T) {
 	h := newHarness(t)
 	seedWeek(t, h)
 	ctx := context.Background()
+	h.clock.Set(time.Date(2026, 10, 26, 6, 30, 0, 0, analytics.Colombo))
+	if n, err := h.svc.SweepReport(ctx); err != nil || n != 1 {
+		t.Fatalf("daily run: %d, %v", n, err)
+	}
+	daily := "tiehere-test-bucket/analytics/reports/2026-10-25.xlsx"
+	original := h.upload.objects[daily]
+	if original == nil {
+		t.Fatal("the daily run stored nothing")
+	}
+
 	h.clock.Set(time.Date(2026, 10, 27, 9, 0, 0, 0, analytics.Colombo))
 	first, err := h.svc.RegenerateReport(ctx, reportDay, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	object := "tiehere-test-bucket/analytics/reports/2026-10-25.xlsx"
-	if !bytes.Equal(h.upload.objects[object], first) {
-		t.Fatal("the upload is not the report")
-	}
+	h.clock.Set(time.Date(2026, 10, 27, 9, 5, 0, 0, analytics.Colombo))
 	second, err := h.svc.RegenerateReport(ctx, reportDay, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(h.upload.objects[object], second) {
-		t.Error("the second run did not replace the stored report")
+	if !bytes.Equal(h.upload.objects[daily], original) {
+		t.Error("regenerating replaced the daily object")
 	}
-	var status string
+	firstObject := "tiehere-test-bucket/analytics/reports/2026-10-25.regenerated-20261027T033000Z.xlsx"
+	secondObject := "tiehere-test-bucket/analytics/reports/2026-10-25.regenerated-20261027T033500Z.xlsx"
+	if !bytes.Equal(h.upload.objects[firstObject], first) || !bytes.Equal(h.upload.objects[secondObject], second) {
+		t.Errorf("regenerated objects: %v", keys(h.upload.objects))
+	}
+	var status, uri string
 	var attempts int
-	_ = h.pool.QueryRow(ctx, `SELECT status, attempts FROM analytics.report_runs WHERE day='2026-10-25'`).Scan(&status, &attempts)
-	if status != "done" || attempts != 2 {
-		t.Errorf("run = %s after %d", status, attempts)
+	_ = h.pool.QueryRow(ctx, `SELECT status, attempts, report_uri FROM analytics.report_runs WHERE day='2026-10-25'`).Scan(&status, &attempts, &uri)
+	if status != "done" || uri != "gs://"+secondObject {
+		t.Errorf("run = %s, %s after %d", status, uri, attempts)
 	}
 	// The aggregates were rebuilt, not doubled.
 	var views int64
 	_ = h.pool.QueryRow(ctx, `SELECT count(*) FROM analytics.daily_screen_stats WHERE day='2026-10-25' AND screen='home'`).Scan(&views)
 	if views != 1 {
 		t.Errorf("%d home rows for the day after two regenerations", views)
+	}
+}
+
+// #116: an upload that landed but was not recorded (the process died, or
+// the database write failed) is retried as create-only: the bucket answers
+// 412, which counts as done, and the run finishes.
+func TestAStoredButUnrecordedReportUploadCountsAsDone(t *testing.T) {
+	h := newHarness(t)
+	seedWeek(t, h)
+	ctx := context.Background()
+	h.upload.objects["tiehere-test-bucket/analytics/reports/2026-10-25.xlsx"] = []byte("from the earlier attempt")
+	h.clock.Set(time.Date(2026, 10, 26, 6, 30, 0, 0, analytics.Colombo))
+	if n, err := h.svc.SweepReport(ctx); err != nil || n != 1 {
+		t.Fatalf("daily run: %d, %v", n, err)
+	}
+	var status string
+	var uploaded bool
+	_ = h.pool.QueryRow(ctx, `SELECT status, uploaded_at IS NOT NULL FROM analytics.report_runs WHERE day='2026-10-25'`).Scan(&status, &uploaded)
+	if status != "done" || !uploaded {
+		t.Errorf("run = %s, uploaded %v", status, uploaded)
 	}
 }
 

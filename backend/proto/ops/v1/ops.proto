@@ -79,7 +79,15 @@ message ScrapeMetricsResponse {
   bytes text = 1;
 }
 
-message RunScheduledWorkRequest {}
+message RunScheduledWorkRequest {
+  // Which sweeps to run (tracker #102). Empty is the core group: lifecycle,
+  // outboxes, retention, auth, billing and the cheap analytics sweeps.
+  // "analytics" is the heavy group (aggregation, archive, the daily
+  // report), which needs minutes rather than seconds and has its own
+  // Cloud Scheduler job, so it can never crowd the core sweeps out of a
+  // tick. An unknown group runs nothing and is an error.
+  string group = 1;
+}
 
 // SweepResult is one sweep's outcome. `name` matches the log field used by
 // the equivalent ticker, so the scheduled and in-process paths read the same

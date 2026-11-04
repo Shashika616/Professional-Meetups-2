@@ -33,7 +33,7 @@ import (
 // token_uri is ignored on purpose: a URL from configuration is still not a
 // store endpoint we chose.
 const (
-	tokenURL      = "https://oauth2.googleapis.com/token"
+	tokenURL      = "https://oauth2.googleapis.com/token" // #nosec G101 -- Google's token endpoint, not a credential
 	publisherBase = "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/"
 	scope         = "https://www.googleapis.com/auth/androidpublisher"
 )

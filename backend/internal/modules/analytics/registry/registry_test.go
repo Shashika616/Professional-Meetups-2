@@ -189,3 +189,20 @@ func TestTheDartConstantsLeaveOutServerEvents(t *testing.T) {
 		}
 	}
 }
+
+// #119 (review N1-L4): an id-typed attribute names a thing in the app (a
+// filter, a toggle), never a record. A UUID there would be a user, meetup
+// or contact id slipping into analytics, so it is refused.
+func TestAnIDAttributeRefusesUUIDs(t *testing.T) {
+	r := Default()
+	for _, v := range []string{"0192f0a4-7b1c-7d3e-8f00-0123456789ab", "0192F0A4-7B1C-7D3E-8F00-0123456789AB", "0192f0a47b1c7d3e8f000123456789ab"} {
+		res := r.Validate(input("filter_changed", `{"filter": "`+v+`", "active": true}`), SourceApp, now)
+		if len(res.AttributeDrops) != 1 || res.AttributeDrops[0] != DropNotIdentifier {
+			t.Errorf("%s: drops %v, want not_identifier", v, res.AttributeDrops)
+		}
+	}
+	res := r.Validate(input("filter_changed", `{"filter": "intent.coffee", "active": true}`), SourceApp, now)
+	if len(res.AttributeDrops) != 0 {
+		t.Errorf("an ordinary id was refused: %v", res.AttributeDrops)
+	}
+}

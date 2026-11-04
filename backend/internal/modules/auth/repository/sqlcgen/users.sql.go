@@ -12,6 +12,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearStaleLastKnownLocations = `-- name: ClearStaleLastKnownLocations :execrows
+UPDATE auth.users
+   SET last_location_lat = NULL, last_location_lng = NULL, last_location_updated_at = NULL
+ WHERE last_location_updated_at < now() - interval '30 days'
+`
+
+// Plan 30B, 3.3: a last known location older than 30 days is forgotten.
+// Nothing reads one that old (joining and nearby notifications need the
+// last 24 hours), so keeping it would only be keeping where someone was.
+func (q *Queries) ClearStaleLastKnownLocations(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, clearStaleLastKnownLocations)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearUserGuestFlag = `-- name: ClearUserGuestFlag :one
 UPDATE auth.users SET is_guest = false, trust_level = $2 WHERE id = $1 RETURNING id, linkedin_sub, full_name, profile_photo_url, headline, trust_level, account_status, created_at, updated_at, phone_number, personal_email, legal_name, address, company_domain, work_email_verified, work_email_verified_at, age_confirmed_over_18, age_confirmed_at, work_email_hash, rating_average, rating_count, rating_updated_at, last_location_lat, last_location_lng, last_location_updated_at, is_guest, company_name, meetups_completed, meetups_completed_updated_at
 `

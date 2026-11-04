@@ -197,3 +197,15 @@ func TestAnalyticsConsentIsRateLimitedPerUser(t *testing.T) {
 		t.Errorf("call %d: %d, want 429", consentPerMinute+1, rec.Code)
 	}
 }
+
+// #119 (review N1-L2): install_id keyed the limiter before anything
+// checked it, so a 64 KB string made a 64 KB key. It must be a UUID.
+func TestAnalyticsIngestRefusesAnInstallIDThatIsNotAUUID(t *testing.T) {
+	s := newTestServerWithLimiter(t)
+	for _, bad := range []string{"", "not-a-uuid", strings.Repeat("a", 4096)} {
+		body := strings.Replace(batchJSON(1, 0), testInstall, bad, 1)
+		if rec := postAnalytics(s, []byte(body), false, ""); rec.Code != http.StatusBadRequest {
+			t.Errorf("install_id %.20q: %d, want 400", bad, rec.Code)
+		}
+	}
+}

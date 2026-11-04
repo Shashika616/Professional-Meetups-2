@@ -21,7 +21,10 @@ func (s *service) UpdateLastKnownLocation(ctx context.Context, req UpdateLastKno
 	if err := geo.ValidateLatLng(req.Lat, req.Lng); err != nil {
 		return fmt.Errorf("auth: %v: %w", err, apperror.ErrInvalidInput)
 	}
-	if _, err := s.users.UpdateLastKnownLocation(ctx, req.UserID, req.Lat, req.Lng); err != nil {
+	// Kept to about 110 m (plan 30B, 3.3), whatever the app sends: enough
+	// for a 50 km radius, too coarse to find a house. The published event,
+	// and so the meetup module's cache, carries the rounded value too.
+	if _, err := s.users.UpdateLastKnownLocation(ctx, req.UserID, geo.StoredPrecision(req.Lat), geo.StoredPrecision(req.Lng)); err != nil {
 		return err
 	}
 	return nil

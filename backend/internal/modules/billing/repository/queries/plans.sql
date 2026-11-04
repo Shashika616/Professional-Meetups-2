@@ -64,9 +64,10 @@ VALUES (sqlc.arg(user_id), sqlc.arg(identity_fingerprint), sqlc.arg(lot_id), sql
 ON CONFLICT DO NOTHING;
 
 -- name: InsertRefundLog :execrows
-INSERT INTO billing.refund_log (user_id, hold_id, meetup_id, event, outcome, percent, amount)
+-- created_at comes from the same clock CountRefundsSince is measured against.
+INSERT INTO billing.refund_log (user_id, hold_id, meetup_id, event, outcome, percent, amount, created_at)
 VALUES (sqlc.arg(user_id), sqlc.arg(hold_id), sqlc.narg(meetup_id), sqlc.arg(event), sqlc.arg(outcome),
-        sqlc.arg(percent), sqlc.arg(amount))
+        sqlc.arg(percent), sqlc.arg(amount), sqlc.arg(created_at)::timestamptz)
 ON CONFLICT (hold_id) DO NOTHING;
 
 -- name: RefundLogExists :one

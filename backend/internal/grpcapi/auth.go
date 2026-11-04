@@ -17,6 +17,7 @@ package grpcapi
 import (
 	"context"
 	"errors"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -388,14 +389,35 @@ func (s *AuthServer) DeleteAccount(ctx context.Context, req *authv1.DeleteAccoun
 	return &authv1.DeleteAccountResponse{}, nil
 }
 
+func (s *AuthServer) SetProfilePhoto(ctx context.Context, req *authv1.SetProfilePhotoRequest) (*authv1.SetProfilePhotoResponse, error) {
+	path, err := s.svc.SetProfilePhoto(ctx, req.GetUserId(), req.GetImage())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.SetProfilePhotoResponse{PhotoPath: path}, nil
+}
+
+func (s *AuthServer) DeleteProfilePhoto(ctx context.Context, req *authv1.DeleteProfilePhotoRequest) (*authv1.DeleteProfilePhotoResponse, error) {
+	if err := s.svc.DeleteProfilePhoto(ctx, req.GetUserId()); err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.DeleteProfilePhotoResponse{}, nil
+}
+
+func (s *AuthServer) GetProfilePhoto(ctx context.Context, req *authv1.GetProfilePhotoRequest) (*authv1.GetProfilePhotoResponse, error) {
+	jpeg, etag, err := s.svc.GetProfilePhoto(ctx, req.GetUserId(), req.GetKnownEtag())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.GetProfilePhotoResponse{Jpeg: jpeg, Etag: etag}, nil
+}
+
 func trustedContactToProto(c auth.TrustedContact) *authv1.TrustedContactResponse {
 	return &authv1.TrustedContactResponse{
 		Id:                   c.ID,
 		Name:                 c.Name,
 		PhoneNumber:          c.PhoneNumber,
-		Email:                c.Email,
 		CreatedAtUnixSeconds: c.CreatedAtUnixSeconds,
-		Status:               c.Status,
 	}
 }
 
@@ -404,7 +426,20 @@ func (s *AuthServer) AddTrustedContact(ctx context.Context, req *authv1.AddTrust
 		UserID:           req.GetUserId(),
 		Name:             req.GetName(),
 		PhoneNumber:      req.GetPhoneNumber(),
-		Email:            req.GetEmail(),
+		CallerTrustLevel: int(req.GetCallerTrustLevel()),
+	})
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return trustedContactToProto(contact), nil
+}
+
+func (s *AuthServer) UpdateTrustedContact(ctx context.Context, req *authv1.UpdateTrustedContactRequest) (*authv1.TrustedContactResponse, error) {
+	contact, err := s.svc.UpdateTrustedContact(ctx, auth.UpdateTrustedContactRequest{
+		UserID:           req.GetUserId(),
+		ContactID:        req.GetContactId(),
+		Name:             req.GetName(),
+		PhoneNumber:      req.GetPhoneNumber(),
 		CallerTrustLevel: int(req.GetCallerTrustLevel()),
 	})
 	if err != nil {
@@ -444,6 +479,8 @@ func (s *AuthServer) TriggerSOS(ctx context.Context, req *authv1.TriggerSOSReque
 		// 0,0 — the exact confusion the optional was added to remove.
 		Latitude:         req.Latitude,
 		Longitude:        req.Longitude,
+		CapturedAt:       capturedAt(req.CapturedAtUnixSeconds),
+		Source:           req.GetLocationSource(),
 		CallerTrustLevel: int(req.GetCallerTrustLevel()),
 		ClientRequestID:  req.GetClientRequestId(),
 	})
@@ -453,10 +490,10 @@ func (s *AuthServer) TriggerSOS(ctx context.Context, req *authv1.TriggerSOSReque
 	return &authv1.TriggerSOSResponse{ContactsNotified: result.ContactsNotified}, nil
 }
 
-func (s *AuthServer) ConfirmTrustedContact(ctx context.Context, req *authv1.ConfirmTrustedContactRequest) (*authv1.ConfirmTrustedContactResponse, error) {
-	name, err := s.svc.ConfirmTrustedContact(ctx, req.GetToken())
-	if err != nil {
-		return nil, apperror.ToGRPCStatus(err)
+func capturedAt(unix *int64) *time.Time {
+	if unix == nil {
+		return nil
 	}
-	return &authv1.ConfirmTrustedContactResponse{RequesterName: name}, nil
+	t := time.Unix(*unix, 0).UTC()
+	return &t
 }

@@ -35,21 +35,48 @@
 -- index deliberately cannot express that — it would have to include
 -- 'rejected', which reintroduces exactly the collision this removes.
 --
+-- # EXISTING DUPLICATES (tracker #101, review N1-B2)
+--
+-- The old key allowed one 'pending' AND one 'accepted' row for the same
+-- person on the same meetup, and that is exactly the pair the new index
+-- refuses: on such data CREATE UNIQUE INDEX fails with 23505 and the
+-- migration stops. The accepted row is the one that holds a seat, so it is
+-- kept, and the extra pending row is marked 'withdrawn' (resolved now, no
+-- note). Nothing else is touched. The runbook's pre-flight query (§3)
+-- counts these rows before deploying.
+--
 -- # ORDER MATTERS
 --
--- The index is built BEFORE the old constraint is dropped, so there is no
--- instant in which the table is unprotected. A failure between the two
--- leaves the old constraint in force and an extra index that is
--- redundant but harmless.
+-- This file runs as one transaction (golang-migrate sends it as a single
+-- multi-statement Exec), so no other session ever sees the table between
+-- the old constraint and the new index. Within it:
 --
--- CREATE INDEX, not CONCURRENTLY: golang-migrate wraps each migration in a
--- transaction and CONCURRENTLY cannot run inside one. The table is small
--- (requests, not events) and the lock is brief; if that ever stops being
--- true, split this into its own non-transactional migration.
+--   1. Lock the table against writes, so no new request arrives between
+--      the cleanup and the index.
+--   2. Drop the old constraint FIRST. It must be gone before the cleanup:
+--      turning the pending row into 'withdrawn' would collide with it
+--      whenever the same person had already withdrawn once before.
+--   3. Clean up, then build the index.
+--
+-- CREATE INDEX, not CONCURRENTLY: CONCURRENTLY cannot run inside a
+-- transaction. The table is small (requests, not events) and the lock is
+-- brief; if that ever stops being true, split this into its own
+-- non-transactional migration.
+
+LOCK TABLE meetup.meetup_requests IN SHARE ROW EXCLUSIVE MODE;
+
+ALTER TABLE meetup.meetup_requests
+    DROP CONSTRAINT IF EXISTS meetup_requests_meetup_id_requester_id_status_key;
+
+UPDATE meetup.meetup_requests p
+   SET status = 'withdrawn', resolved_at = COALESCE(p.resolved_at, now())
+ WHERE p.status = 'pending'
+   AND EXISTS (
+        SELECT 1 FROM meetup.meetup_requests a
+         WHERE a.meetup_id = p.meetup_id
+           AND a.requester_id = p.requester_id
+           AND a.status = 'accepted');
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_meetup_requests_one_live_per_user
     ON meetup.meetup_requests (meetup_id, requester_id)
     WHERE status IN ('pending', 'accepted');
-
-ALTER TABLE meetup.meetup_requests
-    DROP CONSTRAINT IF EXISTS meetup_requests_meetup_id_requester_id_status_key;

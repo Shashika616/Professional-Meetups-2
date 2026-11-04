@@ -1,9 +1,12 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -40,7 +43,7 @@ func newTestLinkedInServerNamed(t *testing.T, name string) (*linkedin.Client, fu
 }
 
 // newTestLinkedInServerWith also varies the picture, for the photo-sync
-// behaviour (the photo follows LinkedIn; the name only ever gets suggested).
+// behaviour (a photo is the user's own; the name only ever gets suggested).
 // An empty picture stands for a LinkedIn response that omits the field.
 func newTestLinkedInServerWith(t *testing.T, name, picture string) (*linkedin.Client, func()) {
 	t.Helper()
@@ -88,6 +91,8 @@ func newFederatedTestService(t *testing.T, opts ...func(*testServiceDeps)) (*ser
 		google:          &fakeIdentityProvider{validTokens: map[string]identity.VerifiedIdentity{}},
 		emailer:         &fakeEmailSender{},
 		smser:           &fakeSmsSender{},
+		photos:          newFakeUserPhotoRepository(),
+		fetcher:         &fakePhotoFetcher{},
 	}
 	for _, opt := range opts {
 		opt(deps)
@@ -108,12 +113,16 @@ func newFederatedTestService(t *testing.T, opts ...func(*testServiceDeps)) (*ser
 		Email:                   deps.emailer,
 		SMS:                     deps.smser,
 		WorkEmailHMACKey:        []byte("test-hmac-key"),
+		Photos:                  deps.photos,
+		PhotoFetcher:            deps.fetcher,
 		Logger:                  slog.New(slog.DiscardHandler),
 	}).(*service)
 	return svc, deps
 }
 
 type testServiceDeps struct {
+	photos          *fakeUserPhotoRepository
+	fetcher         *fakePhotoFetcher
 	users           *fakeUserRepository
 	identities      *fakeUserIdentityRepository
 	tokens          *fakeRefreshTokenRepository
@@ -425,7 +434,7 @@ func TestCompleteLinkedInOnboarding_NewUserGrantsLevel1Immediately(t *testing.T)
 		t.Errorf("TrustLevel = %d, want 1 (LinkedIn direct signup, unchanged from ADR-011)", created.TrustLevel)
 	}
 	if created.ProfilePhotoURL == "" {
-		t.Error("ProfilePhotoURL is empty, want the photo from LinkedIn's userinfo response (no regression vs. ADR-011)")
+		t.Error("ProfilePhotoURL is empty, want the picture from LinkedIn's userinfo response taken once")
 	}
 }
 
@@ -975,7 +984,7 @@ func TestLinkIdentity_AppleAndGoogleNeverSuggestAName(t *testing.T) {
 	}
 }
 
-// --- The profile photo follows LinkedIn (2026-09-26). ---
+// --- A photo is the user's own (plan 2.1). ---
 
 // seedAndLinkLinkedIn links li-sub-123 to a fresh user carrying the given
 // name and photo, with LinkedIn answering with linkedInName/linkedInPhoto.
@@ -1005,116 +1014,100 @@ func seedAndLinkLinkedIn(t *testing.T, existingName, existingPhoto, linkedInName
 	return deps.users.byID[user.ID], resp, deps
 }
 
-// TestLinkIdentity_LinkedIn_GivesAnApplePhotolessAccountItsPhoto is the case
-// this feature exists for: someone signs up with Apple or Google (no photo —
-// Apple issues none, and this app deliberately does not take Google's), then
-// connects LinkedIn. Their professional photo was already in the userinfo
-// response the link flow fetches; before this it was read and dropped, and
-// they kept initials forever.
-func TestLinkIdentity_LinkedIn_GivesAnApplePhotolessAccountItsPhoto(t *testing.T) {
-	stored, resp, _ := seedAndLinkLinkedIn(t,
-		"Ada Lovelace", "", "Ada Lovelace", "https://media.licdn.com/ada.jpg")
-
-	if stored.ProfilePhotoURL != "https://media.licdn.com/ada.jpg" {
-		t.Errorf("stored photo = %q, want LinkedIn's", stored.ProfilePhotoURL)
+// Plan 2.1: connecting LinkedIn later never changes a photo, even when the
+// account has none, and the name is still only suggested (Plan 22).
+func TestLinkIdentity_LinkedIn_NeverTouchesAPhoto(t *testing.T) {
+	stored, resp, deps := seedAndLinkLinkedIn(t,
+		"Ada Lovelace", "/v1/users/u/photo?v=mine", "Grace Hopper", "https://media.licdn.com/grace.jpg")
+	if stored.ProfilePhotoURL != "/v1/users/u/photo?v=mine" {
+		t.Errorf("photo = %q, want the user's own kept", stored.ProfilePhotoURL)
 	}
-	// The session carries it immediately, so the app shows the avatar without
-	// waiting for a later profile refetch.
-	if resp.ProfilePhotoURL != "https://media.licdn.com/ada.jpg" {
-		t.Errorf("session photo = %q, want LinkedIn's", resp.ProfilePhotoURL)
+	if len(deps.users.photoUpdates) != 0 || deps.fetcher.calls != 0 {
+		t.Errorf("%d photo writes, %d fetches; want none", len(deps.users.photoUpdates), deps.fetcher.calls)
+	}
+	if stored.FullName != "Ada Lovelace" || resp.SuggestedNameUpdate != "Grace Hopper" {
+		t.Errorf("name %q, suggestion %q", stored.FullName, resp.SuggestedNameUpdate)
+	}
+
+	bare, _, deps := seedAndLinkLinkedIn(t, "Ada", "", "Ada", "https://media.licdn.com/ada.jpg")
+	if bare.ProfilePhotoURL != "" || deps.fetcher.calls != 0 {
+		t.Errorf("an account with no photo got %q after linking", bare.ProfilePhotoURL)
 	}
 }
 
-// TestLinkIdentity_LinkedIn_PhotoIsSyncedButNameIsOnlySuggested pins the
-// asymmetry that makes this safe. Both fields differ from the account's; the
-// photo is written, the name is not — it comes back as a suggestion for the
-// user to accept or decline (Plan 22).
-func TestLinkIdentity_LinkedIn_PhotoIsSyncedButNameIsOnlySuggested(t *testing.T) {
-	stored, resp, _ := seedAndLinkLinkedIn(t,
-		"Ada Lovelace", "https://old.example.com/old.jpg",
-		"Grace Hopper", "https://media.licdn.com/grace.jpg")
-
-	if stored.ProfilePhotoURL != "https://media.licdn.com/grace.jpg" {
-		t.Errorf("photo = %q, want LinkedIn's — the photo follows LinkedIn", stored.ProfilePhotoURL)
+// Plan 2.1: the LinkedIn picture is taken once, at creation, and signing in
+// again never changes it, whatever LinkedIn then holds.
+func TestLinkedInPictureIsTakenOnceAtCreation(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	ctx := context.Background()
+	created, isNew, err := svc.ResolveOrCreateIdentity(ctx, FederatedProviderLinkedIn, "li-1", "", "Ada", "https://media.licdn.com/ada.jpg", true)
+	if err != nil || !isNew {
+		t.Fatalf("%v, new %v", err, isNew)
 	}
-	if stored.FullName != "Ada Lovelace" {
-		t.Errorf("FullName = %q, want unchanged — linking must never rename the user", stored.FullName)
+	if !strings.HasPrefix(created.ProfilePhotoURL, "/v1/users/"+created.ID+"/photo?v=") {
+		t.Errorf("photo = %q, want our own path", created.ProfilePhotoURL)
 	}
-	if resp.SuggestedNameUpdate != "Grace Hopper" {
-		t.Errorf("SuggestedNameUpdate = %q, want LinkedIn's name offered", resp.SuggestedNameUpdate)
+	if got := deps.photos.byUser[created.ID]; len(got.JPEG) == 0 {
+		t.Error("no photo stored")
 	}
-}
-
-// TestLinkIdentity_LinkedIn_MissingPictureLeavesTheExistingPhotoAlone: a
-// LinkedIn response with no picture must not blank a photo the account
-// already has. Losing one because the provider omitted a field would be
-// strictly worse than keeping a stale one.
-func TestLinkIdentity_LinkedIn_MissingPictureLeavesTheExistingPhotoAlone(t *testing.T) {
-	stored, _, deps := seedAndLinkLinkedIn(t,
-		"Ada Lovelace", "https://old.example.com/old.jpg", "Ada Lovelace", "")
-
-	if stored.ProfilePhotoURL != "https://old.example.com/old.jpg" {
-		t.Errorf("photo = %q, want the existing one kept", stored.ProfilePhotoURL)
-	}
-	if len(deps.users.photoUpdates) != 0 {
-		t.Errorf("photo writes = %d, want 0 for an empty incoming picture", len(deps.users.photoUpdates))
-	}
-}
-
-// TestLinkIdentity_LinkedIn_UnchangedPhotoIsNotRewritten: the write publishes
-// a user-profile-updated event the meetup module consumes to refresh its
-// display cache, so a no-op write is real wasted work downstream.
-func TestLinkIdentity_LinkedIn_UnchangedPhotoIsNotRewritten(t *testing.T) {
-	same := "https://media.licdn.com/ada.jpg"
-	stored, _, deps := seedAndLinkLinkedIn(t, "Ada Lovelace", same, "Ada Lovelace", same)
-
-	if stored.ProfilePhotoURL != same {
-		t.Errorf("photo = %q, want %q", stored.ProfilePhotoURL, same)
-	}
-	if len(deps.users.photoUpdates) != 0 {
-		t.Errorf("photo writes = %d, want 0 when the photo has not changed", len(deps.users.photoUpdates))
-	}
-}
-
-// TestCompleteLinkedInOnboarding_ReturningUserPicksUpAChangedPhoto is the
-// other half of "changed on LinkedIn, changed here": a LinkedIn signup who
-// swaps their photo there gets it mirrored on their next sign-in, rather than
-// keeping the one captured at account creation forever.
-func TestCompleteLinkedInOnboarding_ReturningUserPicksUpAChangedPhoto(t *testing.T) {
-	svc, deps := newFederatedTestService(t, func(d *testServiceDeps) {
-		li, closeLI := newTestLinkedInServerWith(t, "Ada Lovelace", "https://media.licdn.com/first.jpg")
-		t.Cleanup(closeLI)
-		d.linkedin = li
-	})
-	first, err := svc.CompleteLinkedInOnboarding(context.Background(), CompleteLinkedInOnboardingRequest{
-		AuthorizationCode: "auth-code", RedirectURI: "app://callback", AgeConfirmedOver18: true,
-	})
+	again, _, err := svc.ResolveOrCreateIdentity(ctx, FederatedProviderLinkedIn, "li-1", "", "Ada", "https://media.licdn.com/new.jpg", true)
 	if err != nil {
-		t.Fatalf("first onboarding: %v", err)
+		t.Fatal(err)
 	}
-	if got := deps.users.byID[first.UserID].ProfilePhotoURL; got != "https://media.licdn.com/first.jpg" {
-		t.Fatalf("photo at creation = %q, want the first one", got)
+	if again.ProfilePhotoURL != created.ProfilePhotoURL || deps.fetcher.calls != 1 {
+		t.Errorf("signing in again changed the photo: %q after %d fetches", again.ProfilePhotoURL, deps.fetcher.calls)
 	}
+}
 
-	// They change it on LinkedIn, then sign in again.
-	li2, close2 := newTestLinkedInServerWith(t, "Ada Lovelace", "https://media.licdn.com/second.jpg")
-	t.Cleanup(close2)
-	svc.linkedin = li2
+// A picture that cannot be fetched costs the photo, never the account.
+func TestLinkedInPictureFailureStillCreatesTheAccount(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	deps.fetcher.err = errors.New("no")
+	user, isNew, err := svc.ResolveOrCreateIdentity(context.Background(), FederatedProviderLinkedIn, "li-1", "", "Ada", "https://media.licdn.com/a.jpg", true)
+	if err != nil || !isNew {
+		t.Fatalf("%v, new %v", err, isNew)
+	}
+	if user.ProfilePhotoURL != "" {
+		t.Errorf("photo = %q", user.ProfilePhotoURL)
+	}
+}
 
-	second, err := svc.CompleteLinkedInOnboarding(context.Background(), CompleteLinkedInOnboardingRequest{
-		AuthorizationCode: "auth-code", RedirectURI: "app://callback", AgeConfirmedOver18: true,
-	})
+func TestProfilePhotoSetGetDelete(t *testing.T) {
+	svc, deps := newFederatedTestService(t)
+	ctx := context.Background()
+	user, err := deps.users.Create(ctx, repository.NewUser{FullName: "Ada", AgeConfirmedOver18: true})
 	if err != nil {
-		t.Fatalf("second onboarding: %v", err)
+		t.Fatal(err)
 	}
-	if second.UserID != first.UserID {
-		t.Fatalf("second sign-in made a new account: %q vs %q", second.UserID, first.UserID)
+	if _, err := svc.SetProfilePhoto(ctx, user.ID, []byte("not a picture")); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("not a picture: %v", err)
 	}
-	if got := deps.users.byID[first.UserID].ProfilePhotoURL; got != "https://media.licdn.com/second.jpg" {
-		t.Errorf("photo after re-login = %q, want the updated one", got)
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, image.NewRGBA(image.Rect(0, 0, 400, 400)), nil); err != nil {
+		t.Fatal(err)
 	}
-	if second.ProfilePhotoURL != "https://media.licdn.com/second.jpg" {
-		t.Errorf("session photo = %q, want the updated one", second.ProfilePhotoURL)
+	path, err := svc.SetProfilePhoto(ctx, user.ID, b.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deps.users.byID[user.ID].ProfilePhotoURL != path {
+		t.Errorf("the user row holds %q, want %q", deps.users.byID[user.ID].ProfilePhotoURL, path)
+	}
+	stored, etag, err := svc.GetProfilePhoto(ctx, user.ID, "")
+	if err != nil || len(stored) == 0 {
+		t.Fatalf("%d bytes, %v", len(stored), err)
+	}
+	if again, same, err := svc.GetProfilePhoto(ctx, user.ID, etag); err != nil || again != nil || same != etag {
+		t.Errorf("a matching etag: %d bytes, %q, %v", len(again), same, err)
+	}
+	if err := svc.DeleteProfilePhoto(ctx, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	if deps.users.byID[user.ID].ProfilePhotoURL != "" {
+		t.Error("the path outlived the photo")
+	}
+	if _, _, err := svc.GetProfilePhoto(ctx, user.ID, ""); !errors.Is(err, apperror.ErrNotFound) {
+		t.Errorf("after delete: %v", err)
 	}
 }
 

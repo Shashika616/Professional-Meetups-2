@@ -35,6 +35,8 @@ type Querier interface {
 	// clause is the backstop that holds even if that ordering is ever lost
 	// again. Zero rows means "not pending any more", which the repository maps
 	// to a conflict.
+	//
+	// window_end > now() (#114): no one is accepted into a meetup that is over.
 	AcceptMeetupRequest(ctx context.Context, arg AcceptMeetupRequestParams) (MeetupMeetupRequest, error)
 	// Meetups the deleted person hosted are kept (they are every attendee's
 	// history, and deleting one would cascade away other members' requests,
@@ -71,9 +73,9 @@ type Querier interface {
 	// (backend/meetup-scheduling-PLAN.md Step E).
 	AutoRejectPendingRequestsForMeetup(ctx context.Context, meetupID uuid.UUID) ([]MeetupMeetupRequest, error)
 	// Queries behind another member's public profile (GET /v1/users/{id}).
-	// Every one takes the VIEWER as well as the target, because what is
-	// visible depends on what the two of them have shared — see
-	// member.go in the service layer for the rule.
+	// Who may open a profile depends on what viewer and target have shared; see
+	// member.go in the service layer. What a profile then shows does not depend
+	// on the viewer at all (plan 2.3).
 	// True when the viewer may open the target's profile: they are the same
 	// person; the target hosts (or has hosted) a meetup — a host is public by
 	// design, since you must be able to judge them before asking to join; the
@@ -260,6 +262,11 @@ type Querier interface {
 	// failed; the service layer re-fetches to distinguish which for a useful
 	// error message.
 	CloseMeetup(ctx context.Context, arg CloseMeetupParams) (MeetupMeetup, error)
+	// Plan 30 D4: a meetup that ended more than 180 days ago keeps its place
+	// to 2 decimals (about 1 km). It is history; for a "use my current
+	// location" meetup the exact point is where the host once stood. The
+	// location column follows through the meetups_sync_location trigger.
+	CoarsenOldMeetupCoordinates(ctx context.Context) (int64, error)
 	// Replaces the old RecomputeUserRating UPDATE (which wrote users.
 	// rating_average/rating_count directly — the exact cross-database write
 	// ADR-017 flagged, only possible before the DB split because this service
@@ -337,6 +344,11 @@ type Querier interface {
 	// Withdrawing and asking again stays open on purpose. Backing out of a
 	// meetup is not misconduct and should not be a permanent bar, and the
 	// host sees the withdrawal in the request's own history either way.
+	//
+	// And the meetup must still be open with its window not yet over (#114):
+	// an ended meetup stays 'open' until auto-close's next tick, and the Go
+	// check before this statement read it before the lock. Zero rows is then
+	// told apart by MeetupIsJoinable.
 	CreateMeetupRequest(ctx context.Context, arg CreateMeetupRequestParams) (MeetupMeetupRequest, error)
 	DeleteDeadLetteredActivityEvents(ctx context.Context, arg DeleteDeadLetteredActivityEventsParams) (int64, error)
 	DeleteDeadLetteredBillingEvents(ctx context.Context, arg DeleteDeadLetteredBillingEventsParams) (int64, error)
@@ -373,6 +385,10 @@ type Querier interface {
 	// statement would hold one long transaction and a correspondingly long lock.
 	// The caller loops until a batch comes back short.
 	DeleteProcessedNotifications(ctx context.Context, arg DeleteProcessedNotificationsParams) (int64, error)
+	// Plan 30B, 3.3: cached locations older than 30 days are deleted. Every
+	// reader wants the last 24 hours, so an older row only records where
+	// someone used to be.
+	DeleteStaleUserLocationCache(ctx context.Context) (int64, error)
 	DeleteUserDeviceTokens(ctx context.Context, userID uuid.UUID) error
 	// Cached copy of auth-owned data; must not outlive the account.
 	DeleteUserDisplayCache(ctx context.Context, userID uuid.UUID) error
@@ -450,6 +466,10 @@ type Querier interface {
 	// ListActiveMeetups isLive closure, and (as BROWSABLE, 'open' only) in
 	// ListOpenMeetupsFirstPage/AfterCursor above. Keep the three in step.
 	FindScheduleConflict(ctx context.Context, arg FindScheduleConflictParams) (FindScheduleConflictRow, error)
+	// The meetup an SOS message mentions (plan 2.2): one the user hosts or is
+	// accepted on, still open or full, with now inside its window give or take
+	// two hours. The nearest to now if there are two.
+	GetActiveMeetupForUser(ctx context.Context, arg GetActiveMeetupForUserParams) (GetActiveMeetupForUserRow, error)
 	// The meetup an earlier request with this Idempotency-Key created (plan 29
 	// §3.5). Read under the host's schedule lock, inside the create
 	// transaction, so two concurrent retries cannot both miss it.
@@ -541,7 +561,9 @@ type Querier interface {
 	// Whether a user's last known location is within 50 km of a point — the
 	// same ST_DWithin on geography, and the same 50000 m, as browse uses, so
 	// the join rule (D4) is exactly the rule that decided what they could see.
-	// No row means the location is unknown, which the caller decides about.
+	// No row means the location is unknown, or older than not_before (plan
+	// 30B: a day-old location says nothing about where someone is now), which
+	// the caller decides about.
 	IsUserLocationWithinRadius(ctx context.Context, arg IsUserLocationWithinRadiusParams) (bool, error)
 	ListDeviceTokensForUser(ctx context.Context, userID uuid.UUID) ([]MeetupDeviceToken, error)
 	// Batched form of ListDeviceTokensForUser (2026-08-31 round-3 hardening,
@@ -550,6 +572,12 @@ type Querier interface {
 	// list (not just fcm_token) so the caller can group rows back by user
 	// without a second lookup.
 	ListDeviceTokensForUsers(ctx context.Context, userIds []uuid.UUID) ([]MeetupDeviceToken, error)
+	// The written reviews participants left on the target's hosted meetups,
+	// newest first (plan 2.3). Always anonymous: this query cannot name anyone,
+	// because no author column and no meetup column leave it. A review is not
+	// tied to a meetup on the profile either, since a small meetup's guest list
+	// would then give the author away.
+	ListHostReviews(ctx context.Context, arg ListHostReviewsParams) ([]ListHostReviewsRow, error)
 	// The user-deleted handler's first step: meetups this person still hosts that
 	// have not happened yet. The gateway refuses deletion while any exist, so
 	// normally this is empty; it exists for the one that slipped in between that
@@ -583,10 +611,6 @@ type Querier interface {
 	// put a trust rule in SQL where nobody reviewing the trust ladder would
 	// think to look for it.
 	ListMeetupParticipants(ctx context.Context, meetupID uuid.UUID) ([]ListMeetupParticipantsRow, error)
-	// The written comments on a set of meetups, oldest first within a meetup.
-	// The author's display name rides along; the service blanks it for a
-	// viewer who was not on that meetup.
-	ListMeetupReviewComments(ctx context.Context, meetupIds []uuid.UUID) ([]ListMeetupReviewCommentsRow, error)
 	// Keyset continuation of ListMeetupsByHostFirstPage — same
 	// (created_at, id) < (cursor) shape as
 	// ListOpenMeetupsByIntentAfterCursor.
@@ -714,10 +738,16 @@ type Querier interface {
 	// real (if narrow) correctness bug: someone ratable would silently not
 	// appear to rate.
 	ListRatableParticipants(ctx context.Context, arg ListRatableParticipantsParams) ([]ListRatableParticipantsRow, error)
-	// The target's last N meetups as host or accepted participant, newest
-	// window first, with the aggregate the profile shows per meetup and whether
-	// the VIEWER was on it too (which decides whether reviewer names below are
-	// shown or withheld).
+	// The meetups the target HOSTED that are over, newest first, with what the
+	// profile shows of each (plan 2.3). Only the host's are listed: a member who
+	// joined shows a count and a rating, never where they were.
+	//
+	// Only meetups that are over (#103): completed, or past their window and not
+	// yet swept. An open or full meetup is a future time and place, and a
+	// profile is not where those are published.
+	//
+	// The average is the participants' opinion of the meetup: the host's own
+	// review of it is left out.
 	ListRecentMeetupsForMember(ctx context.Context, arg ListRecentMeetupsForMemberParams) ([]ListRecentMeetupsForMemberRow, error)
 	// LEFT JOIN meetup.safety_state (ADR-024 §6) — host visibility into each
 	// accepted participant's check-in status, piggybacking on this query's
@@ -822,6 +852,12 @@ type Querier interface {
 	// to it, which is what lets "processed_at IS NULL" mean "not yet delivered"
 	// without a status column to keep consistent.
 	MarkNotificationProcessed(ctx context.Context, id uuid.UUID) error
+	// #115: processed only by the claimer that holds the row.
+	MarkNotificationProcessedLeased(ctx context.Context, arg MarkNotificationProcessedLeasedParams) (int64, error)
+	// Why a join's conditional insert wrote nothing: the meetup is no longer
+	// open or its window is over (true here means "still joinable", so the
+	// cause was an earlier rejection).
+	MeetupIsJoinable(ctx context.Context, id uuid.UUID) (bool, error)
 	// Everyone whose "meetups completed" total is changed by the meetups in
 	// meetup_ids having just completed, together with each one's NEW total.
 	//
@@ -858,6 +894,11 @@ type Querier interface {
 	// host_user_id scoping (Round 11) added the same way as AcceptMeetupRequest
 	// above — defense-in-depth alongside the existing Go-level check.
 	RejectMeetupRequest(ctx context.Context, arg RejectMeetupRequestParams) (MeetupMeetupRequest, error)
+	// #115: the claim's stamp is the lease. Renewed just before the row is
+	// delivered, and only if the stamp is still the one this claimer wrote: a
+	// different stamp means another claimer took the row after this one's
+	// timeout passed, and that one delivers it.
+	RenewNotificationClaim(ctx context.Context, arg RenewNotificationClaimParams) (pgtype.Timestamptz, error)
 	// A seat came back, so the meetup is joinable again (tracker #85,
 	// finding N-B3).
 	//
@@ -882,7 +923,6 @@ type Querier interface {
 	// ADR-024 §4 — mutual exclusion with check-in is enforced at the service
 	// layer (both states are visible together there), not here.
 	SetDeclined(ctx context.Context, arg SetDeclinedParams) (MeetupSafetyState, error)
-	SetLiveLocationOptIn(ctx context.Context, arg SetLiveLocationOptInParams) (MeetupSafetyState, error)
 	// The review flow's own write: the overall 1-5 for the meetup plus the
 	// optional note, and the completion stamp. Separate from
 	// UpsertMeetupFeedback (the safety questions) because the two are answered

@@ -14,11 +14,6 @@ UPDATE meetup.safety_state SET checklist_ack_at = now()
 WHERE meetup_id = $1 AND user_id = $2
 RETURNING *;
 
--- name: SetLiveLocationOptIn :one
-UPDATE meetup.safety_state SET live_location_opt_in = $3
-WHERE meetup_id = $1 AND user_id = $2
-RETURNING *;
-
 -- name: SetCheckedIn :one
 UPDATE meetup.safety_state SET checked_in_at = now()
 WHERE meetup_id = $1 AND user_id = $2

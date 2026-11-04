@@ -201,22 +201,24 @@ func (q *Queries) InsertAdminAudit(ctx context.Context, arg InsertAdminAuditPara
 }
 
 const insertRefundLog = `-- name: InsertRefundLog :execrows
-INSERT INTO billing.refund_log (user_id, hold_id, meetup_id, event, outcome, percent, amount)
+INSERT INTO billing.refund_log (user_id, hold_id, meetup_id, event, outcome, percent, amount, created_at)
 VALUES ($1, $2, $3, $4, $5,
-        $6, $7)
+        $6, $7, $8::timestamptz)
 ON CONFLICT (hold_id) DO NOTHING
 `
 
 type InsertRefundLogParams struct {
-	UserID   uuid.UUID   `json:"user_id"`
-	HoldID   uuid.UUID   `json:"hold_id"`
-	MeetupID pgtype.UUID `json:"meetup_id"`
-	Event    string      `json:"event"`
-	Outcome  string      `json:"outcome"`
-	Percent  int32       `json:"percent"`
-	Amount   int64       `json:"amount"`
+	UserID    uuid.UUID          `json:"user_id"`
+	HoldID    uuid.UUID          `json:"hold_id"`
+	MeetupID  pgtype.UUID        `json:"meetup_id"`
+	Event     string             `json:"event"`
+	Outcome   string             `json:"outcome"`
+	Percent   int32              `json:"percent"`
+	Amount    int64              `json:"amount"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+// created_at comes from the same clock CountRefundsSince is measured against.
 func (q *Queries) InsertRefundLog(ctx context.Context, arg InsertRefundLogParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertRefundLog,
 		arg.UserID,
@@ -226,6 +228,7 @@ func (q *Queries) InsertRefundLog(ctx context.Context, arg InsertRefundLogParams
 		arg.Outcome,
 		arg.Percent,
 		arg.Amount,
+		arg.CreatedAt,
 	)
 	if err != nil {
 		return 0, err

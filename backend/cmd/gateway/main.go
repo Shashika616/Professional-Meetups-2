@@ -28,8 +28,6 @@ import (
 	"professional-meetups-monolith/backend/internal/platform/logging"
 	"professional-meetups-monolith/backend/internal/platform/ratelimit"
 	"professional-meetups-monolith/backend/internal/platform/telemetry"
-
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // shutdownTimeout bounds how long graceful shutdown waits for in-flight
@@ -142,9 +140,10 @@ func run(logger *slog.Logger) error {
 
 	logger.Info("jwt signing key in use", "kid", signer.KeyID(), "accepted_kids", verifier.KeyIDs())
 
-	// middleware.RateLimit keys its fixed window on (IP, route path), so
+	// middleware.RateLimit keys its fixed window on (IP, route pattern), so
 	// wrapping the whole mux gives every route its own independent
-	// 20-req/min-per-IP limit, not one shared budget across all of them.
+	// 20-req/min-per-IP limit, not one shared budget across all of them,
+	// and not one per meetup id or per 404 path either (#81).
 	//
 	// Chain order is load-bearing and matches the source exactly: Recover
 	// outermost (so it catches panics from everything beneath it), then
@@ -158,17 +157,17 @@ func run(logger *slog.Logger) error {
 	// Metrics sit inside rate limiting so a 429 is still counted — knowing
 	// that a route is shedding load is the whole reason to have the metric.
 	handler = middleware.Metrics(handler)
-	handler = middleware.RateLimit(limiter, middleware.WithTrustedProxyHops(cfg.TrustedProxyHops))(handler)
+	handler = middleware.RateLimit(limiter,
+		middleware.WithTrustedProxyHops(cfg.TrustedProxyHops),
+		middleware.WithRoutePatterns(mux),
+	)(handler)
 	handler = middleware.RequestLogging(logger)(handler)
 	handler = logging.HTTPMiddleware(handler)
 	// The server span, outside the request logger so its trace id is in the
-	// request's log line. Health probes are left out of traces.
-	handler = otelhttp.NewHandler(handler, "gateway",
-		otelhttp.WithFilter(func(r *http.Request) bool {
-			return r.URL.Path != "/healthz" && r.URL.Path != "/readyz"
-		}),
-		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string { return r.Method }),
-	)
+	// request's log line. A new root for every request, with no inbound
+	// baggage and no query string in the span (plan 30B, #119): the edge
+	// does not let a caller choose its trace or copy coordinates into it.
+	handler = middleware.EdgeTrace(handler)
 	handler = middleware.Recover(logger)(handler)
 
 	// Go's http.Server defaults to no timeouts at all on any of these, so a

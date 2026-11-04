@@ -16,7 +16,8 @@ const acceptMeetupRequest = `-- name: AcceptMeetupRequest :one
 UPDATE meetup.meetup_requests SET status = 'accepted', resolved_at = now()
 WHERE meetup.meetup_requests.id = $1
   AND meetup.meetup_requests.status = 'pending'
-  AND meetup.meetup_requests.meetup_id IN (SELECT m.id FROM meetup.meetups m WHERE m.host_user_id = $2)
+  AND meetup.meetup_requests.meetup_id IN (
+      SELECT m.id FROM meetup.meetups m WHERE m.host_user_id = $2 AND m.window_end > now())
 RETURNING id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_at, withdrawal_note
 `
 
@@ -48,6 +49,8 @@ type AcceptMeetupRequestParams struct {
 // clause is the backstop that holds even if that ordering is ever lost
 // again. Zero rows means "not pending any more", which the repository maps
 // to a conflict.
+//
+// window_end > now() (#114): no one is accepted into a meetup that is over.
 func (q *Queries) AcceptMeetupRequest(ctx context.Context, arg AcceptMeetupRequestParams) (MeetupMeetupRequest, error) {
 	row := q.db.QueryRow(ctx, acceptMeetupRequest, arg.ID, arg.HostUserID)
 	var i MeetupMeetupRequest
@@ -158,6 +161,10 @@ WHERE NOT EXISTS (
        AND prior.requester_id = $2::uuid
        AND prior.status = 'rejected'
 )
+  AND EXISTS (
+    SELECT 1 FROM meetup.meetups m
+     WHERE m.id = $1::uuid AND m.status = 'open' AND m.window_end > now()
+)
 RETURNING id, meetup_id, requester_id, status, auto_rejected, created_at, resolved_at, withdrawal_note
 `
 
@@ -193,6 +200,11 @@ type CreateMeetupRequestParams struct {
 // Withdrawing and asking again stays open on purpose. Backing out of a
 // meetup is not misconduct and should not be a permanent bar, and the
 // host sees the withdrawal in the request's own history either way.
+//
+// And the meetup must still be open with its window not yet over (#114):
+// an ended meetup stays 'open' until auto-close's next tick, and the Go
+// check before this statement read it before the lock. Zero rows is then
+// told apart by MeetupIsJoinable.
 func (q *Queries) CreateMeetupRequest(ctx context.Context, arg CreateMeetupRequestParams) (MeetupMeetupRequest, error) {
 	row := q.db.QueryRow(ctx, createMeetupRequest, arg.MeetupID, arg.RequesterID)
 	var i MeetupMeetupRequest
@@ -403,6 +415,21 @@ func (q *Queries) ListRequestsForMeetup(ctx context.Context, meetupID uuid.UUID)
 		return nil, err
 	}
 	return items, nil
+}
+
+const meetupIsJoinable = `-- name: MeetupIsJoinable :one
+SELECT (status = 'open' AND window_end > now())::bool AS joinable
+FROM meetup.meetups WHERE id = $1
+`
+
+// Why a join's conditional insert wrote nothing: the meetup is no longer
+// open or its window is over (true here means "still joinable", so the
+// cause was an earlier rejection).
+func (q *Queries) MeetupIsJoinable(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, meetupIsJoinable, id)
+	var joinable bool
+	err := row.Scan(&joinable)
+	return joinable, err
 }
 
 const rejectMeetupRequest = `-- name: RejectMeetupRequest :one

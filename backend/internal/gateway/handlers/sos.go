@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"professional-meetups-monolith/backend/internal/gateway/middleware"
 	"professional-meetups-monolith/backend/internal/gateway/monolithclient"
@@ -15,21 +16,19 @@ import (
 // never h.meetup — TriggerSOS takes client-supplied meetup/location context
 // instead of the gateway making a second call to meetup.
 
+// A contact is a name and a number (ADR-013). Older app builds also send
+// "email"; it is ignored, and they read a missing email and status as empty
+// and confirmed.
 type addTrustedContactRequest struct {
 	Name        string `json:"name"`
 	PhoneNumber string `json:"phone_number"`
-	Email       string `json:"email"`
 }
 
 type trustedContactResponse struct {
 	ID                   string `json:"id"`
 	Name                 string `json:"name"`
 	PhoneNumber          string `json:"phone_number"`
-	Email                string `json:"email"`
 	CreatedAtUnixSeconds int64  `json:"created_at_unix_seconds"`
-	// "confirmed", "pending" or "expired" (#80). A new key: app builds that
-	// predate it ignore unknown JSON fields.
-	Status string `json:"status"`
 }
 
 func trustedContactResponseFromClient(c monolithclient.TrustedContact) trustedContactResponse {
@@ -37,9 +36,7 @@ func trustedContactResponseFromClient(c monolithclient.TrustedContact) trustedCo
 		ID:                   c.ID,
 		Name:                 c.Name,
 		PhoneNumber:          c.PhoneNumber,
-		Email:                c.Email,
 		CreatedAtUnixSeconds: c.CreatedAtUnixSeconds,
-		Status:               c.Status,
 	}
 }
 
@@ -56,7 +53,27 @@ func (h *Handler) addTrustedContact(w http.ResponseWriter, r *http.Request) {
 	contact, err := h.monolith.AddTrustedContact(
 		ctx,
 		middleware.UserIDFromContext(ctx),
-		req.Name, req.PhoneNumber, req.Email,
+		req.Name, req.PhoneNumber,
+		int32(middleware.TrustLevelFromContext(ctx)),
+	)
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, trustedContactResponseFromClient(contact))
+}
+
+func (h *Handler) updateTrustedContact(w http.ResponseWriter, r *http.Request) {
+	var req addTrustedContactRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, msgBadRequest)
+		return
+	}
+	ctx := r.Context()
+	contact, err := h.monolith.UpdateTrustedContact(
+		ctx,
+		middleware.UserIDFromContext(ctx),
+		r.PathValue("id"), req.Name, req.PhoneNumber,
 		int32(middleware.TrustLevelFromContext(ctx)),
 	)
 	if err != nil {
@@ -105,6 +122,35 @@ type triggerSOSRequest struct {
 	// the first attempt's outcome instead of alerting everyone again.
 	// Optional: older app builds do not send it.
 	ClientRequestID string `json:"client_request_id"`
+	// When the phone took the fix (RFC 3339) and how: "gps" or
+	// "device_last_known". Optional: older builds send only a fresh fix.
+	CapturedAt string `json:"captured_at"`
+	Source     string `json:"source"`
+}
+
+// sosFix reads the location out of the request. Nothing here refuses the
+// request: a bad timestamp is treated as no timestamp, and an unknown source
+// as the weaker claim, because the alert matters more than the detail.
+func (req triggerSOSRequest) sosFix() monolithclient.SOSFix {
+	// Only a COMPLETE pair is a location. One coordinate without the
+	// other is not a point, and passing it on would put a half-truth in
+	// an emergency message.
+	if req.Latitude == nil || req.Longitude == nil {
+		return monolithclient.SOSFix{}
+	}
+	fix := monolithclient.SOSFix{Latitude: req.Latitude, Longitude: req.Longitude}
+	switch req.Source {
+	case "":
+	case "gps":
+		fix.Source = "gps"
+	default:
+		fix.Source = "device_last_known"
+	}
+	if at, err := time.Parse(time.RFC3339, req.CapturedAt); err == nil {
+		unix := at.Unix()
+		fix.CapturedAtUnix = &unix
+	}
+	return fix
 }
 
 // validClientRequestID admits a short opaque token and nothing else. It is
@@ -128,7 +174,10 @@ type triggerSOSResponse struct {
 	ContactsNotified int32 `json:"contacts_notified"`
 }
 
-// triggerSOS is additionally rate-limited per-user (5/hour, ADR-026 §5) via
+// sosRequestsPerHour bounds requests to the route, retries included.
+const sosRequestsPerHour = 30
+
+// triggerSOS is additionally rate-limited per-user via
 // middleware.UserKeyedRateLimit chained after h.requireAuth in Register —
 // not the global IP+path RateLimit in main.go, which can't see UserID yet
 // at that point in the chain.
@@ -145,17 +194,10 @@ func (h *Handler) triggerSOS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	// Only a COMPLETE pair is a location. One coordinate without the
-	// other is not a point, and passing it on would put a half-truth in
-	// an emergency message.
-	var lat, lng *float64
-	if req.Latitude != nil && req.Longitude != nil {
-		lat, lng = req.Latitude, req.Longitude
-	}
 	contactsNotified, err := h.monolith.TriggerSOS(
 		ctx,
 		middleware.UserIDFromContext(ctx),
-		req.ContextMessage, req.ClientRequestID, lat, lng,
+		req.ContextMessage, req.ClientRequestID, req.sosFix(),
 		int32(middleware.TrustLevelFromContext(ctx)),
 	)
 	if err != nil {

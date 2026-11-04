@@ -49,11 +49,20 @@ DELETE FROM meetup.user_location_cache WHERE user_id = $1;
 -- Whether a user's last known location is within 50 km of a point — the
 -- same ST_DWithin on geography, and the same 50000 m, as browse uses, so
 -- the join rule (D4) is exactly the rule that decided what they could see.
--- No row means the location is unknown, which the caller decides about.
+-- No row means the location is unknown, or older than not_before (plan
+-- 30B: a day-old location says nothing about where someone is now), which
+-- the caller decides about.
 SELECT ST_DWithin(
   location,
   ST_SetSRID(ST_MakePoint(sqlc.arg(center_lng)::float8, sqlc.arg(center_lat)::float8), 4326)::geography,
   50000
 )::bool AS within
 FROM meetup.user_location_cache
-WHERE user_id = sqlc.arg(user_id);
+WHERE user_id = sqlc.arg(user_id)
+  AND updated_at > sqlc.arg(not_before)::timestamptz;
+
+-- name: DeleteStaleUserLocationCache :execrows
+-- Plan 30B, 3.3: cached locations older than 30 days are deleted. Every
+-- reader wants the last 24 hours, so an older row only records where
+-- someone used to be.
+DELETE FROM meetup.user_location_cache WHERE updated_at < now() - interval '30 days';

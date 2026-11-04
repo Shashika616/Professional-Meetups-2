@@ -18,7 +18,9 @@ func main() {
 	if *out == "" {
 		log.Fatal("analyticsgen: -out is required")
 	}
-	if err := os.WriteFile(*out, registry.Default().Dart(), 0o644); err != nil {
+	// A generated source file in the repository, meant to be readable.
+	err := os.WriteFile(*out, registry.Default().Dart(), 0o644) // #nosec G306 -- a generated source file, not a secret
+	if err != nil {
 		log.Fatalf("analyticsgen: %v", err)
 	}
 }

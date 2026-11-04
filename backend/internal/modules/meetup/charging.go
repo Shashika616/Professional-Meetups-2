@@ -133,10 +133,13 @@ func (s *service) releaseAfterFailedCreate(ctx context.Context, req CreateMeetup
 
 // existingForKey turns a CreationKeyExistsError into the meetup that the
 // earlier request created.
-func (s *service) existingForKey(ctx context.Context, err error, hostUserID string) (Meetup, bool, error) {
+func (s *service) existingForKey(ctx context.Context, err error, hostUserID, requestHash string) (Meetup, bool, error) {
 	var exists *repository.CreationKeyExistsError
 	if !errors.As(err, &exists) {
 		return Meetup{}, false, nil
+	}
+	if exists.RequestHash != "" && exists.RequestHash != requestHash {
+		return Meetup{}, true, errIdempotencyKeyReused
 	}
 	full, getErr := s.meetups.GetByID(ctx, exists.MeetupID, hostUserID)
 	if getErr != nil {

@@ -50,6 +50,10 @@ type Querier interface {
 	// account_claim) are UNAUTHENTICATED, so this is the cap an attacker meets
 	// before they have any credential at all.
 	ClaimVerificationAttemptByTarget(ctx context.Context, arg ClaimVerificationAttemptByTargetParams) (AuthVerificationCode, error)
+	// Plan 30B, 3.3: a last known location older than 30 days is forgotten.
+	// Nothing reads one that old (joining and nearby notifications need the
+	// last 24 hours), so keeping it would only be keeping where someone was.
+	ClearStaleLastKnownLocations(ctx context.Context) (int64, error)
 	// Linking Apple or Google to an existing account (LinkIdentityToUser's
 	// non-LinkedIn branch, ADR-002 §3). That path writes only user_identities,
 	// so unlike every other verification it has no users UPDATE to ride along
@@ -61,11 +65,6 @@ type Querier interface {
 	// happened to recompute it.
 	ClearUserGuestFlag(ctx context.Context, arg ClearUserGuestFlagParams) (AuthUser, error)
 	CompleteSOSEvent(ctx context.Context, arg CompleteSOSEventParams) error
-	// The contact's own consent, from the link they were texted. Deleting the
-	// pending row IS the confirmation, so it is single-use by construction: a
-	// second press of the same link matches nothing. An expired link matches
-	// nothing either. Returns whose contact they have become, for the page.
-	ConfirmTrustedContactByToken(ctx context.Context, tokenHash string) (string, error)
 	// The other half of V-1: delete the row AND report whether this caller was
 	// the one that deleted it.
 	//
@@ -78,8 +77,6 @@ type Querier interface {
 	ConsumeVerificationCode(ctx context.Context, arg ConsumeVerificationCodeParams) (AuthVerificationCode, error)
 	// The target-keyed twin of ConsumeVerificationCode.
 	ConsumeVerificationCodeByTarget(ctx context.Context, arg ConsumeVerificationCodeByTargetParams) (AuthVerificationCode, error)
-	CountContactInvitesSentByUserSince(ctx context.Context, arg CountContactInvitesSentByUserSinceParams) (int64, error)
-	CountContactInvitesSentToPhoneSince(ctx context.Context, arg CountContactInvitesSentToPhoneSinceParams) (int64, error)
 	CountPendingUserDeleted(ctx context.Context) (int64, error)
 	CountSOSEventsForUserSince(ctx context.Context, arg CountSOSEventsForUserSinceParams) (int64, error)
 	// Backs the soft cap of 3 per user (ADR-026 §1), enforced at the service
@@ -147,8 +144,6 @@ type Querier interface {
 	//
 	// The row count is the INSERT's, which equals the number of guests deleted.
 	DeleteAbandonedGuests(ctx context.Context, arg DeleteAbandonedGuestsParams) (int64, error)
-	// The cap log only ever looks back one day; batched like every other sweep.
-	DeleteContactInvitesSentBefore(ctx context.Context, arg DeleteContactInvitesSentBeforeParams) (int64, error)
 	DeleteDeadLetteredUserDeleted(ctx context.Context, arg DeleteDeadLetteredUserDeletedParams) (int64, error)
 	// The retention sweep (§B3). Every login and every refresh inserts a row and
 	// nothing ever deleted one, so this table grew without bound — cheap to trim
@@ -193,6 +188,9 @@ type Querier interface {
 	// The sweeper, batched like the refresh-token sweep so no single statement
 	// holds a long lock.
 	DeleteExpiredSafetyHolds(ctx context.Context, batchSize int32) (int64, error)
+	DeleteOldOTPBudgets(ctx context.Context) (int64, error)
+	// Plan 30B, 3.3: SOS events, with their coordinates, are kept 90 days.
+	DeleteOldSOSEvents(ctx context.Context) (int64, error)
 	DeleteProcessedUserDeleted(ctx context.Context, arg DeleteProcessedUserDeletedParams) (int64, error)
 	// Account deletion; same logical-FK reason as above. An SOS event records
 	// where the user was when they asked for help.
@@ -207,7 +205,7 @@ type Querier interface {
 	// trusted_contacts.user_id is a logical FK with no constraint, by design
 	// (0001_auth_schema's header). Without this the rows would outlive the
 	// account — and they are the most sensitive thing in the schema, because
-	// they are OTHER PEOPLE's names, phone numbers and email addresses, entered
+	// they are OTHER PEOPLE's names and phone numbers, entered
 	// by someone who has now asked to be forgotten.
 	DeleteTrustedContactsForUser(ctx context.Context, userID uuid.UUID) error
 	// Account deletion (App Store 5.1.1(v), Play's data-deletion policy).
@@ -223,6 +221,7 @@ type Querier interface {
 	// first, before this runs. See the auth service's DeleteAccount for the
 	// ordering and why it is that way round.
 	DeleteUser(ctx context.Context, id uuid.UUID) (int64, error)
+	DeleteUserPhoto(ctx context.Context, userID uuid.UUID) error
 	DeleteVerificationCode(ctx context.Context, arg DeleteVerificationCodeParams) error
 	DeleteVerificationCodeByTarget(ctx context.Context, arg DeleteVerificationCodeByTargetParams) error
 	// Written in the SAME transaction as the delete of auth.users — see
@@ -267,13 +266,14 @@ type Querier interface {
 	// verified a DIFFERENT account. Returns apperror.ErrNotFound (wrapped) if
 	// no user has this hash yet.
 	GetUserByWorkEmailHash(ctx context.Context, workEmailHash pgtype.Text) (AuthUser, error)
+	GetUserPhoto(ctx context.Context, userID uuid.UUID) (GetUserPhotoRow, error)
+	// For a conditional request: the etag alone, without reading the bytes.
+	GetUserPhotoEtag(ctx context.Context, userID uuid.UUID) (string, error)
 	GetVerificationCode(ctx context.Context, arg GetVerificationCodeParams) (AuthVerificationCode, error)
 	GetVerificationCodeByTarget(ctx context.Context, arg GetVerificationCodeByTargetParams) (AuthVerificationCode, error)
 	IncrementVerificationAttempts(ctx context.Context, arg IncrementVerificationAttemptsParams) (AuthVerificationCode, error)
 	IncrementVerificationAttemptsByTarget(ctx context.Context, arg IncrementVerificationAttemptsByTargetParams) (AuthVerificationCode, error)
-	InsertContactInviteSent(ctx context.Context, arg InsertContactInviteSentParams) error
 	InsertIdentity(ctx context.Context, arg InsertIdentityParams) (AuthUserIdentity, error)
-	InsertPendingTrustedContact(ctx context.Context, arg InsertPendingTrustedContactParams) error
 	// Minimal real SOS + trusted contacts (ADR-026, Slice H).
 	InsertTrustedContact(ctx context.Context, arg InsertTrustedContactParams) (AuthTrustedContact, error)
 	// Flags an unknown-company (name, domain) pair for the not-yet-assigned
@@ -281,25 +281,14 @@ type Querier interface {
 	// queue.
 	InsertUnverifiedCompanyClaim(ctx context.Context, arg InsertUnverifiedCompanyClaimParams) error
 	ListIdentitiesForUser(ctx context.Context, userID uuid.UUID) ([]AuthUserIdentity, error)
-	// With each contact's consent state (#80, migration 0024): a contact with a
-	// pending row has not confirmed yet, and pending_expires_at says whether the
-	// link it was sent can still be used. No pending row means confirmed —
-	// including every contact added before consent existed (D2).
-	//
-	// Explicit columns, not c.*: a star query here is what made 0024 keep its
-	// state out of this table, and it should not come back.
-	ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]ListTrustedContactsForUserRow, error)
+	// Oldest first: SOS alerts the first two (decision D5).
+	ListTrustedContactsForUser(ctx context.Context, userID uuid.UUID) ([]AuthTrustedContact, error)
 	// Serialises one user's SOS claims: the duplicate check, the daily count and
 	// the insert below run as one unit. Namespace 5.
 	LockSOSForUser(ctx context.Context, userID string) error
-	// The same for one destination number, across every user, for the
-	// per-number cap. Always taken AFTER the user lock, so two additions can
-	// never wait on each other in opposite orders.
-	LockTrustedContactInvitesForPhone(ctx context.Context, phoneHash string) error
-	// Serialises one user's contact additions, so the contact cap and the daily
-	// invite cap are a count and an insert that cannot interleave (#80).
-	// Namespace 3; ratings use 2.
-	LockTrustedContactInvitesForUser(ctx context.Context, userID string) error
+	// Serialises one user's contact additions, so the cap is a count and an
+	// insert that cannot interleave. Namespace 3; ratings use 2.
+	LockTrustedContactsForUser(ctx context.Context, userID string) error
 	// The claim that makes rotation single-use (tracker #83, review finding
 	// N-A2 / #57).
 	//
@@ -327,6 +316,7 @@ type Querier interface {
 	MarkUserDeletedDeadLettered(ctx context.Context, arg MarkUserDeletedDeadLetteredParams) error
 	MarkUserDeletedFailed(ctx context.Context, arg MarkUserDeletedFailedParams) error
 	MarkUserDeletedProcessed(ctx context.Context, id uuid.UUID) error
+	RefundOTPGuess(ctx context.Context, arg RefundOTPGuessParams) error
 	// The reuse-detection response (docs/plans/03-hardening-pass.md §B1): when a
 	// refresh token that has already been rotated or revoked is presented again,
 	// every still-live token in that user's session family is revoked, not just
@@ -339,6 +329,13 @@ type Querier interface {
 	// idempotency.
 	RevokeAllRefreshTokensForUser(ctx context.Context, userID uuid.UUID) (int64, error)
 	RevokeRefreshTokenByHash(ctx context.Context, tokenHash string) error
+	TakeOTPGuess(ctx context.Context, arg TakeOTPGuessParams) (int32, error)
+	// Plan 30B (#106): per target, purpose and Asia/Colombo day. Each take is
+	// one statement that refuses at the cap, so parallel requests cannot
+	// overshoot it.
+	TakeOTPSend(ctx context.Context, arg TakeOTPSendParams) (int32, error)
+	// Scoped to (id, user_id), like the delete.
+	UpdateTrustedContact(ctx context.Context, arg UpdateTrustedContactParams) (AuthTrustedContact, error)
 	// ADR-019 §2's post-auth profile-completion screen — CompleteProfileSetup
 	// is the only caller. fullName is always required there, unlike every
 	// other field on this table.
@@ -440,6 +437,7 @@ type Querier interface {
 	// regression, with no loss of redelivery-safety (an exact-equal redelivery
 	// is still a no-op, just via `>` instead of failing an `IS NULL` check).
 	UpsertUserMeetupsCompletedCache(ctx context.Context, arg UpsertUserMeetupsCompletedCacheParams) (int64, error)
+	UpsertUserPhoto(ctx context.Context, arg UpsertUserPhotoParams) error
 	// The rating-updated consumer's idempotent, order-guarded upsert (ADR-018
 	// Decision 2, ADR-017's addendum Step 5b) — users.rating_average/
 	// rating_count are a read-only cache of what services/meetup owns as of

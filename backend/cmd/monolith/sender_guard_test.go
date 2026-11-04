@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -89,12 +87,15 @@ func TestRequireRealSendersInProduction(t *testing.T) {
 // non-empty string is Cloud Run's business, and a revision whose secret
 // is missing fails to start on its own.
 func TestRequireRealSendersInProduction_AcceptsTheDeployedManifest(t *testing.T) {
-	manifest, err := os.ReadFile(filepath.Join("..", "..", "service.yaml"))
-	if err != nil {
-		t.Fatalf("read backend/service.yaml: %v", err)
+	for _, m := range deployManifests(t) {
+		requireRealSendersAcceptManifest(t, m)
 	}
+}
+
+func requireRealSendersAcceptManifest(t *testing.T, m deployManifest) {
+	t.Helper()
 	declared := func(name string) bool {
-		return strings.Contains(string(manifest), "- name: "+name)
+		return strings.Contains(m.text, "- name: "+name)
 	}
 
 	// Mirror the manifest into a config: a declared var is a set var.
@@ -118,8 +119,8 @@ func TestRequireRealSendersInProduction_AcceptsTheDeployedManifest(t *testing.T)
 		func(string) string { return "meetups-backend" }, cfg,
 	); err != nil {
 		t.Fatalf("the deployed manifest would be refused at startup: %v\n"+
-			"backend/service.yaml declares: gmail=%v/%v resend=%v/%v twilio=%v/%v/%v",
-			err,
+			"%s declares: gmail=%v/%v resend=%v/%v twilio=%v/%v/%v",
+			err, m.path,
 			declared("GMAIL_ADDRESS"), declared("GMAIL_APP_PASSWORD"),
 			declared("RESEND_API_KEY"), declared("RESEND_FROM_EMAIL"),
 			declared("TWILIO_ACCOUNT_SID"), declared("TWILIO_AUTH_TOKEN"),

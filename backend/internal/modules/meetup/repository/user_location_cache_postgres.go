@@ -8,10 +8,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"professional-meetups-monolith/backend/internal/modules/meetup/repository/sqlcgen"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
+	"professional-meetups-monolith/backend/internal/platform/geo"
 )
 
 type postgresUserLocationCacheRepository struct {
@@ -34,8 +36,8 @@ func (r *postgresUserLocationCacheRepository) Upsert(
 
 	rowsAffected, err := r.q.UpsertUserLocationCache(ctx, sqlcgen.UpsertUserLocationCacheParams{
 		UserID:    parsed,
-		Lat:       lat,
-		Lng:       lng,
+		Lat:       geo.StoredPrecision(lat),
+		Lng:       geo.StoredPrecision(lng),
 		UpdatedAt: toTimestamptz(occurredAt),
 	})
 	if err != nil {
@@ -75,6 +77,7 @@ func (r *postgresUserLocationCacheRepository) WithinBrowseRadius(ctx context.Con
 	}
 	within, err := r.q.IsUserLocationWithinRadius(ctx, sqlcgen.IsUserLocationWithinRadiusParams{
 		CenterLng: centerLng, CenterLat: centerLat, UserID: user,
+		NotBefore: pgtype.Timestamptz{Time: time.Now().Add(-geo.LocationFreshFor), Valid: true},
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {

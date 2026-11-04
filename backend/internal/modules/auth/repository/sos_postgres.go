@@ -8,6 +8,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/repository/sqlcgen"
@@ -27,14 +29,8 @@ func NewTrustedContactRepository(pool *pgxpool.Pool) TrustedContactRepository {
 	return &postgresTrustedContactRepository{pool: pool, q: sqlcgen.New(pool)}
 }
 
-// InsertPending adds the contact, its pending-consent row and the
-// invitation log entry in one transaction, after checking every cap under
-// the user's lock and then the number's lock.
-//
-// The contact cap moved in here from the service, which used to count and
-// then insert as two separate calls: two additions racing could both see
-// two contacts and both insert, ending at four.
-func (r *postgresTrustedContactRepository) InsertPending(ctx context.Context, c NewPendingContact) (TrustedContact, error) {
+// Insert adds the contact after checking the cap under the user's lock.
+func (r *postgresTrustedContactRepository) Insert(ctx context.Context, c NewContact) (TrustedContact, error) {
 	user, err := uuid.Parse(c.UserID)
 	if err != nil {
 		return TrustedContact{}, fmt.Errorf("repository: invalid user id %q: %w", c.UserID, apperror.ErrInvalidInput)
@@ -47,13 +43,9 @@ func (r *postgresTrustedContactRepository) InsertPending(ctx context.Context, c 
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := r.q.WithTx(tx)
 
-	if err := qtx.LockTrustedContactInvitesForUser(ctx, c.UserID); err != nil {
-		return TrustedContact{}, fmt.Errorf("repository: lock contact invites for user: %w", err)
+	if err := qtx.LockTrustedContactsForUser(ctx, c.UserID); err != nil {
+		return TrustedContact{}, fmt.Errorf("repository: lock trusted contacts: %w", err)
 	}
-	if err := qtx.LockTrustedContactInvitesForPhone(ctx, c.PhoneHash); err != nil {
-		return TrustedContact{}, fmt.Errorf("repository: lock contact invites for number: %w", err)
-	}
-
 	existing, err := qtx.CountTrustedContactsForUser(ctx, user)
 	if err != nil {
 		return TrustedContact{}, fmt.Errorf("repository: count trusted contacts: %w", err)
@@ -61,71 +53,45 @@ func (r *postgresTrustedContactRepository) InsertPending(ctx context.Context, c 
 	if int(existing) >= c.MaxContacts {
 		return TrustedContact{}, fmt.Errorf("repository: %d trusted contacts: %w", existing, ErrTooManyTrustedContacts)
 	}
-
-	since := toTimestamptz(time.Now().Add(-c.CapWindow))
-	byUser, err := qtx.CountContactInvitesSentByUserSince(ctx, sqlcgen.CountContactInvitesSentByUserSinceParams{UserID: user, Since: since})
-	if err != nil {
-		return TrustedContact{}, fmt.Errorf("repository: count invites by user: %w", err)
-	}
-	if int(byUser) >= c.MaxInvitesPerUser {
-		return TrustedContact{}, fmt.Errorf("repository: %d invites by this user: %w", byUser, ErrContactInviteLimit)
-	}
-	toPhone, err := qtx.CountContactInvitesSentToPhoneSince(ctx, sqlcgen.CountContactInvitesSentToPhoneSinceParams{PhoneHash: c.PhoneHash, Since: since})
-	if err != nil {
-		return TrustedContact{}, fmt.Errorf("repository: count invites to number: %w", err)
-	}
-	if int(toPhone) >= c.MaxInvitesPerPhone {
-		return TrustedContact{}, fmt.Errorf("repository: %d invites to this number: %w", toPhone, ErrContactInviteLimit)
-	}
-
 	row, err := qtx.InsertTrustedContact(ctx, sqlcgen.InsertTrustedContactParams{
-		UserID:      user,
-		Name:        c.Name,
-		PhoneNumber: textOrNull(c.PhoneNumber),
-		Email:       textOrNull(c.Email),
+		UserID: user, Name: c.Name, PhoneNumber: c.PhoneNumber,
 	})
 	if err != nil {
-		return TrustedContact{}, fmt.Errorf("repository: insert trusted contact: %w", err)
-	}
-	if err := qtx.InsertPendingTrustedContact(ctx, sqlcgen.InsertPendingTrustedContactParams{
-		ContactID: row.ID,
-		TokenHash: c.TokenHash,
-		ExpiresAt: toTimestamptz(c.ExpiresAt),
-	}); err != nil {
-		return TrustedContact{}, fmt.Errorf("repository: insert pending trusted contact: %w", err)
-	}
-	if err := qtx.InsertContactInviteSent(ctx, sqlcgen.InsertContactInviteSentParams{UserID: user, PhoneHash: c.PhoneHash}); err != nil {
-		return TrustedContact{}, fmt.Errorf("repository: log contact invite: %w", err)
+		return TrustedContact{}, contactWriteError("insert", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return TrustedContact{}, fmt.Errorf("repository: commit trusted contact insert: %w", err)
 	}
-
-	contact := trustedContactFromRow(row)
-	contact.PendingUntil = c.ExpiresAt
-	return contact, nil
+	return trustedContactFromRow(row), nil
 }
 
-func (r *postgresTrustedContactRepository) Confirm(ctx context.Context, tokenHash string) (string, error) {
-	name, err := r.q.ConfirmTrustedContactByToken(ctx, tokenHash)
+func (r *postgresTrustedContactRepository) Update(ctx context.Context, contactID, userID, name, phoneNumber string) (TrustedContact, error) {
+	contact, err := uuid.Parse(contactID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return "", fmt.Errorf("repository: confirmation token: %w", apperror.ErrNotFound)
-		}
-		return "", fmt.Errorf("repository: confirm trusted contact: %w", err)
+		return TrustedContact{}, fmt.Errorf("repository: invalid contact id %q: %w", contactID, apperror.ErrInvalidInput)
 	}
-	return name, nil
-}
-
-func (r *postgresTrustedContactRepository) DeleteInvitesSentBefore(ctx context.Context, before time.Time, batchSize int) (int, error) {
-	n, err := r.q.DeleteContactInvitesSentBefore(ctx, sqlcgen.DeleteContactInvitesSentBeforeParams{
-		SentBefore: toTimestamptz(before),
-		BatchSize:  int32(batchSize),
+	user, err := uuid.Parse(userID)
+	if err != nil {
+		return TrustedContact{}, fmt.Errorf("repository: invalid user id %q: %w", userID, apperror.ErrInvalidInput)
+	}
+	row, err := r.q.UpdateTrustedContact(ctx, sqlcgen.UpdateTrustedContactParams{
+		ID: contact, UserID: user, Name: name, PhoneNumber: phoneNumber,
 	})
-	if err != nil {
-		return 0, fmt.Errorf("repository: delete old contact invites: %w", err)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return TrustedContact{}, fmt.Errorf("repository: trusted contact %s: %w", contactID, apperror.ErrNotFound)
 	}
-	return int(n), nil
+	if err != nil {
+		return TrustedContact{}, contactWriteError("update", err)
+	}
+	return trustedContactFromRow(row), nil
+}
+
+func contactWriteError(op string, err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return fmt.Errorf("repository: %s trusted contact: %w", op, ErrDuplicateTrustedContact)
+	}
+	return fmt.Errorf("repository: %s trusted contact: %w", op, err)
 }
 
 func (r *postgresTrustedContactRepository) ListForUser(ctx context.Context, userID string) ([]TrustedContact, error) {
@@ -139,20 +105,7 @@ func (r *postgresTrustedContactRepository) ListForUser(ctx context.Context, user
 	}
 	contacts := make([]TrustedContact, 0, len(rows))
 	for _, row := range rows {
-		var pendingUntil time.Time // zero: confirmed
-		if row.PendingExpiresAt.Valid {
-			pendingUntil = row.PendingExpiresAt.Time
-		}
-		contacts = append(contacts, TrustedContact{
-			ID:           row.ID.String(),
-			UserID:       row.UserID.String(),
-			Name:         row.Name,
-			PhoneNumber:  textOrEmpty(row.PhoneNumber),
-			Email:        textOrEmpty(row.Email),
-			CreatedAt:    timestamptzOrZero(row.CreatedAt),
-			UpdatedAt:    timestamptzOrZero(row.UpdatedAt),
-			PendingUntil: pendingUntil,
-		})
+		contacts = append(contacts, trustedContactFromRow(row))
 	}
 	return contacts, nil
 }
@@ -181,8 +134,7 @@ func trustedContactFromRow(row sqlcgen.AuthTrustedContact) TrustedContact {
 		ID:          row.ID.String(),
 		UserID:      row.UserID.String(),
 		Name:        row.Name,
-		PhoneNumber: textOrEmpty(row.PhoneNumber),
-		Email:       textOrEmpty(row.Email),
+		PhoneNumber: row.PhoneNumber,
 		CreatedAt:   timestamptzOrZero(row.CreatedAt),
 		UpdatedAt:   timestamptzOrZero(row.UpdatedAt),
 	}
@@ -246,13 +198,26 @@ func (r *postgresSOSEventRepository) Claim(ctx context.Context, c SOSClaim) (SOS
 	if int(count) >= c.MaxPerWindow {
 		return SOSOutcome{}, fmt.Errorf("repository: %d sos events in window: %w", count, ErrSOSLimit)
 	}
+	if c.MaxPerHour > 0 {
+		hourly, err := qtx.CountSOSEventsForUserSince(ctx, sqlcgen.CountSOSEventsForUserSinceParams{
+			UserID: user, Since: toTimestamptz(time.Now().Add(-time.Hour)),
+		})
+		if err != nil {
+			return SOSOutcome{}, fmt.Errorf("repository: count sos events: %w", err)
+		}
+		if int(hourly) >= c.MaxPerHour {
+			return SOSOutcome{}, fmt.Errorf("repository: %d sos events in the last hour: %w", hourly, ErrSOSHourlyLimit)
+		}
+	}
 
 	id, err := qtx.ClaimSOSEvent(ctx, sqlcgen.ClaimSOSEventParams{
-		UserID:          user,
-		ClientRequestID: textOrNull(c.ClientRequestID),
-		ContextMessage:  textOrNull(c.Event.ContextMessage),
-		Latitude:        float8OrNull(c.Event.Latitude),
-		Longitude:       float8OrNull(c.Event.Longitude),
+		UserID:             user,
+		ClientRequestID:    textOrNull(c.ClientRequestID),
+		ContextMessage:     textOrNull(c.Event.ContextMessage),
+		Latitude:           float8OrNull(c.Event.Latitude),
+		Longitude:          float8OrNull(c.Event.Longitude),
+		LocationSource:     textOrNull(c.Event.LocationSource),
+		LocationCapturedAt: capturedAtOrNull(c.Event.LocationCapturedAt),
 	})
 	if err != nil {
 		return SOSOutcome{}, fmt.Errorf("repository: claim sos event: %w", err)
@@ -296,4 +261,11 @@ func (r *postgresSOSEventRepository) Outcome(ctx context.Context, userID, client
 		Completed:        row.CompletedAt.Valid,
 		ContactsNotified: int(row.ContactsNotified),
 	}, nil
+}
+
+func capturedAtOrNull(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return toTimestamptz(*t)
 }

@@ -5,10 +5,12 @@
 //	DATABASE_URL=... analyticsreport --date=2026-10-31 --out=report.xlsx
 //	DATABASE_URL=... analyticsreport --date=2026-10-31 --deliver
 //
-// --deliver emails ANALYTICS_REPORT_RECIPIENTS and replaces
-// analytics/reports/YYYY-MM-DD.xlsx in ANALYTICS_ARCHIVE_BUCKET, through the
-// same senders the monolith uses (GMAIL_* or RESEND_*, otherwise the
-// logging sender). Raw events must still be in Postgres (the retention
+// --deliver emails ANALYTICS_REPORT_RECIPIENTS, through the same senders the
+// monolith uses (GMAIL_* or RESEND_*, otherwise the logging sender), and
+// stores the workbook in ANALYTICS_ARCHIVE_BUCKET as
+// analytics/reports/YYYY-MM-DD.regenerated-<UTC time>.xlsx, beside the daily
+// copy, which it never replaces (#116). The upload authenticates through the
+// metadata server, so it works only on Google Cloud as the service account. Raw events must still be in Postgres (the retention
 // window, 14 days by default); an older day is rebuilt from its aggregates
 // only if they are already there.
 package main

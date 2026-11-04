@@ -5,48 +5,51 @@ import (
 	"fmt"
 	"time"
 
-	"professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 )
 
-// recentMeetupsOnProfile is how many of a member's meetups their public
-// profile shows.
-const recentMeetupsOnProfile = 5
+// How much of a host's history a profile shows.
+const (
+	recentMeetupsOnProfile = 5
+	reviewsOnProfile       = 20
+)
 
-// MemberActivity is what the public profile shows of a member's history,
-// as one particular viewer may see it.
+// colombo is the app's one time zone. A profile's dates and months are
+// Sri Lankan ones whatever the server's zone is.
+var colombo = time.FixedZone("Asia/Colombo", 5*60*60+30*60)
+
+// MemberActivity is what a public profile shows of a member's history. It
+// is the same for every viewer who may see it.
 type MemberActivity struct {
 	RecentMeetups []MemberMeetup
+	Reviews       []MemberReview
+	// IdentityHidden: the viewer is a guest looking at someone else, so the
+	// member's name and photo are not shown either (#103).
+	IdentityHidden bool
 }
 
-// MemberMeetup is one meetup on a member's profile: what it was, the
-// member's role in it, how many came, how it was rated overall, and the
-// written comments.
+// MemberMeetup is one finished meetup a member hosted: what it was, the
+// day, the area, how many came and how it was rated. Day is noon in Colombo
+// on that date, so the hour of the meetup never leaves the server and the
+// date reads the same on a phone in any nearby zone.
 type MemberMeetup struct {
-	ID               string
 	Intent           Intent
 	Status           Status
-	WindowStart      time.Time
-	WindowEnd        time.Time
+	Day              time.Time
 	LocationLabel    string
-	Hosted           bool
 	ParticipantCount int
 	OverallAverage   float64
 	ReviewCount      int
-	// ViewerWasIn — the viewer was host or accepted on this meetup, so the
-	// comment authors below are named. Otherwise they are anonymous.
-	ViewerWasIn bool
-	Comments    []MemberMeetupComment
 }
 
-// MemberMeetupComment is one review note on a meetup. AuthorName is empty
-// when the viewer was not on that meetup — the same rule that hides
-// participant identities from outsiders on a live meetup (see
-// ListMeetupParticipants) applied to who said what about a past one.
-type MemberMeetupComment struct {
-	AuthorName string
-	Note       string
-	WrittenAt  time.Time
+// MemberReview is one anonymous review: a score, the text and a month, for
+// every viewer (plan 2.3). There is deliberately no field that could name
+// the author or point to a meetup. A meetup of three would give the writer
+// away, so reviews are not attached to meetups at all.
+type MemberReview struct {
+	Score int
+	Text  string
+	Month string // YYYY-MM
 }
 
 // GetMemberActivity is the gate AND the content behind another member's
@@ -67,7 +70,20 @@ type MemberMeetupComment struct {
 // a directory by guessing ids. The rule lives in
 // repository/queries/member.sql (CanViewMemberProfile), with the reasoning
 // for each clause; this is the one place it is enforced.
-func (s *service) GetMemberActivity(ctx context.Context, viewerID, targetID string) (MemberActivity, error) {
+//
+// # WHAT A GUEST SEES (#103)
+//
+// A guest (below visibilityFloor) is not shown who hosts a meetup on its
+// card, so a profile cannot tell them either: they get no meetups, and
+// IdentityHidden asks the gateway to leave out the name and photo. Their
+// own profile is always theirs to see.
+//
+// # WHAT ANYONE ELSE SEES (plan 2.3)
+//
+// A host's finished meetups and the anonymous reviews of them. A member who
+// only joined shows their count and rating, which the gateway reads from
+// the profile; no meetup of theirs is listed here.
+func (s *service) GetMemberActivity(ctx context.Context, viewerID string, viewerTrustLevel int, targetID string) (MemberActivity, error) {
 	ok, err := s.meetups.CanViewMemberProfile(ctx, viewerID, targetID)
 	if err != nil {
 		return MemberActivity{}, err
@@ -75,52 +91,56 @@ func (s *service) GetMemberActivity(ctx context.Context, viewerID, targetID stri
 	if !ok {
 		return MemberActivity{}, fmt.Errorf("meetup: you can see a member's profile once you share a meetup with them: %w", apperror.ErrForbidden)
 	}
+	if viewerID != targetID && viewerTrustLevel < visibilityFloor {
+		return MemberActivity{RecentMeetups: []MemberMeetup{}, Reviews: []MemberReview{}, IdentityHidden: true}, nil
+	}
 
-	rows, err := s.meetups.ListRecentMeetupsForMember(ctx, viewerID, targetID, recentMeetupsOnProfile)
+	rows, err := s.meetups.ListRecentMeetupsForMember(ctx, targetID, recentMeetupsOnProfile)
 	if err != nil {
 		return MemberActivity{}, err
 	}
-	ids := make([]string, 0, len(rows))
-	for _, r := range rows {
-		ids = append(ids, r.ID)
-	}
-	comments, err := s.meetups.ListReviewComments(ctx, ids)
+	reviews, err := s.meetups.ListHostReviews(ctx, targetID, reviewsOnProfile)
 	if err != nil {
 		return MemberActivity{}, err
 	}
-	byMeetup := make(map[string][]repository.MeetupReviewComment, len(rows))
-	for _, c := range comments {
-		byMeetup[c.MeetupID] = append(byMeetup[c.MeetupID], c)
-	}
 
-	out := MemberActivity{RecentMeetups: make([]MemberMeetup, 0, len(rows))}
+	out := MemberActivity{
+		RecentMeetups: make([]MemberMeetup, 0, len(rows)),
+		Reviews:       make([]MemberReview, 0, len(reviews)),
+	}
 	for _, r := range rows {
-		mm := MemberMeetup{
-			ID:               r.ID,
+		out.RecentMeetups = append(out.RecentMeetups, MemberMeetup{
 			Intent:           Intent(r.Intent),
 			Status:           Status(r.Status),
-			WindowStart:      r.WindowStart,
-			WindowEnd:        r.WindowEnd,
+			Day:              dayOnly(r.WindowStart),
 			LocationLabel:    r.LocationLabel,
-			Hosted:           r.TargetIsHost,
 			ParticipantCount: r.ParticipantCount,
 			OverallAverage:   r.OverallAverage,
 			ReviewCount:      r.ReviewCount,
-			ViewerWasIn:      r.ViewerWasIn,
-			Comments:         make([]MemberMeetupComment, 0, len(byMeetup[r.ID])),
-		}
-		for _, c := range byMeetup[r.ID] {
-			name := ""
-			if r.ViewerWasIn {
-				name = c.AuthorName
-			}
-			mm.Comments = append(mm.Comments, MemberMeetupComment{
-				AuthorName: name,
-				Note:       c.Note,
-				WrittenAt:  c.WrittenAt,
-			})
-		}
-		out.RecentMeetups = append(out.RecentMeetups, mm)
+		})
+	}
+	for _, r := range reviews {
+		out.Reviews = append(out.Reviews, MemberReview{
+			Score: r.Score,
+			Text:  clampText(r.Text, maxFreeTextReasonLength),
+			Month: r.WrittenAt.In(colombo).Format("2006-01"),
+		})
 	}
 	return out, nil
+}
+
+// dayOnly is noon in Colombo on t's Colombo date.
+func dayOnly(t time.Time) time.Time {
+	y, m, d := t.In(colombo).Date()
+	return time.Date(y, m, d, 12, 0, 0, 0, colombo)
+}
+
+// clampText cuts s to at most limit characters. New reviews are limited when
+// written; this holds the limit for ones written before it.
+func clampText(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit])
 }

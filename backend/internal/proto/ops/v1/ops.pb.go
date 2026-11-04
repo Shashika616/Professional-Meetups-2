@@ -263,7 +263,14 @@ func (x *ScrapeMetricsResponse) GetText() []byte {
 }
 
 type RunScheduledWorkRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which sweeps to run (tracker #102). Empty is the core group: lifecycle,
+	// outboxes, retention, auth, billing and the cheap analytics sweeps.
+	// "analytics" is the heavy group (aggregation, archive, the daily
+	// report), which needs minutes rather than seconds and has its own
+	// Cloud Scheduler job, so it can never crowd the core sweeps out of a
+	// tick. An unknown group runs nothing and is an error.
+	Group         string `protobuf:"bytes,1,opt,name=group,proto3" json:"group,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -296,6 +303,13 @@ func (x *RunScheduledWorkRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RunScheduledWorkRequest.ProtoReflect.Descriptor instead.
 func (*RunScheduledWorkRequest) Descriptor() ([]byte, []int) {
 	return file_ops_v1_ops_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RunScheduledWorkRequest) GetGroup() string {
+	if x != nil {
+		return x.Group
+	}
+	return ""
 }
 
 // SweepResult is one sweep's outcome. `name` matches the log field used by
@@ -441,8 +455,9 @@ const file_ops_v1_ops_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\x11.ops.v1.FlagValueR\x05value:\x028\x01\"\x16\n" +
 	"\x14ScrapeMetricsRequest\"+\n" +
 	"\x15ScrapeMetricsResponse\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\fR\x04text\"\x19\n" +
-	"\x17RunScheduledWorkRequest\"S\n" +
+	"\x04text\x18\x01 \x01(\fR\x04text\"/\n" +
+	"\x17RunScheduledWorkRequest\x12\x14\n" +
+	"\x05group\x18\x01 \x01(\tR\x05group\"S\n" +
 	"\vSweepResult\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\baffected\x18\x02 \x01(\x03R\baffected\x12\x14\n" +

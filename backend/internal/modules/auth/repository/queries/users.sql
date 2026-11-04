@@ -280,3 +280,11 @@ SELECT id FROM gone;
 -- first, before this runs. See the auth service's DeleteAccount for the
 -- ordering and why it is that way round.
 DELETE FROM auth.users WHERE id = $1;
+
+-- name: ClearStaleLastKnownLocations :execrows
+-- Plan 30B, 3.3: a last known location older than 30 days is forgotten.
+-- Nothing reads one that old (joining and nearby notifications need the
+-- last 24 hours), so keeping it would only be keeping where someone was.
+UPDATE auth.users
+   SET last_location_lat = NULL, last_location_lng = NULL, last_location_updated_at = NULL
+ WHERE last_location_updated_at < now() - interval '30 days';

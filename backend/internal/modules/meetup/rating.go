@@ -194,6 +194,13 @@ func (s *service) SubmitRating(ctx context.Context, req SubmitRatingRequest) err
 	if !raterIsParticipant {
 		return fmt.Errorf("meetup: caller is not a participant of meetup %s: %w", req.MeetupID, apperror.ErrForbidden)
 	}
+	m, err := s.meetups.GetByID(ctx, req.MeetupID, req.RaterUserID)
+	if err != nil {
+		return err
+	}
+	if err := withinReviewWindow(m, time.Now()); err != nil {
+		return err
+	}
 
 	// A withdrawn requester never satisfies IsParticipant by definition (it
 	// only covers the host + currently-accepted requesters) — this stands in

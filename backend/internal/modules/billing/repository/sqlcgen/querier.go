@@ -70,6 +70,7 @@ type Querier interface {
 	// Zero rows means this notification was handled before.
 	InsertProcessedNotification(ctx context.Context, arg InsertProcessedNotificationParams) (int64, error)
 	InsertReconciliationRun(ctx context.Context, arg InsertReconciliationRunParams) (int64, error)
+	// created_at comes from the same clock CountRefundsSince is measured against.
 	InsertRefundLog(ctx context.Context, arg InsertRefundLogParams) (int64, error)
 	// A repeated transaction inserts nothing and returns no row; the caller
 	// then reads the original.

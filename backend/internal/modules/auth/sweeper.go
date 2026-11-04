@@ -68,7 +68,8 @@ type refreshTokenSweeperService interface {
 	SweepExpiredRefreshTokens(ctx context.Context) (int, error)
 	SweepAbandonedGuests(ctx context.Context) (int, error)
 	SweepExpiredSafetyHolds(ctx context.Context) (int, error)
-	SweepContactInvites(ctx context.Context) (int, error)
+	SweepOTPBudgets(ctx context.Context) (int, error)
+	SweepLocationRetention(ctx context.Context) (int, error)
 }
 
 // NewRefreshTokenSweeper constructs a sweeper over svc.
@@ -134,12 +135,20 @@ func (s *RefreshTokenSweeper) Tick(ctx context.Context) {
 		s.logger.Info("safety hold purge", "purged", holds)
 	}
 
-	// Independent too: the invitation log only bounds future invitations.
-	invites, err := s.svc.SweepContactInvites(ctx)
+	// The daily OTP budgets (#106) need only today and yesterday.
+	budgets, err := s.svc.SweepOTPBudgets(ctx)
 	if err != nil {
-		s.logger.Error("contact invitation log trim", "error", err)
-	} else if invites > 0 {
-		s.logger.Info("contact invitation log trim", "deleted", invites)
+		s.logger.Error("otp budget trim", "error", err)
+	} else if budgets > 0 {
+		s.logger.Info("otp budget trim", "deleted", budgets)
+	}
+
+	// Old locations and SOS events (plan 30B, 3.3).
+	located, err := s.svc.SweepLocationRetention(ctx)
+	if err != nil {
+		s.logger.Error("location retention", "error", err)
+	} else if located > 0 {
+		s.logger.Info("location retention", "affected", located)
 	}
 }
 
@@ -224,26 +233,6 @@ func (s *service) SweepExpiredRefreshTokens(ctx context.Context) (int, error) {
 		//
 		// The cost is one extra query that returns 0 at the end of a sweep
 		// that did work. refreshTokenSweepMaxBatches still bounds the loop.
-		if deleted == 0 {
-			return total, nil
-		}
-	}
-	return total, nil
-}
-
-// SweepContactInvites trims the trusted-contact invitation log (#80). Same
-// batching as every other sweep in this file.
-func (s *service) SweepContactInvites(ctx context.Context) (int, error) {
-	total := 0
-	for batch := 0; batch < refreshTokenSweepMaxBatches; batch++ {
-		if err := ctx.Err(); err != nil {
-			return total, nil
-		}
-		deleted, err := s.sos.SweepContactInvites(ctx, refreshTokenSweepBatchSize)
-		if err != nil {
-			return total, err
-		}
-		total += deleted
 		if deleted == 0 {
 			return total, nil
 		}

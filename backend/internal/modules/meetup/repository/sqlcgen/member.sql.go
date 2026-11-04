@@ -48,9 +48,9 @@ type CanViewMemberProfileParams struct {
 }
 
 // Queries behind another member's public profile (GET /v1/users/{id}).
-// Every one takes the VIEWER as well as the target, because what is
-// visible depends on what the two of them have shared — see
-// member.go in the service layer for the rule.
+// Who may open a profile depends on what viewer and target have shared; see
+// member.go in the service layer. What a profile then shows does not depend
+// on the viewer at all (plan 2.3).
 // True when the viewer may open the target's profile: they are the same
 // person; the target hosts (or has hosted) a meetup — a host is public by
 // design, since you must be able to judge them before asking to join; the
@@ -86,50 +86,50 @@ func (q *Queries) CanViewMemberProfile(ctx context.Context, arg CanViewMemberPro
 	return can_view, err
 }
 
-const listMeetupReviewComments = `-- name: ListMeetupReviewComments :many
+const listHostReviews = `-- name: ListHostReviews :many
 SELECT
-  f.meetup_id,
-  f.user_id AS author_id,
-  COALESCE(u.full_name, '') AS author_name,
+  f.overall_score::int AS score,
   f.notes,
   f.review_completed_at
 FROM meetup.meetup_feedback f
-LEFT JOIN meetup.user_display_cache u ON u.user_id = f.user_id
-WHERE f.meetup_id = ANY($1::uuid[])
+JOIN meetup.meetups m ON m.id = f.meetup_id
+WHERE m.host_user_id = $1::uuid
+  AND f.user_id <> m.host_user_id
   -- Only a finished review is public (#90). A row can exist, and carry
   -- text, before its author ever completed the review.
   AND f.review_completed_at IS NOT NULL
+  AND f.overall_score IS NOT NULL
   AND f.notes IS NOT NULL AND btrim(f.notes) <> ''
-ORDER BY f.meetup_id, f.review_completed_at
+ORDER BY f.review_completed_at DESC
+LIMIT $2
 `
 
-type ListMeetupReviewCommentsRow struct {
-	MeetupID          uuid.UUID          `json:"meetup_id"`
-	AuthorID          uuid.UUID          `json:"author_id"`
-	AuthorName        string             `json:"author_name"`
+type ListHostReviewsParams struct {
+	TargetID  uuid.UUID `json:"target_id"`
+	PageLimit int32     `json:"page_limit"`
+}
+
+type ListHostReviewsRow struct {
+	Score             int32              `json:"score"`
 	Notes             pgtype.Text        `json:"notes"`
 	ReviewCompletedAt pgtype.Timestamptz `json:"review_completed_at"`
 }
 
-// The written comments on a set of meetups, oldest first within a meetup.
-// The author's display name rides along; the service blanks it for a
-// viewer who was not on that meetup.
-func (q *Queries) ListMeetupReviewComments(ctx context.Context, meetupIds []uuid.UUID) ([]ListMeetupReviewCommentsRow, error) {
-	rows, err := q.db.Query(ctx, listMeetupReviewComments, meetupIds)
+// The written reviews participants left on the target's hosted meetups,
+// newest first (plan 2.3). Always anonymous: this query cannot name anyone,
+// because no author column and no meetup column leave it. A review is not
+// tied to a meetup on the profile either, since a small meetup's guest list
+// would then give the author away.
+func (q *Queries) ListHostReviews(ctx context.Context, arg ListHostReviewsParams) ([]ListHostReviewsRow, error) {
+	rows, err := q.db.Query(ctx, listHostReviews, arg.TargetID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListMeetupReviewCommentsRow
+	var items []ListHostReviewsRow
 	for rows.Next() {
-		var i ListMeetupReviewCommentsRow
-		if err := rows.Scan(
-			&i.MeetupID,
-			&i.AuthorID,
-			&i.AuthorName,
-			&i.Notes,
-			&i.ReviewCompletedAt,
-		); err != nil {
+		var i ListHostReviewsRow
+		if err := rows.Scan(&i.Score, &i.Notes, &i.ReviewCompletedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -141,56 +141,48 @@ func (q *Queries) ListMeetupReviewComments(ctx context.Context, meetupIds []uuid
 }
 
 const listRecentMeetupsForMember = `-- name: ListRecentMeetupsForMember :many
-WITH membership AS (
-  SELECT m.id AS meetup_id, m.host_user_id AS user_id, true AS is_host FROM meetup.meetups m
-  UNION ALL
-  SELECT r.meetup_id, r.requester_id, false FROM meetup.meetup_requests r WHERE r.status = 'accepted'
-)
 SELECT
-  m.id,
   m.intent,
   m.status,
   m.window_start,
-  m.window_end,
   m.location_label,
-  tm.is_host AS target_is_host,
-  (SELECT count(*) FROM membership c WHERE c.meetup_id = m.id)::int AS participant_count,
-  COALESCE((SELECT avg(f.overall_score) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.overall_score IS NOT NULL), 0)::float8 AS overall_average,
-  (SELECT count(*) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.overall_score IS NOT NULL)::int AS review_count,
-  EXISTS (SELECT 1 FROM membership v WHERE v.meetup_id = m.id AND v.user_id = $1::uuid) AS viewer_was_in
+  (1 + (SELECT count(*) FROM meetup.meetup_requests r WHERE r.meetup_id = m.id AND r.status = 'accepted'))::int AS participant_count,
+  COALESCE((SELECT avg(f.overall_score) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.user_id <> m.host_user_id AND f.overall_score IS NOT NULL), 0)::float8 AS overall_average,
+  (SELECT count(*) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.user_id <> m.host_user_id AND f.overall_score IS NOT NULL)::int AS review_count
 FROM meetup.meetups m
-JOIN membership tm ON tm.meetup_id = m.id AND tm.user_id = $2::uuid
-WHERE m.status <> 'cancelled'
+WHERE m.host_user_id = $1::uuid
+  AND (m.status = 'completed' OR (m.status IN ('open', 'full') AND m.window_end < now()))
 ORDER BY m.window_start DESC
-LIMIT $3
+LIMIT $2
 `
 
 type ListRecentMeetupsForMemberParams struct {
-	ViewerID  uuid.UUID `json:"viewer_id"`
 	TargetID  uuid.UUID `json:"target_id"`
 	PageLimit int32     `json:"page_limit"`
 }
 
 type ListRecentMeetupsForMemberRow struct {
-	ID               uuid.UUID          `json:"id"`
 	Intent           MeetupIntentType   `json:"intent"`
 	Status           MeetupMeetupStatus `json:"status"`
 	WindowStart      pgtype.Timestamptz `json:"window_start"`
-	WindowEnd        pgtype.Timestamptz `json:"window_end"`
 	LocationLabel    string             `json:"location_label"`
-	TargetIsHost     bool               `json:"target_is_host"`
 	ParticipantCount int32              `json:"participant_count"`
 	OverallAverage   float64            `json:"overall_average"`
 	ReviewCount      int32              `json:"review_count"`
-	ViewerWasIn      bool               `json:"viewer_was_in"`
 }
 
-// The target's last N meetups as host or accepted participant, newest
-// window first, with the aggregate the profile shows per meetup and whether
-// the VIEWER was on it too (which decides whether reviewer names below are
-// shown or withheld).
+// The meetups the target HOSTED that are over, newest first, with what the
+// profile shows of each (plan 2.3). Only the host's are listed: a member who
+// joined shows a count and a rating, never where they were.
+//
+// Only meetups that are over (#103): completed, or past their window and not
+// yet swept. An open or full meetup is a future time and place, and a
+// profile is not where those are published.
+//
+// The average is the participants' opinion of the meetup: the host's own
+// review of it is left out.
 func (q *Queries) ListRecentMeetupsForMember(ctx context.Context, arg ListRecentMeetupsForMemberParams) ([]ListRecentMeetupsForMemberRow, error) {
-	rows, err := q.db.Query(ctx, listRecentMeetupsForMember, arg.ViewerID, arg.TargetID, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listRecentMeetupsForMember, arg.TargetID, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -199,17 +191,13 @@ func (q *Queries) ListRecentMeetupsForMember(ctx context.Context, arg ListRecent
 	for rows.Next() {
 		var i ListRecentMeetupsForMemberRow
 		if err := rows.Scan(
-			&i.ID,
 			&i.Intent,
 			&i.Status,
 			&i.WindowStart,
-			&i.WindowEnd,
 			&i.LocationLabel,
-			&i.TargetIsHost,
 			&i.ParticipantCount,
 			&i.OverallAverage,
 			&i.ReviewCount,
-			&i.ViewerWasIn,
 		); err != nil {
 			return nil, err
 		}

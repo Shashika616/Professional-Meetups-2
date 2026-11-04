@@ -377,3 +377,117 @@ func TestRateLimit_StoreWebhooksAreNotThrottledAtTwenty(t *testing.T) {
 		}
 	}
 }
+
+// Tracker #107 (review N1-A2): encoding/json matches keys without regard
+// to case, so a peek that read only parsed["email"] let {"EMAIL": ...} or
+// {"Email": ...} through every keyed limit while the handler still saw the
+// address. Each spelling of the key must count against the same bucket.
+func TestRateLimit_KeyedChecksIgnoreTheCaseOfTheKey(t *testing.T) {
+	for _, key := range []string{"phone_number", "PHONE_NUMBER", "Phone_Number"} {
+		t.Run(key, func(t *testing.T) {
+			h := RateLimit(newLimiter(t))(&countingHandler{})
+			body := fmt.Sprintf(`{%q:"+94771234567"}`, key)
+			for i := 1; i <= targetKeyedLimit+1; i++ {
+				rec := httptest.NewRecorder()
+				r := httptest.NewRequest(http.MethodPost, "/v1/verification/phone/start", strings.NewReader(body))
+				r.RemoteAddr = fmt.Sprintf("192.0.2.%d:999", i)
+				h.ServeHTTP(rec, r)
+				if i <= targetKeyedLimit && rec.Code != http.StatusOK {
+					t.Fatalf("send %d: %d", i, rec.Code)
+				}
+				if i > targetKeyedLimit && rec.Code != http.StatusTooManyRequests {
+					t.Errorf("send %d with key %q: %d, want 429", i, key, rec.Code)
+				}
+			}
+		})
+	}
+	h := RateLimit(newLimiter(t))(&countingHandler{})
+	for i := 1; i <= requestsPerMinute+1; i++ {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/v1/auth/email/login", strings.NewReader(`{"EMAIL":"victim@example.com","code":"1"}`))
+		r.RemoteAddr = fmt.Sprintf("192.0.2.%d:999", i)
+		h.ServeHTTP(rec, r)
+		if i > requestsPerMinute && rec.Code != http.StatusTooManyRequests {
+			t.Errorf("an upper-case EMAIL key skipped the per-address limit: %d", rec.Code)
+		}
+	}
+}
+
+// A body that names the key twice, exactly or in another case, is
+// ambiguous: the limiter and the handler could read different values. It
+// is refused before either does.
+func TestRateLimit_DuplicateOrConflictingKeysAreRefused(t *testing.T) {
+	for name, body := range map[string]string{
+		"exact duplicate":     `{"email":"a@example.com","email":"victim@example.com"}`,
+		"case conflict":       `{"email":"a@example.com","Email":"victim@example.com"}`,
+		"duplicate elsewhere": `{"email":"a@example.com","code":"1","CODE":"2"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			next := &countingHandler{}
+			h := RateLimit(newLimiter(t))(next)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, postJSON("/v1/auth/email/login", body))
+			if rec.Code != http.StatusBadRequest || next.calls != 0 {
+				t.Errorf("status %d, handler calls %d; want 400 and none", rec.Code, next.calls)
+			}
+		})
+	}
+	// An ordinary body still passes, and a route that is not keyed is not
+	// inspected at all.
+	next := &countingHandler{}
+	h := RateLimit(newLimiter(t))(next)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, postJSON("/v1/auth/email/login", `{"email":"a@example.com","code":"123456"}`))
+	if rec.Code != http.StatusOK {
+		t.Errorf("an ordinary body: %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, postJSON("/v1/meetups", `{"x":1,"x":2}`))
+	if rec.Code != http.StatusOK {
+		t.Errorf("a route without a keyed check was inspected: %d", rec.Code)
+	}
+}
+
+// Tracker #81: keyed on the raw path, every meetup id and every 404 path
+// was a fresh bucket of its own: an id-cycling caller was never limited,
+// and each one grew the map. Keyed on the route pattern, they share one.
+func TestRateLimit_KeysOnTheRoutePatternNotTheRawPath(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/meetups/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := RateLimit(newLimiter(t), WithRoutePatterns(mux))(mux)
+	for i := 1; i <= requestsPerMinute+1; i++ {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/meetups/%d", i), nil)
+		r.RemoteAddr = "203.0.113.10:1"
+		h.ServeHTTP(rec, r)
+		if i > requestsPerMinute && rec.Code != http.StatusTooManyRequests {
+			t.Errorf("request %d to a fresh meetup id: %d, want 429", i, rec.Code)
+		}
+	}
+	for i := 1; i <= requestsPerMinute+1; i++ {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/no/such/path/%d", i), nil)
+		r.RemoteAddr = "203.0.113.11:1"
+		h.ServeHTTP(rec, r)
+		if i > requestsPerMinute && rec.Code != http.StatusTooManyRequests {
+			t.Errorf("request %d to a fresh 404 path: %d, want 429", i, rec.Code)
+		}
+	}
+}
+
+// Plan 2.1: a screen of avatars is many photo requests from one phone at
+// once, far past the default 20 a minute.
+func TestRateLimit_PhotosHaveAHigherCeiling(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/users/{id}/photo", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	h := RateLimit(newLimiter(t), WithRoutePatterns(mux))(mux)
+	for i := 1; i <= 100; i++ {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/v1/users/%d/photo", i), nil)
+		r.RemoteAddr = "203.0.113.20:1"
+		h.ServeHTTP(rec, r)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("avatar %d: %d", i, rec.Code)
+		}
+	}
+}

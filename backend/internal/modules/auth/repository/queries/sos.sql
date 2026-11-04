@@ -1,25 +1,20 @@
 -- Minimal real SOS + trusted contacts (ADR-026, Slice H).
 
 -- name: InsertTrustedContact :one
-INSERT INTO auth.trusted_contacts (user_id, name, phone_number, email)
-VALUES ($1, $2, $3, $4)
+INSERT INTO auth.trusted_contacts (user_id, name, phone_number, phone_normalized)
+VALUES ($1, $2, $3, $3)
+RETURNING *;
+
+-- name: UpdateTrustedContact :one
+-- Scoped to (id, user_id), like the delete.
+UPDATE auth.trusted_contacts
+   SET name = $3, phone_number = $4, phone_normalized = $4
+ WHERE id = $1 AND user_id = $2
 RETURNING *;
 
 -- name: ListTrustedContactsForUser :many
--- With each contact's consent state (#80, migration 0024): a contact with a
--- pending row has not confirmed yet, and pending_expires_at says whether the
--- link it was sent can still be used. No pending row means confirmed —
--- including every contact added before consent existed (D2).
---
--- Explicit columns, not c.*: a star query here is what made 0024 keep its
--- state out of this table, and it should not come back.
-SELECT
-  c.id, c.user_id, c.name, c.phone_number, c.email, c.created_at, c.updated_at,
-  p.expires_at AS pending_expires_at
-FROM auth.trusted_contacts c
-LEFT JOIN auth.pending_trusted_contacts p ON p.contact_id = c.id
-WHERE c.user_id = $1
-ORDER BY c.created_at ASC;
+-- Oldest first: SOS alerts the first two (decision D5).
+SELECT * FROM auth.trusted_contacts WHERE user_id = $1 ORDER BY created_at ASC, id ASC;
 
 -- name: CountTrustedContactsForUser :one
 -- Backs the soft cap of 3 per user (ADR-026 §1), enforced at the service
@@ -39,7 +34,7 @@ DELETE FROM auth.trusted_contacts WHERE id = $1 AND user_id = $2;
 -- trusted_contacts.user_id is a logical FK with no constraint, by design
 -- (0001_auth_schema's header). Without this the rows would outlive the
 -- account — and they are the most sensitive thing in the schema, because
--- they are OTHER PEOPLE's names, phone numbers and email addresses, entered
+-- they are OTHER PEOPLE's names and phone numbers, entered
 -- by someone who has now asked to be forgotten.
 DELETE FROM auth.trusted_contacts WHERE user_id = $1;
 
@@ -64,7 +59,9 @@ SELECT
     'latitude',          s.latitude,
     'longitude',         s.longitude,
     'triggered_at',      s.triggered_at,
-    'contacts_notified', s.contacts_notified
+    'contacts_notified', s.contacts_notified,
+    'location_source',   s.location_source,
+    'location_captured_at', s.location_captured_at
   ) ORDER BY s.triggered_at),
   now() + sqlc.arg(hold_for)::interval
 FROM auth.users u
@@ -82,56 +79,10 @@ WHERE id IN (
   LIMIT sqlc.arg(batch_size)
 );
 
--- name: LockTrustedContactInvitesForUser :exec
--- Serialises one user's contact additions, so the contact cap and the daily
--- invite cap are a count and an insert that cannot interleave (#80).
--- Namespace 3; ratings use 2.
+-- name: LockTrustedContactsForUser :exec
+-- Serialises one user's contact additions, so the cap is a count and an
+-- insert that cannot interleave. Namespace 3; ratings use 2.
 SELECT pg_advisory_xact_lock(3, hashtext(sqlc.arg(user_id)::text));
-
--- name: LockTrustedContactInvitesForPhone :exec
--- The same for one destination number, across every user, for the
--- per-number cap. Always taken AFTER the user lock, so two additions can
--- never wait on each other in opposite orders.
-SELECT pg_advisory_xact_lock(4, hashtext(sqlc.arg(phone_hash)::text));
-
--- name: CountContactInvitesSentByUserSince :one
-SELECT count(*) FROM auth.contact_invites_sent
-WHERE user_id = $1 AND sent_at > sqlc.arg(since)::timestamptz;
-
--- name: CountContactInvitesSentToPhoneSince :one
-SELECT count(*) FROM auth.contact_invites_sent
-WHERE phone_hash = $1 AND sent_at > sqlc.arg(since)::timestamptz;
-
--- name: InsertContactInviteSent :exec
-INSERT INTO auth.contact_invites_sent (user_id, phone_hash) VALUES ($1, $2);
-
--- name: InsertPendingTrustedContact :exec
-INSERT INTO auth.pending_trusted_contacts (contact_id, token_hash, expires_at)
-VALUES ($1, $2, $3);
-
--- name: ConfirmTrustedContactByToken :one
--- The contact's own consent, from the link they were texted. Deleting the
--- pending row IS the confirmation, so it is single-use by construction: a
--- second press of the same link matches nothing. An expired link matches
--- nothing either. Returns whose contact they have become, for the page.
-WITH confirmed AS (
-  DELETE FROM auth.pending_trusted_contacts
-  WHERE token_hash = $1 AND expires_at > now()
-  RETURNING contact_id
-)
-SELECT u.full_name
-FROM confirmed
-JOIN auth.trusted_contacts c ON c.id = confirmed.contact_id
-JOIN auth.users u ON u.id = c.user_id;
-
--- name: DeleteContactInvitesSentBefore :execrows
--- The cap log only ever looks back one day; batched like every other sweep.
-DELETE FROM auth.contact_invites_sent
-WHERE id IN (
-  SELECT id FROM auth.contact_invites_sent
-  WHERE sent_at < sqlc.arg(sent_before)::timestamptz
-  LIMIT sqlc.arg(batch_size)
-);
 
 -- name: LockSOSForUser :exec
 -- Serialises one user's SOS claims: the duplicate check, the daily count and
@@ -152,11 +103,18 @@ WHERE user_id = $1 AND triggered_at > sqlc.arg(since)::timestamptz;
 -- client_request_id finds it and reports this attempt's outcome instead of
 -- texting everyone again (migration 0023).
 INSERT INTO auth.sos_events
-  (user_id, client_request_id, context_message, latitude, longitude, contacts_notified)
-VALUES ($1, $2, $3, $4, $5, 0)
+  (user_id, client_request_id, context_message, latitude, longitude,
+   location_source, location_captured_at, contacts_notified)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
 RETURNING id;
 
 -- name: CompleteSOSEvent :exec
 UPDATE auth.sos_events
 SET contacts_notified = $2, completed_at = now()
 WHERE id = $1;
+
+-- name: DeleteOldSOSEvents :execrows
+-- Plan 30B, 3.3: SOS events, with their coordinates, are kept 90 days.
+DELETE FROM auth.sos_events WHERE id IN (
+  SELECT id FROM auth.sos_events WHERE triggered_at < now() - interval '90 days' LIMIT 1000
+);

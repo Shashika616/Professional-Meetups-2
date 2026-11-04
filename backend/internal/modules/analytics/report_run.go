@@ -42,8 +42,21 @@ type ReportMailer interface {
 }
 
 // ReportObject is where a day's report goes in the bucket.
+//
+// Every report upload is create-only (#116), so the service account needs
+// only roles/storage.objectCreator and nothing it runs can replace or
+// delete a stored object. The daily run writes ReportObject once; a retry
+// after an upload that landed but was not recorded gets 412, which counts
+// as done. A regeneration is stored beside it as RegeneratedReportObject,
+// named for when it was made.
 func ReportObject(day time.Time) string {
 	return "analytics/reports/" + day.Format("2006-01-02") + ".xlsx"
+}
+
+// RegeneratedReportObject is where a regeneration of day's report, made at
+// at, goes in the bucket.
+func RegeneratedReportObject(day, at time.Time) string {
+	return "analytics/reports/" + day.Format("2006-01-02") + ".regenerated-" + at.UTC().Format("20060102T150405Z") + ".xlsx"
 }
 
 // ReportFilename is the attachment's name.
@@ -98,7 +111,7 @@ func (s *Service) SweepReport(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	metrics.Default.AnalyticsReports.WithLabelValues("build", "done").Inc()
-	problems := s.deliverReport(ctx, day, body, claim.EmailedAt, claim.UploadedAt)
+	problems := s.deliverReport(ctx, day, ReportObject(day), body, claim.EmailedAt, claim.UploadedAt)
 	if len(problems) > 0 {
 		s.finishReport(ctx, day, "failed", len(body), strings.Join(problems, "; "))
 		s.logger.Warn("analytics: daily report not fully delivered; the next tick retries",
@@ -116,7 +129,8 @@ func (s *Service) SweepReport(ctx context.Context) (int, error) {
 var ErrDayNotOver = errors.New("analytics: that day is not over yet in Asia/Colombo")
 
 // RegenerateReport rebuilds a day's report from its events (re-aggregating
-// it), and with deliver emails and uploads it, replacing the stored copy.
+// it), and with deliver emails it and stores it beside the original
+// (RegeneratedReportObject), which it never replaces.
 // The regeneration CLI. Only for days that are over (ErrDayNotOver).
 func (s *Service) RegenerateReport(ctx context.Context, day time.Time, deliver bool) ([]byte, error) {
 	if !day.Before(LocalDay(s.now())) {
@@ -130,7 +144,8 @@ func (s *Service) RegenerateReport(ctx context.Context, day time.Time, deliver b
 		return nil, fmt.Errorf("analytics: report: record: %w", err)
 	}
 	if deliver {
-		if problems := s.deliverReport(ctx, day, body, pgtype.Timestamptz{}, pgtype.Timestamptz{}); len(problems) > 0 {
+		object := RegeneratedReportObject(day, s.now())
+		if problems := s.deliverReport(ctx, day, object, body, pgtype.Timestamptz{}, pgtype.Timestamptz{}); len(problems) > 0 {
 			return body, fmt.Errorf("analytics: report: %s", strings.Join(problems, "; "))
 		}
 	}
@@ -139,7 +154,7 @@ func (s *Service) RegenerateReport(ctx context.Context, day time.Time, deliver b
 
 // deliverReport emails and uploads what has not been delivered yet, and
 // returns what failed.
-func (s *Service) deliverReport(ctx context.Context, day time.Time, body []byte, emailed, uploaded pgtype.Timestamptz) []string {
+func (s *Service) deliverReport(ctx context.Context, day time.Time, object string, body []byte, emailed, uploaded pgtype.Timestamptz) []string {
 	var problems []string
 	if len(s.cfg.ReportRecipients) > 0 && !emailed.Valid {
 		if s.mailer == nil {
@@ -161,8 +176,7 @@ func (s *Service) deliverReport(ctx context.Context, day time.Time, body []byte,
 		}
 	}
 	if s.cfg.ArchiveBucket != "" && s.archive != nil && !uploaded.Valid {
-		object := ReportObject(day)
-		if err := s.archive.Upload(ctx, s.cfg.ArchiveBucket, object, body, UploadOptions{ContentType: XLSXType}); err != nil {
+		if err := s.archive.Upload(ctx, s.cfg.ArchiveBucket, object, body, UploadOptions{ContentType: XLSXType, CreateOnly: true}); err != nil {
 			metrics.Default.AnalyticsReports.WithLabelValues("upload", "failed").Inc()
 			problems = append(problems, "upload: "+err.Error())
 		} else {

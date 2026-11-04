@@ -26,6 +26,11 @@
 -- Withdrawing and asking again stays open on purpose. Backing out of a
 -- meetup is not misconduct and should not be a permanent bar, and the
 -- host sees the withdrawal in the request's own history either way.
+--
+-- And the meetup must still be open with its window not yet over (#114):
+-- an ended meetup stays 'open' until auto-close's next tick, and the Go
+-- check before this statement read it before the lock. Zero rows is then
+-- told apart by MeetupIsJoinable.
 INSERT INTO meetup.meetup_requests (meetup_id, requester_id)
 SELECT sqlc.arg(meetup_id)::uuid, sqlc.arg(requester_id)::uuid
 WHERE NOT EXISTS (
@@ -35,7 +40,18 @@ WHERE NOT EXISTS (
        AND prior.requester_id = sqlc.arg(requester_id)::uuid
        AND prior.status = 'rejected'
 )
+  AND EXISTS (
+    SELECT 1 FROM meetup.meetups m
+     WHERE m.id = sqlc.arg(meetup_id)::uuid AND m.status = 'open' AND m.window_end > now()
+)
 RETURNING *;
+
+-- name: MeetupIsJoinable :one
+-- Why a join's conditional insert wrote nothing: the meetup is no longer
+-- open or its window is over (true here means "still joinable", so the
+-- cause was an earlier rejection).
+SELECT (status = 'open' AND window_end > now())::bool AS joinable
+FROM meetup.meetups WHERE id = $1;
 
 -- name: GetMeetupRequestByID :one
 -- Plain, no join — used inside Accept's transaction where requester
@@ -118,10 +134,13 @@ SELECT count(*) FROM meetup.meetup_requests WHERE meetup_id = $1 AND status = 'a
 -- clause is the backstop that holds even if that ordering is ever lost
 -- again. Zero rows means "not pending any more", which the repository maps
 -- to a conflict.
+--
+-- window_end > now() (#114): no one is accepted into a meetup that is over.
 UPDATE meetup.meetup_requests SET status = 'accepted', resolved_at = now()
 WHERE meetup.meetup_requests.id = $1
   AND meetup.meetup_requests.status = 'pending'
-  AND meetup.meetup_requests.meetup_id IN (SELECT m.id FROM meetup.meetups m WHERE m.host_user_id = $2)
+  AND meetup.meetup_requests.meetup_id IN (
+      SELECT m.id FROM meetup.meetups m WHERE m.host_user_id = $2 AND m.window_end > now())
 RETURNING *;
 
 -- name: GetMeetupRequestByIDForUpdate :one

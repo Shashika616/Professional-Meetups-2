@@ -32,7 +32,7 @@ func (q *Queries) EnsureSafetyState(ctx context.Context, arg EnsureSafetyStatePa
 }
 
 const getSafetyState = `-- name: GetSafetyState :one
-SELECT meetup_id, user_id, checklist_ack_at, live_location_opt_in, checked_in_at, declined_at, decline_reason, updated_at FROM meetup.safety_state WHERE meetup_id = $1 AND user_id = $2
+SELECT meetup_id, user_id, checklist_ack_at, checked_in_at, declined_at, decline_reason, updated_at FROM meetup.safety_state WHERE meetup_id = $1 AND user_id = $2
 `
 
 type GetSafetyStateParams struct {
@@ -47,7 +47,6 @@ func (q *Queries) GetSafetyState(ctx context.Context, arg GetSafetyStateParams) 
 		&i.MeetupID,
 		&i.UserID,
 		&i.ChecklistAckAt,
-		&i.LiveLocationOptIn,
 		&i.CheckedInAt,
 		&i.DeclinedAt,
 		&i.DeclineReason,
@@ -117,7 +116,7 @@ func (q *Queries) RecordSafetyShare(ctx context.Context, arg RecordSafetySharePa
 const setCheckedIn = `-- name: SetCheckedIn :one
 UPDATE meetup.safety_state SET checked_in_at = now()
 WHERE meetup_id = $1 AND user_id = $2
-RETURNING meetup_id, user_id, checklist_ack_at, live_location_opt_in, checked_in_at, declined_at, decline_reason, updated_at
+RETURNING meetup_id, user_id, checklist_ack_at, checked_in_at, declined_at, decline_reason, updated_at
 `
 
 type SetCheckedInParams struct {
@@ -132,7 +131,6 @@ func (q *Queries) SetCheckedIn(ctx context.Context, arg SetCheckedInParams) (Mee
 		&i.MeetupID,
 		&i.UserID,
 		&i.ChecklistAckAt,
-		&i.LiveLocationOptIn,
 		&i.CheckedInAt,
 		&i.DeclinedAt,
 		&i.DeclineReason,
@@ -144,7 +142,7 @@ func (q *Queries) SetCheckedIn(ctx context.Context, arg SetCheckedInParams) (Mee
 const setChecklistAck = `-- name: SetChecklistAck :one
 UPDATE meetup.safety_state SET checklist_ack_at = now()
 WHERE meetup_id = $1 AND user_id = $2
-RETURNING meetup_id, user_id, checklist_ack_at, live_location_opt_in, checked_in_at, declined_at, decline_reason, updated_at
+RETURNING meetup_id, user_id, checklist_ack_at, checked_in_at, declined_at, decline_reason, updated_at
 `
 
 type SetChecklistAckParams struct {
@@ -159,7 +157,6 @@ func (q *Queries) SetChecklistAck(ctx context.Context, arg SetChecklistAckParams
 		&i.MeetupID,
 		&i.UserID,
 		&i.ChecklistAckAt,
-		&i.LiveLocationOptIn,
 		&i.CheckedInAt,
 		&i.DeclinedAt,
 		&i.DeclineReason,
@@ -171,7 +168,7 @@ func (q *Queries) SetChecklistAck(ctx context.Context, arg SetChecklistAckParams
 const setDeclined = `-- name: SetDeclined :one
 UPDATE meetup.safety_state SET declined_at = now(), decline_reason = $3
 WHERE meetup_id = $1 AND user_id = $2
-RETURNING meetup_id, user_id, checklist_ack_at, live_location_opt_in, checked_in_at, declined_at, decline_reason, updated_at
+RETURNING meetup_id, user_id, checklist_ack_at, checked_in_at, declined_at, decline_reason, updated_at
 `
 
 type SetDeclinedParams struct {
@@ -189,35 +186,6 @@ func (q *Queries) SetDeclined(ctx context.Context, arg SetDeclinedParams) (Meetu
 		&i.MeetupID,
 		&i.UserID,
 		&i.ChecklistAckAt,
-		&i.LiveLocationOptIn,
-		&i.CheckedInAt,
-		&i.DeclinedAt,
-		&i.DeclineReason,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const setLiveLocationOptIn = `-- name: SetLiveLocationOptIn :one
-UPDATE meetup.safety_state SET live_location_opt_in = $3
-WHERE meetup_id = $1 AND user_id = $2
-RETURNING meetup_id, user_id, checklist_ack_at, live_location_opt_in, checked_in_at, declined_at, decline_reason, updated_at
-`
-
-type SetLiveLocationOptInParams struct {
-	MeetupID          uuid.UUID `json:"meetup_id"`
-	UserID            uuid.UUID `json:"user_id"`
-	LiveLocationOptIn bool      `json:"live_location_opt_in"`
-}
-
-func (q *Queries) SetLiveLocationOptIn(ctx context.Context, arg SetLiveLocationOptInParams) (MeetupSafetyState, error) {
-	row := q.db.QueryRow(ctx, setLiveLocationOptIn, arg.MeetupID, arg.UserID, arg.LiveLocationOptIn)
-	var i MeetupSafetyState
-	err := row.Scan(
-		&i.MeetupID,
-		&i.UserID,
-		&i.ChecklistAckAt,
-		&i.LiveLocationOptIn,
 		&i.CheckedInAt,
 		&i.DeclinedAt,
 		&i.DeclineReason,

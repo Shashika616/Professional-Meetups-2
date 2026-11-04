@@ -15,14 +15,12 @@ import (
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 )
 
-// errAlertSendFailed simulates one contact's transport failing —
-// TriggerSOS must tolerate this and still notify/count the others
-// (ADR-026 §4).
+// errAlertSendFailed simulates one contact's send failing — TriggerSOS must
+// tolerate this and still notify and count the others (ADR-026 §4).
 var errAlertSendFailed = errors.New("simulated alert send failure")
 
-// newTestServiceForSOS mirrors newTestServiceWithCompanies' shape — a
-// dedicated helper for this file's tests, returning direct access to the
-// trusted-contact/SOS-event fakes so tests can assert against them (ADR-026).
+// newTestServiceForSOS returns a service with direct access to the
+// trusted-contact and SOS-event fakes.
 func newTestServiceForSOS(t *testing.T) (*service, *fakeUserRepository, *fakeTrustedContactRepository, *fakeSOSEventRepository, *fakeEmailSender, *fakeSmsSender) {
 	t.Helper()
 	users := newFakeUserRepository()
@@ -49,628 +47,424 @@ func newTestServiceForSOS(t *testing.T) (*service, *fakeUserRepository, *fakeTru
 	return svc, users, trustedContacts, sosEvents, emailSender, smsSender
 }
 
-// confirmFromInvite plays the contact: it reads the link out of the most
-// recent invitation texted and confirms through it, exactly as the real
-// person would on the confirmation page (#80).
-func confirmFromInvite(t *testing.T, svc *service, smsSender *fakeSmsSender) {
-	t.Helper()
-	if len(smsSender.alertsSent) == 0 {
-		t.Fatal("no invitation was texted")
+func coord(v float64) *float64 { return &v }
+
+func trigger(svc *service, user string) (TriggerSOSResult, error) {
+	return svc.TriggerSOS(context.Background(), TriggerSOSRequest{
+		CallerTrustLevel: safetyFeatureTrustFloor, UserID: user, Latitude: coord(6.9), Longitude: coord(79.8),
+	})
+}
+
+func addContact(svc *service, user, name, phone string) (TrustedContact, error) {
+	return svc.AddTrustedContact(context.Background(), AddTrustedContactRequest{
+		CallerTrustLevel: safetyFeatureTrustFloor, UserID: user, Name: name, PhoneNumber: phone,
+	})
+}
+
+// ADR-013: adding a contact sends nothing at all. No invitation, no
+// confirmation code.
+func TestAddTrustedContactSendsNothing(t *testing.T) {
+	svc, users, _, _, emailSender, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	c, err := addContact(svc, "user-1", "Amma", "077 123 4567")
+	if err != nil {
+		t.Fatal(err)
 	}
-	msg := smsSender.alertsSent[len(smsSender.alertsSent)-1].message
-	i := strings.Index(msg, "/c/")
-	if i < 0 {
-		t.Fatalf("invitation has no confirmation link: %q", msg)
+	if c.PhoneNumber != "+94771234567" {
+		t.Errorf("stored %q, want E.164", c.PhoneNumber)
 	}
-	token := msg[i+3:]
-	if j := strings.IndexAny(token, " )"); j >= 0 {
-		token = token[:j]
+	if len(smsSender.alertsSent) != 0 || smsSender.alertCallCount != 0 || len(smsSender.sent) != 0 || len(emailSender.sent) != 0 {
+		t.Error("adding a contact reached someone")
 	}
-	if _, err := svc.ConfirmTrustedContact(context.Background(), token); err != nil {
-		t.Fatalf("ConfirmTrustedContact from the invitation link: %v", err)
+	if _, err := svc.UpdateTrustedContact(context.Background(), UpdateTrustedContactRequest{
+		CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", ContactID: c.ID, Name: "Thaththa", PhoneNumber: "+94771234568",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if smsSender.alertCallCount != 0 {
+		t.Error("editing a contact reached someone")
 	}
 }
 
-func TestAddTrustedContact_EnforcesSoftCapOfThree(t *testing.T) {
+func TestAddTrustedContact_EnforcesTheCapOfTwo(t *testing.T) {
 	svc, users, _, _, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
 	seedUser(t, users, "user-1")
-
 	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
-		_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
-			CallerTrustLevel: safetyFeatureTrustFloor,
-			UserID:           "user-1", Name: "Contact", PhoneNumber: "+94771234567",
-		})
-		if err != nil {
-			t.Fatalf("AddTrustedContact() #%d error: %v", i, err)
+		if _, err := addContact(svc, "user-1", fmt.Sprintf("Contact %d", i), fmt.Sprintf("+9477000000%d", i)); err != nil {
+			t.Fatalf("contact %d: %v", i, err)
 		}
 	}
-
-	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
-		CallerTrustLevel: safetyFeatureTrustFloor,
-		UserID:           "user-1", Name: "One Too Many", PhoneNumber: "+94770000000",
-	})
-	if !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Fatalf("4th AddTrustedContact() code = %v, want %v (soft cap)", err, apperror.ErrInvalidInput)
+	if _, err := addContact(svc, "user-1", "One more", "+94770000099"); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("a 3rd contact: %v, want invalid input", err)
 	}
 }
 
-func TestAddTrustedContact_RequiresPhone(t *testing.T) {
+func TestContactFieldsAreValidatedOnAddAndEdit(t *testing.T) {
 	svc, users, _, _, _, _ := newTestServiceForSOS(t)
 	seedUser(t, users, "user-1")
-	ctx := context.Background()
-
-	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "No Contact Info"})
-	if !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Fatalf("AddTrustedContact() with neither phone nor email: code = %v, want %v", err, apperror.ErrInvalidInput)
-	}
-
-	// An email alone is not enough: an SOS needs someone reachable now.
-	_, err = svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "Email Only", Email: "friend@example.com"})
-	if !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Fatalf("AddTrustedContact() with email only: code = %v, want %v", err, apperror.ErrInvalidInput)
-	}
-
-	// Phone alone is the minimum; email is the optional extra channel.
-	if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "Phone Only", PhoneNumber: "+94771234567"}); err != nil {
-		t.Fatalf("AddTrustedContact() with phone only: %v, want nil", err)
-	}
-	if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "Both", PhoneNumber: "+94771234568", Email: "friend@example.com"}); err != nil {
-		t.Fatalf("AddTrustedContact() with phone and email: %v, want nil", err)
+	for name, c := range map[string]struct{ name, phone string }{
+		"no phone":     {"Amma", ""},
+		"bad phone":    {"Amma", "12345"},
+		"blank name":   {"   ", "+94771234567"},
+		"long name":    {strings.Repeat("a", 61), "+94771234567"},
+		"line break":   {"Amma\nDad", "+94771234567"},
+		"link in name": {"see https://x.co", "+94771234567"},
+	} {
+		if _, err := addContact(svc, "user-1", c.name, c.phone); !errors.Is(err, apperror.ErrInvalidInput) {
+			t.Errorf("%s on add: %v, want invalid input", name, err)
+		}
+		if _, err := svc.UpdateTrustedContact(context.Background(), UpdateTrustedContactRequest{
+			CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", ContactID: "contact-1", Name: c.name, PhoneNumber: c.phone,
+		}); !errors.Is(err, apperror.ErrInvalidInput) {
+			t.Errorf("%s on edit: %v, want invalid input", name, err)
+		}
 	}
 }
 
-func TestAddTrustedContact_RejectsEmptyName(t *testing.T) {
-	svc, _, _, _, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
+func TestUpdateTrustedContact_RejectsNonOwnerCaller(t *testing.T) {
+	svc, users, contacts, _, _, _ := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	c := contacts.seed("user-2", "Theirs", "+94771234567")
+	_, err := svc.UpdateTrustedContact(context.Background(), UpdateTrustedContactRequest{
+		CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", ContactID: c.ID, Name: "Mine", PhoneNumber: "+94771234568",
+	})
+	if !errors.Is(err, apperror.ErrForbidden) {
+		t.Errorf("error = %v, want forbidden", err)
+	}
+	if contacts.byID[c.ID].Name != "Theirs" {
+		t.Error("another user's contact was changed")
+	}
+}
 
-	_, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Name: "  ", PhoneNumber: "+94771234567"})
-	if !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Fatalf("AddTrustedContact() with blank name: code = %v, want %v", err, apperror.ErrInvalidInput)
+func TestUpdateTrustedContact_NeedsTheSafetyTrustLevel(t *testing.T) {
+	svc, users, contacts, _, _, _ := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	c := contacts.seed("user-1", "Amma", "+94771234567")
+	_, err := svc.UpdateTrustedContact(context.Background(), UpdateTrustedContactRequest{
+		CallerTrustLevel: 0, UserID: "user-1", ContactID: c.ID, Name: "Amma", PhoneNumber: "+94771234567",
+	})
+	if !errors.Is(err, apperror.ErrForbidden) {
+		t.Errorf("error = %v, want forbidden", err)
 	}
 }
 
 func TestListTrustedContacts_ScopedToCaller(t *testing.T) {
-	svc, _, trustedContacts, _, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Ada", "+94771234567", ""); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-	if _, err := trustedContacts.Insert(ctx, "user-2", "Grace", "+94779999999", ""); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-
-	resp, err := svc.ListTrustedContacts(ctx, "user-1")
+	svc, _, contacts, _, _, _ := newTestServiceForSOS(t)
+	contacts.seed("user-1", "Mine", "+94771234567")
+	contacts.seed("user-2", "Theirs", "+94771234568")
+	got, err := svc.ListTrustedContacts(context.Background(), "user-1")
 	if err != nil {
-		t.Fatalf("ListTrustedContacts() error: %v", err)
+		t.Fatal(err)
 	}
-	if len(resp) != 1 || resp[0].Name != "Ada" {
-		t.Errorf("ListTrustedContacts(user-1) = %+v, want only Ada's contact", resp)
+	if len(got) != 1 || got[0].Name != "Mine" {
+		t.Errorf("listed %+v", got)
 	}
 }
 
-// TestRemoveTrustedContact_RejectsNonOwnerCaller is the delete-authorization
-// check — a caller must not be able to remove another user's contact by
-// guessing its id.
 func TestRemoveTrustedContact_RejectsNonOwnerCaller(t *testing.T) {
-	svc, _, trustedContacts, _, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
-	contact, err := trustedContacts.Insert(ctx, "user-1", "Ada", "+94771234567", "")
-	if err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-
-	err = svc.RemoveTrustedContact(ctx, RemoveTrustedContactRequest{UserID: "someone-else", ContactID: contact.ID})
+	svc, _, contacts, _, _, _ := newTestServiceForSOS(t)
+	c := contacts.seed("user-2", "Theirs", "+94771234567")
+	err := svc.RemoveTrustedContact(context.Background(), RemoveTrustedContactRequest{UserID: "user-1", ContactID: c.ID})
 	if !errors.Is(err, apperror.ErrForbidden) {
-		t.Fatalf("RemoveTrustedContact() by a non-owner: code = %v, want %v (Forbidden)", err, apperror.ErrForbidden)
+		t.Errorf("error = %v, want forbidden", err)
 	}
-
-	// Confirm it's still there — the non-owner's call must not have deleted it.
-	list, err := svc.ListTrustedContacts(ctx, "user-1")
-	if err != nil {
-		t.Fatalf("ListTrustedContacts() error: %v", err)
-	}
-	if len(list) != 1 {
-		t.Errorf("contact was deleted by a non-owner's call, want it to still exist")
+	if _, still := contacts.byID[c.ID]; !still {
+		t.Error("another user's contact was removed")
 	}
 }
 
 func TestRemoveTrustedContact_OwnerSucceeds(t *testing.T) {
-	svc, _, trustedContacts, _, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
-	contact, err := trustedContacts.Insert(ctx, "user-1", "Ada", "+94771234567", "")
-	if err != nil {
-		t.Fatalf("seed error: %v", err)
+	svc, _, contacts, _, _, _ := newTestServiceForSOS(t)
+	c := contacts.seed("user-1", "Mine", "+94771234567")
+	if err := svc.RemoveTrustedContact(context.Background(), RemoveTrustedContactRequest{UserID: "user-1", ContactID: c.ID}); err != nil {
+		t.Fatal(err)
 	}
-
-	if err := svc.RemoveTrustedContact(ctx, RemoveTrustedContactRequest{UserID: "user-1", ContactID: contact.ID}); err != nil {
-		t.Fatalf("RemoveTrustedContact() error: %v", err)
-	}
-	list, err := svc.ListTrustedContacts(ctx, "user-1")
-	if err != nil {
-		t.Fatalf("ListTrustedContacts() error: %v", err)
-	}
-	if len(list) != 0 {
-		t.Errorf("contact still present after owner's own delete")
+	if _, still := contacts.byID[c.ID]; still {
+		t.Error("the contact is still there")
 	}
 }
 
 func TestTriggerSOS_RejectsWithZeroContacts(t *testing.T) {
-	svc, users, _, _, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-
-	_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
-	if !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Fatalf("TriggerSOS() with zero contacts: code = %v, want %v", err, apperror.ErrInvalidInput)
+	svc, users, _, sosEvents, _, _ := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	if _, err := trigger(svc, "user-1"); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("error = %v, want invalid input", err)
+	}
+	if len(sosEvents.events) != 0 {
+		t.Error("an event was recorded for an alert that could not go")
 	}
 }
 
-// TestTriggerSOS_RejectsInvalidLatLng (2026-08-31 round-2 hardening) —
-// garbage coordinates previously flowed straight into a real maps link
-// sent to a real trusted contact. Seeds a contact first so a rejection
-// here is unambiguously about the coordinates, not the zero-contacts case
-// TestTriggerSOS_RejectsWithZeroContacts already covers.
 func TestTriggerSOS_RejectsInvalidLatLng(t *testing.T) {
-	cases := []struct {
-		name string
-		lat  float64
-		lng  float64
-	}{
-		{"NaN latitude", math.NaN(), 79.8},
-		{"NaN longitude", 6.9, math.NaN()},
-		{"latitude too high", 91, 79.8},
-		{"latitude too low", -91, 79.8},
-		{"longitude too high", 6.9, 181},
-		{"longitude too low", 6.9, -181},
+	svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	contacts.seed("user-1", "Amma", "+94771234567")
+	for name, c := range map[string][2]float64{
+		"nan":          {math.NaN(), 79.8},
+		"out of range": {91, 79.8},
+		"null island":  {0, 0},
+	} {
+		_, err := svc.TriggerSOS(context.Background(), TriggerSOSRequest{
+			CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(c[0]), Longitude: coord(c[1]),
+		})
+		if !errors.Is(err, apperror.ErrInvalidInput) {
+			t.Errorf("%s: %v, want invalid input", name, err)
+		}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			svc, users, trustedContacts, _, _, _ := newTestServiceForSOS(t)
-			ctx := context.Background()
-			users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-			if _, err := trustedContacts.Insert(ctx, "user-1", "Phone Contact", "+94771234567", ""); err != nil {
-				t.Fatalf("seed error: %v", err)
-			}
+	if smsSender.alertCallCount != 0 {
+		t.Error("a bad coordinate reached a contact")
+	}
+}
 
-			_, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(tc.lat), Longitude: coord(tc.lng)})
-			if !errors.Is(err, apperror.ErrInvalidInput) {
-				t.Errorf("TriggerSOS() with lat=%v lng=%v: code = %v, want %v", tc.lat, tc.lng, err, apperror.ErrInvalidInput)
+// Plan 2.2 and D5: SMS only, and an account from before the cap that still
+// has 3 contacts alerts the 2 oldest.
+func TestTriggerSOS_AlertsOnlyTheTwoOldestContacts(t *testing.T) {
+	svc, users, contacts, sosEvents, emailSender, smsSender := newTestServiceForSOS(t)
+	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
+	contacts.seed("user-1", "First", "+94770000001")
+	contacts.seed("user-1", "Second", "+94770000002")
+	contacts.seed("user-1", "Third", "+94770000003")
+
+	resp, err := trigger(svc, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ContactsNotified != 2 {
+		t.Errorf("notified %d, want 2", resp.ContactsNotified)
+	}
+	if len(smsSender.alertsSent) != 2 || smsSender.alertsSent[0].to != "+94770000001" || smsSender.alertsSent[1].to != "+94770000002" {
+		t.Errorf("texted %+v, want the two oldest", smsSender.alertsSent)
+	}
+	if len(emailSender.alertsSent) != 0 {
+		t.Error("an alert went by email")
+	}
+	if len(sosEvents.events) != 1 || sosEvents.events[0].ContactsNotified != 2 {
+		t.Errorf("events %+v", sosEvents.events)
+	}
+	msg := smsSender.alertsSent[0].message
+	if !strings.HasPrefix(msg, "Ada Lovelace triggered an SOS alert through TieHere") ||
+		!strings.Contains(msg, "https://maps.google.com/?q=6.90000,79.80000") ||
+		!strings.Contains(msg, "(Sri Lanka time)") {
+		t.Errorf("message = %q", msg)
+	}
+}
+
+// A repeat with the same request id alerts nobody twice.
+func TestTriggerSOS_SameRequestIDAlertsOnce(t *testing.T) {
+	svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	contacts.seed("user-1", "Amma", "+94771234567")
+	for i := 0; i < 2; i++ {
+		resp, err := svc.TriggerSOS(context.Background(), TriggerSOSRequest{
+			CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", ClientRequestID: "one",
+		})
+		if err != nil || resp.ContactsNotified != 1 {
+			t.Fatalf("attempt %d: %+v, %v", i, resp, err)
+		}
+	}
+	if len(smsSender.alertsSent) != 1 {
+		t.Errorf("%d alerts for one emergency", len(smsSender.alertsSent))
+	}
+}
+
+// The alert goes out even when the user's row cannot be read: an emergency
+// must not depend on a display name.
+func TestTriggerSOS_GoesOutWithoutTheUsersName(t *testing.T) {
+	svc, _, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	contacts.seed("user-1", "Amma", "+94771234567")
+	if _, err := trigger(svc, "user-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(smsSender.alertsSent) != 1 || !strings.HasPrefix(smsSender.alertsSent[0].message, "A TieHere member triggered") {
+		t.Errorf("sent %+v", smsSender.alertsSent)
+	}
+}
+
+func TestTriggerSOS_TolerantOfPartialSendFailure(t *testing.T) {
+	svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	contacts.seed("user-1", "First", "+94770000001")
+	contacts.seed("user-1", "Second", "+94770000002")
+	smsSender.alertErr = errAlertSendFailed
+	smsSender.alertFailFirstN = 2 // the first contact fails on both tries
+	resp, err := trigger(svc, "user-1")
+	if err != nil {
+		t.Fatalf("one contact's failure failed the call: %v", err)
+	}
+	if resp.ContactsNotified != 1 {
+		t.Errorf("notified %d, want 1", resp.ContactsNotified)
+	}
+}
+
+func TestTriggerSOS_RetriesTransientSendFailure(t *testing.T) {
+	svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	contacts.seed("user-1", "Amma", "+94771234567")
+	smsSender.alertErr = errAlertSendFailed
+	smsSender.alertFailFirstN = 1
+	resp, err := trigger(svc, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ContactsNotified != 1 || smsSender.alertCallCount != 2 {
+		t.Errorf("notified %d after %d attempts, want 1 after 2", resp.ContactsNotified, smsSender.alertCallCount)
+	}
+}
+
+// The breaker opens across calls and users: once Twilio is known to be down,
+// the next emergency fails fast rather than paying the retry cost again.
+func TestTriggerSOS_OpenBreakerFailsFastAcrossCalls(t *testing.T) {
+	svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	smsSender.alertErr = errAlertSendFailed
+	for i := 0; i < 3; i++ {
+		user := fmt.Sprintf("user-%d", i)
+		seedUser(t, users, user)
+		contacts.seed(user, "Amma", fmt.Sprintf("+9477000000%d", i))
+		if _, err := trigger(svc, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Two attempts each for two users, one for the third, then open.
+	if smsSender.alertCallCount != 5 {
+		t.Errorf("real sends = %d, want 5: the breaker must stop the 6th", smsSender.alertCallCount)
+	}
+}
+
+func TestTriggerSOS_RecordsTheLocationSource(t *testing.T) {
+	svc, users, contacts, sosEvents, _, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	contacts.seed("user-1", "Amma", "+94771234567")
+	resp, err := svc.TriggerSOS(context.Background(), TriggerSOSRequest{
+		CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", ContextMessage: "Coffee at 3pm",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ContactsNotified != 1 {
+		t.Errorf("notified %d", resp.ContactsNotified)
+	}
+	e := sosEvents.events[0]
+	if e.Latitude != nil || e.LocationSource != "" || e.LocationCapturedAt != nil || e.ContextMessage != "Coffee at 3pm" {
+		t.Errorf("event %+v", e)
+	}
+	if strings.Contains(smsSender.alertsSent[0].message, "Coffee at 3pm") {
+		t.Error("client text reached the message")
+	}
+	if !strings.Contains(smsSender.alertsSent[0].message, "Current location unknown") {
+		t.Errorf("message = %q", smsSender.alertsSent[0].message)
+	}
+}
+
+func TestNotifyMeetupShare_OnlyTextsTheContactsTheCallerPicked(t *testing.T) {
+	svc, users, contacts, _, emailSender, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	picked := contacts.seed("user-1", "Picked", "+94770000001")
+	contacts.seed("user-1", "Other", "+94770000002")
+	notified, err := svc.NotifyMeetupShare(context.Background(), "user-1", MeetupShare{
+		ContactIDs: []string{picked.ID}, LocationLabel: "Cafe", Latitude: 6.9, Longitude: 79.8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notified) != 1 || notified[0] != picked.ID {
+		t.Errorf("notified %v", notified)
+	}
+	if len(smsSender.alertsSent) != 1 || smsSender.alertsSent[0].to != "+94770000001" || len(emailSender.alertsSent) != 0 {
+		t.Errorf("sent %+v", smsSender.alertsSent)
+	}
+}
+
+func TestNotifyMeetupShare_RefusesContactsThatAreNotYours(t *testing.T) {
+	svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	contacts.seed("user-1", "Mine", "+94770000001")
+	theirs := contacts.seed("user-2", "Theirs", "+94770000002")
+	_, err := svc.NotifyMeetupShare(context.Background(), "user-1", MeetupShare{ContactIDs: []string{theirs.ID}, Latitude: 6.9, Longitude: 79.8})
+	if !errors.Is(err, apperror.ErrInvalidInput) || smsSender.alertCallCount != 0 {
+		t.Errorf("error = %v after %d sends", err, smsSender.alertCallCount)
+	}
+}
+
+func TestNotifyMeetupShare_RefusesAnEmptySelectionAndBadCoordinates(t *testing.T) {
+	svc, users, contacts, _, _, _ := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	c := contacts.seed("user-1", "Mine", "+94770000001")
+	ctx := context.Background()
+	if _, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{Latitude: 6.9, Longitude: 79.8}); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("no contacts: %v", err)
+	}
+	if _, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{ContactIDs: []string{c.ID}, Latitude: 91}); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("bad coordinates: %v", err)
+	}
+}
+
+type fakeMeetupLookup struct {
+	meetup sos.AlertMeetup
+	found  bool
+	err    error
+}
+
+func (f fakeMeetupLookup) ActiveMeetup(context.Context, string, time.Time) (sos.AlertMeetup, bool, error) {
+	return f.meetup, f.found, f.err
+}
+
+// The meetup section comes through the port, and a failed lookup costs the
+// section, never the alert.
+func TestTriggerSOS_MeetupSection(t *testing.T) {
+	for name, tc := range map[string]struct {
+		lookup fakeMeetupLookup
+		want   bool
+	}{
+		"on a meetup":      {fakeMeetupLookup{meetup: sos.AlertMeetup{Intent: "coffee", Label: "Colombo 07", Lat: 6.91234, Lng: 79.86543}, found: true}, true},
+		"not on a meetup":  {fakeMeetupLookup{}, false},
+		"the lookup fails": {fakeMeetupLookup{err: errors.New("down")}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			smsSender := &fakeSmsSender{}
+			users, contacts := newFakeUserRepository(), newFakeTrustedContactRepository()
+			seedUser(t, users, "user-1")
+			contacts.seed("user-1", "Amma", "+94771234567")
+			svc := New(Deps{
+				Users: users, TrustedContacts: contacts, SOSEvents: &fakeSOSEventRepository{}, SMS: smsSender,
+				SOSMeetups: tc.lookup, Logger: slog.New(slog.DiscardHandler),
+			}).(*service)
+			if _, err := trigger(svc, "user-1"); err != nil {
+				t.Fatal(err)
+			}
+			if len(smsSender.alertsSent) != 1 {
+				t.Fatalf("%d alerts", len(smsSender.alertsSent))
+			}
+			if got := strings.Contains(smsSender.alertsSent[0].message, "Coffee meetup - Colombo 07"); got != tc.want {
+				t.Errorf("section present %v, want %v:\n%s", got, tc.want, smsSender.alertsSent[0].message)
 			}
 		})
 	}
 }
 
-func TestTriggerSOS_SendsToAllContacts(t *testing.T) {
-	svc, users, trustedContacts, sosEvents, emailSender, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Phone Contact", "+94771234567", ""); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Email Contact", "", "friend@example.com"); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
-		CallerTrustLevel: safetyFeatureTrustFloor,
-		UserID:           "user-1", ContextMessage: "at the coffee meetup", Latitude: coord(6.9271), Longitude: coord(79.8612),
-	})
-	if err != nil {
-		t.Fatalf("TriggerSOS() error: %v", err)
-	}
-	if resp.ContactsNotified != 2 {
-		t.Errorf("contacts_notified = %d, want 2", resp.ContactsNotified)
-	}
-	if len(smsSender.alertsSent) != 1 || !strings.Contains(smsSender.alertsSent[0].message, "Ada Lovelace") {
-		t.Errorf("sms alerts = %+v, want one containing the caller's name", smsSender.alertsSent)
-	}
-	// The client's context string must NOT reach the alert (#80): SOS text
-	// is a fixed template, so it cannot carry words or links of the
-	// sender's choosing. The string is still kept in the audit row.
-	if len(emailSender.alertsSent) != 1 {
-		t.Fatalf("email alerts = %d, want 1", len(emailSender.alertsSent))
-	}
-	if strings.Contains(emailSender.alertsSent[0].message, "at the coffee meetup") {
-		t.Errorf("email alert = %q carries the client's context string", emailSender.alertsSent[0].message)
-	}
-	if len(sosEvents.events) == 1 && sosEvents.events[0].ContextMessage != "at the coffee meetup" {
-		t.Errorf("audit row context = %q, want the string the client sent", sosEvents.events[0].ContextMessage)
-	}
-	if len(sosEvents.events) != 1 || sosEvents.events[0].ContactsNotified != 2 {
-		t.Errorf("sos_events = %+v, want one row with contacts_notified=2", sosEvents.events)
-	}
-}
-
-// TestTriggerSOS_TolerantOfPartialSendFailure makes every SMS send fail
-// (simulating one transport being down) while email keeps working — the
-// call as a whole must still succeed, with contacts_notified reflecting
-// only the sends that actually went through.
-func TestTriggerSOS_TolerantOfPartialSendFailure(t *testing.T) {
-	svc, users, trustedContacts, sosEvents, _, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Phone Contact (will fail)", "+94771111111", ""); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Email Contact (will succeed)", "", "friend@example.com"); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
+// One request id per SOS dialog: the user's Retry repeats it. When every
+// send failed, that Retry has to really send, not report the same zero.
+func TestTriggerSOS_RetryAfterReachingNobodySendsAgain(t *testing.T) {
+	svc, users, contacts, _, _, smsSender := newTestServiceForSOS(t)
+	seedUser(t, users, "user-1")
+	contacts.seed("user-1", "Amma", "+94771234567")
 	smsSender.alertErr = errAlertSendFailed
-
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(1), Longitude: coord(2)})
-	if err != nil {
-		t.Fatalf("TriggerSOS() error: %v, want the call to succeed despite the SMS failure", err)
-	}
-	if resp.ContactsNotified != 1 {
-		t.Errorf("contacts_notified = %d, want 1 (only the email contact succeeded)", resp.ContactsNotified)
-	}
-	if len(sosEvents.events) != 1 || sosEvents.events[0].ContactsNotified != 1 {
-		t.Errorf("sos_events = %+v, want one row with contacts_notified=1", sosEvents.events)
-	}
-}
-
-// TestTriggerSOS_RetriesTransientSendFailure (2026-08-31 round-3
-// hardening) — TriggerSOS was the one send in this app with no retry at
-// all; confirms a send that fails once but succeeds on the bounded retry
-// still counts as notified, and that the retry actually happened (2 real
-// attempts against the underlying sender), not just that the end result
-// looks right by coincidence.
-func TestTriggerSOS_RetriesTransientSendFailure(t *testing.T) {
-	svc, users, trustedContacts, _, _, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Phone Contact", "+94771234567", ""); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-	smsSender.alertErr = errAlertSendFailed
-	smsSender.alertFailFirstN = 1 // fails once (transient), succeeds on the retry
-
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
-	if err != nil {
-		t.Fatalf("TriggerSOS() error: %v", err)
-	}
-	if resp.ContactsNotified != 1 {
-		t.Errorf("contacts_notified = %d, want 1 — the retry should have recovered the transient failure", resp.ContactsNotified)
-	}
-	if smsSender.alertCallCount != 2 {
-		t.Errorf("real send attempts = %d, want exactly 2 (one failure, one successful retry) — not just 1 (no retry happened) or more (retried past success)", smsSender.alertCallCount)
-	}
-}
-
-// TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel: a
-// total outage on one channel must not stop the other channel reaching every
-// contact. This is the caller-visible half of the resilience story; the
-// breaker's own mechanics are the two tests below it.
-func TestTriggerSOS_SustainedChannelFailureStillAlertsEveryOtherChannel(t *testing.T) {
-	svc, users, trustedContacts, _, emailSender, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
-		// Each contact has BOTH channels, so a total SMS outage must still
-		// leave every contact reachable by email.
-		if _, err := trustedContacts.Insert(ctx, "user-1",
-			fmt.Sprintf("Contact %d", i), fmt.Sprintf("+9477000000%d", i), fmt.Sprintf("c%d@example.com", i)); err != nil {
-			t.Fatalf("seed contact %d: %v", i, err)
+	smsSender.alertFailFirstN = 2
+	again := func() int32 {
+		resp, err := svc.TriggerSOS(context.Background(), TriggerSOSRequest{
+			CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", ClientRequestID: "dialog-1",
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
+		return resp.ContactsNotified
 	}
-	smsSender.alertErr = errAlertSendFailed // sustained failure (alertFailFirstN left at 0)
-
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
-	if err != nil {
-		t.Fatalf("TriggerSOS() error: %v", err)
+	if n := again(); n != 0 {
+		t.Fatalf("first attempt notified %d", n)
 	}
-	if resp.ContactsNotified != int32(sos.MaxTrustedContactsPerUser) {
-		t.Errorf("contacts_notified = %d, want %d — a dead SMS channel must not stop the email alert going out",
-			resp.ContactsNotified, sos.MaxTrustedContactsPerUser)
+	if n := again(); n != 1 {
+		t.Errorf("the retry notified %d, want 1", n)
 	}
-	if len(emailSender.alertsSent) != sos.MaxTrustedContactsPerUser {
-		t.Errorf("email alerts sent = %d, want %d", len(emailSender.alertsSent), sos.MaxTrustedContactsPerUser)
-	}
-	// The email channel never failed, so ITS breaker must still be closed —
-	// one channel's outage must not trip the other's.
-	if len(emailSender.alertsSent) != sos.MaxTrustedContactsPerUser {
-		t.Errorf("email sends = %d, want %d — the email breaker must be unaffected by the SMS outage",
-			len(emailSender.alertsSent), sos.MaxTrustedContactsPerUser)
-	}
-}
-
-// TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures restores the
-// source's own breaker test (services/auth/internal/service/sos_test.go),
-// per ADR-001's 2026-09-04 correction.
-//
-// 3 phone-only contacts, SMS failing sustained. Each contact's send gets up
-// to sendMaxAttempts (2) real attempts, so 3 x 2 = 6 real sends if the
-// breaker never intervened. The threshold is 5, so the breaker opens exactly
-// on the 3rd contact's 1st attempt (2+2+1 = 5 recorded failures); that
-// contact's 2nd attempt must then short-circuit via breaker.ErrOpen without
-// ever reaching the real sender — asserted via the call count, not inferred
-// from the response.
-func TestTriggerSOS_CircuitBreakerOpensAfterRepeatedFailures(t *testing.T) {
-	svc, users, trustedContacts, _, _, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
-		if _, err := trustedContacts.Insert(ctx, "user-1", fmt.Sprintf("Contact %d", i), fmt.Sprintf("+9477000000%d", i), ""); err != nil {
-			t.Fatalf("seed contact %d: %v", i, err)
-		}
-	}
-	smsSender.alertErr = errAlertSendFailed // sustained failure
-
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)})
-	if err != nil {
-		t.Fatalf("TriggerSOS() error: %v", err)
-	}
-	if resp.ContactsNotified != 0 {
-		t.Errorf("contacts_notified = %d, want 0 (every send failed)", resp.ContactsNotified)
-	}
-	if smsSender.alertCallCount != 5 {
-		t.Errorf("real send attempts = %d, want exactly 5 — the breaker opening on the 5th recorded failure must prevent a 6th real attempt",
-			smsSender.alertCallCount)
-	}
-}
-
-// TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel is
-// the property the breaker exists for and that a per-call breaker could
-// never provide: the failure memory persists ACROSS TriggerSOS calls, from
-// DIFFERENT users. Once Twilio is known to be down, the next person's
-// emergency doesn't pay the retry-and-timeout cost again — and their email
-// alert still goes out.
-func TestTriggerSOS_OpenBreakerFailsFastAcrossCallsAndSpareTheOtherChannel(t *testing.T) {
-	svc, users, trustedContacts, _, emailSender, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	users.byID["user-2"] = repository.User{ID: "user-2", FullName: "Grace Hopper"}
-	for i := 0; i < sos.MaxTrustedContactsPerUser; i++ {
-		if _, err := trustedContacts.Insert(ctx, "user-1", fmt.Sprintf("Contact %d", i), fmt.Sprintf("+9477000000%d", i), ""); err != nil {
-			t.Fatalf("seed user-1 contact %d: %v", i, err)
-		}
-	}
-	// A different user, with both channels.
-	if _, err := trustedContacts.Insert(ctx, "user-2", "Second user's contact", "+94779999999", "second@example.com"); err != nil {
-		t.Fatalf("seed user-2 contact: %v", err)
-	}
-	smsSender.alertErr = errAlertSendFailed
-
-	// First call trips the SMS breaker open (5 recorded failures).
-	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-1", Latitude: coord(6.9), Longitude: coord(79.8)}); err != nil {
-		t.Fatalf("first TriggerSOS() error: %v", err)
-	}
-	callsAfterFirst := smsSender.alertCallCount
-	if callsAfterFirst != 5 {
-		t.Fatalf("SMS attempts after the first call = %d, want 5 (breaker should already be open)", callsAfterFirst)
-	}
-
-	// A DIFFERENT user's emergency, moments later. The SMS channel is already
-	// known to be down, so it must fail fast — zero further real sends, and
-	// no retry delay paid.
-	start := time.Now()
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{CallerTrustLevel: safetyFeatureTrustFloor, UserID: "user-2", Latitude: coord(6.9), Longitude: coord(79.8)})
-	elapsed := time.Since(start)
-	if err != nil {
-		t.Fatalf("second TriggerSOS() error: %v", err)
-	}
-
-	if smsSender.alertCallCount != callsAfterFirst {
-		t.Errorf("SMS attempts after the second call = %d, want %d — an open breaker must not reach the real sender at all",
-			smsSender.alertCallCount, callsAfterFirst)
-	}
-	// With the breaker open there is no retry delay: sendRetryDelay is 500ms,
-	// so anything near that means it retried instead of failing fast.
-	if elapsed >= 500*time.Millisecond {
-		t.Errorf("second call took %v — an open breaker must fail fast, not pay the %v retry delay", elapsed, 500*time.Millisecond)
-	}
-	// And the healthy channel still delivered, so the caller is still helped.
-	if resp.ContactsNotified != 1 {
-		t.Errorf("contacts_notified = %d, want 1 — the email channel is healthy and must still alert the contact", resp.ContactsNotified)
-	}
-	if len(emailSender.alertsSent) != 1 {
-		t.Errorf("email alerts sent = %d, want 1 — one channel's open breaker must not affect the other's", len(emailSender.alertsSent))
-	}
-}
-
-func TestTriggerSOS_WritesSosEventRow(t *testing.T) {
-	svc, users, trustedContacts, sosEvents, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Contact", "+94771234567", ""); err != nil {
-		t.Fatalf("seed error: %v", err)
-	}
-
-	if _, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
-		CallerTrustLevel: safetyFeatureTrustFloor,
-		UserID:           "user-1", ContextMessage: "help", Latitude: coord(6.9), Longitude: coord(79.8),
-	}); err != nil {
-		t.Fatalf("TriggerSOS() error: %v", err)
-	}
-
-	if len(sosEvents.events) != 1 {
-		t.Fatalf("sos_events rows = %d, want 1", len(sosEvents.events))
-	}
-	got := sosEvents.events[0]
-	if got.UserID != "user-1" || got.ContextMessage != "help" ||
-		got.Latitude == nil || *got.Latitude != 6.9 ||
-		got.Longitude == nil || *got.Longitude != 79.8 {
-		t.Errorf("sos event = %+v, want the trigger's own values recorded", got)
-	}
-}
-
-// --- NotifyMeetupShare -----------------------------------------------------
-//
-// The planned, non-emergency counterpart of TriggerSOS: the user picks WHO to
-// tell, before anything has gone wrong. These tests are mostly about what a
-// modified client cannot do, because this sends real text messages.
-
-func TestNotifyMeetupShare_OnlyTextsTheContactsTheCallerPicked(t *testing.T) {
-	svc, users, trustedContacts, _, _, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-
-	picked, err := trustedContacts.Insert(ctx, "user-1", "Amma", "+94771111111", "")
-	if err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Friend", "+94772222222", ""); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	notified, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
-		ContactIDs:    []string{picked.ID},
-		LocationLabel: "Colombo Fort Cafe",
-		Latitude:      6.9271,
-		Longitude:     79.8612,
-		WindowStart:   time.Date(2026, 9, 8, 15, 0, 0, 0, time.UTC),
-		WindowEnd:     time.Date(2026, 9, 8, 16, 0, 0, 0, time.UTC),
-	})
-	if err != nil {
-		t.Fatalf("NotifyMeetupShare: %v", err)
-	}
-	if notified != 1 {
-		t.Errorf("notified = %d, want 1 — only the picked contact", notified)
-	}
-	if got := len(smsSender.alertsSent); got != 1 {
-		t.Fatalf("sent %d messages, want 1 — the unpicked contact must not be texted", got)
-	}
-	if smsSender.alertsSent[0].to != "+94771111111" {
-		t.Errorf("texted %q, want the picked contact", smsSender.alertsSent[0].to)
-	}
-}
-
-func TestNotifyMeetupShare_RejectsContactsThatAreNotYours(t *testing.T) {
-	svc, users, trustedContacts, _, _, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	if _, err := trustedContacts.Insert(ctx, "user-1", "Amma", "+94771111111", ""); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-
-	// A guessed id belonging to somebody else. Without the intersection
-	// against the caller's own list this is a way to text a stranger.
-	_, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
-		ContactIDs:  []string{"not-this-users-contact"},
-		Latitude:    6.9271,
-		Longitude:   79.8612,
-		WindowStart: time.Now(),
-		WindowEnd:   time.Now().Add(time.Hour),
-	})
-	if !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Fatalf("error = %v, want ErrInvalidInput", err)
-	}
-	if len(smsSender.alertsSent) != 0 {
-		t.Error("a message was sent to a contact the caller does not own")
-	}
-}
-
-func TestNotifyMeetupShare_RejectsAnEmptySelectionAndBadCoordinates(t *testing.T) {
-	svc, users, trustedContacts, _, _, _ := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	c, _ := trustedContacts.Insert(ctx, "user-1", "Amma", "+94771111111", "")
-
-	if _, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
-		Latitude: 6.9, Longitude: 79.8,
-	}); !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Errorf("empty selection: error = %v, want ErrInvalidInput", err)
-	}
-
-	// Garbage coordinates would otherwise flow into a real maps link.
-	if _, err := svc.NotifyMeetupShare(ctx, "user-1", MeetupShare{
-		ContactIDs: []string{c.ID}, Latitude: math.NaN(), Longitude: 79.8,
-	}); !errors.Is(err, apperror.ErrInvalidInput) {
-		t.Errorf("NaN latitude: error = %v, want ErrInvalidInput", err)
-	}
-}
-
-// TestMeetupShareMessage_StatesAWindowAndPlaceNotLiveTracking pins the
-// wording. The app does not track anyone — it sends a static pin at the
-// meetup's own coordinates — and a message implying otherwise would be a
-// safety promise the product cannot keep.
-func TestMeetupShareMessage_StatesAWindowAndPlaceNotLiveTracking(t *testing.T) {
-	msg := sos.MeetupShareMessage(
-		"Ada Lovelace", "Colombo Fort Cafe", 6.9271, 79.8612,
-		time.Date(2026, 9, 8, 15, 0, 0, 0, time.UTC),
-		time.Date(2026, 9, 8, 16, 0, 0, 0, time.UTC),
-	)
-
-	for _, want := range []string{"Ada Lovelace", "Colombo Fort Cafe", "maps.google.com"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("message %q is missing %q", msg, want)
-		}
-	}
-	for _, forbidden := range []string{"live", "Live", "track", "Track"} {
-		if strings.Contains(msg, forbidden) {
-			t.Errorf("message %q claims %q — the app sends a static pin, not tracking", msg, forbidden)
-		}
-	}
-	// Not an emergency: it must not borrow SOS's alarm wording.
-	if strings.Contains(msg, "may need help") {
-		t.Errorf("message %q reads as an SOS alert", msg)
-	}
-}
-
-// coord is the address of a coordinate literal. TriggerSOSRequest's
-// latitude and longitude became *float64 in #78 so that "no fix" is
-// representable; the tests that do supply a location say so with this.
-func coord(v float64) *float64 { return &v }
-
-// TestTriggerSOS_SendsWithoutALocationFix is tracker #78 (review finding
-// N-D2): the feature whose whole point is to work when things have gone
-// wrong must not be blocked by being indoors.
-//
-// Before this, latitude and longitude were required proto3 doubles with
-// no presence, so the client refused to send at all until it had a GPS
-// fix — a safety feature that failed exactly when it was most needed.
-// The alert now goes out and says the location is unavailable, which a
-// contact can act on; silence is not.
-func TestTriggerSOS_SendsWithoutALocationFix(t *testing.T) {
-	svc, users, trustedContacts, sosEvents, _, smsSender := newTestServiceForSOS(t)
-	ctx := context.Background()
-	users.byID["user-1"] = repository.User{ID: "user-1", FullName: "Ada Lovelace"}
-	if _, err := svc.AddTrustedContact(ctx, AddTrustedContactRequest{
-		CallerTrustLevel: safetyFeatureTrustFloor,
-		UserID:           "user-1", Name: "Mum", PhoneNumber: "+94770000001",
-	}); err != nil {
-		t.Fatalf("AddTrustedContact: %v", err)
-	}
-	_ = trustedContacts
-	// Mum agrees through her link; only then can the alert reach her (#80).
-	confirmFromInvite(t, svc, smsSender)
-	smsSender.alertsSent = nil
-
-	resp, err := svc.TriggerSOS(ctx, TriggerSOSRequest{
-		CallerTrustLevel: safetyFeatureTrustFloor,
-		UserID:           "user-1",
-		ContextMessage:   "at the coffee meetup",
-		// No fix: indoors, permission denied, or the read timed out.
-		Latitude:  nil,
-		Longitude: nil,
-	})
-	if err != nil {
-		t.Fatalf("TriggerSOS without a location: %v", err)
-	}
-	if resp.ContactsNotified != 1 {
-		t.Fatalf("contacts notified = %d, want 1 — the alert was suppressed for want of a fix",
-			resp.ContactsNotified)
-	}
-
-	if len(smsSender.alertsSent) != 1 {
-		t.Fatalf("sms alerts = %d, want 1", len(smsSender.alertsSent))
-	}
-	body := smsSender.alertsSent[0].message
-	if !strings.Contains(body, "Location unavailable") {
-		t.Errorf("alert body = %q, want it to say the location is unavailable", body)
-	}
-	if strings.Contains(body, "maps.google.com") {
-		t.Errorf("alert body = %q, want no maps link when there is no location", body)
-	}
-
-	// 0,0 is a real place in the Gulf of Guinea; the audit trail must not
-	// claim it.
-	if len(sosEvents.events) != 1 {
-		t.Fatalf("sos_events rows = %d, want 1", len(sosEvents.events))
-	}
-	if sosEvents.events[0].Latitude != nil || sosEvents.events[0].Longitude != nil {
-		t.Errorf("recorded location = (%v, %v), want NULL",
-			sosEvents.events[0].Latitude, sosEvents.events[0].Longitude)
+	if n := again(); n != 1 || len(smsSender.alertsSent) != 1 {
+		t.Errorf("a repeat after success notified %d and sent %d", n, len(smsSender.alertsSent))
 	}
 }

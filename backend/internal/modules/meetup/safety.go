@@ -84,17 +84,6 @@ func (s *service) AcknowledgeSafetyChecklist(ctx context.Context, req SafetyStat
 	return safetyStateFromRepo(state), nil
 }
 
-func (s *service) SetLiveLocationOptIn(ctx context.Context, req SetLiveLocationOptInRequest) (SafetyState, error) {
-	if err := s.requireParticipant(ctx, req.MeetupID, req.UserID); err != nil {
-		return SafetyState{}, err
-	}
-	state, err := s.safetyState.SetLiveLocationOptIn(ctx, req.MeetupID, req.UserID, req.OptIn)
-	if err != nil {
-		return SafetyState{}, err
-	}
-	return safetyStateFromRepo(state), nil
-}
-
 // CheckIn enforces the step order server-side (checklist before check-in),
 // not just relying on the client's screen sequencing — a client that skips
 // straight to check-in (a bug, or a modified client) must not bypass the
@@ -251,8 +240,13 @@ func (s *service) ShareWithContacts(ctx context.Context, req ShareWithContactsRe
 	if err := s.requireParticipant(ctx, req.MeetupID, req.UserID); err != nil {
 		return SafetyState{}, err
 	}
-	if len(req.ContactIDs) == 0 {
+	contactIDs := dedupeIDs(req.ContactIDs)
+	if len(contactIDs) == 0 {
 		return SafetyState{}, fmt.Errorf("meetup: pick at least one trusted contact: %w", apperror.ErrInvalidInput)
+	}
+	// D1: a share goes to at most two contacts, the same two an SOS alerts.
+	if len(contactIDs) > MaxShareContacts {
+		return SafetyState{}, fmt.Errorf("meetup: pick at most %d trusted contacts: %w", MaxShareContacts, apperror.ErrInvalidInput)
 	}
 	if s.contactNotifier == nil {
 		// Explicit, not silent. The old switch's whole failure was telling
@@ -264,9 +258,14 @@ func (s *service) ShareWithContacts(ctx context.Context, req ShareWithContactsRe
 	if err != nil {
 		return SafetyState{}, err
 	}
+	// D1: only a meetup that is still going to happen. A cancelled or
+	// finished one has no place and time worth telling anyone about.
+	if (m.Status != repository.MeetupStatusOpen && m.Status != repository.MeetupStatusFull) || !time.Now().Before(m.WindowEnd) {
+		return SafetyState{}, fmt.Errorf("meetup: %s is no longer happening: %w", req.MeetupID, apperror.ErrConflict)
+	}
 
 	notified, err := s.contactNotifier.NotifyMeetupShare(ctx, req.UserID, ContactShare{
-		ContactIDs:    req.ContactIDs,
+		ContactIDs:    contactIDs,
 		LocationLabel: m.LocationLabel,
 		Latitude:      m.LocationLat,
 		Longitude:     m.LocationLng,
@@ -276,13 +275,14 @@ func (s *service) ShareWithContacts(ctx context.Context, req ShareWithContactsRe
 	if err != nil {
 		return SafetyState{}, err
 	}
-	if notified == 0 {
+	if len(notified) == 0 {
 		return SafetyState{}, fmt.Errorf("meetup: could not reach any of those contacts: %w", apperror.ErrInternal)
 	}
 
-	// Recorded per contact so a later "share with one more" adds to the set
-	// rather than replacing it.
-	for _, contactID := range req.ContactIDs {
+	// Recorded per contact actually told (D1), so a later "share with one
+	// more" adds to the set, and a contact whose text failed is not shown
+	// to the user as told.
+	for _, contactID := range notified {
 		if err := s.safetyState.RecordShare(ctx, req.MeetupID, req.UserID, contactID); err != nil {
 			// The message already went out; failing the whole call here
 			// would tell the user nothing happened when it did. Logged and
@@ -292,4 +292,21 @@ func (s *service) ShareWithContacts(ctx context.Context, req ShareWithContactsRe
 	}
 
 	return s.GetSafetyState(ctx, SafetyStateRequest{MeetupID: req.MeetupID, UserID: req.UserID})
+}
+
+// MaxShareContacts is how many trusted contacts one share may tell (D1).
+const MaxShareContacts = 2
+
+// dedupeIDs drops repeats and blanks, keeping the first-seen order.
+func dedupeIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }

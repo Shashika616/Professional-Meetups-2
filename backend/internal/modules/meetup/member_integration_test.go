@@ -3,7 +3,12 @@ package meetup_test
 import (
 	"context"
 	"errors"
+	"reflect"
+	"regexp"
+	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"professional-meetups-monolith/backend/internal/modules/meetup"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
@@ -160,7 +165,7 @@ func TestGetMemberActivity_Gate_Integration(t *testing.T) {
 		{"outsider → pending", f.outsider, f.pending, false},
 	}
 	for _, c := range cases {
-		_, err := h.svc.GetMemberActivity(ctx, c.viewer, c.target)
+		_, err := h.svc.GetMemberActivity(ctx, c.viewer, 2, c.target)
 		if c.allowed && err != nil {
 			t.Errorf("%s: want allowed, got %v", c.name, err)
 		}
@@ -172,15 +177,16 @@ func TestGetMemberActivity_Gate_Integration(t *testing.T) {
 
 // The recent-meetups feed: role, aggregate, and comment authorship named
 // only for a viewer who was on that meetup.
-func TestGetMemberActivity_RecentMeetupsAndComments_Integration(t *testing.T) {
+func TestGetMemberActivity_HostMeetupsAndAnonymousReviews_Integration(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	f := newMemberFixture(t, h)
 
 	// End the meetup and have both people review it with a note.
+	start := time.Date(2026, 9, 1, 15, 0, 0, 0, time.UTC) // 20:30 in Colombo
 	if _, err := h.pool.Exec(ctx,
-		`UPDATE meetup.meetups SET window_start = now() - interval '3 hours', window_end = now() - interval '1 hour' WHERE id = $1`,
-		f.meetupID,
+		`UPDATE meetup.meetups SET window_start = $2, window_end = now() - interval '1 hour' WHERE id = $1`,
+		f.meetupID, start,
 	); err != nil {
 		t.Fatalf("end meetup: %v", err)
 	}
@@ -198,59 +204,70 @@ func TestGetMemberActivity_RecentMeetupsAndComments_Integration(t *testing.T) {
 		t.Fatalf("guest review: %v", err)
 	}
 
-	// An outsider looking at the host: the meetup is listed, the aggregate
-	// is real, the comments are there — but nobody is named.
-	got, err := h.svc.GetMemberActivity(ctx, f.outsider, f.host)
-	if err != nil {
-		t.Fatalf("outsider → host: %v", err)
-	}
-	if len(got.RecentMeetups) != 1 {
-		t.Fatalf("recent = %d, want 1", len(got.RecentMeetups))
-	}
-	mm := got.RecentMeetups[0]
-	if !mm.Hosted || mm.ParticipantCount != 2 || mm.ReviewCount != 2 || mm.OverallAverage != 4 {
-		t.Errorf("host's meetup = hosted:%v people:%d reviews:%d avg:%v, want hosted, 2, 2, 4", mm.Hosted, mm.ParticipantCount, mm.ReviewCount, mm.OverallAverage)
-	}
-	if mm.ViewerWasIn {
-		t.Error("ViewerWasIn = true for an outsider")
-	}
-	if len(mm.Comments) != 2 {
-		t.Fatalf("comments = %d, want 2", len(mm.Comments))
-	}
-	for _, c := range mm.Comments {
-		if c.AuthorName != "" {
-			t.Errorf("outsider saw a comment author: %q — names are for people who were there", c.AuthorName)
+	// Everyone sees exactly the same thing, including the person who wrote
+	// the review and the host it is about.
+	var first meetup.MemberActivity
+	for i, viewer := range []string{f.outsider, f.accepted, f.host} {
+		got, err := h.svc.GetMemberActivity(ctx, viewer, 2, f.host)
+		if err != nil {
+			t.Fatalf("viewer %d: %v", i, err)
 		}
-		if c.Note != hostNote && c.Note != guestNote {
-			t.Errorf("unexpected note %q", c.Note)
+		if i == 0 {
+			first = got
+			continue
+		}
+		if !reflect.DeepEqual(got, first) {
+			t.Errorf("viewer %d sees %+v, the outsider %+v", i, got, first)
 		}
 	}
 
-	// The accepted guest looking at the host: same meetup, now with names,
-	// and from the guest's side it was joined, not hosted, when looking at
-	// themselves.
-	got, err = h.svc.GetMemberActivity(ctx, f.accepted, f.host)
-	if err != nil {
-		t.Fatalf("accepted → host: %v", err)
+	if len(first.RecentMeetups) != 1 {
+		t.Fatalf("recent = %d, want 1", len(first.RecentMeetups))
 	}
-	mm = got.RecentMeetups[0]
-	if !mm.ViewerWasIn {
-		t.Error("ViewerWasIn = false for an accepted participant")
+	mm := first.RecentMeetups[0]
+	if mm.ParticipantCount != 2 || mm.ReviewCount != 1 || mm.OverallAverage != 3 {
+		t.Errorf("meetup = people:%d reviews:%d avg:%v, want 2, 1, 3: the host's own review does not count", mm.ParticipantCount, mm.ReviewCount, mm.OverallAverage)
 	}
-	names := map[string]bool{}
-	for _, c := range mm.Comments {
-		names[c.AuthorName] = true
-	}
-	if !names["Host Person"] || !names["Accepted Person"] {
-		t.Errorf("a participant should see who wrote what, got %v", names)
+	wantDay := time.Date(2026, 9, 1, 6, 30, 0, 0, time.UTC) // noon in Colombo
+	if !mm.Day.Equal(wantDay) {
+		t.Errorf("Day = %s, want %s: the hour must not leave the server", mm.Day.UTC(), wantDay)
 	}
 
-	self, err := h.svc.GetMemberActivity(ctx, f.accepted, f.accepted)
+	if len(first.Reviews) != 1 {
+		t.Fatalf("reviews = %+v, want the participant's only", first.Reviews)
+	}
+	r := first.Reviews[0]
+	if r.Score != 3 || r.Text != guestNote || !regexp.MustCompile(`^\d{4}-\d{2}$`).MatchString(r.Month) {
+		t.Errorf("review = %+v", r)
+	}
+
+	// A member who only joined lists no meetups and has no reviews.
+	joined, err := h.svc.GetMemberActivity(ctx, f.accepted, 2, f.accepted)
 	if err != nil {
 		t.Fatalf("self: %v", err)
 	}
-	if len(self.RecentMeetups) != 1 || self.RecentMeetups[0].Hosted {
-		t.Errorf("the guest's own feed should list the meetup as joined, got %+v", self.RecentMeetups)
+	if len(joined.RecentMeetups) != 0 || len(joined.Reviews) != 0 {
+		t.Errorf("a member who only joined shows %+v", joined)
+	}
+}
+
+// Plan 2.3: an old review longer than the limit is still cut on the way out.
+func TestGetMemberActivity_ClampsReviewText_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	f := newMemberFixture(t, h)
+	long := strings.Repeat("අ", 600) // three bytes each: characters, not bytes
+	if _, err := h.pool.Exec(ctx, `
+		INSERT INTO meetup.meetup_feedback (meetup_id, user_id, happened, overall_score, notes, review_completed_at)
+		VALUES ($1, $2, true, 4, $3, now())`, f.meetupID, f.accepted, long); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := h.svc.GetMemberActivity(ctx, f.outsider, 2, f.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Reviews) != 1 || utf8.RuneCountInString(got.Reviews[0].Text) != 500 {
+		t.Fatalf("reviews = %d, want one of 500 characters", len(got.Reviews))
 	}
 }
 
@@ -279,15 +296,13 @@ func TestGetMemberActivity_NeverPublishesASafetyNote_Integration(t *testing.T) {
 
 	assertNotPublished := func(stage string) {
 		t.Helper()
-		got, err := h.svc.GetMemberActivity(ctx, f.outsider, f.host)
+		got, err := h.svc.GetMemberActivity(ctx, f.outsider, 2, f.host)
 		if err != nil {
 			t.Fatalf("%s: GetMemberActivity: %v", stage, err)
 		}
-		for _, mm := range got.RecentMeetups {
-			for _, c := range mm.Comments {
-				if c.Note == private {
-					t.Errorf("%s: a private safety note was shown publicly", stage)
-				}
+		for _, r := range got.Reviews {
+			if r.Text == private {
+				t.Errorf("%s: a private safety note was shown publicly", stage)
 			}
 		}
 	}
@@ -303,4 +318,86 @@ func TestGetMemberActivity_NeverPublishesASafetyNote_Integration(t *testing.T) {
 		t.Fatalf("review: %v", err)
 	}
 	assertNotPublished("after a review with no note")
+}
+
+// #103 (review N1-B1): a profile listed a member's next open or full
+// meetups, with times and places, to anyone allowed to open it. Only
+// meetups that have ended are listed now.
+func TestGetMemberActivity_NeverListsAnUpcomingMeetup_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	f := newMemberFixture(t, h)
+	got, err := h.svc.GetMemberActivity(ctx, f.accepted, 2, f.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RecentMeetups) != 0 {
+		t.Errorf("an upcoming meetup was listed on the profile: %+v", got.RecentMeetups)
+	}
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE meetup.meetups SET window_start = now() - interval '3 hours', window_end = now() - interval '1 hour' WHERE id = $1`,
+		f.meetupID); err != nil {
+		t.Fatal(err)
+	}
+	got, err = h.svc.GetMemberActivity(ctx, f.accepted, 2, f.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RecentMeetups) != 1 {
+		t.Errorf("the ended meetup is not listed: %d", len(got.RecentMeetups))
+	}
+}
+
+// #103: a guest (Level 0) sees no one's meetups, name or photo but their
+// own, wherever names are hidden from guests today.
+func TestGetMemberActivity_HidesOthersFromAGuest_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	f := newMemberFixture(t, h)
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE meetup.meetups SET window_start = now() - interval '3 hours', window_end = now() - interval '1 hour' WHERE id = $1`,
+		f.meetupID); err != nil {
+		t.Fatal(err)
+	}
+	got, err := h.svc.GetMemberActivity(ctx, f.outsider, 0, f.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RecentMeetups) != 0 || !got.IdentityHidden {
+		t.Errorf("a guest got %d meetups, identity hidden %v; want none and hidden", len(got.RecentMeetups), got.IdentityHidden)
+	}
+	self, err := h.svc.GetMemberActivity(ctx, f.host, 0, f.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if self.IdentityHidden || len(self.RecentMeetups) != 1 {
+		t.Errorf("a member's own profile was hidden from them: %+v", self)
+	}
+}
+
+// Plan 30B (review N1-B7): the 14-day review window was enforced only by
+// which reviews Home offered; the submit paths took a review or rating
+// months later. Both refuse once the window has passed.
+func TestReviewsAndRatingsCloseAfterFourteenDays_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	f := newMemberFixture(t, h)
+	if _, err := h.pool.Exec(ctx,
+		`UPDATE meetup.meetups SET window_start = now() - interval '15 days 3 hours', window_end = now() - interval '15 days' WHERE id = $1`,
+		f.meetupID); err != nil {
+		t.Fatal(err)
+	}
+	err := h.svc.SubmitMeetupReview(ctx, meetup.SubmitMeetupReviewRequest{
+		MeetupID: f.meetupID, RaterID: f.accepted, OverallScore: 4,
+		Participants: []meetup.ReviewParticipantInput{{UserID: f.host, Score: 4}},
+	})
+	if !isSentinel(err, apperror.ErrConflict) {
+		t.Errorf("a review 15 days after: %v, want conflict", err)
+	}
+	err = h.svc.SubmitRating(ctx, meetup.SubmitRatingRequest{
+		MeetupID: f.meetupID, RaterUserID: f.accepted, RatedUserID: f.host, Score: 4,
+	})
+	if !isSentinel(err, apperror.ErrConflict) {
+		t.Errorf("a rating 15 days after: %v, want conflict", err)
+	}
 }

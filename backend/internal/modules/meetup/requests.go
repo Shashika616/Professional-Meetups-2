@@ -6,6 +6,7 @@ import (
 
 	"professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
+	"professional-meetups-monolith/backend/internal/platform/geo"
 )
 
 func (s *service) RequestToJoin(ctx context.Context, req RequestToJoinRequest) (MeetupRequest, error) {
@@ -26,23 +27,24 @@ func (s *service) RequestToJoin(ctx context.Context, req RequestToJoinRequest) (
 		return MeetupRequest{}, fmt.Errorf("meetup: meetup %s is not open: %w", req.MeetupID, apperror.ErrConflict)
 	}
 
-	// The 50 km rule, applied to joining as well as to browsing (D4).
-	// Browse only ever showed meetups within 50 km, but RequestToJoin took
-	// any meetup id, so someone far away who had the id could ask to join
-	// a coffee — or a ride share — in another city.
+	// The browse radius, applied to joining as well as to browsing (D4).
+	// Browse only ever showed meetups within it, but RequestToJoin took any
+	// meetup id, so someone far away who had the id could ask to join a
+	// coffee — or a ride share — in another city.
 	//
 	// Measured from the requester's last known location, the one the app
-	// reports whenever the home screen loads. When none has ever been
-	// reported the rule is not applied: the location is self-reported
-	// either way, so refusing those users would add friction without
-	// adding protection. The host is refused above already, and anyone
-	// already on the meetup has nothing left to request.
+	// reports whenever the home screen loads, and it must be recent (plan
+	// 30B, 3.3). It used to be skipped when none was known, which made the
+	// rule optional for anyone who never let the app report one.
 	within, known, err := s.userLocations.WithinBrowseRadius(ctx, req.RequesterID, m.LocationLat, m.LocationLng)
 	if err != nil {
 		return MeetupRequest{}, err
 	}
-	if known && !within {
-		return MeetupRequest{}, fmt.Errorf("meetup: this meetup is more than 50 km from you: %w", apperror.ErrForbidden)
+	if !known {
+		return MeetupRequest{}, fmt.Errorf("meetup: Turn on location to join, so we can check this meetup is near you: %w", apperror.ErrForbidden)
+	}
+	if !within {
+		return MeetupRequest{}, fmt.Errorf("meetup: this meetup is more than %d km from you: %w", geo.BrowseRadiusKm, apperror.ErrForbidden)
 	}
 
 	// The host's notification is composed and queued INSIDE Create's own

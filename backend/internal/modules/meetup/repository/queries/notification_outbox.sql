@@ -65,7 +65,25 @@ WHERE id IN (
   LIMIT sqlc.arg(batch_size)
   FOR UPDATE SKIP LOCKED
 )
-RETURNING id, fcm_tokens, title, body, data, attempts;
+RETURNING id, fcm_tokens, title, body, data, attempts, next_attempt_at;
+
+-- name: RenewNotificationClaim :one
+-- #115: the claim's stamp is the lease. Renewed just before the row is
+-- delivered, and only if the stamp is still the one this claimer wrote: a
+-- different stamp means another claimer took the row after this one's
+-- timeout passed, and that one delivers it.
+UPDATE meetup.notification_outbox
+SET next_attempt_at = now() + sqlc.arg(visibility_timeout)::interval
+WHERE id = sqlc.arg(id)
+  AND next_attempt_at = sqlc.arg(lease)::timestamptz
+  AND processed_at IS NULL AND dead_lettered_at IS NULL
+RETURNING next_attempt_at;
+
+-- name: MarkNotificationProcessedLeased :execrows
+-- #115: processed only by the claimer that holds the row.
+UPDATE meetup.notification_outbox
+SET processed_at = now(), last_error = NULL
+WHERE id = sqlc.arg(id) AND next_attempt_at = sqlc.arg(lease)::timestamptz;
 
 -- name: MarkNotificationProcessed :exec
 -- The only statement that ever writes processed_at. Success is the sole path

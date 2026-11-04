@@ -78,6 +78,11 @@ const (
 // like: never free text, never a sentence, never a name with a capital.
 var identifier = regexp.MustCompile(`^[a-z0-9][a-z0-9_.:-]*$`)
 
+// uuidShaped matches a UUID with or without dashes, in either case. An
+// id-typed attribute names a thing in the app (a filter, a toggle), never
+// a record (#119): a UUID there would be a user, meetup or contact id.
+var uuidShaped = regexp.MustCompile(`^(?i)[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$`)
+
 // IsIdentifier reports whether s is a valid identifier value.
 func IsIdentifier(s string) bool {
 	return len(s) <= MaxStringLength && identifier.MatchString(s)
@@ -404,7 +409,7 @@ func (a Attribute) check(v any) (any, string) {
 			}
 			return s, ""
 		}
-		if !identifier.MatchString(s) {
+		if !identifier.MatchString(s) || uuidShaped.MatchString(s) {
 			return nil, DropNotIdentifier
 		}
 		return s, ""

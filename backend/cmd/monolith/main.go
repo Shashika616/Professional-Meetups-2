@@ -39,6 +39,7 @@ import (
 	authconfig "professional-meetups-monolith/backend/internal/modules/auth/config"
 	"professional-meetups-monolith/backend/internal/modules/auth/identity"
 	"professional-meetups-monolith/backend/internal/modules/auth/linkedin"
+	"professional-meetups-monolith/backend/internal/modules/auth/photo"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/modules/billing"
 	billingconfig "professional-meetups-monolith/backend/internal/modules/billing/config"
@@ -53,6 +54,7 @@ import (
 	"professional-meetups-monolith/backend/internal/platform/internalauth"
 	"professional-meetups-monolith/backend/internal/platform/logging"
 	"professional-meetups-monolith/backend/internal/platform/outbox"
+	"professional-meetups-monolith/backend/internal/platform/ratelimit"
 	"professional-meetups-monolith/backend/internal/platform/telemetry"
 	analyticsv1 "professional-meetups-monolith/backend/internal/proto/analytics/v1"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
@@ -226,6 +228,13 @@ func run(logger *slog.Logger) error {
 			"schema_version", have, "build_expects", migrations.Latest())
 	}
 
+	// Set below, once the meetup service exists.
+	sosMeetups := &sosMeetupLookup{}
+
+	// Limits that must hold across instances (#81): counted in
+	// ops.rate_counters rather than in this process's memory.
+	sharedLimits := ratelimit.NewShared(pool, logger)
+
 	// One bus for the whole process (ADR-001 §4). Modules publish and
 	// subscribe on it; nothing else exists between them.
 	bus := eventbus.New(logger)
@@ -266,6 +275,11 @@ func run(logger *slog.Logger) error {
 		Identities:              repository.NewUserIdentityRepository(pool),
 		RefreshTokens:           repository.NewRefreshTokenRepository(pool),
 		VerificationCodes:       repository.NewVerificationCodeRepository(pool),
+		OTPBudgets:              repository.NewOTPBudgetRepository(pool),
+		Retention:               repository.NewRetentionRepository(pool),
+		Photos:                  repository.NewUserPhotoRepository(pool),
+		PhotoFetcher:            photo.NewFetcher(),
+		Limits:                  sharedLimits,
 		KnownCompanies:          repository.NewKnownCompanyRepository(pool),
 		UnverifiedCompanyClaims: repository.NewUnverifiedCompanyClaimRepository(pool),
 		TrustedContacts:         repository.NewTrustedContactRepository(pool),
@@ -276,7 +290,7 @@ func run(logger *slog.Logger) error {
 		Email:                   emailSender,
 		SMS:                     smsSender,
 		WorkEmailHMACKey:        workEmailHMACKey,
-		PublicBaseURL:           cfg.PublicBaseURL,
+		SOSMeetups:              sosMeetups,
 		Logger:                  logger,
 	})
 
@@ -427,6 +441,7 @@ func run(logger *slog.Logger) error {
 		Ratings:       meetuprepo.NewRatingRepository(pool, bus, logger),
 		DeviceTokens:  meetupDeviceTokens,
 		UserLocations: userLocationCache,
+		Retention:     meetuprepo.NewRetentionRepository(pool),
 		Outbox:        notificationOutbox,
 		Wake:          notificationPoller.Wake,
 		Geocoder:      geocoding.NewNominatimReverseGeocoder(),
@@ -564,6 +579,7 @@ func run(logger *slog.Logger) error {
 	userDeletedRetention := notification.NewRetentionFor("user-deleted outbox", userDeletedOutbox, logger)
 	go userDeletedRetention.Run(ctx)
 	go auth.NewRefreshTokenSweeper(authService, logger).Run(ctx)
+	sosMeetups.meetups = meetupService
 	// Billing's two outboxes, woken by the writes that fill them.
 	go billingPoller.Run(ctx)
 	go meetupBillingPoller.Run(ctx)
@@ -610,7 +626,11 @@ func run(logger *slog.Logger) error {
 		grpcapi.Sweep{Name: "auth: expired refresh tokens", Run: countedInt(authService.SweepExpiredRefreshTokens)},
 		grpcapi.Sweep{Name: "auth: abandoned guests", Run: countedInt(authService.SweepAbandonedGuests)},
 		grpcapi.Sweep{Name: "auth: expired safety holds", Run: countedInt(authService.SweepExpiredSafetyHolds)},
-		grpcapi.Sweep{Name: "auth: contact invitation log", Run: countedInt(authService.SweepContactInvites)},
+		grpcapi.Sweep{Name: "auth: otp budgets", Run: countedInt(authService.SweepOTPBudgets)},
+		grpcapi.Sweep{Name: "auth: location retention", Run: countedInt(authService.SweepLocationRetention)},
+		grpcapi.Sweep{Name: "meetup: stale locations", Run: countedInt(meetupService.SweepStaleUserLocations)},
+		grpcapi.Sweep{Name: "meetup: old meetup coordinates", Run: countedInt(meetupService.SweepOldMeetupCoordinates)},
+		grpcapi.Sweep{Name: "ops: rate counters", Run: sharedLimits.Sweep},
 		// Billing (plan 29A). Captures and refunds first, so a creation's
 		// capture lands before its hold could be expired below.
 		grpcapi.Sweep{Name: "outbox: meetup billing events", Run: countedInt(meetupBillingPoller.Drain)},
@@ -620,17 +640,27 @@ func run(logger *slog.Logger) error {
 		grpcapi.Sweep{Name: "billing: reconciliation", Run: countedInt(billingService.Reconcile)},
 		grpcapi.Sweep{Name: "retention: meetup billing events", Run: retentionSweep(meetupBillingRetention)},
 		grpcapi.Sweep{Name: "retention: billing outbox", Run: retentionSweep(billingRetention)},
-		// Plan 29D. Partitions first, so the day's writes have somewhere to
-		// go; the aggregate before the retention, which never drops a day
-		// that has not been aggregated (it aggregates first if it must).
+		// Plan 29D. Partitions stay in the core tick: they are cheap, and
+		// without them the day's writes have nowhere to go.
 		grpcapi.Sweep{Name: "outbox: meetup activity", Run: countedInt(activityPoller.Drain)},
 		grpcapi.Sweep{Name: "retention: meetup activity", Run: retentionSweep(activityRetention)},
 		grpcapi.Sweep{Name: "analytics: partitions", Run: countedInt(analyticsService.SweepPartitions)},
-		grpcapi.Sweep{Name: "analytics: aggregate", Run: countedInt(analyticsService.SweepAggregate)},
-		grpcapi.Sweep{Name: "analytics: archive and retention", Run: countedInt(analyticsService.SweepRetention)},
+		// Last in the core tick (#117): the outbox drains above handed
+		// server events to the in-memory buffer and marked their rows done,
+		// so write them before the request ends and the instance can idle.
+		grpcapi.Sweep{Name: "analytics: flush", Run: countedInt(analyticsService.SweepFlush), Budget: analyticsFlushBudget},
+		// The analytics tick (#102), its own Scheduler job: work that needs
+		// minutes, each sweep within the 120s its statements are allowed.
+		// The aggregate before the retention, which never drops a day that
+		// has not been aggregated (it aggregates first if it must).
+		grpcapi.Sweep{Name: "analytics: aggregate", Run: countedInt(analyticsService.SweepAggregate),
+			Group: grpcapi.GroupAnalytics, Budget: analyticsSweepBudget},
+		grpcapi.Sweep{Name: "analytics: archive and retention", Run: countedInt(analyticsService.SweepRetention),
+			Group: grpcapi.GroupAnalytics, Budget: analyticsSweepBudget},
 		// After 06:00 Colombo, once a day: yesterday's report, emailed and
 		// stored. Idempotent by date; a failed delivery retries next tick.
-		grpcapi.Sweep{Name: "analytics: daily report", Run: countedInt(analyticsService.SweepReport)},
+		grpcapi.Sweep{Name: "analytics: daily report", Run: countedInt(analyticsService.SweepReport),
+			Group: grpcapi.GroupAnalytics, Budget: analyticsSweepBudget},
 	).WithAppConfig(grpcapi.AppConfig{
 		Flags:                  flagService,
 		MinSupportedAppVersion: minSupportedAppVersion(),

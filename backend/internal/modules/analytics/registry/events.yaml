@@ -31,6 +31,7 @@ screens:
   - events
   - meetup_detail
   - location_view
+  - location_explanation
   - participants
   - schedule_meetup
   - meetup_review

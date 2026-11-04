@@ -56,13 +56,32 @@ type fakeUploader struct {
 	fail    error
 }
 
-func (u *fakeUploader) Upload(_ context.Context, bucket, object string, body []byte, _ analytics.UploadOptions) error {
+// Upload behaves like a bucket where the service account holds only
+// roles/storage.objectCreator (runbook §14, #116): it may create, never
+// replace. A create-only write of an object that exists is the 412 the real
+// uploader counts as done; a plain write of one is refused.
+func (u *fakeUploader) UploadStream(ctx context.Context, bucket, object string, body io.Reader, opts analytics.UploadOptions) error {
+	b, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	return u.Upload(ctx, bucket, object, b, opts)
+}
+
+func (u *fakeUploader) Upload(_ context.Context, bucket, object string, body []byte, opts analytics.UploadOptions) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	if u.fail != nil {
 		return u.fail
 	}
-	u.objects[bucket+"/"+object] = append([]byte(nil), body...)
+	key := bucket + "/" + object
+	if _, exists := u.objects[key]; exists {
+		if opts.CreateOnly {
+			return nil
+		}
+		return errors.New("status 403: objectCreator cannot replace " + key)
+	}
+	u.objects[key] = append([]byte(nil), body...)
 	return nil
 }
 
@@ -587,6 +606,13 @@ func TestRetentionArchivesThenDrops(t *testing.T) {
 	if len(lines) != 2 || !strings.Contains(string(raw), `"event_name":"app_opened"`) || !strings.Contains(string(raw), `"cold_start":true`) {
 		t.Errorf("archive = %s", raw)
 	}
+	// #110 (review N1-M3): the archive outlives account deletion and
+	// opt-out, so it carries no per-person key at all.
+	for _, field := range []string{`"user_key"`, `"install_id"`, installID} {
+		if strings.Contains(string(raw), field) {
+			t.Errorf("the archive carries %s", field)
+		}
+	}
 	var exists bool
 	_ = h.pool.QueryRow(context.Background(), `SELECT to_regclass('analytics.events_20261025') IS NOT NULL`).Scan(&exists)
 	if exists {
@@ -627,3 +653,29 @@ func keys(m map[string][]byte) []string {
 }
 
 func date(t time.Time) pgtype.Date { return pgtype.Date{Time: t, Valid: true} }
+
+// Tracker #117: a server event from an outbox drain sits in the in-memory
+// buffer while its outbox row is already marked done. The tick's final
+// "analytics: flush" sweep writes it before the request ends, so an
+// instance that is idled or killed after the tick has lost nothing. The
+// harness flushes only every hour, so only the sweep can have written it.
+func TestTheFlushSweepWritesAnOutboxDeliveredEvent(t *testing.T) {
+	h := newHarness(t)
+	const user = "aaaaaaaa-0000-0000-0000-0000000000f1"
+	h.svc.Record(context.Background(), analytics.ServerEvent{
+		Source: "meetup_activity_outbox:" + newID(), Name: "join_requested", UserID: user,
+	})
+	if n := h.count(t, "event_name = 'join_requested'"); n != 0 {
+		t.Fatalf("%d written before the sweep; the test proves nothing", n)
+	}
+	flushed, err := h.svc.SweepFlush(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flushed != 1 {
+		t.Errorf("the sweep reports %d flushed, want 1", flushed)
+	}
+	if n := h.count(t, "event_name = 'join_requested' AND user_key = $1", h.svc.UserKey(user)); n != 1 {
+		t.Errorf("%d join_requested events in the table after the flush sweep, want 1", n)
+	}
+}

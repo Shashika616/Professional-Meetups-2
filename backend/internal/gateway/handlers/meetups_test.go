@@ -30,7 +30,6 @@ type meetupRecorder struct {
 	gotCursor      string
 	gotReason      string
 	gotAccept      bool
-	gotOptIn       bool
 	gotScore       int32
 	gotRatedUserID string
 
@@ -123,11 +122,6 @@ func (f *fakeMonolith) AcknowledgeSafetyChecklist(_ context.Context, meetupID, u
 	return monolithclient.SafetyState{MeetupID: meetupID}, f.err
 }
 
-func (f *fakeMonolith) SetLiveLocationOptIn(_ context.Context, meetupID, userID string, optIn bool) (monolithclient.SafetyState, error) {
-	f.meetup.gotMeetupID, f.meetup.gotUserID, f.meetup.gotOptIn = meetupID, userID, optIn
-	return monolithclient.SafetyState{MeetupID: meetupID}, f.err
-}
-
 func (f *fakeMonolith) CheckIn(_ context.Context, meetupID, userID string) (monolithclient.SafetyState, error) {
 	f.meetup.gotMeetupID, f.meetup.gotUserID = meetupID, userID
 	return monolithclient.SafetyState{MeetupID: meetupID}, f.err
@@ -212,7 +206,6 @@ func TestMeetupRoutes_AreWiredAndRequireAuth(t *testing.T) {
 		{http.MethodPost, "/v1/meetups/device-token", `{"fcm_token":"t"}`},
 		{http.MethodGet, "/v1/meetups/m1/safety", ""},
 		{http.MethodPost, "/v1/meetups/m1/safety/checklist", `{}`},
-		{http.MethodPost, "/v1/meetups/m1/safety/live-location", `{"opt_in":true}`},
 		{http.MethodPost, "/v1/meetups/m1/safety/check-in", `{}`},
 		{http.MethodPost, "/v1/meetups/m1/safety/decline", `{"reason":"x"}`},
 		{http.MethodPost, "/v1/meetups/m1/feedback", `{"happened":true}`},
@@ -359,7 +352,7 @@ func TestMeetupResponse_OmitsRedactedFields(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 	for _, key := range []string{
-		"host_full_name", "host_profile_photo_url", "location_lat", "location_lng",
+		"host_full_name", "host_photo_url", "location_lat", "location_lng",
 		"location_label", "window_start_unix_seconds", "window_end_unix_seconds",
 	} {
 		if _, present := body[key]; present {

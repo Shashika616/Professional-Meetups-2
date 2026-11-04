@@ -19,6 +19,7 @@ import (
 	authconfig "professional-meetups-monolith/backend/internal/modules/auth/config"
 	"professional-meetups-monolith/backend/internal/modules/auth/email"
 	"professional-meetups-monolith/backend/internal/modules/auth/sms"
+	"professional-meetups-monolith/backend/internal/modules/auth/sos"
 	"professional-meetups-monolith/backend/internal/modules/billing"
 	"professional-meetups-monolith/backend/internal/modules/meetup"
 	meetuprepo "professional-meetups-monolith/backend/internal/modules/meetup/repository"
@@ -110,7 +111,7 @@ func shutdownGRPCServer(server *grpc.Server, logger *slog.Logger) {
 // interface so neither package imports the other.
 type contactNotifier struct{ auth auth.Service }
 
-func (c contactNotifier) NotifyMeetupShare(ctx context.Context, userID string, share meetup.ContactShare) (int, error) {
+func (c contactNotifier) NotifyMeetupShare(ctx context.Context, userID string, share meetup.ContactShare) ([]string, error) {
 	return c.auth.NotifyMeetupShare(ctx, userID, auth.MeetupShare{
 		ContactIDs:    share.ContactIDs,
 		LocationLabel: share.LocationLabel,
@@ -119,6 +120,20 @@ func (c contactNotifier) NotifyMeetupShare(ctx context.Context, userID string, s
 		WindowStart:   share.WindowStart,
 		WindowEnd:     share.WindowEnd,
 	})
+}
+
+// sosMeetupLookup carries the auth module's question "what meetup is this
+// person on?" to the meetup module (meetup -> auth is the usual direction, so
+// neither imports the other). Auth is built first, so the meetup service is
+// set once it exists, before anything is served.
+type sosMeetupLookup struct{ meetups meetup.Service }
+
+func (l *sosMeetupLookup) ActiveMeetup(ctx context.Context, userID string, now time.Time) (sos.AlertMeetup, bool, error) {
+	m, ok, err := l.meetups.ActiveMeetup(ctx, userID, now)
+	if err != nil || !ok {
+		return sos.AlertMeetup{}, false, err
+	}
+	return sos.AlertMeetup{Intent: m.Intent, Label: m.LocationLabel, Lat: m.Lat, Lng: m.Lng}, true, nil
 }
 
 // outboxObserver adapts the generic poller's Observer to this process's

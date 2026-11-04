@@ -25,6 +25,9 @@ type UploadOptions struct {
 // Uploader writes one object to Cloud Storage.
 type Uploader interface {
 	Upload(ctx context.Context, bucket, object string, body []byte, opts UploadOptions) error
+	// UploadStream writes an object read from body without holding it all
+	// in memory (#119): the raw archive of a busy day is large.
+	UploadStream(ctx context.Context, bucket, object string, body io.Reader, opts UploadOptions) error
 }
 
 func markArchived(d time.Time, uri string) sqlcgen.MarkPartitionArchivedParams {
@@ -35,7 +38,7 @@ func markArchived(d time.Time, uri string) sqlcgen.MarkPartitionArchivedParams {
 // account's token, and the Cloud Storage JSON API. Nothing in a request or
 // the environment can point the archive anywhere else.
 const (
-	metadataTokenURL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+	metadataTokenURL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token" // #nosec G101 -- the metadata server's endpoint, not a credential
 	gcsUploadBase    = "https://storage.googleapis.com/upload/storage/v1/b/"
 )
 
@@ -49,7 +52,14 @@ type GCS struct {
 	mu      sync.Mutex
 	token   string
 	expires time.Time
+
+	// chunkSize is one resumable-upload chunk; a multiple of 256 KiB, as
+	// Cloud Storage requires. Zero is defaultChunkSize.
+	chunkSize int
 }
+
+// defaultChunkSize bounds the memory one streamed upload holds.
+const defaultChunkSize = 8 << 20
 
 // NewGCS constructs the uploader.
 func NewGCS() *GCS {
@@ -127,5 +137,93 @@ func (g *GCS) Upload(ctx context.Context, bucket, object string, body []byte, op
 		return fmt.Errorf("analytics: upload: status %d", resp.StatusCode)
 	default:
 		return fmt.Errorf("analytics: upload: status %d", resp.StatusCode)
+	}
+}
+
+// UploadStream writes body through Cloud Storage's resumable-upload
+// protocol (#119): a session is opened (with ifGenerationMatch=0 when
+// create-only, so a 412 there means the object is already written and
+// counts as done), then the body is sent in chunkSize pieces, each but the
+// last with an open total, and the last with the total. At most one chunk
+// is held in memory, whatever the size of the object.
+func (g *GCS) UploadStream(ctx context.Context, bucket, object string, body io.Reader, opts UploadOptions) error {
+	token, err := g.accessToken(ctx)
+	if err != nil {
+		return err
+	}
+	params := url.Values{"uploadType": {"resumable"}, "name": {object}}
+	if opts.CreateOnly {
+		params.Set("ifGenerationMatch", "0")
+	}
+	contentType := opts.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	init, err := http.NewRequestWithContext(ctx, http.MethodPost, g.uploadBase+url.PathEscape(bucket)+"/o?"+params.Encode(), nil)
+	if err != nil {
+		return err
+	}
+	init.Header.Set("Authorization", "Bearer "+token)
+	init.Header.Set("X-Upload-Content-Type", contentType)
+	resp, err := g.client.Do(init)
+	if err != nil {
+		return fmt.Errorf("analytics: upload: open session: %w", err)
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	_ = resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusPreconditionFailed && opts.CreateOnly:
+		return nil
+	case resp.StatusCode != http.StatusOK:
+		return fmt.Errorf("analytics: upload: open session: status %d", resp.StatusCode)
+	}
+	session := resp.Header.Get("Location")
+	if session == "" {
+		return fmt.Errorf("analytics: upload: no session")
+	}
+
+	size := g.chunkSize
+	if size <= 0 {
+		size = defaultChunkSize
+	}
+	chunk := make([]byte, size)
+	var sent int64
+	for {
+		n, readErr := io.ReadFull(body, chunk)
+		last := readErr == io.EOF || readErr == io.ErrUnexpectedEOF
+		if readErr != nil && !last {
+			return fmt.Errorf("analytics: upload: read: %w", readErr)
+		}
+		var rng string
+		switch {
+		case last && n == 0:
+			rng = fmt.Sprintf("bytes */%d", sent)
+		case last:
+			rng = fmt.Sprintf("bytes %d-%d/%d", sent, sent+int64(n)-1, sent+int64(n))
+		default:
+			rng = fmt.Sprintf("bytes %d-%d/*", sent, sent+int64(n)-1)
+		}
+		put, err := http.NewRequestWithContext(ctx, http.MethodPut, session, bytes.NewReader(chunk[:n]))
+		if err != nil {
+			return err
+		}
+		put.Header.Set("Content-Range", rng)
+		resp, err := g.client.Do(put)
+		if err != nil {
+			return fmt.Errorf("analytics: upload: chunk: %w", err)
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+		_ = resp.Body.Close()
+		sent += int64(n)
+		switch {
+		case !last && resp.StatusCode == http.StatusPermanentRedirect:
+			continue
+		case last && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated):
+			return nil
+		case resp.StatusCode == http.StatusPreconditionFailed && opts.CreateOnly:
+			return nil
+		default:
+			return fmt.Errorf("analytics: upload: chunk at %d: status %d", sent-int64(n), resp.StatusCode)
+		}
 	}
 }

@@ -36,6 +36,7 @@ import (
 	"professional-meetups-monolith/backend/internal/modules/auth/sms"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 	"professional-meetups-monolith/backend/internal/platform/db"
+	"professional-meetups-monolith/backend/internal/platform/ratelimit"
 )
 
 // defaultTestDatabaseURL matches backend/docker-compose.yml's local Postgres
@@ -99,7 +100,8 @@ func truncateAuthTables(t *testing.T, pool *pgxpool.Pool) {
 		TRUNCATE auth.users, auth.refresh_tokens, auth.verification_codes,
 		         auth.user_identities, auth.unverified_company_claims,
 		         auth.trusted_contacts, auth.sos_events, auth.user_deleted_outbox,
-		         auth.safety_holds, auth.contact_invites_sent
+		         auth.safety_holds, auth.otp_budgets, auth.user_photos,
+		         ops.rate_counters
 		RESTART IDENTITY CASCADE`)
 	if err != nil {
 		t.Fatalf("truncate: %v", err)
@@ -281,6 +283,9 @@ func newHarness(t *testing.T) *harness {
 		Identities:              repository.NewUserIdentityRepository(pool),
 		RefreshTokens:           repository.NewRefreshTokenRepository(pool),
 		VerificationCodes:       repository.NewVerificationCodeRepository(pool),
+		OTPBudgets:              repository.NewOTPBudgetRepository(pool),
+		Retention:               repository.NewRetentionRepository(pool),
+		Photos:                  repository.NewUserPhotoRepository(pool),
 		KnownCompanies:          repository.NewKnownCompanyRepository(pool),
 		UnverifiedCompanyClaims: repository.NewUnverifiedCompanyClaimRepository(pool),
 		TrustedContacts:         repository.NewTrustedContactRepository(pool),
@@ -295,6 +300,7 @@ func newHarness(t *testing.T) *harness {
 		Email:            emailer,
 		SMS:              smser,
 		WorkEmailHMACKey: []byte("integration-test-hmac-key"),
+		Limits:           ratelimit.NewShared(pool, logger),
 		Logger:           logger,
 	})
 
@@ -627,17 +633,26 @@ func TestCorporateEmailVerification_Integration(t *testing.T) {
 		assertRawWorkEmailNotStored(t, h.pool, "Ada@WSO2.com")
 	})
 
-	t.Run("unknown company is accepted and flagged for review", func(t *testing.T) {
+	t.Run("unknown company is held for review at Level 2", func(t *testing.T) {
 		if err := startAndVerify("ada@some-unlisted-co.com", "Some Unlisted Co"); err != nil {
-			t.Fatalf("unknown company was rejected, want accept-and-flag: %v", err)
+			t.Fatalf("unknown company was rejected, want held for review: %v", err)
 		}
 		var claims int
 		if err := h.pool.QueryRow(ctx,
-			`SELECT count(*) FROM auth.unverified_company_claims WHERE user_id = $1`, userID).Scan(&claims); err != nil {
+			`SELECT count(*) FROM auth.unverified_company_claims WHERE user_id = $1 AND status = 'pending_review'`, userID).Scan(&claims); err != nil {
 			t.Fatalf("count claims: %v", err)
 		}
 		if claims != 1 {
-			t.Errorf("unverified_company_claims rows = %d, want 1", claims)
+			t.Errorf("pending_review claims = %d, want 1", claims)
+		}
+		var verified bool
+		var level int
+		if err := h.pool.QueryRow(ctx,
+			`SELECT work_email_verified, trust_level FROM auth.users WHERE id = $1`, userID).Scan(&verified, &level); err != nil {
+			t.Fatal(err)
+		}
+		if verified || level >= 3 {
+			t.Errorf("an unknown company left (verified %v, level %d), want unverified and below Level 3 (#111)", verified, level)
 		}
 	})
 
@@ -748,33 +763,6 @@ func TestRefreshTokenRotation_Integration(t *testing.T) {
 	}
 }
 
-// confirmAllInvites plays every invited contact: it reads each confirmation
-// link out of the texts captured so far and confirms through it, as the real
-// people would on the confirmation page (#80). Returns how many it confirmed.
-func (h *harness) confirmAllInvites(t *testing.T) int {
-	t.Helper()
-	h.smser.mu.Lock()
-	alerts := append([]string(nil), h.smser.alerts...)
-	h.smser.mu.Unlock()
-
-	confirmed := 0
-	for _, msg := range alerts {
-		i := strings.Index(msg, "/c/")
-		if i < 0 {
-			continue
-		}
-		token := msg[i+3:]
-		if j := strings.IndexAny(token, " )"); j >= 0 {
-			token = token[:j]
-		}
-		if _, err := h.svc.ConfirmTrustedContact(context.Background(), token); err != nil {
-			t.Fatalf("ConfirmTrustedContact: %v", err)
-		}
-		confirmed++
-	}
-	return confirmed
-}
-
 // TestTrustedContactsAndSOS_Integration covers the cap, the ownership-scoped
 // delete (the IDOR case), and the audit row.
 func TestTrustedContactsAndSOS_Integration(t *testing.T) {
@@ -785,7 +773,7 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	attacker := h.signUpByEmail(t, "attacker@example.com")
 
 	var first auth.TrustedContact
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 2; i++ {
 		contact, err := h.svc.AddTrustedContact(ctx, auth.AddTrustedContactRequest{
 			CallerTrustLevel: 2,
 			UserID:           owner.UserID, Name: fmt.Sprintf("Contact %d", i), PhoneNumber: "+9477123456" + fmt.Sprint(i),
@@ -800,9 +788,9 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 
 	if _, err := h.svc.AddTrustedContact(ctx, auth.AddTrustedContactRequest{
 		CallerTrustLevel: 2,
-		UserID:           owner.UserID, Name: "Fourth", PhoneNumber: "+94771234599",
+		UserID:           owner.UserID, Name: "Third", PhoneNumber: "+94771234599",
 	}); err == nil {
-		t.Error("a 4th trusted contact was accepted, want the cap of 3 enforced")
+		t.Error("a 3rd trusted contact was accepted, want the cap of 2 enforced")
 	} else if !isSentinel(err, apperror.ErrInvalidInput) {
 		t.Errorf("error = %v, want ErrInvalidInput", err)
 	}
@@ -820,8 +808,8 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTrustedContacts: %v", err)
 	}
-	if len(stillThere) != 3 {
-		t.Errorf("owner has %d contacts, want 3 — the non-owner's delete must not have landed", len(stillThere))
+	if len(stillThere) != 2 {
+		t.Errorf("owner has %d contacts, want 2 — the non-owner's delete must not have landed", len(stillThere))
 	}
 	// And listing is self-scoped: the attacker sees none of them.
 	attackerContacts, err := h.svc.ListTrustedContacts(ctx, attacker.UserID)
@@ -832,17 +820,6 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 		t.Errorf("another user's list returned %d contacts, want 0", len(attackerContacts))
 	}
 
-	// Pending contacts are not alerted (#80): each of the three must agree
-	// through the link they were texted before SOS can reach them.
-	for _, c := range stillThere {
-		if c.Status != "pending" {
-			t.Errorf("a just-added contact has status %q, want pending", c.Status)
-		}
-	}
-	if n := h.confirmAllInvites(t); n != 3 {
-		t.Fatalf("confirmed %d invitations, want 3", n)
-	}
-
 	result, err := h.svc.TriggerSOS(ctx, auth.TriggerSOSRequest{
 		CallerTrustLevel: 2,
 		UserID:           owner.UserID, ContextMessage: "Coffee at 3pm", Latitude: sosCoord(6.9271), Longitude: sosCoord(79.8612),
@@ -850,13 +827,13 @@ func TestTrustedContactsAndSOS_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TriggerSOS: %v", err)
 	}
-	if result.ContactsNotified != 3 {
-		t.Errorf("ContactsNotified = %d, want 3", result.ContactsNotified)
+	if result.ContactsNotified != 2 {
+		t.Errorf("ContactsNotified = %d, want 2", result.ContactsNotified)
 	}
 
 	var events int
 	if err := h.pool.QueryRow(ctx,
-		`SELECT count(*) FROM auth.sos_events WHERE user_id = $1 AND contacts_notified = 3`, owner.UserID).Scan(&events); err != nil {
+		`SELECT count(*) FROM auth.sos_events WHERE user_id = $1 AND contacts_notified = 2`, owner.UserID).Scan(&events); err != nil {
 		t.Fatalf("count sos_events: %v", err)
 	}
 	if events != 1 {
@@ -900,8 +877,8 @@ func TestUpdateLastKnownLocation_Integration(t *testing.T) {
 		`SELECT last_location_lat, last_location_lng FROM auth.users WHERE id = $1`, session.UserID).Scan(&lat, &lng); err != nil {
 		t.Fatalf("read location: %v", err)
 	}
-	if lat != 6.9271 || lng != 79.8612 {
-		t.Errorf("stored (%v, %v), want (6.9271, 79.8612)", lat, lng)
+	if lat != 6.927 || lng != 79.861 { // rounded to 3 decimals (plan 30B, 3.3)
+		t.Errorf("stored (%v, %v), want (6.927, 79.861)", lat, lng)
 	}
 	if got := h.bus.countOf(eventbus.TopicUserLocationUpdated); got != before+1 {
 		t.Errorf("user-location-updated published %d times, want %d", got, before+1)

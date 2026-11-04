@@ -238,9 +238,9 @@ var (
 //  2. Company name-vs-domain cross-check against known_companies,
 //     normalized-name-keyed: a known company with a non-matching domain is
 //     rejected (errCompanyDomainMismatch, the lookalike-domain case); an
-//     unknown company proceeds exactly as before (accept, extract+store the
-//     domain) but is additionally flagged into unverified_company_claims for
-//     manual review.
+//     unknown company stores the domain and name but NOT work_email_verified,
+//     so the account stays at Level 2, and is flagged into
+//     unverified_company_claims as pending_review (#111).
 func (s *service) VerifyCorporateEmailCode(ctx context.Context, req VerifyCodeRequest) (SessionResult, error) {
 	req.Target = normalizeVerificationTarget(VerificationPurposeCorporateEmail, req.Target)
 	if req.Purpose != VerificationPurposeCorporateEmail {
@@ -272,12 +272,17 @@ func (s *service) VerifyCorporateEmailCode(ctx context.Context, req VerifyCodeRe
 	domain := domainFromEmail(req.Target)
 	normalizedName := normalizeCompanyName(companyName)
 	known, err := s.knownCompanies.GetByNameNormalized(ctx, normalizedName)
+	// Level 3 only for a company we know (#111, review N1-A3). An unknown
+	// one keeps the proven domain and its name for the review queue, at
+	// Level 2: anyone can register a domain and call it a company.
+	verified := true
 	switch {
 	case err == nil:
 		if !slices.Contains(known.Domains, domain) {
 			return SessionResult{}, errCompanyDomainMismatch
 		}
 	case errors.Is(err, apperror.ErrNotFound):
+		verified = false
 		if err := s.unverifiedCompanyClaims.Insert(ctx, repository.UnverifiedCompanyClaim{
 			UserID:             user.ID,
 			CompanyNameEntered: companyName,
@@ -296,7 +301,7 @@ func (s *service) VerifyCorporateEmailCode(ctx context.Context, req VerifyCodeRe
 	// satisfies 3. `user` above is kept — it still feeds the reuse-abuse
 	// check and the unverified-company-claim insert — it just no longer
 	// supplies the snapshot the trust level is computed from.
-	persisted, err := s.users.UpdateWorkEmailVerified(ctx, req.UserID, domain, true, time.Now(), workEmailHash, companyName, func(u repository.User) int {
+	persisted, err := s.users.UpdateWorkEmailVerified(ctx, req.UserID, domain, verified, time.Now(), workEmailHash, companyName, func(u repository.User) int {
 		return computeTrustLevel(afterVerification(u))
 	})
 	if err != nil {
@@ -415,6 +420,9 @@ func (s *service) startVerification(
 	} else if !errors.Is(err, apperror.ErrNotFound) {
 		return StartVerificationResult{}, err
 	}
+	if err := s.takeOTPSend(ctx, purpose, target); err != nil {
+		return StartVerificationResult{}, err
+	}
 
 	code, err := generateOTP()
 	if err != nil {
@@ -510,6 +518,19 @@ func (s *service) dispatchVerificationCode(ctx context.Context, purpose reposito
 // explainUnclaimableAttempt reads the row back to tell them apart. That read
 // decides wording only — it can never grant an attempt.
 func (s *service) verifyAndConsumeCode(ctx context.Context, userID string, purpose repository.VerificationPurpose, target, code string) error {
+	refund, err := s.takeOTPGuess(ctx, purpose, target)
+	if err != nil {
+		return err
+	}
+	if err := s.claimAndConsumeCode(ctx, userID, purpose, target, code); err != nil {
+		return err
+	}
+	refund()
+	return nil
+}
+
+// claimAndConsumeCode is the per-code half of verifyAndConsumeCode.
+func (s *service) claimAndConsumeCode(ctx context.Context, userID string, purpose repository.VerificationPurpose, target, code string) error {
 	claimed, err := s.verificationCodes.ClaimAttempt(ctx, userID, purpose, otpMaxAttempts)
 	if err != nil {
 		if errors.Is(err, apperror.ErrNotFound) {

@@ -77,7 +77,7 @@ func Run(ctx context.Context, w Writer, partitions PartitionMaker, opt Options) 
 	if opt.Days == 0 {
 		opt.Days = 7
 	}
-	g := &gen{r: rand.New(rand.NewPCG(opt.Seed, opt.Seed^0x9e3779b97f4a7c15)), reg: registry.Default()}
+	g := &gen{r: rand.New(rand.NewPCG(opt.Seed, opt.Seed^0x9e3779b97f4a7c15)), reg: registry.Default()} // #nosec G404 -- synthetic local test data, seeded on purpose so a run is reproducible; nothing secret is drawn
 	written := 0
 	g.flush = func(evs []repository.Event) error {
 		if len(evs) == 0 {

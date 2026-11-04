@@ -9,7 +9,7 @@
 # `context: .` for this service), not this cmd/monolith/ folder, so the whole
 # module (internal/, go.mod, go.sum) is visible to the build.
 
-FROM golang:1.26.10-alpine AS build
+FROM golang:1.26.10-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS build
 WORKDIR /workspace
 
 # Copy go.mod/go.sum before source so dependency downloads are cached across
@@ -22,7 +22,7 @@ COPY . .
 # CGO disabled + static build: the runtime stage below has no C libraries.
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/monolith ./cmd/monolith
 
-FROM gcr.io/distroless/static-debian12:nonroot AS runtime
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime
 COPY --from=build /out/monolith /monolith
 USER nonroot:nonroot
 EXPOSE 9090

@@ -384,3 +384,18 @@ func TestStartTargetKeyedVerification_SkipsSendForAllowlistedEmail(t *testing.T)
 		}
 	})
 }
+
+// Plan 30B, #111: throwaway inboxes are not work addresses.
+func TestDisposableDomainsAreNotWorkEmail(t *testing.T) {
+	for _, address := range []string{"jane@mailinator.com", "jane@10minutemail.com", "jane@Guerrillamail.com", "jane@yopmail.com"} {
+		if !isRejectedCorporateEmail(address) {
+			t.Errorf("%s was accepted as a work address", address)
+		}
+	}
+	if isRejectedCorporateEmail("jane@wso2.com") {
+		t.Error("an ordinary company domain was rejected")
+	}
+	if len(disposableEmailDomains) < 50 {
+		t.Errorf("the disposable list has %d entries; the embed is broken", len(disposableEmailDomains))
+	}
+}

@@ -1,7 +1,7 @@
 -- Queries behind another member's public profile (GET /v1/users/{id}).
--- Every one takes the VIEWER as well as the target, because what is
--- visible depends on what the two of them have shared — see
--- member.go in the service layer for the rule.
+-- Who may open a profile depends on what viewer and target have shared; see
+-- member.go in the service layer. What a profile then shows does not depend
+-- on the viewer at all (plan 2.3).
 
 -- name: CanViewMemberProfile :one
 -- True when the viewer may open the target's profile: they are the same
@@ -60,48 +60,48 @@ SELECT
   ) AS can_view;
 
 -- name: ListRecentMeetupsForMember :many
--- The target's last N meetups as host or accepted participant, newest
--- window first, with the aggregate the profile shows per meetup and whether
--- the VIEWER was on it too (which decides whether reviewer names below are
--- shown or withheld).
-WITH membership AS (
-  SELECT m.id AS meetup_id, m.host_user_id AS user_id, true AS is_host FROM meetup.meetups m
-  UNION ALL
-  SELECT r.meetup_id, r.requester_id, false FROM meetup.meetup_requests r WHERE r.status = 'accepted'
-)
+-- The meetups the target HOSTED that are over, newest first, with what the
+-- profile shows of each (plan 2.3). Only the host's are listed: a member who
+-- joined shows a count and a rating, never where they were.
+--
+-- Only meetups that are over (#103): completed, or past their window and not
+-- yet swept. An open or full meetup is a future time and place, and a
+-- profile is not where those are published.
+--
+-- The average is the participants' opinion of the meetup: the host's own
+-- review of it is left out.
 SELECT
-  m.id,
   m.intent,
   m.status,
   m.window_start,
-  m.window_end,
   m.location_label,
-  tm.is_host AS target_is_host,
-  (SELECT count(*) FROM membership c WHERE c.meetup_id = m.id)::int AS participant_count,
-  COALESCE((SELECT avg(f.overall_score) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.overall_score IS NOT NULL), 0)::float8 AS overall_average,
-  (SELECT count(*) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.overall_score IS NOT NULL)::int AS review_count,
-  EXISTS (SELECT 1 FROM membership v WHERE v.meetup_id = m.id AND v.user_id = sqlc.arg(viewer_id)::uuid) AS viewer_was_in
+  (1 + (SELECT count(*) FROM meetup.meetup_requests r WHERE r.meetup_id = m.id AND r.status = 'accepted'))::int AS participant_count,
+  COALESCE((SELECT avg(f.overall_score) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.user_id <> m.host_user_id AND f.overall_score IS NOT NULL), 0)::float8 AS overall_average,
+  (SELECT count(*) FROM meetup.meetup_feedback f WHERE f.meetup_id = m.id AND f.user_id <> m.host_user_id AND f.overall_score IS NOT NULL)::int AS review_count
 FROM meetup.meetups m
-JOIN membership tm ON tm.meetup_id = m.id AND tm.user_id = sqlc.arg(target_id)::uuid
-WHERE m.status <> 'cancelled'
+WHERE m.host_user_id = sqlc.arg(target_id)::uuid
+  AND (m.status = 'completed' OR (m.status IN ('open', 'full') AND m.window_end < now()))
 ORDER BY m.window_start DESC
 LIMIT sqlc.arg(page_limit);
 
--- name: ListMeetupReviewComments :many
--- The written comments on a set of meetups, oldest first within a meetup.
--- The author's display name rides along; the service blanks it for a
--- viewer who was not on that meetup.
+-- name: ListHostReviews :many
+-- The written reviews participants left on the target's hosted meetups,
+-- newest first (plan 2.3). Always anonymous: this query cannot name anyone,
+-- because no author column and no meetup column leave it. A review is not
+-- tied to a meetup on the profile either, since a small meetup's guest list
+-- would then give the author away.
 SELECT
-  f.meetup_id,
-  f.user_id AS author_id,
-  COALESCE(u.full_name, '') AS author_name,
+  f.overall_score::int AS score,
   f.notes,
   f.review_completed_at
 FROM meetup.meetup_feedback f
-LEFT JOIN meetup.user_display_cache u ON u.user_id = f.user_id
-WHERE f.meetup_id = ANY(sqlc.arg(meetup_ids)::uuid[])
+JOIN meetup.meetups m ON m.id = f.meetup_id
+WHERE m.host_user_id = sqlc.arg(target_id)::uuid
+  AND f.user_id <> m.host_user_id
   -- Only a finished review is public (#90). A row can exist, and carry
   -- text, before its author ever completed the review.
   AND f.review_completed_at IS NOT NULL
+  AND f.overall_score IS NOT NULL
   AND f.notes IS NOT NULL AND btrim(f.notes) <> ''
-ORDER BY f.meetup_id, f.review_completed_at;
+ORDER BY f.review_completed_at DESC
+LIMIT sqlc.arg(page_limit);

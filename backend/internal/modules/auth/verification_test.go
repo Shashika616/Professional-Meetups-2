@@ -268,8 +268,8 @@ func TestVerifyCorporateEmailCode_ExtractsDomainAndDeletesRawAddress(t *testing.
 	seedUser(t, users, "user-1")
 
 	// "Acme Corp" is not seeded in known_companies — the unknown-company
-	// fallback path, which still accepts and stores the domain (ADR-019
-	// §3).
+	// path, which stores the domain but holds verification for review
+	// (#111).
 	session, err := verifyCorporateEmail(t, svc, emailSender, "user-1", "jane@acmecorp.com", "Acme Corp")
 	if err != nil {
 		t.Fatalf("VerifyCorporateEmailCode() error: %v", err)
@@ -280,8 +280,8 @@ func TestVerifyCorporateEmailCode_ExtractsDomainAndDeletesRawAddress(t *testing.
 	if got.CompanyDomain != "acmecorp.com" {
 		t.Errorf("CompanyDomain = %q, want %q", got.CompanyDomain, "acmecorp.com")
 	}
-	if !got.WorkEmailVerified {
-		t.Error("WorkEmailVerified = false, want true")
+	if got.WorkEmailVerified {
+		t.Error("WorkEmailVerified = true for an unknown company, want false until reviewed (#111)")
 	}
 	if got.CompanyDomain == "jane@acmecorp.com" {
 		t.Error("CompanyDomain stores the raw address, want only the domain (ADR-003)")
@@ -369,15 +369,21 @@ func TestVerifyCorporateEmailCode_KnownCompanyDomainMismatchRejected(t *testing.
 	}
 }
 
-func TestVerifyCorporateEmailCode_UnknownCompanyAcceptsAndFlagsForReview(t *testing.T) {
+// Plan 30B, #111 (review N1-A3): an unknown company no longer reaches
+// Level 3 unreviewed. The mailbox is proven and its domain kept, so the
+// claim can be reviewed, but work_email_verified waits for that review.
+func TestVerifyCorporateEmailCode_UnknownCompanyIsHeldForReview(t *testing.T) {
 	svc, users, _, emailSender, _, _, claims := newTestServiceWithCompanies(t)
 	seedUser(t, users, "user-1")
 
 	if _, err := verifyCorporateEmail(t, svc, emailSender, "user-1", "jane@unknownco.com", "Unknown Co"); err != nil {
 		t.Fatalf("VerifyCorporateEmailCode() error: %v", err)
 	}
-	if !users.byID["user-1"].WorkEmailVerified {
-		t.Error("WorkEmailVerified = false, want true — unknown company still accepts per the MVP fallback")
+	if users.byID["user-1"].WorkEmailVerified {
+		t.Error("WorkEmailVerified = true for an unknown company, want false until it is reviewed")
+	}
+	if users.byID["user-1"].CompanyDomain != "unknownco.com" {
+		t.Errorf("company domain %q, want it kept for the review", users.byID["user-1"].CompanyDomain)
 	}
 	if len(claims.claims) != 1 {
 		t.Fatalf("unverified_company_claims got %d row(s), want 1", len(claims.claims))

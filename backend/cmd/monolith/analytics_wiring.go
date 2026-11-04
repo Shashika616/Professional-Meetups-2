@@ -13,6 +13,15 @@ import (
 	"professional-meetups-monolith/backend/internal/platform/outbox"
 )
 
+// Budgets on the scheduled tick (#102). An analytics sweep may take as
+// long as the 120s statement limit its background work runs under; three
+// of them fit inside the analytics tick's 480s (gateway cron.go). The flush
+// is one buffered write.
+const (
+	analyticsSweepBudget = 120 * time.Second
+	analyticsFlushBudget = 10 * time.Second
+)
+
 // --- analytics (plan 29D): server domain events from the outboxes ---
 //
 // Every adapter here reads an outbox row another module already writes in

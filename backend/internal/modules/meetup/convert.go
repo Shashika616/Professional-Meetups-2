@@ -162,12 +162,11 @@ func requestsFromRepo(requests []repository.MeetupRequest) []MeetupRequest {
 
 func safetyStateFromRepo(s repository.SafetyState) SafetyState {
 	return SafetyState{
-		MeetupID:          s.MeetupID,
-		ChecklistAckAt:    s.ChecklistAckAt,
-		LiveLocationOptIn: s.LiveLocationOptIn,
-		CheckedInAt:       s.CheckedInAt,
-		DeclinedAt:        s.DeclinedAt,
-		DeclineReason:     s.DeclineReason,
+		MeetupID:       s.MeetupID,
+		ChecklistAckAt: s.ChecklistAckAt,
+		CheckedInAt:    s.CheckedInAt,
+		DeclinedAt:     s.DeclinedAt,
+		DeclineReason:  s.DeclineReason,
 	}
 }
 

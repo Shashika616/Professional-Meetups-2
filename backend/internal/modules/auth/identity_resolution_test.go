@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
@@ -107,8 +108,8 @@ func TestResolveOrCreateIdentity(t *testing.T) {
 		if user.TrustLevel != 1 {
 			t.Errorf("TrustLevel = %d, want 1 (LinkedIn direct signup grants Level 1 immediately)", user.TrustLevel)
 		}
-		if user.ProfilePhotoURL != "https://example.com/p.jpg" {
-			t.Errorf("ProfilePhotoURL = %q, want the photo passed in (no regression vs. ADR-011's existing behavior)", user.ProfilePhotoURL)
+		if !strings.HasPrefix(user.ProfilePhotoURL, "/v1/users/") {
+			t.Errorf("ProfilePhotoURL = %q, want our own path", user.ProfilePhotoURL)
 		}
 	})
 

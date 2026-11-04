@@ -25,6 +25,7 @@
 package ratelimit
 
 import (
+	"container/list"
 	"sync"
 	"time"
 )
@@ -57,16 +58,27 @@ type Limiter interface {
 // when it expires. A bucket whose resetAt has passed is indistinguishable
 // from a key that was never seen — both start a fresh window.
 type bucket struct {
+	key     string
 	count   int
 	resetAt time.Time
 }
+
+// DefaultMaxKeys caps how many buckets one process keeps (#81). Before the
+// cap, every distinct key (a fresh 404 path, a fresh meetup id) was a new
+// bucket kept until its window ended: a caller cycling keys grew the map
+// without bound. At the cap the oldest bucket is dropped, which at worst
+// gives that one key a fresh window.
+const DefaultMaxKeys = 100_000
 
 // InMemory counts requests per key over a fixed window, in a mutex-guarded
 // map. Safe for concurrent use. Construct with New, which also starts the
 // sweeper. This is the only Limiter implementation today.
 type InMemory struct {
 	mu      sync.Mutex
-	buckets map[string]*bucket
+	buckets map[string]*list.Element // of *bucket
+	// order holds the buckets oldest first, for eviction at maxKeys.
+	order   *list.List
+	maxKeys int
 
 	// now is time.Now in production; tests substitute a clock so they can
 	// assert real window-expiry behavior without sleeping through it.
@@ -90,8 +102,14 @@ func New() *InMemory {
 }
 
 func newWithClock(now func() time.Time) *InMemory {
+	return newWithClockAndCap(now, DefaultMaxKeys)
+}
+
+func newWithClockAndCap(now func() time.Time, maxKeys int) *InMemory {
 	l := &InMemory{
-		buckets: make(map[string]*bucket),
+		buckets: make(map[string]*list.Element),
+		order:   list.New(),
+		maxKeys: maxKeys,
 		now:     now,
 		stop:    make(chan struct{}),
 	}
@@ -110,14 +128,31 @@ func (l *InMemory) Allow(key string, limit int, window time.Duration) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	b, ok := l.buckets[key]
-	if !ok || !now.Before(b.resetAt) {
-		l.buckets[key] = &bucket{count: 1, resetAt: now.Add(window)}
+	if el, ok := l.buckets[key]; ok {
+		b := el.Value.(*bucket)
+		if now.Before(b.resetAt) {
+			b.count++
+			return b.count <= limit
+		}
+		// A new window: the bucket is as young as a new one.
+		b.count, b.resetAt = 1, now.Add(window)
+		l.order.MoveToBack(el)
 		return true
 	}
+	for l.order.Len() >= l.maxKeys {
+		oldest := l.order.Front()
+		delete(l.buckets, oldest.Value.(*bucket).key)
+		l.order.Remove(oldest)
+	}
+	l.buckets[key] = l.order.PushBack(&bucket{key: key, count: 1, resetAt: now.Add(window)})
+	return true
+}
 
-	b.count++
-	return b.count <= limit
+// size is how many buckets are held (tests).
+func (l *InMemory) size() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.buckets)
 }
 
 // Close stops the sweeper goroutine. Idempotent-unsafe by design (a second
@@ -150,9 +185,10 @@ func (l *InMemory) sweep() {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for key, b := range l.buckets {
-		if !now.Before(b.resetAt) {
+	for key, el := range l.buckets {
+		if !now.Before(el.Value.(*bucket).resetAt) {
 			delete(l.buckets, key)
+			l.order.Remove(el)
 		}
 	}
 }

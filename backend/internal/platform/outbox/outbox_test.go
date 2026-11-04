@@ -330,3 +330,54 @@ func TestClaimError_DoesNotSpin(t *testing.T) {
 		t.Errorf("process was called %d times despite the claim failing", calls)
 	}
 }
+
+// leasingStore is a fakeStore whose claims can be lost to another claimer
+// between the batch claim and a row's delivery (#115).
+type leasingStore struct {
+	*fakeStore
+	lost            map[string]bool
+	renewed         []string
+	processedLeased []string
+}
+
+func (s *leasingStore) Renew(_ context.Context, r Row) (Row, bool, error) {
+	if s.lost[r.ID] {
+		return r, false, nil
+	}
+	s.renewed = append(s.renewed, r.ID)
+	r.Lease = "renewed"
+	return r, true, nil
+}
+
+func (s *leasingStore) MarkProcessedLeased(_ context.Context, r Row) (bool, error) {
+	if r.Lease != "renewed" {
+		return false, nil
+	}
+	s.processedLeased = append(s.processedLeased, r.ID)
+	return true, nil
+}
+
+// #115 (review N1-B4): a slow batch outlived the claim's visibility
+// timeout, another instance claimed the same rows, and both pushed. Each
+// row's claim is now renewed just before it is delivered, and a row whose
+// claim was lost is left to the instance that holds it.
+func TestARowWhoseClaimWasLostIsNotDeliveredTwice(t *testing.T) {
+	store := &leasingStore{
+		fakeStore: &fakeStore{pending: []Row{{ID: "kept"}, {ID: "lost"}}},
+		lost:      map[string]bool{"lost": true},
+	}
+	var delivered []string
+	p := New(store, func(_ context.Context, r Row) error {
+		delivered = append(delivered, r.ID)
+		return nil
+	})
+	if _, err := p.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(delivered) != 1 || delivered[0] != "kept" {
+		t.Errorf("delivered %v, want only the row still held", delivered)
+	}
+	if len(store.processedLeased) != 1 || len(store.processed) != 0 {
+		t.Errorf("marked %v leased and %v plain; a leasing store is marked under its lease", store.processedLeased, store.processed)
+	}
+}

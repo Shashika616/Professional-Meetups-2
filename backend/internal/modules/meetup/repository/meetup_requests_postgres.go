@@ -93,6 +93,10 @@ func (r *postgresMeetupRequestRepository) Create(ctx context.Context, meetupID, 
 		// sentence — "the host already said no" versus "you have already
 		// asked".
 		if errors.Is(err, pgx.ErrNoRows) {
+			joinable, jerr := q.MeetupIsJoinable(ctx, meetup)
+			if jerr != nil || !joinable {
+				return MeetupRequest{}, fmt.Errorf("repository: this meetup has ended or is no longer open: %w", apperror.ErrConflict)
+			}
 			return MeetupRequest{}, fmt.Errorf(
 				"repository: this meetup's host already declined a request from %s: %w",
 				requesterID, apperror.ErrConflict)
@@ -468,6 +472,12 @@ func (r *postgresMeetupRequestRepository) Accept(
 	}
 	if meetupRow.Status != sqlcgen.MeetupMeetupStatusOpen {
 		return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup %s is not open: %w", locateRow.MeetupID, apperror.ErrConflict)
+	}
+
+	// Under the meetup's lock (#114): an ended meetup takes no one, even
+	// before auto-close has marked it.
+	if !meetupRow.WindowEnd.Time.After(time.Now()) {
+		return MeetupRequest{}, false, nil, fmt.Errorf("repository: meetup %s has ended: %w", meetupRow.ID, apperror.ErrConflict)
 	}
 
 	// NOW the request's status means something: re-read it under its own

@@ -161,11 +161,9 @@ type UserRepository interface {
 	// only caller, the one field every one of the four auth paths lets a
 	// user (re)confirm on the new mandatory post-auth screen.
 	UpdateFullName(ctx context.Context, userID, fullName string) (User, error)
-	// UpdateProfilePhoto mirrors the caller's LinkedIn photo onto the user
-	// row. LinkedIn is the only source of profile photos in this app, so
-	// this is a sync rather than a user-facing edit — see the query's own
-	// comment for why the photo is synced while the name is only suggested.
-	// Callers must not pass an empty url.
+	// UpdateProfilePhoto sets the path of the user's photo, or clears it
+	// with "", and publishes the profile update the meetup module's display
+	// cache follows.
 	UpdateProfilePhoto(ctx context.Context, userID, photoURL string) (User, error)
 	// Delete removes the account and everything cascading from it in this
 	// schema. Irreversible, and deliberately so: App Store 5.1.1(v)
@@ -506,75 +504,50 @@ type UnverifiedCompanyClaimRepository interface {
 	Insert(ctx context.Context, claim UnverifiedCompanyClaim) error
 }
 
-// TrustedContact is a user's own emergency contact (ADR-026 §1) — a
-// property of the user, not any specific meetup, per ADR-017's
-// per-service DB split. PhoneNumber/Email follow the same "empty string
-// means unset" convention as every other optional field in this package;
-// at least one of the two is always set (DB CHECK constraint, migration
-// 0009).
+// TrustedContact is a user's own emergency contact (ADR-026 §1, ADR-013): a
+// name and a phone number. A property of the user, not of any meetup.
 type TrustedContact struct {
 	ID          string
 	UserID      string
 	Name        string
-	PhoneNumber string
-	Email       string
+	PhoneNumber string // E.164
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	// PendingUntil is when an unconfirmed contact's link expires (#80). Zero
-	// means confirmed, which includes every contact added before consent
-	// existed (migration 0024, decision D2).
-	PendingUntil time.Time
 }
 
-// Confirmed reports whether this contact may receive alerts.
-func (c TrustedContact) Confirmed() bool { return c.PendingUntil.IsZero() }
-
-// NewPendingContact is a trusted contact being added, pending its own
-// consent (#80). The caps travel with it because they are enforced inside
-// the same transaction as the insert: counted and written under one lock,
-// so two concurrent additions cannot both squeeze under a limit.
-type NewPendingContact struct {
+// NewContact is a contact to add. MaxContacts is enforced under the user's
+// lock with the insert, so two additions racing cannot both pass.
+type NewContact struct {
 	UserID      string
 	Name        string
-	PhoneNumber string
-	Email       string
-	// PhoneHash is sha256 of the normalised number, for the per-number cap.
-	PhoneHash string
-	// TokenHash is sha256 of the single-use token in the invitation link.
-	TokenHash string
-	ExpiresAt time.Time
-
-	MaxContacts        int
-	MaxInvitesPerUser  int
-	MaxInvitesPerPhone int
-	CapWindow          time.Duration
+	PhoneNumber string // E.164
+	MaxContacts int
 }
 
 var (
 	// ErrTooManyTrustedContacts: the user already has MaxContacts.
 	ErrTooManyTrustedContacts = errors.New("too many trusted contacts")
-	// ErrContactInviteLimit: a daily invitation cap, per user or per number.
-	ErrContactInviteLimit = errors.New("contact invitation limit reached")
+	// ErrDuplicateTrustedContact: the user already has this number.
+	ErrDuplicateTrustedContact = errors.New("trusted contact number already added")
 	// ErrSOSLimit: the user's daily SOS cap.
 	ErrSOSLimit = errors.New("sos limit reached")
+	// ErrSOSHourlyLimit: the user's hourly SOS cap.
+	ErrSOSHourlyLimit = errors.New("sos hourly limit reached")
 )
 
 // TrustedContactRepository is the persistence boundary for trusted
 // contacts. The soft cap of 3 per user (ADR-026 §1) is enforced by the
 // service layer via Count, not a DB constraint here.
 type TrustedContactRepository interface {
-	// InsertPending adds a contact awaiting consent and logs the invitation,
-	// enforcing every cap in NewPendingContact atomically. Returns
-	// ErrTooManyTrustedContacts or ErrContactInviteLimit (wrapped).
-	InsertPending(ctx context.Context, contact NewPendingContact) (TrustedContact, error)
+	// Insert adds a contact, enforcing MaxContacts atomically. Returns
+	// ErrTooManyTrustedContacts, or ErrDuplicateTrustedContact for a number
+	// the user already has.
+	Insert(ctx context.Context, contact NewContact) (TrustedContact, error)
+	// Update changes a contact's name and number, scoped to (contactID,
+	// userID): apperror.ErrNotFound (wrapped) if no row matched.
+	Update(ctx context.Context, contactID, userID, name, phoneNumber string) (TrustedContact, error)
+	// ListForUser returns the contacts oldest first.
 	ListForUser(ctx context.Context, userID string) ([]TrustedContact, error)
-	// Confirm records the contact's consent from the token in their link,
-	// and returns the name of the user whose contact they now are.
-	// apperror.ErrNotFound (wrapped) for a token that is unknown, expired or
-	// already used — deliberately not distinguished.
-	Confirm(ctx context.Context, tokenHash string) (requesterName string, err error)
-	// DeleteInvitesSentBefore trims the invitation log the caps read.
-	DeleteInvitesSentBefore(ctx context.Context, before time.Time, batchSize int) (int, error)
 	// Delete scopes the DELETE to (contactID, userID) in one statement —
 	// returns apperror.ErrNotFound (wrapped) if no row matched, which the
 	// service layer maps to Forbidden (the caller either doesn't own this
@@ -598,6 +571,11 @@ type SOSEvent struct {
 	Latitude         *float64
 	Longitude        *float64
 	ContactsNotified int
+	// LocationSource and LocationCapturedAt say where the coordinates came
+	// from and when: "gps", "device_last_known" or "server_last_known", or
+	// "" with a nil time when the location is unknown.
+	LocationSource     string
+	LocationCapturedAt *time.Time
 }
 
 // SOSClaim asks to record a new SOS before any alert is sent.
@@ -608,6 +586,10 @@ type SOSClaim struct {
 	ClientRequestID string
 	MaxPerWindow    int
 	Window          time.Duration
+	// MaxPerHour is a second, shorter cap counted the same way (#81): in
+	// Postgres, under the user's lock, after a retry has been recognised,
+	// so it holds across instances and a retry never counts. Zero: none.
+	MaxPerHour int
 }
 
 // SOSOutcome is what a claim found or created.

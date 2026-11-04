@@ -37,7 +37,7 @@ type Writer interface {
 // costs dropped events, never a slow user request.
 type Buffer struct {
 	queue      chan repository.Event
-	sync       chan chan struct{}
+	sync       chan chan int
 	writer     Writer
 	flushEvery time.Duration
 	flushSize  int
@@ -64,7 +64,7 @@ func NewBuffer(w Writer, capacity int, flushEvery time.Duration, flushSize int, 
 	}
 	return &Buffer{
 		queue:      make(chan repository.Event, capacity),
-		sync:       make(chan chan struct{}),
+		sync:       make(chan chan int),
 		writer:     w,
 		flushEvery: flushEvery,
 		flushSize:  flushSize,
@@ -92,20 +92,23 @@ func (b *Buffer) Depth() int { return len(b.queue) }
 func (b *Buffer) Done() <-chan struct{} { return b.done }
 
 // Sync asks the flusher to write everything queued so far and waits for it,
-// or for ctx. Used before an account's data is deleted, so nothing of
-// theirs still queued lands after the delete.
-func (b *Buffer) Sync(ctx context.Context) {
-	ack := make(chan struct{})
+// or for ctx, and returns how many events it handed to the writer (0 when
+// ctx ended first). Used before an account's data is deleted, so nothing of
+// theirs still queued lands after the delete, and by the tick's flush sweep.
+func (b *Buffer) Sync(ctx context.Context) int {
+	ack := make(chan int, 1)
 	select {
 	case b.sync <- ack:
 	case <-b.done:
-		return
+		return 0
 	case <-ctx.Done():
-		return
+		return 0
 	}
 	select {
-	case <-ack:
+	case n := <-ack:
+		return n
 	case <-ctx.Done():
+		return 0
 	}
 }
 
@@ -126,10 +129,12 @@ func (b *Buffer) Run(ctx context.Context) {
 	// drain takes what is queued right now (not what keeps arriving, so a
 	// steady producer cannot hold it), flushing every full batch, then the
 	// remainder.
-	drain := func(ctx context.Context) {
+	drain := func(ctx context.Context) int {
+		taken := len(batch)
 		for n := len(b.queue); n > 0; n-- {
 			select {
 			case e := <-b.queue:
+				taken++
 				batch = append(batch, e)
 				if len(batch) >= b.flushSize {
 					flush(ctx)
@@ -139,6 +144,7 @@ func (b *Buffer) Run(ctx context.Context) {
 			}
 		}
 		flush(ctx)
+		return taken
 	}
 	for {
 		select {
@@ -153,8 +159,7 @@ func (b *Buffer) Run(ctx context.Context) {
 				flush(ctx)
 			}
 		case ack := <-b.sync:
-			drain(ctx)
-			close(ack)
+			ack <- drain(ctx)
 		case <-ticker.C:
 			flush(ctx)
 		}

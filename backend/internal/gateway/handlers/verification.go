@@ -157,7 +157,7 @@ func (h *Handler) verifyCorporateEmailCode(w http.ResponseWriter, r *http.Reques
 type profileResponse struct {
 	UserID                  string `json:"user_id"`
 	FullName                string `json:"full_name"`
-	ProfilePhotoURL         string `json:"profile_photo_url"`
+	ProfilePhotoURL         string `json:"photo_url"`
 	TrustLevel              int    `json:"trust_level"`
 	PhoneVerified           bool   `json:"phone_verified"`
 	PersonalEmailVerified   bool   `json:"personal_email_verified"`
@@ -211,7 +211,7 @@ func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
 type publicProfileResponse struct {
 	UserID            string                 `json:"user_id"`
 	FullName          string                 `json:"full_name"`
-	ProfilePhotoURL   string                 `json:"profile_photo_url"`
+	ProfilePhotoURL   string                 `json:"photo_url"`
 	TrustLevel        int                    `json:"trust_level"`
 	RatingAverage     float64                `json:"rating_average"`
 	RatingCount       int                    `json:"rating_count"`
@@ -220,31 +220,36 @@ type publicProfileResponse struct {
 	WorkEmailVerified bool                   `json:"work_email_verified"`
 	PhoneVerified     bool                   `json:"phone_verified"`
 	RecentMeetups     []memberMeetupResponse `json:"recent_meetups"`
+	Reviews           []memberReviewResponse `json:"reviews"`
 }
 
-// memberMeetupResponse is one of the member's last few meetups: what,
-// when, where, their role, the turnout, the overall rating, and the
-// written comments. Comment authors are named only where the VIEWER was
-// on that meetup — the monolith blanks them otherwise.
+// memberMeetupResponse is one finished meetup the member hosted: what, the
+// day, the area, the turnout and the rating.
+//
+// id, window_end_unix_seconds and hosted carry nothing any more, and the
+// window fields hold the day rather than a time, but builds already on
+// phones read them: id is a required string there. Old builds find no
+// comments and no names, which is what this change is for.
 type memberMeetupResponse struct {
-	ID                     string                        `json:"id"`
-	Intent                 string                        `json:"intent"`
-	Status                 string                        `json:"status"`
-	WindowStartUnixSeconds int64                         `json:"window_start_unix_seconds"`
-	WindowEndUnixSeconds   int64                         `json:"window_end_unix_seconds"`
-	LocationLabel          string                        `json:"location_label"`
-	Hosted                 bool                          `json:"hosted"`
-	ParticipantCount       int32                         `json:"participant_count"`
-	OverallAverage         float64                       `json:"overall_average"`
-	ReviewCount            int32                         `json:"review_count"`
-	ViewerWasIn            bool                          `json:"viewer_was_in"`
-	Comments               []memberMeetupCommentResponse `json:"comments"`
+	ID                     string  `json:"id"`
+	Intent                 string  `json:"intent"`
+	Status                 string  `json:"status"`
+	WindowStartUnixSeconds int64   `json:"window_start_unix_seconds"`
+	WindowEndUnixSeconds   int64   `json:"window_end_unix_seconds"`
+	LocationLabel          string  `json:"location_label"`
+	Hosted                 bool    `json:"hosted"`
+	ParticipantCount       int32   `json:"participant_count"`
+	OverallAverage         float64 `json:"overall_average"`
+	ReviewCount            int32   `json:"review_count"`
 }
 
-type memberMeetupCommentResponse struct {
-	AuthorName           string `json:"author_name"`
-	Note                 string `json:"note"`
-	WrittenAtUnixSeconds int64  `json:"written_at_unix_seconds"`
+// memberReviewResponse is one anonymous review, the same for every viewer:
+// a score, the text and a month. Add no field here that could point at the
+// author: the public profile test pins these three keys exactly.
+type memberReviewResponse struct {
+	Score int32  `json:"score"`
+	Text  string `json:"text"`
+	Month string `json:"month"`
 }
 
 // getPublicProfile — GET /v1/users/{id}.
@@ -261,7 +266,7 @@ func (h *Handler) getPublicProfile(w http.ResponseWriter, r *http.Request) {
 	viewerID := middleware.UserIDFromContext(ctx)
 	targetID := r.PathValue("id")
 
-	activity, err := h.monolith.GetMemberActivity(ctx, viewerID, targetID)
+	activity, err := h.monolith.GetMemberActivity(ctx, viewerID, int32(middleware.TrustLevelFromContext(ctx)), targetID)
 	if err != nil {
 		writeGRPCError(w, err)
 		return
@@ -273,34 +278,33 @@ func (h *Handler) getPublicProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	recent := make([]memberMeetupResponse, 0, len(activity.RecentMeetups))
 	for _, mm := range activity.RecentMeetups {
-		comments := make([]memberMeetupCommentResponse, 0, len(mm.Comments))
-		for _, c := range mm.Comments {
-			comments = append(comments, memberMeetupCommentResponse{
-				AuthorName:           c.AuthorName,
-				Note:                 c.Note,
-				WrittenAtUnixSeconds: c.WrittenAtUnixSeconds,
-			})
-		}
 		recent = append(recent, memberMeetupResponse{
-			ID:                     mm.ID,
 			Intent:                 mm.Intent,
 			Status:                 mm.Status,
-			WindowStartUnixSeconds: mm.WindowStartUnixSeconds,
-			WindowEndUnixSeconds:   mm.WindowEndUnixSeconds,
+			WindowStartUnixSeconds: mm.DayUnixSeconds,
+			WindowEndUnixSeconds:   mm.DayUnixSeconds,
 			LocationLabel:          mm.LocationLabel,
-			Hosted:                 mm.Hosted,
+			Hosted:                 true,
 			ParticipantCount:       mm.ParticipantCount,
 			OverallAverage:         mm.OverallAverage,
 			ReviewCount:            mm.ReviewCount,
-			ViewerWasIn:            mm.ViewerWasIn,
-			Comments:               comments,
 		})
+	}
+	reviews := make([]memberReviewResponse, 0, len(activity.Reviews))
+	for _, rv := range activity.Reviews {
+		reviews = append(reviews, memberReviewResponse(rv))
+	}
+	// A guest is not told who this is (#103); the monolith decides.
+	name, photo := profile.FullName, photoPath(profile.ProfilePhotoURL)
+	if activity.IdentityHidden {
+		name, photo = "", ""
 	}
 	writeJSON(w, http.StatusOK, publicProfileResponse{
 		RecentMeetups:     recent,
+		Reviews:           reviews,
 		UserID:            profile.UserID,
-		FullName:          profile.FullName,
-		ProfilePhotoURL:   profile.ProfilePhotoURL,
+		FullName:          name,
+		ProfilePhotoURL:   photo,
 		TrustLevel:        profile.TrustLevel,
 		RatingAverage:     profile.RatingAverage,
 		RatingCount:       profile.RatingCount,
@@ -318,7 +322,7 @@ func profileResponseFromClient(profile monolithclient.Profile) profileResponse {
 	return profileResponse{
 		UserID:                  profile.UserID,
 		FullName:                profile.FullName,
-		ProfilePhotoURL:         profile.ProfilePhotoURL,
+		ProfilePhotoURL:         photoPath(profile.ProfilePhotoURL),
 		TrustLevel:              profile.TrustLevel,
 		PhoneVerified:           profile.PhoneVerified,
 		PersonalEmailVerified:   profile.PersonalEmailVerified,

@@ -433,13 +433,6 @@ type AnalyticsUserFirstSeen struct {
 	FirstDay pgtype.Date `json:"first_day"`
 }
 
-type AuthContactInvitesSent struct {
-	ID        uuid.UUID          `json:"id"`
-	UserID    uuid.UUID          `json:"user_id"`
-	PhoneHash string             `json:"phone_hash"`
-	SentAt    pgtype.Timestamptz `json:"sent_at"`
-}
-
 type AuthKnownCompany struct {
 	ID             uuid.UUID          `json:"id"`
 	NameNormalized string             `json:"name_normalized"`
@@ -447,10 +440,12 @@ type AuthKnownCompany struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
-type AuthPendingTrustedContact struct {
-	ContactID uuid.UUID          `json:"contact_id"`
-	TokenHash string             `json:"token_hash"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+type AuthOtpBudget struct {
+	TargetHash    []byte      `json:"target_hash"`
+	Purpose       string      `json:"purpose"`
+	Day           pgtype.Date `json:"day"`
+	Sends         int32       `json:"sends"`
+	FailedGuesses int32       `json:"failed_guesses"`
 }
 
 type AuthRefreshToken struct {
@@ -476,25 +471,27 @@ type AuthSafetyHold struct {
 }
 
 type AuthSosEvent struct {
-	ID               uuid.UUID          `json:"id"`
-	UserID           uuid.UUID          `json:"user_id"`
-	ContextMessage   pgtype.Text        `json:"context_message"`
-	Latitude         pgtype.Float8      `json:"latitude"`
-	Longitude        pgtype.Float8      `json:"longitude"`
-	TriggeredAt      pgtype.Timestamptz `json:"triggered_at"`
-	ContactsNotified int32              `json:"contacts_notified"`
-	ClientRequestID  pgtype.Text        `json:"client_request_id"`
-	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	ID                 uuid.UUID          `json:"id"`
+	UserID             uuid.UUID          `json:"user_id"`
+	ContextMessage     pgtype.Text        `json:"context_message"`
+	Latitude           pgtype.Float8      `json:"latitude"`
+	Longitude          pgtype.Float8      `json:"longitude"`
+	TriggeredAt        pgtype.Timestamptz `json:"triggered_at"`
+	ContactsNotified   int32              `json:"contacts_notified"`
+	ClientRequestID    pgtype.Text        `json:"client_request_id"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	LocationSource     pgtype.Text        `json:"location_source"`
+	LocationCapturedAt pgtype.Timestamptz `json:"location_captured_at"`
 }
 
 type AuthTrustedContact struct {
-	ID          uuid.UUID          `json:"id"`
-	UserID      uuid.UUID          `json:"user_id"`
-	Name        string             `json:"name"`
-	PhoneNumber pgtype.Text        `json:"phone_number"`
-	Email       pgtype.Text        `json:"email"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID              uuid.UUID          `json:"id"`
+	UserID          uuid.UUID          `json:"user_id"`
+	Name            string             `json:"name"`
+	PhoneNumber     string             `json:"phone_number"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	PhoneNormalized string             `json:"phone_normalized"`
 }
 
 type AuthUnverifiedCompanyClaim struct {
@@ -503,6 +500,8 @@ type AuthUnverifiedCompanyClaim struct {
 	CompanyNameEntered string             `json:"company_name_entered"`
 	Domain             string             `json:"domain"`
 	FlaggedAt          pgtype.Timestamptz `json:"flagged_at"`
+	Status             string             `json:"status"`
+	ReviewedAt         pgtype.Timestamptz `json:"reviewed_at"`
 }
 
 type AuthUser struct {
@@ -555,6 +554,16 @@ type AuthUserIdentity struct {
 	Subject  string               `json:"subject"`
 	Email    pgtype.Text          `json:"email"`
 	LinkedAt pgtype.Timestamptz   `json:"linked_at"`
+}
+
+type AuthUserPhoto struct {
+	UserID    uuid.UUID          `json:"user_id"`
+	Jpeg      []byte             `json:"jpeg"`
+	Etag      string             `json:"etag"`
+	Width     int32              `json:"width"`
+	Height    int32              `json:"height"`
+	Bytes     int32              `json:"bytes"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AuthVerificationCode struct {
@@ -823,6 +832,7 @@ type MeetupMeetup struct {
 	Location               interface{}        `json:"location"`
 	CreationKey            pgtype.Text        `json:"creation_key"`
 	ChargeHoldID           pgtype.UUID        `json:"charge_hold_id"`
+	CreationRequestHash    pgtype.Text        `json:"creation_request_hash"`
 }
 
 type MeetupMeetupFeedback struct {
@@ -893,14 +903,13 @@ type MeetupSafetyShare struct {
 }
 
 type MeetupSafetyState struct {
-	MeetupID          uuid.UUID          `json:"meetup_id"`
-	UserID            uuid.UUID          `json:"user_id"`
-	ChecklistAckAt    pgtype.Timestamptz `json:"checklist_ack_at"`
-	LiveLocationOptIn bool               `json:"live_location_opt_in"`
-	CheckedInAt       pgtype.Timestamptz `json:"checked_in_at"`
-	DeclinedAt        pgtype.Timestamptz `json:"declined_at"`
-	DeclineReason     pgtype.Text        `json:"decline_reason"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	MeetupID       uuid.UUID          `json:"meetup_id"`
+	UserID         uuid.UUID          `json:"user_id"`
+	ChecklistAckAt pgtype.Timestamptz `json:"checklist_ack_at"`
+	CheckedInAt    pgtype.Timestamptz `json:"checked_in_at"`
+	DeclinedAt     pgtype.Timestamptz `json:"declined_at"`
+	DeclineReason  pgtype.Text        `json:"decline_reason"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MeetupSubscriptionCache struct {
@@ -943,4 +952,11 @@ type OpsFeatureFlagAudit struct {
 	Operator  string             `json:"operator"`
 	Reason    string             `json:"reason"`
 	ChangedAt pgtype.Timestamptz `json:"changed_at"`
+}
+
+type OpsRateCounter struct {
+	KeyHash     []byte             `json:"key_hash"`
+	WindowStart pgtype.Timestamptz `json:"window_start"`
+	Count       int32              `json:"count"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }

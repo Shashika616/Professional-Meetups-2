@@ -88,10 +88,15 @@ type TrustedContact struct {
 	ID                   string
 	Name                 string
 	PhoneNumber          string
-	Email                string
 	CreatedAtUnixSeconds int64
-	// Status is "confirmed", "pending" or "expired" (#80).
-	Status string
+}
+
+// SOSFix is the phone's location for an SOS: nil coordinates when it has
+// none, and CapturedAtUnix and Source empty from older app builds.
+type SOSFix struct {
+	Latitude, Longitude *float64
+	CapturedAtUnix      *int64
+	Source              string
 }
 
 // Client is the gateway's view of the monolith. Every method that takes a
@@ -139,6 +144,12 @@ type Client interface {
 	StartCorporateEmailVerification(ctx context.Context, userID, email string) (resendAfterSeconds int32, err error)
 	VerifyCorporateEmailCode(ctx context.Context, userID, email, code, companyName string) (Session, error)
 	GetProfile(ctx context.Context, userID string) (Profile, error)
+	// SetProfilePhoto stores the caller's picture and returns its path.
+	SetProfilePhoto(ctx context.Context, userID string, image []byte) (path string, err error)
+	DeleteProfilePhoto(ctx context.Context, userID string) error
+	// GetProfilePhoto returns a JPEG and its etag; jpeg is empty when
+	// knownEtag still matches.
+	GetProfilePhoto(ctx context.Context, userID, knownEtag string) (jpeg []byte, etag string, err error)
 	CompleteProfileSetup(ctx context.Context, userID, fullName, companyName, companyEmail string) (Profile, error)
 
 	UpdateLastKnownLocation(ctx context.Context, userID string, lat, lng float64) error
@@ -150,7 +161,8 @@ type Client interface {
 	// which announces it to the rest of the system itself. Idempotent.
 	DeleteAccount(ctx context.Context, userID string) error
 
-	AddTrustedContact(ctx context.Context, userID, name, phoneNumber, email string, callerTrustLevel int32) (TrustedContact, error)
+	AddTrustedContact(ctx context.Context, userID, name, phoneNumber string, callerTrustLevel int32) (TrustedContact, error)
+	UpdateTrustedContact(ctx context.Context, userID, contactID, name, phoneNumber string, callerTrustLevel int32) (TrustedContact, error)
 	ListTrustedContacts(ctx context.Context, userID string) ([]TrustedContact, error)
 	RemoveTrustedContact(ctx context.Context, userID, contactID string) error
 	// TriggerSOS returns how many trusted contacts were actually alerted.
@@ -158,10 +170,7 @@ type Client interface {
 	// alert still goes out and says the location is unavailable.
 	// clientRequestID is shared by an attempt and its automatic retry, so
 	// the retry cannot alert everyone twice. Empty from older app builds.
-	TriggerSOS(ctx context.Context, userID, contextMessage, clientRequestID string, lat, lng *float64, callerTrustLevel int32) (contactsNotified int32, err error)
-	// ConfirmTrustedContact records a contact's consent from their link
-	// (#80). No user: the token is the proof.
-	ConfirmTrustedContact(ctx context.Context, token string) (requesterName string, err error)
+	TriggerSOS(ctx context.Context, userID, contextMessage, clientRequestID string, fix SOSFix, callerTrustLevel int32) (contactsNotified int32, err error)
 
 	// --- meetup module (Phase 2) — same connection, same interceptor ---
 	CreateMeetup(ctx context.Context, hostUserID string, hostTrustLevel int32, intent string, windowStart, windowEnd int64, lat, lng float64, label string, capacity int32, charge CreateCharge) (Meetup, error)
@@ -181,7 +190,6 @@ type Client interface {
 	UnregisterDeviceToken(ctx context.Context, userID, fcmToken string) error
 	GetSafetyState(ctx context.Context, meetupID, userID string) (SafetyState, error)
 	AcknowledgeSafetyChecklist(ctx context.Context, meetupID, userID string) (SafetyState, error)
-	SetLiveLocationOptIn(ctx context.Context, meetupID, userID string, optIn bool) (SafetyState, error)
 	ShareWithContacts(ctx context.Context, meetupID, userID string, contactIDs []string) (SafetyState, error)
 	CheckIn(ctx context.Context, meetupID, userID string) (SafetyState, error)
 	DeclineCheckIn(ctx context.Context, meetupID, userID, reason string) (SafetyState, error)
@@ -190,7 +198,7 @@ type Client interface {
 	ListMeetupParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (MeetupParticipants, error)
 	// GetMemberActivity — another member's recent meetups as the viewer may
 	// see them; PermissionDenied when the viewer may not open that member.
-	GetMemberActivity(ctx context.Context, viewerID, targetID string) (MemberActivity, error)
+	GetMemberActivity(ctx context.Context, viewerID string, viewerTrustLevel int32, targetID string) (MemberActivity, error)
 	ListRatableParticipants(ctx context.Context, meetupID, viewerID string, viewerTrustLevel int32) (RatableParticipants, error)
 	SubmitMeetupReview(ctx context.Context, meetupID, raterUserID string, overallScore int32, notes *string, participants []ReviewParticipantInput) error
 	GetMeetupReview(ctx context.Context, meetupID, viewerID string) (MeetupReview, error)
@@ -235,8 +243,8 @@ type Client interface {
 	// scales to zero (service.yaml, runbook §10).
 	//
 	// Like CheckHealth, it carries no user context: it is operator work, not
-	// anybody's request.
-	RunScheduledWork(ctx context.Context) (ScheduledWorkReport, error)
+	// anybody's request. group is "" (the core sweeps) or "analytics".
+	RunScheduledWork(ctx context.Context, group string) (ScheduledWorkReport, error)
 
 	// IngestAnalytics forwards one event batch (plan 29D). userID is from
 	// the verified token, "" when signed out.
@@ -347,8 +355,8 @@ func (c *grpcClient) CheckHealth(ctx context.Context) error {
 // error return is for "the tick could not be run at all". The handler needs
 // to tell those apart, because only the second means retrying the whole tick
 // is the right response.
-func (c *grpcClient) RunScheduledWork(ctx context.Context) (ScheduledWorkReport, error) {
-	resp, err := c.ops.RunScheduledWork(ctx, &opsv1.RunScheduledWorkRequest{})
+func (c *grpcClient) RunScheduledWork(ctx context.Context, group string) (ScheduledWorkReport, error) {
+	resp, err := c.ops.RunScheduledWork(ctx, &opsv1.RunScheduledWorkRequest{Group: group})
 	if err != nil {
 		return ScheduledWorkReport{}, fmt.Errorf("monolithclient: run scheduled work: %w", err)
 	}
@@ -602,6 +610,27 @@ func (c *grpcClient) VerifyCorporateEmailCode(ctx context.Context, userID, email
 	return sessionFromProto(resp), nil
 }
 
+func (c *grpcClient) SetProfilePhoto(ctx context.Context, userID string, image []byte) (string, error) {
+	resp, err := c.auth.SetProfilePhoto(ctx, &authv1.SetProfilePhotoRequest{UserId: userID, Image: image})
+	if err != nil {
+		return "", err
+	}
+	return resp.GetPhotoPath(), nil
+}
+
+func (c *grpcClient) DeleteProfilePhoto(ctx context.Context, userID string) error {
+	_, err := c.auth.DeleteProfilePhoto(ctx, &authv1.DeleteProfilePhotoRequest{UserId: userID})
+	return err
+}
+
+func (c *grpcClient) GetProfilePhoto(ctx context.Context, userID, knownEtag string) ([]byte, string, error) {
+	resp, err := c.auth.GetProfilePhoto(ctx, &authv1.GetProfilePhotoRequest{UserId: userID, KnownEtag: knownEtag})
+	if err != nil {
+		return nil, "", err
+	}
+	return resp.GetJpeg(), resp.GetEtag(), nil
+}
+
 func (c *grpcClient) GetProfile(ctx context.Context, userID string) (Profile, error) {
 	resp, err := c.auth.GetProfile(ctx, &authv1.GetProfileRequest{UserId: userID})
 	if err != nil {
@@ -640,9 +669,20 @@ func (c *grpcClient) DeleteAccount(ctx context.Context, userID string) error {
 	return err
 }
 
-func (c *grpcClient) AddTrustedContact(ctx context.Context, userID, name, phoneNumber, email string, callerTrustLevel int32) (TrustedContact, error) {
+func (c *grpcClient) AddTrustedContact(ctx context.Context, userID, name, phoneNumber string, callerTrustLevel int32) (TrustedContact, error) {
 	resp, err := c.auth.AddTrustedContact(ctx, &authv1.AddTrustedContactRequest{
-		UserId: userID, Name: name, PhoneNumber: phoneNumber, Email: email,
+		UserId: userID, Name: name, PhoneNumber: phoneNumber,
+		CallerTrustLevel: callerTrustLevel,
+	})
+	if err != nil {
+		return TrustedContact{}, err
+	}
+	return trustedContactFromProto(resp), nil
+}
+
+func (c *grpcClient) UpdateTrustedContact(ctx context.Context, userID, contactID, name, phoneNumber string, callerTrustLevel int32) (TrustedContact, error) {
+	resp, err := c.auth.UpdateTrustedContact(ctx, &authv1.UpdateTrustedContactRequest{
+		UserId: userID, ContactId: contactID, Name: name, PhoneNumber: phoneNumber,
 		CallerTrustLevel: callerTrustLevel,
 	})
 	if err != nil {
@@ -670,9 +710,10 @@ func (c *grpcClient) RemoveTrustedContact(ctx context.Context, userID, contactID
 	return err
 }
 
-func (c *grpcClient) TriggerSOS(ctx context.Context, userID, contextMessage, clientRequestID string, lat, lng *float64, callerTrustLevel int32) (int32, error) {
+func (c *grpcClient) TriggerSOS(ctx context.Context, userID, contextMessage, clientRequestID string, fix SOSFix, callerTrustLevel int32) (int32, error) {
 	resp, err := c.auth.TriggerSOS(ctx, &authv1.TriggerSOSRequest{
-		UserId: userID, ContextMessage: contextMessage, Latitude: lat, Longitude: lng,
+		UserId: userID, ContextMessage: contextMessage, Latitude: fix.Latitude, Longitude: fix.Longitude,
+		CapturedAtUnixSeconds: fix.CapturedAtUnix, LocationSource: fix.Source,
 		CallerTrustLevel: callerTrustLevel, ClientRequestId: clientRequestID,
 	})
 	if err != nil {
@@ -681,22 +722,12 @@ func (c *grpcClient) TriggerSOS(ctx context.Context, userID, contextMessage, cli
 	return resp.GetContactsNotified(), nil
 }
 
-func (c *grpcClient) ConfirmTrustedContact(ctx context.Context, token string) (string, error) {
-	resp, err := c.auth.ConfirmTrustedContact(ctx, &authv1.ConfirmTrustedContactRequest{Token: token})
-	if err != nil {
-		return "", err
-	}
-	return resp.GetRequesterName(), nil
-}
-
 func trustedContactFromProto(resp *authv1.TrustedContactResponse) TrustedContact {
 	return TrustedContact{
 		ID:                   resp.GetId(),
 		Name:                 resp.GetName(),
 		PhoneNumber:          resp.GetPhoneNumber(),
-		Email:                resp.GetEmail(),
 		CreatedAtUnixSeconds: resp.GetCreatedAtUnixSeconds(),
-		Status:               resp.GetStatus(),
 	}
 }
 
@@ -741,27 +772,27 @@ func sessionFromProto(resp *authv1.SessionResponse) Session {
 // terms: wire-format intent/status strings, Unix seconds for times.
 type MemberActivity struct {
 	RecentMeetups []MemberMeetup
+	Reviews       []MemberReview
+	// IdentityHidden: leave the member's name and photo out (#103).
+	IdentityHidden bool
 }
 
+// MemberMeetup is one finished meetup the member hosted.
 type MemberMeetup struct {
-	ID                     string
-	Intent                 string
-	Status                 string
-	WindowStartUnixSeconds int64
-	WindowEndUnixSeconds   int64
-	LocationLabel          string
-	Hosted                 bool
-	ParticipantCount       int32
-	OverallAverage         float64
-	ReviewCount            int32
-	ViewerWasIn            bool
-	Comments               []MemberMeetupComment
+	Intent           string
+	Status           string
+	DayUnixSeconds   int64
+	LocationLabel    string
+	ParticipantCount int32
+	OverallAverage   float64
+	ReviewCount      int32
 }
 
-type MemberMeetupComment struct {
-	AuthorName           string
-	Note                 string
-	WrittenAtUnixSeconds int64
+// MemberReview is one anonymous review. See meetup.MemberReview.
+type MemberReview struct {
+	Score int32
+	Text  string
+	Month string
 }
 
 func (c *grpcClient) ScrapeMonolithMetrics(ctx context.Context) ([]byte, error) {

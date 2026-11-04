@@ -104,12 +104,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// sign-out) but reads the bearer when it is valid — see logout.
 	mux.Handle("POST /v1/auth/logout", h.optionalAuth(http.HandlerFunc(h.logout)))
 
-	// A trusted contact agreeing, from the link texted to them (#80).
-	// Unauthenticated by nature: the person confirming has no account. The
-	// token in the path is the credential. See contact_confirm.go.
-	mux.HandleFunc("GET /c/{token}", h.showContactConfirm)
-	mux.HandleFunc("POST /c/{token}", h.confirmContact)
-
 	// Authenticated — Profile-initiated linking only.
 	mux.Handle("POST /v1/auth/identities/link", h.requireAuth(http.HandlerFunc(h.linkIdentity)))
 
@@ -136,6 +130,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// through h.monolith's auth methods.
 	mux.Handle("POST /v1/sos/contacts", h.requireAuth(http.HandlerFunc(h.addTrustedContact)))
 	mux.Handle("GET /v1/sos/contacts", h.requireAuth(http.HandlerFunc(h.listTrustedContacts)))
+	mux.Handle("PUT /v1/sos/contacts/{id}", h.requireAuth(http.HandlerFunc(h.updateTrustedContact)))
 	mux.Handle("DELETE /v1/sos/contacts/{id}", h.requireAuth(http.HandlerFunc(h.removeTrustedContact)))
 
 	// /v1/sos/trigger gets an additional per-user limit (5/hour) on top of
@@ -144,13 +139,20 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// UserIDFromContext, which only exists once Auth has run.
 	var sosTrigger http.Handler = http.HandlerFunc(h.triggerSOS)
 	if h.limiter != nil {
-		sosTrigger = middleware.UserKeyedRateLimit(h.limiter, "/v1/sos/trigger", 5, time.Hour)(sosTrigger)
+		// A coarse ceiling only. The real limits (5 an hour, 10 a day) are
+		// counted in the monolith, which can tell a retry from a new alert.
+		sosTrigger = middleware.UserKeyedRateLimit(h.limiter, "/v1/sos/trigger", sosRequestsPerHour, time.Hour)(sosTrigger)
 	}
 	mux.Handle("POST /v1/sos/trigger", h.requireAuth(sosTrigger))
 
 	// Location — the browse screen's on-demand read is this route's one and
 	// only call site on the frontend; no periodic timer.
 	mux.Handle("POST /v1/users/me/location", h.requireAuth(http.HandlerFunc(h.updateLastKnownLocation)))
+
+	// A user's own photo (plan 2.1). See photo.go.
+	mux.Handle("PUT /v1/users/me/photo", h.requireAuth(http.HandlerFunc(h.putPhoto)))
+	mux.Handle("DELETE /v1/users/me/photo", h.requireAuth(http.HandlerFunc(h.deletePhoto)))
+	mux.Handle("GET /v1/users/{id}/photo", h.requireAuth(http.HandlerFunc(h.getPhoto)))
 
 	// Meetup scheduling and join requests — all authenticated, same
 	// requireAuth as above. RequestToJoin gets the same blanket IP+path rate
@@ -193,7 +195,6 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	mux.Handle("GET /v1/notifications", h.requireAuth(http.HandlerFunc(h.listNotifications)))
 	mux.Handle("GET /v1/meetups/{id}/safety", h.requireAuth(http.HandlerFunc(h.getSafetyState)))
 	mux.Handle("POST /v1/meetups/{id}/safety/checklist", h.requireAuth(http.HandlerFunc(h.acknowledgeSafetyChecklist)))
-	mux.Handle("POST /v1/meetups/{id}/safety/live-location", h.requireAuth(http.HandlerFunc(h.setLiveLocationOptIn)))
 	mux.Handle("POST /v1/meetups/{id}/safety/share", h.requireAuth(http.HandlerFunc(h.shareWithContacts)))
 	mux.Handle("POST /v1/meetups/{id}/safety/check-in", h.requireAuth(http.HandlerFunc(h.checkIn)))
 	mux.Handle("POST /v1/meetups/{id}/safety/decline", h.requireAuth(http.HandlerFunc(h.declineCheckIn)))
@@ -546,7 +547,7 @@ type sessionResponse struct {
 	ExpiresIn       int64  `json:"expires_in"`
 	IsNewUser       bool   `json:"is_new_user"`
 	FullName        string `json:"full_name"`
-	ProfilePhotoURL string `json:"profile_photo_url"`
+	ProfilePhotoURL string `json:"photo_url"`
 	// SuggestedNameUpdate is present only after a LinkedIn link whose name
 	// differs from the account's own (Plan 22). omitempty keeps every other
 	// session response byte-for-byte what it was — this route is shared by
@@ -654,7 +655,7 @@ func (h *Handler) writeSession(w http.ResponseWriter, s monolithclient.Session) 
 		ExpiresIn:       int64(jwt.AccessTokenTTL.Seconds()),
 		IsNewUser:       s.IsNewUser,
 		FullName:        s.FullName,
-		ProfilePhotoURL: s.ProfilePhotoURL,
+		ProfilePhotoURL: photoPath(s.ProfilePhotoURL),
 
 		SuggestedNameUpdate: s.SuggestedNameUpdate,
 	})

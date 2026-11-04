@@ -160,7 +160,6 @@ func safetyStateToProto(s meetup.SafetyState) *meetupv1.SafetyStateResponse {
 	return &meetupv1.SafetyStateResponse{
 		MeetupId:                  s.MeetupID,
 		ChecklistAckAtUnixSeconds: unixPtr(s.ChecklistAckAt),
-		LiveLocationOptIn:         s.LiveLocationOptIn,
 		CheckedInAtUnixSeconds:    unixPtr(s.CheckedInAt),
 		DeclinedAtUnixSeconds:     unixPtr(s.DeclinedAt),
 		DeclineReason:             s.DeclineReason,
@@ -366,18 +365,6 @@ func (s *MeetupServer) AcknowledgeSafetyChecklist(ctx context.Context, req *meet
 	return safetyStateToProto(state), nil
 }
 
-func (s *MeetupServer) SetLiveLocationOptIn(ctx context.Context, req *meetupv1.SetLiveLocationOptInRequest) (*meetupv1.SafetyStateResponse, error) {
-	state, err := s.svc.SetLiveLocationOptIn(ctx, meetup.SetLiveLocationOptInRequest{
-		MeetupID: req.GetMeetupId(),
-		UserID:   req.GetUserId(),
-		OptIn:    req.GetOptIn(),
-	})
-	if err != nil {
-		return nil, apperror.ToGRPCStatus(err)
-	}
-	return safetyStateToProto(state), nil
-}
-
 func (s *MeetupServer) ShareWithContacts(ctx context.Context, req *meetupv1.ShareWithContactsRequest) (*meetupv1.SafetyStateResponse, error) {
 	state, err := s.svc.ShareWithContacts(ctx, meetup.ShareWithContactsRequest{
 		MeetupID:   req.GetMeetupId(),
@@ -478,36 +465,27 @@ func (s *MeetupServer) ListMeetupParticipants(ctx context.Context, req *meetupv1
 }
 
 func (s *MeetupServer) GetMemberActivity(ctx context.Context, req *meetupv1.GetMemberActivityRequest) (*meetupv1.GetMemberActivityResponse, error) {
-	activity, err := s.svc.GetMemberActivity(ctx, req.GetViewerId(), req.GetTargetId())
+	activity, err := s.svc.GetMemberActivity(ctx, req.GetViewerId(), int(req.GetViewerTrustLevel()), req.GetTargetId())
 	if err != nil {
 		return nil, apperror.ToGRPCStatus(err)
 	}
-	out := make([]*meetupv1.MemberMeetup, 0, len(activity.RecentMeetups))
+	meetups := make([]*meetupv1.MemberMeetup, 0, len(activity.RecentMeetups))
 	for _, mm := range activity.RecentMeetups {
-		comments := make([]*meetupv1.MemberMeetupComment, 0, len(mm.Comments))
-		for _, c := range mm.Comments {
-			comments = append(comments, &meetupv1.MemberMeetupComment{
-				AuthorName:           c.AuthorName,
-				Note:                 c.Note,
-				WrittenAtUnixSeconds: c.WrittenAt.Unix(),
-			})
-		}
-		out = append(out, &meetupv1.MemberMeetup{
-			Id:                     mm.ID,
-			Intent:                 intentToProto[mm.Intent],
-			Status:                 statusToProto[mm.Status],
-			WindowStartUnixSeconds: mm.WindowStart.Unix(),
-			WindowEndUnixSeconds:   mm.WindowEnd.Unix(),
-			LocationLabel:          mm.LocationLabel,
-			Hosted:                 mm.Hosted,
-			ParticipantCount:       int32(mm.ParticipantCount),
-			OverallAverage:         mm.OverallAverage,
-			ReviewCount:            int32(mm.ReviewCount),
-			ViewerWasIn:            mm.ViewerWasIn,
-			Comments:               comments,
+		meetups = append(meetups, &meetupv1.MemberMeetup{
+			Intent:           intentToProto[mm.Intent],
+			Status:           statusToProto[mm.Status],
+			DayUnixSeconds:   mm.Day.Unix(),
+			LocationLabel:    mm.LocationLabel,
+			ParticipantCount: int32(mm.ParticipantCount),
+			OverallAverage:   mm.OverallAverage,
+			ReviewCount:      int32(mm.ReviewCount),
 		})
 	}
-	return &meetupv1.GetMemberActivityResponse{RecentMeetups: out}, nil
+	reviews := make([]*meetupv1.MemberReview, 0, len(activity.Reviews))
+	for _, r := range activity.Reviews {
+		reviews = append(reviews, &meetupv1.MemberReview{Score: int32(r.Score), Text: r.Text, Month: r.Month})
+	}
+	return &meetupv1.GetMemberActivityResponse{RecentMeetups: meetups, Reviews: reviews, IdentityHidden: activity.IdentityHidden}, nil
 }
 
 func (s *MeetupServer) ListRatableParticipants(ctx context.Context, req *meetupv1.ListRatableParticipantsRequest) (*meetupv1.ListRatableParticipantsResponse, error) {

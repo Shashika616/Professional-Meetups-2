@@ -255,14 +255,6 @@ type SafetyStateRequest struct {
 	UserID   string
 }
 
-// SetLiveLocationOptInRequest toggles the caller's own live-location
-// sharing for one meetup.
-type SetLiveLocationOptInRequest struct {
-	MeetupID string
-	UserID   string
-	OptIn    bool
-}
-
 // DeclineCheckInRequest declines at the checklist/check-in stage. Reason is
 // required.
 type DeclineCheckInRequest struct {
@@ -275,12 +267,11 @@ type DeclineCheckInRequest struct {
 // DeclinedAt/DeclineReason are set together and are mutually exclusive with
 // CheckedInAt.
 type SafetyState struct {
-	MeetupID          string
-	ChecklistAckAt    *time.Time
-	LiveLocationOptIn bool
-	CheckedInAt       *time.Time
-	DeclinedAt        *time.Time
-	DeclineReason     *string
+	MeetupID       string
+	ChecklistAckAt *time.Time
+	CheckedInAt    *time.Time
+	DeclinedAt     *time.Time
+	DeclineReason  *string
 	// SharedWithContactIDs are the caller's own trusted contacts who have
 	// already been told about this meetup. Returned so the screen can show
 	// what it did rather than asking again blind — an action a user cannot

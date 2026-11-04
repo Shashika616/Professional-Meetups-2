@@ -1,6 +1,6 @@
 -- name: CreateMeetup :one
-INSERT INTO meetup.meetups (host_user_id, intent, window_start, window_end, location_lat, location_lng, location_label, capacity, creation_key, charge_hold_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, sqlc.narg(creation_key), sqlc.narg(charge_hold_id))
+INSERT INTO meetup.meetups (host_user_id, intent, window_start, window_end, location_lat, location_lng, location_label, capacity, creation_key, charge_hold_id, creation_request_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, sqlc.narg(creation_key), sqlc.narg(charge_hold_id), sqlc.narg(creation_request_hash))
 RETURNING *;
 
 -- name: GetMeetupByCreationKey :one
@@ -755,3 +755,33 @@ WHERE host_user_id = $1;
 -- cap (#89). idx_meetups_host narrows to the host; a host's rows are few.
 SELECT count(*) FROM meetup.meetups
 WHERE host_user_id = $1 AND created_at > sqlc.arg(since)::timestamptz;
+
+-- name: CoarsenOldMeetupCoordinates :execrows
+-- Plan 30 D4: a meetup that ended more than 180 days ago keeps its place
+-- to 2 decimals (about 1 km). It is history; for a "use my current
+-- location" meetup the exact point is where the host once stood. The
+-- location column follows through the meetups_sync_location trigger.
+UPDATE meetup.meetups
+   SET location_lat = round(location_lat::numeric, 2)::float8,
+       location_lng = round(location_lng::numeric, 2)::float8
+ WHERE id IN (
+   SELECT id FROM meetup.meetups
+    WHERE window_end < now() - interval '180 days'
+      AND (location_lat <> round(location_lat::numeric, 2)::float8
+        OR location_lng <> round(location_lng::numeric, 2)::float8)
+    LIMIT 1000
+ );
+
+-- name: GetActiveMeetupForUser :one
+-- The meetup an SOS message mentions (plan 2.2): one the user hosts or is
+-- accepted on, still open or full, with now inside its window give or take
+-- two hours. The nearest to now if there are two.
+SELECT m.intent, m.location_label, m.location_lat, m.location_lng
+FROM meetup.meetups m
+WHERE m.status IN ('open', 'full')
+  AND sqlc.arg(at_time)::timestamptz BETWEEN m.window_start - interval '2 hours' AND m.window_end + interval '2 hours'
+  AND (m.host_user_id = sqlc.arg(user_id)::uuid OR EXISTS (
+        SELECT 1 FROM meetup.meetup_requests r
+         WHERE r.meetup_id = m.id AND r.requester_id = sqlc.arg(user_id)::uuid AND r.status = 'accepted'))
+ORDER BY abs(extract(epoch FROM m.window_start - sqlc.arg(at_time)::timestamptz))
+LIMIT 1;

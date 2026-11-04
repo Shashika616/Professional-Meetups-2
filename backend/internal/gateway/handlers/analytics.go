@@ -13,6 +13,8 @@ import (
 
 	"professional-meetups-monolith/backend/internal/gateway/middleware"
 	"professional-meetups-monolith/backend/internal/gateway/monolithclient"
+
+	"github.com/google/uuid"
 )
 
 // The analytics routes (plan 29 §4.3, docs/api/analytics.md). The batch is
@@ -94,6 +96,12 @@ func (h *Handler) ingestAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(batch.Events) > analyticsMaxEvents {
 		writeError(w, http.StatusRequestEntityTooLarge, msgAnalyticsTooLarge)
+		return
+	}
+	// The install id keys the limiter below, so it is checked first (#119):
+	// any other string would make a key of the caller's choosing and size.
+	if _, err := uuid.Parse(batch.InstallID); err != nil || len(batch.InstallID) != 36 {
+		writeError(w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 	ctx := r.Context()

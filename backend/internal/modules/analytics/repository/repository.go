@@ -133,7 +133,8 @@ func text(s string) pgtype.Text { return pgtype.Text{String: s, Valid: s != ""} 
 // transaction only.
 const backgroundStatementTimeout = `SET LOCAL statement_timeout = '120s'`
 
-// exportRow is one archived line: the stored row, nothing more.
+// exportRow is one archived line: the stored row without its per-person
+// keys (#110).
 type exportRow struct {
 	EventID       uuid.UUID       `json:"event_id"`
 	EventName     string          `json:"event_name"`
@@ -141,8 +142,6 @@ type exportRow struct {
 	Source        string          `json:"source"`
 	OccurredAt    time.Time       `json:"occurred_at"`
 	ReceivedAt    time.Time       `json:"received_at"`
-	UserKey       *string         `json:"user_key,omitempty"`
-	InstallID     *string         `json:"install_id,omitempty"`
 	SessionID     *string         `json:"session_id,omitempty"`
 	AppVersion    *string         `json:"app_version,omitempty"`
 	OSName        *string         `json:"os_name,omitempty"`
@@ -156,7 +155,10 @@ type exportRow struct {
 }
 
 // ExportDay streams one day's events to w as NDJSON, one row per line, and
-// returns how many it wrote. It reads with a cursor, so a large day never
+// returns how many it wrote. user_key and install_id are left out (#110):
+// the archive outlives account deletion and opt-out, which can only erase
+// what is in Postgres, so it holds nothing that links an event to a person
+// or a device. Sessions, screens, flows and attributes keep it useful. It reads with a cursor, so a large day never
 // sits in memory.
 func (s *Store) ExportDay(ctx context.Context, day time.Time, w io.Writer) (int, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
@@ -169,7 +171,7 @@ func (s *Store) ExportDay(ctx context.Context, day time.Time, w io.Writer) (int,
 	}
 	rows, err := tx.Query(ctx, `
 		SELECT event_id, event_name, schema_version, source, occurred_at, received_at,
-		       user_key, install_id, session_id, app_version, os_name, os_version, device_class,
+		       session_id, app_version, os_name, os_version, device_class,
 		       locale, screen, flow_id, flow_step, attributes
 		FROM analytics.events
 		WHERE received_day = $1
@@ -183,7 +185,7 @@ func (s *Store) ExportDay(ctx context.Context, day time.Time, w io.Writer) (int,
 	for rows.Next() {
 		var r exportRow
 		if err := rows.Scan(&r.EventID, &r.EventName, &r.SchemaVersion, &r.Source, &r.OccurredAt, &r.ReceivedAt,
-			&r.UserKey, &r.InstallID, &r.SessionID, &r.AppVersion, &r.OSName, &r.OSVersion, &r.DeviceClass,
+			&r.SessionID, &r.AppVersion, &r.OSName, &r.OSVersion, &r.DeviceClass,
 			&r.Locale, &r.Screen, &r.FlowID, &r.FlowStep, &r.Attributes); err != nil {
 			return n, fmt.Errorf("analytics: export scan: %w", err)
 		}

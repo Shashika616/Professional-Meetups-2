@@ -54,6 +54,8 @@ const (
 // publishes a rating-updated event for auth's own cache, ADR-018) — this
 // service never reads or writes any users table at all anymore.
 type Meetup struct {
+	// CreationRequestHash is set only by FindByCreationKey (N1-B6).
+	CreationRequestHash string
 	ID                  string
 	HostUserID          string
 	HostFullName        string
@@ -116,6 +118,9 @@ type NewMeetup struct {
 	// second create with the same key for the same host returns
 	// *CreationKeyExistsError instead of inserting (plan 29 §3.5).
 	CreationKey string
+	// CreationRequestHash identifies what was asked for under CreationKey,
+	// so a replay can be told from a different request (N1-B6).
+	CreationRequestHash string
 	// ChargeHoldID is the billing hold reserved for this creation, "" when
 	// it was free. When set, Create writes meetup.created to the billing
 	// outbox in the same transaction.
@@ -127,6 +132,9 @@ type NewMeetup struct {
 // meetup as the result: it is a retry, not a conflict.
 type CreationKeyExistsError struct {
 	MeetupID string
+	// RequestHash is what the earlier request asked for; "" for meetups
+	// made before 0035.
+	RequestHash string
 }
 
 func (e *CreationKeyExistsError) Error() string {
@@ -238,14 +246,14 @@ type MeetupRepository interface {
 	// CanViewMemberProfile answers whether viewer may open target's public
 	// profile — see member.sql for the rule.
 	CanViewMemberProfile(ctx context.Context, viewerID, targetID string) (bool, error)
-	// ListRecentMeetupsForMember returns target's latest meetups as host or
-	// accepted participant, newest first, at most limit.
-	ListRecentMeetupsForMember(ctx context.Context, viewerID, targetID string, limit int) ([]RecentMemberMeetup, error)
-	// ListReviewComments returns the written review notes on the given
-	// meetups, oldest first within each meetup.
-	ListReviewComments(ctx context.Context, meetupIDs []string) ([]MeetupReviewComment, error)
+	// ListRecentMeetupsForMember returns the finished meetups target hosted,
+	// newest first, at most limit.
+	ListRecentMeetupsForMember(ctx context.Context, targetID string, limit int) ([]RecentMemberMeetup, error)
+	// ListHostReviews returns participants' written reviews of target's
+	// hosted meetups, newest first, at most limit.
+	ListHostReviews(ctx context.Context, targetID string, limit int) ([]HostReview, error)
 	// ListOpen returns open meetups for intent, newest first, cursor-
-	// paginated, within 40km of (viewerLat, viewerLng) (ADR-021 §2). cursor
+	// paginated, within 50 km of (viewerLat, viewerLng) (ADR-021 §2). cursor
 	// nil means the first page. Returns one page of at most pageSize
 	// meetups and the cursor for the next page (nil if this was the last
 	// page).
@@ -401,11 +409,10 @@ type MeetupRequestRepository interface {
 // let a non-participant overwrite the real participants' state, which is
 // exactly the bug ADR-024 fixes).
 type SafetyState struct {
-	MeetupID          string
-	UserID            string
-	ChecklistAckAt    *time.Time
-	LiveLocationOptIn bool
-	CheckedInAt       *time.Time
+	MeetupID       string
+	UserID         string
+	ChecklistAckAt *time.Time
+	CheckedInAt    *time.Time
 	// DeclinedAt/DeclineReason (ADR-024 § 4) are set together, mutually
 	// exclusive with CheckedInAt — enforced at the service layer, not here.
 	DeclinedAt    *time.Time
@@ -428,7 +435,6 @@ type SafetyStateRepository interface {
 	// accepted requester on it, not a generic "not found."
 	Get(ctx context.Context, meetupID, userID string) (SafetyState, error)
 	AcknowledgeChecklist(ctx context.Context, meetupID, userID string) (SafetyState, error)
-	SetLiveLocationOptIn(ctx context.Context, meetupID, userID string, optIn bool) (SafetyState, error)
 	CheckIn(ctx context.Context, meetupID, userID string) (SafetyState, error)
 	// Decline sets declined_at/decline_reason on the caller's own row
 	// (ADR-024 § 4). Mutual exclusion with CheckIn is a service-layer
@@ -457,33 +463,24 @@ type MeetupParticipant struct {
 	TrustLevel      int
 }
 
-// RecentMemberMeetup is one row of a member's recent activity, as the
-// member.sql queries return it — the aggregate per meetup, plus whether the
-// VIEWER was on that meetup (which the service uses to decide whether the
-// comment authors below may be named).
+// RecentMemberMeetup is one finished meetup a member hosted.
 type RecentMemberMeetup struct {
-	ID               string
 	Intent           Intent
 	Status           MeetupStatus
 	WindowStart      time.Time
-	WindowEnd        time.Time
 	LocationLabel    string
-	TargetIsHost     bool
 	ParticipantCount int
 	OverallAverage   float64
 	ReviewCount      int
-	ViewerWasIn      bool
 }
 
-// MeetupReviewComment is one written review note on a meetup, with the
-// author's display name attached; the service decides whether the viewer
-// gets to keep the name.
-type MeetupReviewComment struct {
-	MeetupID   string
-	AuthorID   string
-	AuthorName string
-	Note       string
-	WrittenAt  time.Time
+// HostReview is one written review of a host. It has no author field on
+// purpose: an anonymous review cannot leak a name that never left the
+// database.
+type HostReview struct {
+	Score     int
+	Text      string
+	WrittenAt time.Time
 }
 
 // FeedbackRepository is the persistence boundary for post-meetup feedback
@@ -656,13 +653,14 @@ type UserLocationCacheRepository interface {
 	// for userID, the ordering guard (ADR-018 Decision 2) silently no-op'ing
 	// a stale/out-of-order redelivery.
 	Upsert(ctx context.Context, userID string, lat, lng float64, occurredAt time.Time) (applied bool, err error)
-	// ListWithinRadius returns every cached user location within 40km of
+	// ListWithinRadius returns every cached user location within 50 km of
 	// (centerLat, centerLng) whose updated_at is after notBefore (the
 	// staleness cutoff — Step 4: "non-stale... within 24 hours").
 	ListWithinRadius(ctx context.Context, centerLat, centerLng float64, notBefore time.Time) ([]UserLocation, error)
 	// WithinBrowseRadius reports whether userID's last known location is
-	// within the 50 km browse radius of the point. known is false when no
-	// location has ever been reported for them.
+	// within the browse radius of the point. known is false when no
+	// location is known, or the one known is older than
+	// geo.LocationFreshFor.
 	WithinBrowseRadius(ctx context.Context, userID string, centerLat, centerLng float64) (within, known bool, err error)
 }
 

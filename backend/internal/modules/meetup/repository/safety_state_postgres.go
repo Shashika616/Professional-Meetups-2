@@ -81,21 +81,6 @@ func (r *postgresSafetyStateRepository) AcknowledgeChecklist(ctx context.Context
 	return safetyStateFromRow(row), nil
 }
 
-func (r *postgresSafetyStateRepository) SetLiveLocationOptIn(ctx context.Context, meetupID, userID string, optIn bool) (SafetyState, error) {
-	meetup, user, err := parseSafetyStateIDs(meetupID, userID)
-	if err != nil {
-		return SafetyState{}, err
-	}
-	row, err := r.q.SetLiveLocationOptIn(ctx, sqlcgen.SetLiveLocationOptInParams{MeetupID: meetup, UserID: user, LiveLocationOptIn: optIn})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return SafetyState{}, fmt.Errorf("repository: no safety state for meetup %s, user %s: %w", meetupID, userID, apperror.ErrNotFound)
-		}
-		return SafetyState{}, fmt.Errorf("repository: set live location opt-in: %w", err)
-	}
-	return safetyStateFromRow(row), nil
-}
-
 func (r *postgresSafetyStateRepository) CheckIn(ctx context.Context, meetupID, userID string) (SafetyState, error) {
 	meetup, user, err := parseSafetyStateIDs(meetupID, userID)
 	if err != nil {
@@ -150,13 +135,12 @@ func (r *postgresSafetyStateRepository) Decline(ctx context.Context, meetupID, u
 
 func safetyStateFromRow(row sqlcgen.MeetupSafetyState) SafetyState {
 	return SafetyState{
-		MeetupID:          row.MeetupID.String(),
-		UserID:            row.UserID.String(),
-		ChecklistAckAt:    timePtrOrNil(row.ChecklistAckAt),
-		LiveLocationOptIn: row.LiveLocationOptIn,
-		CheckedInAt:       timePtrOrNil(row.CheckedInAt),
-		DeclinedAt:        timePtrOrNil(row.DeclinedAt),
-		DeclineReason:     stringPtrOrNil(row.DeclineReason),
+		MeetupID:       row.MeetupID.String(),
+		UserID:         row.UserID.String(),
+		ChecklistAckAt: timePtrOrNil(row.ChecklistAckAt),
+		CheckedInAt:    timePtrOrNil(row.CheckedInAt),
+		DeclinedAt:     timePtrOrNil(row.DeclinedAt),
+		DeclineReason:  stringPtrOrNil(row.DeclineReason),
 	}
 }
 

@@ -13,7 +13,25 @@ package geo
 import (
 	"fmt"
 	"math"
+	"time"
 )
+
+// BrowseRadiusMeters is the one radius (plan 30B, 3.3): what browse shows,
+// who may join, who gets a meetup's exact coordinates, and who is told
+// about a new meetup nearby. The SQL in the meetup module spells it as
+// 50000, and a test there keeps the two equal.
+const BrowseRadiusMeters = 50_000
+
+// BrowseRadiusKm is BrowseRadiusMeters for messages.
+const BrowseRadiusKm = BrowseRadiusMeters / 1000
+
+// LocationFreshFor is how old a last known location may be and still count
+// (3.3): older than this, the person may be anywhere.
+const LocationFreshFor = 24 * time.Hour
+
+// StoredPrecision rounds a coordinate to 3 decimal places, about 110 m, the
+// most precise any last known location is kept (3.3).
+func StoredPrecision(v float64) float64 { return math.Round(v*1000) / 1000 }
 
 // ValidateLatLng rejects NaN, infinite, out-of-range, and null-island
 // coordinates. Callers map the returned error through their own
