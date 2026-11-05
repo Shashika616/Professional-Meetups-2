@@ -158,24 +158,24 @@ func (h *chargingHarness) reconciled(t *testing.T) {
 func cost(n int64) *int64 { return &n }
 
 // createReq is a 4-person meetup starting `start` from now, an hour long.
-// Cost under the default rules: 10 credits within 48 hours.
+// Cost under the default rules: 150 credits within 48 hours.
 func createReq(host string, start time.Duration) meetup.CreateMeetupRequest {
 	ws := time.Now().Add(start).Truncate(time.Second)
 	return meetup.CreateMeetupRequest{
 		HostUserID: host, HostTrustLevel: 3, Intent: meetup.IntentCoffee,
 		WindowStart: ws, WindowEnd: ws.Add(time.Hour),
 		LocationLat: 6.9271, LocationLng: 79.8612, LocationLabel: "Cafe",
-		Capacity: 4, ExpectedCost: cost(10), PriceVersion: 1,
+		Capacity: 4, ExpectedCost: cost(150), PriceVersion: 2,
 	}
 }
 
-// 20 creations at once for a host with 25 credits at 10 each: exactly two
-// succeed, the balance ends at 5, it is never negative, and the ledger
+// 20 creations at once for a host with 375 credits at 150 each: exactly two
+// succeed, the balance ends at 75, it is never negative, and the ledger
 // replays to the wallet.
 func TestConcurrentCreatesChargeExactlyTwo(t *testing.T) {
 	h := newChargingHarness(t)
 	host := uuid.NewString()
-	h.fund(t, host, 25)
+	h.fund(t, host, 375)
 
 	var (
 		wg                  sync.WaitGroup
@@ -212,8 +212,8 @@ func TestConcurrentCreatesChargeExactlyTwo(t *testing.T) {
 	}
 	h.drain(t)
 	v := h.wallet(t, host)
-	if v.Balance != 5 || v.Held != 0 || v.Debt != 0 {
-		t.Fatalf("wallet = %+v, want balance 5, nothing held, no debt", v)
+	if v.Balance != 75 || v.Held != 0 || v.Debt != 0 {
+		t.Fatalf("wallet = %+v, want balance 75, nothing held, no debt", v)
 	}
 	if n := pipelineCount(t, h.pool, `SELECT count(*) FROM meetup.meetups WHERE host_user_id = $1`, host); n != 2 {
 		t.Fatalf("%d meetups exist, want 2", n)
@@ -226,7 +226,7 @@ func TestConcurrentCreatesChargeExactlyTwo(t *testing.T) {
 func TestSameIdempotencyKeyConcurrentlyChargesOnce(t *testing.T) {
 	h := newChargingHarness(t)
 	host := uuid.NewString()
-	h.fund(t, host, 100)
+	h.fund(t, host, 1500)
 	req := createReq(host, 3*time.Hour)
 	req.IdempotencyKey = "retry-" + uuid.NewString()
 
@@ -265,8 +265,8 @@ func TestSameIdempotencyKeyConcurrentlyChargesOnce(t *testing.T) {
 	if n := pipelineCount(t, h.pool, `SELECT count(*) FROM billing.holds WHERE user_id = $1`, host); n != 1 {
 		t.Fatalf("%d holds, want 1", n)
 	}
-	if v := h.wallet(t, host); v.Balance != 90 || v.Held != 0 {
-		t.Fatalf("wallet = %+v, want one 10-credit charge", v)
+	if v := h.wallet(t, host); v.Balance != 1350 || v.Held != 0 {
+		t.Fatalf("wallet = %+v, want one 150-credit charge", v)
 	}
 	h.reconciled(t)
 }
@@ -275,7 +275,7 @@ func TestSameIdempotencyKeyConcurrentlyChargesOnce(t *testing.T) {
 func TestFailedCreateAfterReserveReleasesTheHold(t *testing.T) {
 	h := newChargingHarness(t)
 	host := uuid.NewString()
-	h.fund(t, host, 50)
+	h.fund(t, host, 750)
 
 	if _, err := h.meetups.CreateMeetup(newAppCtx(), createReq(host, 3*time.Hour)); err != nil {
 		t.Fatal(err)
@@ -289,7 +289,7 @@ func TestFailedCreateAfterReserveReleasesTheHold(t *testing.T) {
 	}
 	h.drain(t)
 	v := h.wallet(t, host)
-	if v.Balance != 40 || v.Held != 0 {
+	if v.Balance != 600 || v.Held != 0 {
 		t.Fatalf("wallet = %+v, want only the first charge and nothing held", v)
 	}
 	if n := pipelineCount(t, h.pool, `SELECT count(*) FROM billing.holds WHERE user_id = $1 AND state = 'released'`, host); n != 1 {
@@ -301,7 +301,7 @@ func TestFailedCreateAfterReserveReleasesTheHold(t *testing.T) {
 func TestCreatePricingErrors(t *testing.T) {
 	h := newChargingHarness(t)
 	host := uuid.NewString()
-	h.fund(t, host, 50)
+	h.fund(t, host, 750)
 
 	t.Run("an app build without the credits UI is told to update", func(t *testing.T) {
 		old := clientinfo.With(context.Background(), clientinfo.Info{AppVersion: "1.0.0"})
@@ -321,13 +321,13 @@ func TestCreatePricingErrors(t *testing.T) {
 		req.ExpectedCost = nil
 		_, err := h.meetups.CreateMeetup(newAppCtx(), req)
 		var coded *apperror.CodedError
-		if !errors.As(err, &coded) || coded.Code != apperror.CodePriceChanged || coded.Fields["cost"] != 10 {
-			t.Fatalf("err = %v, want price_changed with cost 10", err)
+		if !errors.As(err, &coded) || coded.Code != apperror.CodePriceChanged || coded.Fields["cost"] != 150 {
+			t.Fatalf("err = %v, want price_changed with cost 150", err)
 		}
 	})
 	t.Run("a stale expected cost is price_changed", func(t *testing.T) {
 		req := createReq(host, 3*time.Hour)
-		req.ExpectedCost = cost(8)
+		req.ExpectedCost = cost(120)
 		_, err := h.meetups.CreateMeetup(newAppCtx(), req)
 		var coded *apperror.CodedError
 		if !errors.As(err, &coded) || coded.Code != apperror.CodePriceChanged {
@@ -352,7 +352,7 @@ func TestCreatePricingErrors(t *testing.T) {
 			t.Fatalf("level 2 host with credits: %v, want forbidden", err)
 		}
 	})
-	if v := h.wallet(t, host); v.Balance != 50 || v.Held != 0 {
+	if v := h.wallet(t, host); v.Balance != 750 || v.Held != 0 {
 		t.Fatalf("refused creates touched the wallet: %+v", v)
 	}
 	h.reconciled(t)
@@ -374,8 +374,8 @@ func TestNewHostPaysWithWelcomeCredits(t *testing.T) {
 		t.Fatal("no meetup")
 	}
 	h.drain(t)
-	if v := h.wallet(t, host); v.Balance != 50 || v.Held != 0 {
-		t.Fatalf("after the first create wallet = %+v, want 50 left of the 60 welcome credits", v)
+	if v := h.wallet(t, host); v.Balance != 850 || v.Held != 0 {
+		t.Fatalf("after the first create wallet = %+v, want 850 left of the 1000 welcome credits", v)
 	}
 	if n := pipelineCount(t, h.pool, `SELECT count(*) FROM billing.welcome_grants WHERE user_id = $1`, host); n != 1 {
 		t.Fatalf("%d welcome grants, want 1", n)
@@ -388,22 +388,22 @@ func TestNewHostPaysWithWelcomeCredits(t *testing.T) {
 func TestCancelRefundsThroughTheOutbox(t *testing.T) {
 	h := newChargingHarness(t)
 	host := uuid.NewString()
-	h.fund(t, host, 30)
+	h.fund(t, host, 450)
 
 	m, err := h.meetups.CreateMeetup(newAppCtx(), createReq(host, 40*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.drain(t)
-	if v := h.wallet(t, host); v.Balance != 20 {
-		t.Fatalf("after capture balance = %d, want 20", v.Balance)
+	if v := h.wallet(t, host); v.Balance != 300 {
+		t.Fatalf("after capture balance = %d, want 4500", v.Balance)
 	}
 	if err := h.meetups.CancelMeetup(context.Background(), meetup.CancelMeetupRequest{MeetupID: m.ID, HostUserID: host, Reason: "plans changed"}); err != nil {
 		t.Fatal(err)
 	}
 	h.drain(t)
-	if v := h.wallet(t, host); v.Balance != 30 {
-		t.Fatalf("after cancelling 40h ahead balance = %d, want 30", v.Balance)
+	if v := h.wallet(t, host); v.Balance != 450 {
+		t.Fatalf("after cancelling 40h ahead balance = %d, want 450", v.Balance)
 	}
 	h.reconciled(t)
 }
@@ -413,7 +413,7 @@ func TestCancelRefundsThroughTheOutbox(t *testing.T) {
 func TestAutoCloseWithNobodyRefundsHalf(t *testing.T) {
 	h := newChargingHarness(t)
 	host := uuid.NewString()
-	h.fund(t, host, 30)
+	h.fund(t, host, 450)
 	m, err := h.meetups.CreateMeetup(newAppCtx(), createReq(host, 3*time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -429,8 +429,8 @@ func TestAutoCloseWithNobodyRefundsHalf(t *testing.T) {
 		t.Fatalf("auto-close closed %d, %v", n, err)
 	}
 	h.drain(t)
-	if v := h.wallet(t, host); v.Balance != 25 {
-		t.Fatalf("balance = %d, want 20 + half of 10", v.Balance)
+	if v := h.wallet(t, host); v.Balance != 375 {
+		t.Fatalf("balance = %d, want 4500 + half of 150", v.Balance)
 	}
 	h.reconciled(t)
 }
@@ -443,7 +443,7 @@ var _ = fmt.Sprintf
 func TestIdempotencyKeyAfterAFailedCreate(t *testing.T) {
 	h := newChargingHarness(t)
 	host := uuid.NewString()
-	h.fund(t, host, 100)
+	h.fund(t, host, 1500)
 
 	blocker, err := h.meetups.CreateMeetup(newAppCtx(), createReq(host, 3*time.Hour))
 	if err != nil {
@@ -459,15 +459,15 @@ func TestIdempotencyKeyAfterAFailedCreate(t *testing.T) {
 
 	// Same key, a 20-person meetup 13 days out, with its correct cost.
 	bigger := createReq(host, 13*24*time.Hour)
-	bigger.IdempotencyKey, bigger.Capacity, bigger.ExpectedCost = key, 20, cost(48)
+	bigger.IdempotencyKey, bigger.Capacity, bigger.ExpectedCost = key, 20, cost(720)
 	_, err = h.meetups.CreateMeetup(newAppCtx(), bigger)
 	var coded *apperror.CodedError
 	if !errors.As(err, &coded) || coded.Code != apperror.CodeIdempotencyKeyReused {
 		t.Fatalf("bigger body with a used key: %v, want idempotency_key_reused", err)
 	}
 	h.drain(t)
-	if v := h.wallet(t, host); v.Balance != 90 || v.Held != 0 {
-		t.Fatalf("after the refused reuse: %+v, want only the blocker's 10 charged", v)
+	if v := h.wallet(t, host); v.Balance != 1350 || v.Held != 0 {
+		t.Fatalf("after the refused reuse: %+v, want only the blocker's 150 charged", v)
 	}
 
 	// The slot frees up; the same request with the same key now succeeds
@@ -480,8 +480,8 @@ func TestIdempotencyKeyAfterAFailedCreate(t *testing.T) {
 		t.Fatalf("same body, same key, slot free: %v", err)
 	}
 	h.drain(t)
-	if v := h.wallet(t, host); v.Balance != 80 || v.Held != 0 {
-		t.Fatalf("wallet = %+v, want 80 (blocker 10, no refund under 24h; retry 10)", v)
+	if v := h.wallet(t, host); v.Balance != 1200 || v.Held != 0 {
+		t.Fatalf("wallet = %+v, want 1200 (blocker 150, no refund under 24h; retry 150)", v)
 	}
 	if n := pipelineCount(t, h.pool, `SELECT count(*) FROM billing.holds WHERE user_id = $1 AND state = 'captured'`, host); n != 2 {
 		t.Fatalf("captured holds = %d, want 2 (blocker and the retry)", n)

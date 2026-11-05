@@ -24,11 +24,11 @@ func TestWelcomeCreditsDecayWeekly(t *testing.T) {
 	ctx := context.Background()
 	host := h.newHost()
 
-	if got := h.wallet(t, host).Balance; got != 60 {
-		t.Fatalf("welcome balance = %d, want 60", got)
+	if got := h.wallet(t, host).Balance; got != 1000 {
+		t.Fatalf("welcome balance = %d, want 1000", got)
 	}
 
-	for k, want := range []int64{54, 48, 42, 36, 30, 24, 18, 12, 6, 0} {
+	for k, want := range []int64{900, 800, 700, 600, 500, 400, 300, 200, 100, 0} {
 		h.clock.Advance(week)
 		if _, err := h.svc.SweepDecayAndExpiry(ctx); err != nil {
 			t.Fatal(err)
@@ -52,17 +52,17 @@ func TestSpendBetweenSweepsSeesTheDecayedBalance(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	host := h.newHost()
-	_ = h.wallet(t, host) // grant 60
+	_ = h.wallet(t, host) // grant 1000
 
 	// Three weeks pass with no sweep at all: the lot is allowed 42.
 	h.clock.Advance(3*week + time.Hour)
 	rules, _ := h.svc.Rules(ctx)
-	_, err := h.svc.Reserve(ctx, host.UserID, billing.ReserveRequest{Cost: 43, PriceVersion: rules.Version}, "k1")
+	_, err := h.svc.Reserve(ctx, host.UserID, billing.ReserveRequest{Cost: 701, PriceVersion: rules.Version}, "k1")
 	var coded *apperror.CodedError
-	if !errors.As(err, &coded) || coded.Code != apperror.CodeInsufficientCredits || coded.Fields["available"] != 42 {
-		t.Fatalf("reserving 43 against a decayed 42: err = %v", err)
+	if !errors.As(err, &coded) || coded.Code != apperror.CodeInsufficientCredits || coded.Fields["available"] != 700 {
+		t.Fatalf("reserving 701 against a decayed 700: err = %v", err)
 	}
-	if _, err := h.svc.Reserve(ctx, host.UserID, billing.ReserveRequest{Cost: 42, PriceVersion: rules.Version}, "k2"); err != nil {
+	if _, err := h.svc.Reserve(ctx, host.UserID, billing.ReserveRequest{Cost: 700, PriceVersion: rules.Version}, "k2"); err != nil {
 		t.Fatalf("reserving the decayed balance exactly: %v", err)
 	}
 	h.assertReconciled(t)
@@ -74,20 +74,20 @@ func TestSpendOrderAndRefundToOriginalLots(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	host := h.newHost()
-	_ = h.wallet(t, host) // 60 welcome
+	_ = h.wallet(t, host) // 1000 welcome
 	purchased, err := h.svc.GrantLotForTest(ctx, host.UserID, wallet.KindPurchase, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	hold := h.reserveCapture(t, host, 70)
+	hold := h.reserveCapture(t, host, 1010)
 
 	lot := func(id uuid.UUID) int64 {
 		return int64(h.count(t, `SELECT remaining FROM billing.credit_lots WHERE id = $1`, id))
 	}
 	welcomeRemaining := int64(h.count(t, `SELECT remaining FROM billing.credit_lots WHERE kind = 'welcome' AND user_id = $1`, host.UserID))
 	if welcomeRemaining != 0 || lot(purchased) != 90 {
-		t.Fatalf("after spending 70: welcome %d (want 0), purchased %d (want 90)", welcomeRemaining, lot(purchased))
+		t.Fatalf("after spending 1010: welcome %d (want 0), purchased %d (want 90)", welcomeRemaining, lot(purchased))
 	}
 
 	// A full refund (cancelled well ahead) returns 60 to welcome and 10 to
@@ -100,8 +100,8 @@ func TestSpendOrderAndRefundToOriginalLots(t *testing.T) {
 		t.Fatal(err)
 	}
 	welcomeRemaining = int64(h.count(t, `SELECT remaining FROM billing.credit_lots WHERE kind = 'welcome' AND user_id = $1`, host.UserID))
-	if welcomeRemaining != 60 || lot(purchased) != 100 {
-		t.Fatalf("after refund: welcome %d (want 60), purchased %d (want 100)", welcomeRemaining, lot(purchased))
+	if welcomeRemaining != 1000 || lot(purchased) != 100 {
+		t.Fatalf("after refund: welcome %d (want 1000), purchased %d (want 100)", welcomeRemaining, lot(purchased))
 	}
 	h.assertReconciled(t)
 }
@@ -388,8 +388,8 @@ func TestPlanQuotaAndLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q.CoveredByPlan || q.Cost != 10 {
-		t.Fatalf("eleventh creation: %+v, want 10 credits", q)
+	if q.CoveredByPlan || q.Cost != 150 {
+		t.Fatalf("eleventh creation: %+v, want 150 credits", q)
 	}
 	ent, err := h.svc.Entitlements(ctx, c)
 	if err != nil {
@@ -417,8 +417,8 @@ func TestFreeLimitsApplyWithoutAPlan(t *testing.T) {
 		t.Fatalf("21 people without a plan: err = %v, want invalid input", err)
 	}
 	q, err := h.svc.Quote(ctx, c, 5, h.clock.Now().Add(time.Hour))
-	if err != nil || q.Cost != 12 || q.WouldCost != 12 || q.Limits != (billing.Limits{MaxCapacity: 20, MaxAdvanceDays: 14}) {
-		t.Fatalf("quote = %+v, %v; want cost 12 under the free limits", q, err)
+	if err != nil || q.Cost != 180 || q.WouldCost != 180 || q.Limits != (billing.Limits{MaxCapacity: 20, MaxAdvanceDays: 14}) {
+		t.Fatalf("quote = %+v, %v; want cost 180 under the free limits", q, err)
 	}
 }
 
@@ -449,8 +449,8 @@ func TestWelcomeGrantOncePerUserAndPerPerson(t *testing.T) {
 			}(i)
 		}
 		wg.Wait()
-		if got := h.wallet(t, host).Balance; got != 60 {
-			t.Fatalf("balance = %d, want one 60-credit grant", got)
+		if got := h.wallet(t, host).Balance; got != 1000 {
+			t.Fatalf("balance = %d, want one 1000-credit grant", got)
 		}
 	})
 
@@ -470,8 +470,8 @@ func TestWelcomeGrantOncePerUserAndPerPerson(t *testing.T) {
 		}
 		wg.Wait()
 		total := h.wallet(t, a).Balance + h.wallet(t, b).Balance
-		if total != 60 {
-			t.Fatalf("two accounts with one phone got %d credits between them, want 60", total)
+		if total != 1000 {
+			t.Fatalf("two accounts with one phone got %d credits between them, want 1000", total)
 		}
 	})
 
@@ -601,8 +601,8 @@ func TestFirstQuoteGrantsWelcomeCredits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q.BalanceAvailable != 60 || q.Cost != 10 {
-		t.Fatalf("first quote = %+v; want 60 available and cost 10", q)
+	if q.BalanceAvailable != 1000 || q.Cost != 150 {
+		t.Fatalf("first quote = %+v; want 1000 available and cost 150", q)
 	}
 	if n := h.count(t, `SELECT count(*) FROM billing.welcome_grants WHERE user_id = $1`, host.UserID); n != 1 {
 		t.Fatalf("%d welcome grants, want 1", n)

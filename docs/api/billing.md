@@ -133,9 +133,9 @@ saves. A capacity or start time outside `limits` is 400. `credits_enforced` is
 always `true` (credits have no switch); it is kept so the response shape is
 stable.
 
-Default prices (`billing.price_rules` version 1): 10 credits for up to 4 people,
-2 per person above 4; plus 0 within 48 hours, 3 up to 7 days, 6 up to 14 days,
-10 up to 30 days (30 days needs a plan).
+Default prices (`billing.price_rules` version 2): 150 credits for up to 4 people,
+30 per person above 4; plus 0 within 48 hours, 45 up to 7 days, 90 up to 14 days,
+150 up to 30 days (30 days needs a plan). New accounts get 1000 welcome credits.
 
 ## `GET /v1/billing/entitlements`
 
@@ -250,9 +250,9 @@ per-IP limit otherwise.
 {
   "catalog_version": 1,
   "credit_packs": [
-    { "product_id": "credits_50",  "credits": 50,  "bonus": 0,  "sort": 1 },
-    { "product_id": "credits_120", "credits": 120, "bonus": 20, "badge": "popular", "sort": 2 },
-    { "product_id": "credits_300", "credits": 300, "bonus": 75, "badge": "best_value", "sort": 3 }
+    { "product_id": "credits_50",  "credits": 750,  "bonus": 0,  "sort": 1 },
+    { "product_id": "credits_120", "credits": 1800, "bonus": 300, "badge": "popular", "sort": 2 },
+    { "product_id": "credits_300", "credits": 4500, "bonus": 1125, "badge": "best_value", "sort": 3 }
   ],
   "plans_visible": true,
   "plans": [

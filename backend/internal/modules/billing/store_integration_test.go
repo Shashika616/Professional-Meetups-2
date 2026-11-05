@@ -63,11 +63,11 @@ func TestVerifyGrantsAPackExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.CreditsGranted != 120 || first.AlreadyProcessed || first.Wallet.Balance != 120 {
-		t.Fatalf("first verify = %+v; want 120 credits (100 + 20 bonus)", first)
+	if first.CreditsGranted != 1800 || first.AlreadyProcessed || first.Wallet.Balance != 1800 {
+		t.Fatalf("first verify = %+v; want 1800 credits (1500 + 300 bonus)", first)
 	}
 	again, err := h.verify(c, "android", "credits_120", token)
-	if err != nil || !again.AlreadyProcessed || again.CreditsGranted != 120 || again.Wallet.Balance != 120 {
+	if err != nil || !again.AlreadyProcessed || again.CreditsGranted != 1800 || again.Wallet.Balance != 1800 {
 		t.Fatalf("repeat = %+v, %v; want the original result and nothing new", again, err)
 	}
 
@@ -100,8 +100,8 @@ func TestVerifyGrantsAPackExactlyOnce(t *testing.T) {
 	if n := h.count(t, `SELECT count(*) FROM billing.credit_lots WHERE user_id = $1 AND expires_at IS NOT NULL`, c.UserID); n != 0 {
 		t.Fatal("a purchased lot expires (App Review 3.1.1)")
 	}
-	if v := h.wallet(t, c); v.Balance != 120 {
-		t.Fatalf("balance = %d, want 120", v.Balance)
+	if v := h.wallet(t, c); v.Balance != 1800 {
+		t.Fatalf("balance = %d, want 1800", v.Balance)
 	}
 	// Google was told to consume it, and the token is gone.
 	if n := h.count(t, `SELECT count(*) FROM billing.store_purchases
@@ -480,7 +480,7 @@ func TestPackRefundAfterPartialSpendRecordsDebt(t *testing.T) {
 	if _, err := h.verify(c, "ios", "credits_50", tok); err != nil {
 		t.Fatal(err)
 	}
-	h.reserveCapture(t, c, 30)
+	h.reserveCapture(t, c, 450)
 
 	refund := h.appleNotification(t, h.apple, "n-refund", "REFUND", "", claims)
 	for range 2 {
@@ -489,14 +489,14 @@ func TestPackRefundAfterPartialSpendRecordsDebt(t *testing.T) {
 		}
 	}
 	v := h.wallet(t, c)
-	if v.Balance != 0 || v.Debt != 30 {
-		t.Fatalf("after the refund wallet = %+v, want balance 0 and debt 30", v)
+	if v.Balance != 0 || v.Debt != 450 {
+		t.Fatalf("after the refund wallet = %+v, want balance 0 and debt 450", v)
 	}
 	rules, err := h.svc.Rules(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = h.svc.Reserve(ctx, c.UserID, billing.ReserveRequest{Cost: 10, PriceVersion: rules.Version}, "k-debt")
+	_, err = h.svc.Reserve(ctx, c.UserID, billing.ReserveRequest{Cost: 150, PriceVersion: rules.Version}, "k-debt")
 	var coded *apperror.CodedError
 	if !errors.As(err, &coded) || coded.Code != apperror.CodeCreditsDebt {
 		t.Fatalf("creating with debt: %v, want credits_debt", err)
@@ -507,10 +507,10 @@ func TestPackRefundAfterPartialSpendRecordsDebt(t *testing.T) {
 		AppID: h.cfg.AppleBundleID, Environment: store.Production, AccountToken: billing.AccountToken(c.UserID)})); err != nil {
 		t.Fatal(err)
 	}
-	if v := h.wallet(t, c); v.Balance != 20 || v.Debt != 0 {
-		t.Fatalf("after a new pack wallet = %+v, want balance 20 and debt 0", v)
+	if v := h.wallet(t, c); v.Balance != 300 || v.Debt != 0 {
+		t.Fatalf("after a new pack wallet = %+v, want balance 300 and debt 0", v)
 	}
-	if _, err := h.svc.Reserve(ctx, c.UserID, billing.ReserveRequest{Cost: 10, PriceVersion: rules.Version}, "k-after"); err != nil {
+	if _, err := h.svc.Reserve(ctx, c.UserID, billing.ReserveRequest{Cost: 150, PriceVersion: rules.Version}, "k-after"); err != nil {
 		t.Fatalf("creating after the debt is paid: %v", err)
 	}
 	h.assertReconciled(t)
@@ -559,7 +559,7 @@ func TestCatalogShowsPlansOnlyWhereTheFlagSays(t *testing.T) {
 	if cat.PlansVisible || len(cat.Plans) != 0 {
 		t.Fatalf("an ordinary user sees plans: %+v", cat.Plans)
 	}
-	if len(cat.CreditPacks) != 3 || cat.CreditPacks[1].ProductID != "credits_120" || cat.CreditPacks[1].Credits != 120 || cat.CreditPacks[1].Bonus != 20 {
+	if len(cat.CreditPacks) != 3 || cat.CreditPacks[1].ProductID != "credits_120" || cat.CreditPacks[1].Credits != 1800 || cat.CreditPacks[1].Bonus != 300 {
 		t.Fatalf("credit packs = %+v", cat.CreditPacks)
 	}
 	if cat.AppAccountToken != billing.AccountToken(ordinary) || cat.TermsURL == "" {

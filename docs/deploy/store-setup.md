@@ -19,9 +19,9 @@ whatever the catalog lists, so a product missing from a store is simply skipped.
 
 | Product id | Type | Grants | Notes |
 |---|---|---|---|
-| `credits_50` | Consumable | 50 credits | |
-| `credits_120` | Consumable | 120 credits (100 + 20 bonus) | |
-| `credits_300` | Consumable | 300 credits (225 + 75 bonus) | |
+| `credits_50` | Consumable | 750 credits | |
+| `credits_120` | Consumable | 1800 credits (1500 + 300 bonus) | |
+| `credits_300` | Consumable | 4500 credits (3375 + 1125 bonus) | |
 | `premium_monthly` | Auto-renewable subscription | Pro, monthly | 10 meetups a month, 30 people, 30 days ahead |
 | `premium_yearly` | Auto-renewable subscription | Pro, yearly | Same plan; the 10 meetups reset every month |
 
