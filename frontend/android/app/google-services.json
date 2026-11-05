@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "740861671089-7vt1du7suo6aq9qua98h0ek2p7jct76u.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.profconn.professional_connections_platform",
+            "certificate_hash": "1a0ad75bade349ffe80b8d061e82c6b3e2e915b6"
+          }
+        },
+        {
           "client_id": "740861671089-cjsiocfa8b2chf8iiqsj170etnp2gnaf.apps.googleusercontent.com",
           "client_type": 3
         }

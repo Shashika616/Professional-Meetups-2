@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -7,15 +8,19 @@ import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
+import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 import 'package:professional_connections_platform/core/widgets/secondary_button.dart';
 
 enum LegalDocument {
-  terms('Terms and Conditions'),
-  privacy('Privacy Policy');
+  terms('Terms and Conditions', 'https://tiehere.com/terms'),
+  privacy('Privacy Policy', 'https://tiehere.com/privacy');
 
-  const LegalDocument(this.title);
+  const LegalDocument(this.title, this.webUrl);
 
   final String title;
+
+  /// The public page, for when the server has no text to show.
+  final String webUrl;
 }
 
 /// Opens [document] on a page of its own.
@@ -31,9 +36,12 @@ void openLegalDocument(BuildContext context, LegalDocument document) {
 /// Reads the terms or the privacy policy inside the app, from the server's
 /// current text.
 class LegalDocumentPage extends ConsumerWidget {
-  const LegalDocumentPage({super.key, required this.document});
+  const LegalDocumentPage({super.key, required this.document, this.open});
 
   final LegalDocument document;
+
+  /// Opens the website; replaced in tests.
+  final Future<void> Function(Uri uri)? open;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -46,8 +54,16 @@ class LegalDocumentPage extends ConsumerWidget {
         child: SafeArea(
           child: documents.when(
             loading: () => const Center(child: BrandLoader(size: 44)),
-            error: (_, _) =>
-                _Failed(onRetry: () => ref.invalidate(legalDocumentsProvider)),
+            error: (_, _) => _Failed(
+              onRetry: () => ref.invalidate(legalDocumentsProvider),
+              onOpenWebsite: () {
+                final launch =
+                    open ??
+                    (Uri u) =>
+                        launchUrl(u, mode: LaunchMode.externalApplication);
+                launch(Uri.parse(document.webUrl));
+              },
+            ),
             data: (docs) => _Text(
               markdown: document == LegalDocument.terms
                   ? docs.terms
@@ -61,9 +77,10 @@ class LegalDocumentPage extends ConsumerWidget {
 }
 
 class _Failed extends StatelessWidget {
-  const _Failed({required this.onRetry});
+  const _Failed({required this.onRetry, required this.onOpenWebsite});
 
   final VoidCallback onRetry;
+  final VoidCallback onOpenWebsite;
 
   @override
   Widget build(BuildContext context) {
@@ -74,11 +91,16 @@ class _Failed extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'We couldn’t load this. Check your connection and try again.',
+              'We couldn’t load this here. You can read it on our website.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppPalette.textSecondary, fontSize: 15),
             ),
             const SizedBox(height: 16),
+            PrimaryButton(
+              label: 'Read on tiehere.com',
+              onPressed: onOpenWebsite,
+            ),
+            const SizedBox(height: 10),
             SecondaryButton(
               label: 'Try again',
               icon: AppIcons.refresh,

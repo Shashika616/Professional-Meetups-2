@@ -171,6 +171,26 @@ void main() {
     expect(legal.documentReads, 2);
   });
 
+  testWidgets('with no text to show, it offers the website page', (
+    tester,
+  ) async {
+    legal.documentsError = const LegalException('nothing published');
+    Uri? opened;
+    await tester.pumpWidget(
+      app(
+        LegalDocumentPage(
+          document: LegalDocument.privacy,
+          open: (uri) async => opened = uri,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('Read on tiehere.com'));
+    await tester.pump();
+    expect(opened.toString(), 'https://tiehere.com/privacy');
+  });
+
   testWidgets('the company field shows the saved name, not the domain', (
     tester,
   ) async {

@@ -247,7 +247,7 @@ class _BalanceCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                '${wallet.available}',
+                formatCreditNumber(wallet.available),
                 key: const Key('creditsAvailable'),
                 style: TextStyle(
                   color: AppPalette.textPrimary,
@@ -390,7 +390,7 @@ class _HistoryRow extends StatelessWidget {
             ),
           ),
           Text(
-            '${gain ? '+' : '−'}${entry.delta.abs()}',
+            '${gain ? '+' : '−'}${formatCreditNumber(entry.delta.abs())}',
             style: TextStyle(
               color: gain ? AppPalette.brandGreen : AppPalette.textPrimary,
               fontSize: 15,
