@@ -13,6 +13,7 @@ class RemoteAppConfig {
   const RemoteAppConfig({
     this.flags = const {},
     this.values = const {},
+    this.forceUpdate = ForceUpdate.none,
     this.minSupportedAppVersion = '',
     this.billingCatalogVersion = 0,
   });
@@ -26,6 +27,12 @@ class RemoteAppConfig {
   final Map<String, num> values;
   final String minSupportedAppVersion;
   final int billingCatalogVersion;
+
+  /// The operator's forced update, from the `app.force_update` flag.
+  final ForceUpdate forceUpdate;
+
+  /// Whether signed-in users must agree to the current terms.
+  bool get legalAcceptanceRequired => flag('legal.acceptance.required');
 
   /// An unknown flag is off.
   bool flag(String key) => flags[key] ?? false;
@@ -44,6 +51,7 @@ class RemoteAppConfig {
 
   factory RemoteAppConfig.fromJson(Map<String, dynamic> json) =>
       RemoteAppConfig(
+        forceUpdate: ForceUpdate.fromConfig(json),
         flags: {
           for (final e
               in (json['flags'] as Map<String, dynamic>? ?? const {}).entries)
@@ -59,6 +67,47 @@ class RemoteAppConfig {
         billingCatalogVersion:
             (json['billing_catalog_version'] as num?)?.toInt() ?? 0,
       );
+}
+
+/// A forced update, set by the operator without a release (runbook). Off means
+/// nobody is blocked. Each platform has its own minimum, because the stores
+/// approve builds at different speeds.
+class ForceUpdate {
+  const ForceUpdate({
+    this.enabled = false,
+    this.minVersions = const {},
+    this.message = '',
+    this.storeUrls = const {},
+  });
+
+  static const none = ForceUpdate();
+
+  factory ForceUpdate.fromConfig(Map<String, dynamic> json) {
+    final flags = json['flags'] as Map<String, dynamic>? ?? const {};
+    final values = json['values'] as Map<String, dynamic>? ?? const {};
+    final value = values['app.force_update'];
+    if (flags['app.force_update'] != true || value is! Map<String, dynamic>) {
+      return none;
+    }
+    Map<String, String> strings(Object? map) => {
+      if (map is Map<String, dynamic>)
+        for (final e in map.entries)
+          if (e.value is String) e.key: e.value as String,
+    };
+    return ForceUpdate(
+      enabled: true,
+      minVersions: strings(value['min_version']),
+      message: value['message'] as String? ?? '',
+      storeUrls: strings(value['store_url']),
+    );
+  }
+
+  final bool enabled;
+
+  /// By platform: `ios`, `android`.
+  final Map<String, String> minVersions;
+  final String message;
+  final Map<String, String> storeUrls;
 }
 
 abstract interface class AppConfigService {

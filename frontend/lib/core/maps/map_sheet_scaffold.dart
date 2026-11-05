@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
@@ -227,14 +228,7 @@ class MapActionButton extends StatelessWidget {
             height: 44,
             child: Center(
               child: busy
-                  ? SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppPalette.candyBlue,
-                      ),
-                    )
+                  ? BrandLoader(size: 24)
                   : AppIcon(icon, size: 21, color: AppPalette.textPrimary),
             ),
           ),

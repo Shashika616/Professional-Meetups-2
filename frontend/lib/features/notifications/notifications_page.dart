@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -57,6 +58,7 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
         _notifications = rows;
         _loading = false;
       });
+      await markNotificationsSeen(ref, rows);
     } on MeetupSessionExpiredException {
       if (mounted) {
         ref.read(authSessionProvider.notifier).forceSignOut();
@@ -78,12 +80,7 @@ class _NotificationsPageState extends ConsumerState<NotificationsPage> {
       appBar: AppBar(title: const Text('Notifications')),
       body: AppBackground(
         child: SafeArea(
-          child: RefreshIndicator(
-            onRefresh: _load,
-            color: AppPalette.candyBlue,
-            backgroundColor: AppPalette.card,
-            child: _buildBody(),
-          ),
+          child: BrandRefreshIndicator(onRefresh: _load, child: _buildBody()),
         ),
       ),
     );

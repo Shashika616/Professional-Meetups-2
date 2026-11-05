@@ -120,6 +120,8 @@ void main() async {
   Analytics.instance = analytics;
   unawaited(analytics.start());
 
+  await ThemeModeNotifier.preload();
+
   runApp(
     UncontrolledProviderScope(
       container: container,

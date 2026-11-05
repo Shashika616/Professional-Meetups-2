@@ -12,6 +12,7 @@ import 'package:professional_connections_platform/core/utils/snacks.dart';
 import 'package:professional_connections_platform/core/services/push_notification_service.dart';
 import 'package:professional_connections_platform/core/widgets/app_background.dart';
 import 'package:professional_connections_platform/core/widgets/app_bottom_bar.dart';
+import 'package:professional_connections_platform/features/legal/legal_acceptance_page.dart';
 import 'package:professional_connections_platform/features/premium/purchase_listener.dart';
 import 'package:professional_connections_platform/features/home/home_page.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
@@ -101,6 +102,7 @@ class _AppShellState extends ConsumerState<AppShell>
       // purchase on another device). Flags are re-read by UpdateGate, which
       // is on every screen.
       ref.invalidate(walletProvider);
+      ref.invalidate(hasNewNotificationsProvider);
     }
   }
 
@@ -124,6 +126,7 @@ class _AppShellState extends ConsumerState<AppShell>
   /// either way.
   void _onPushMessage(PushMessage message) {
     _refreshFor(message.type);
+    ref.invalidate(hasNewNotificationsProvider);
 
     if (message.source != PushMessageSource.foreground) return;
     if (!mounted) return;
@@ -191,6 +194,9 @@ class _AppShellState extends ConsumerState<AppShell>
 
   @override
   Widget build(BuildContext context) {
+    if (ref.watch(legalAcceptancePendingProvider).value ?? false) {
+      return const LegalAcceptancePage();
+    }
     final currentIndex = ref.watch(currentTabIndexProvider);
 
     // Keeps the PageView in sync with tab changes that didn't come from a

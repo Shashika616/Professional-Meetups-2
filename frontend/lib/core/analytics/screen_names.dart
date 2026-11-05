@@ -18,6 +18,8 @@ abstract final class ScreenNames {
   static const meetupDetail = AnalyticsScreen.meetupDetail;
   static const locationView = AnalyticsScreen.locationView;
   static const locationExplanation = AnalyticsScreen.locationExplanation;
+  static const legalAcceptance = AnalyticsScreen.legalAcceptance;
+  static const legalDocument = AnalyticsScreen.legalDocument;
   static const participants = AnalyticsScreen.participants;
   static const requestManagement = AnalyticsScreen.requestManagement;
   static const scheduleMeetup = AnalyticsScreen.scheduleMeetup;
@@ -63,6 +65,8 @@ abstract final class ScreenNames {
     meetupDetail,
     locationView,
     locationExplanation,
+    legalAcceptance,
+    legalDocument,
     participants,
     requestManagement,
     scheduleMeetup,

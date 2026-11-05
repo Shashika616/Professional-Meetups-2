@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/features/legal/legal_document_page.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
 /// The 18+ self-attestation control: a checkbox and its exact sentence.
@@ -28,6 +29,13 @@ class AgeConfirmationCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [_checkbox(), const SizedBox(height: 6), const _LegalLinks()],
+    );
+  }
+
+  Widget _checkbox() {
     return GestureDetector(
       onTap: () => onChanged(!value),
       behavior: HitTestBehavior.opaque,
@@ -55,6 +63,34 @@ class AgeConfirmationCheckbox extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Readable before signing up, as the stores expect.
+class _LegalLinks extends StatelessWidget {
+  const _LegalLinks();
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      color: AppPalette.candyBlue,
+      fontSize: 12.5,
+      fontWeight: FontWeight.w600,
+    );
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 16,
+      children: [
+        for (final document in LegalDocument.values)
+          GestureDetector(
+            onTap: () => openLegalDocument(context, document),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(document.title, style: style),
+            ),
+          ),
+      ],
     );
   }
 }

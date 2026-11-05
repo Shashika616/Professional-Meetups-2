@@ -62,7 +62,7 @@ class _ProfileHero extends StatelessWidget {
                 _RoundControl(
                   icon: AppIcons.edit,
                   onTap: onEditName!,
-                  label: 'Edit your name',
+                  label: 'Edit your display name',
                 )
               else
                 const SizedBox(height: 44),
@@ -90,15 +90,7 @@ class _ProfileHero extends StatelessWidget {
                     ring: true,
                     showPresenceDot: true,
                   ),
-                  if (photoBusy)
-                    SizedBox(
-                      width: 32,
-                      height: 32,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: AppPalette.candyBlue,
-                      ),
-                    ),
+                  if (photoBusy) const BrandLoader(size: 48),
                 ],
               ),
             ),

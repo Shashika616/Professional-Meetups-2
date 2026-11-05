@@ -7,10 +7,18 @@ import 'package:professional_connections_platform/core/widgets/professional_avat
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
 
 class HomeHeader extends StatelessWidget {
-  const HomeHeader({super.key, required this.userName, this.imageUrl});
+  const HomeHeader({
+    super.key,
+    required this.userName,
+    this.imageUrl,
+    this.hasNewNotifications = false,
+  });
 
   final String userName;
   final String? imageUrl;
+
+  /// Shows the dot on the bell.
+  final bool hasNewNotifications;
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +61,7 @@ class HomeHeader extends StatelessWidget {
                 ),
               ),
               _NotificationBell(
+                hasNew: hasNewNotifications,
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     settings: const RouteSettings(
@@ -92,9 +101,10 @@ class HomeHeader extends StatelessWidget {
 }
 
 class _NotificationBell extends StatelessWidget {
-  const _NotificationBell({required this.onTap});
+  const _NotificationBell({required this.onTap, required this.hasNew});
 
   final VoidCallback onTap;
+  final bool hasNew;
 
   @override
   Widget build(BuildContext context) {
@@ -103,12 +113,32 @@ class _NotificationBell extends StatelessWidget {
       // 24px icon alone is under the 44px minimum tap size.
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Padding(
-        padding: EdgeInsets.all(8.0),
-        child: AppIcon(
-          AppIcons.bell,
-          size: 23,
-          color: AppPalette.textSecondary,
+      child: Semantics(
+        button: true,
+        label: hasNew ? 'Notifications, new' : 'Notifications',
+        child: Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AppIcon(AppIcons.bell, size: 23, color: AppPalette.textSecondary),
+              if (hasNew)
+                Positioned(
+                  key: const Key('notification-dot'),
+                  top: -1,
+                  right: -1,
+                  child: Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      color: AppPalette.danger,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppPalette.onyx, width: 2),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -139,6 +139,9 @@ class AppIcons {
       '<rect x="4" y="5" width="16" height="14" rx="3"/>'
       '<circle cx="9" cy="10" r="1.5"/>'
       '<path d="M4 16l5-4 4 3 3-2 4 3"/>';
+  static const String document =
+      '<path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/>'
+      '<path d="M14 3v5h5M9 13h6M9 17h6"/>';
   static const String edit = '<path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17z"/>';
 
   // ---------------------------------------------------------------------

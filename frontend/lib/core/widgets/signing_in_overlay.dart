@@ -2,8 +2,8 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
-import 'package:professional_connections_platform/core/widgets/app_icon.dart';
 
 /// Covers a page while a sign-in or sign-up is in flight: the page blurs
 /// and dims, every control under it stops taking taps, and one loader with
@@ -116,17 +116,12 @@ class _Veil extends StatelessWidget {
   }
 }
 
-/// The launcher mark at rest inside a thin brand-green arc that sweeps
-/// around it, over a soft glow. The arc is the "still working" signal; the
-/// mark is so the wait belongs to this app and not to whichever provider's
-/// sheet just closed. Proportions: mark 56, a breath of space, then a
-/// 4-point ring at 92: thick enough to read as a made object rather than a
-/// hairline, with enough air that it is not an icon jammed in a spinner.
+/// The app's loader, large, over a soft glow, so the wait belongs to this app
+/// and not to whichever provider's sheet just closed.
 class _MarkInRing extends StatelessWidget {
   const _MarkInRing();
 
   static const double _ring = 92;
-  static const double _mark = 56;
 
   @override
   Widget build(BuildContext context) {
@@ -152,44 +147,7 @@ class _MarkInRing extends StatelessWidget {
             ),
             child: const SizedBox.square(dimension: _ring + 32),
           ),
-          // Track, faint, so the arc has something to travel along.
-          SizedBox.square(
-            dimension: _ring,
-            child: CircularProgressIndicator(
-              value: 1,
-              strokeWidth: 4,
-              color: green.withValues(alpha: 0.16),
-            ),
-          ),
-          // The sweeping arc.
-          SizedBox.square(
-            dimension: _ring,
-            child: CircularProgressIndicator(
-              strokeWidth: 4,
-              strokeCap: StrokeCap.round,
-              color: green,
-            ),
-          ),
-          // A plate under the mark so its own white or dark tile has a
-          // clean edge against the blur.
-          Container(
-            width: _mark + 12,
-            height: _mark + 12,
-            decoration: BoxDecoration(
-              color: AppPalette.surface,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(
-                    alpha: AppPalette.isLight ? 0.10 : 0.40,
-                  ),
-                  blurRadius: 18,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-          ),
-          const BrandMarkTile(size: _mark, radius: 14),
+          const BrandLoader(size: _ring),
         ],
       ),
     );

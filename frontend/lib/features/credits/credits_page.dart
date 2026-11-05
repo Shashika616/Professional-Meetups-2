@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/credits.dart';
@@ -113,7 +114,7 @@ class _CreditsPageState extends ConsumerState<CreditsPage> {
       appBar: AppBar(title: const Text('Credits')),
       body: AppBackground(
         child: SafeArea(
-          child: RefreshIndicator(
+          child: BrandRefreshIndicator(
             onRefresh: _refresh,
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),

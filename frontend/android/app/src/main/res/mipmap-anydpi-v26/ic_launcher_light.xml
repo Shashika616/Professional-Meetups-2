@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon for the light theme (Android 8+): the same mark on white. The launcher masks this to whatever shape the
+  device theme uses - circle, squircle, rounded square - so the artwork must
+  survive being cropped to a circle inscribed in the inner 72dp of a 108dp
+  canvas. ic_launcher_foreground is sized for that safe zone rather than
+  filling the square, which is why the mark looks small next to the legacy
+  mipmap-*/ic_launcher.png beside it. Both are correct for their own slot.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_light_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <!--
+      Android 13+ themed icons. The launcher tints this layer from the
+      wallpaper palette, so it is a silhouette, not a colourway. The app's own
+      theme picks between this icon and ic_launcher_light (MainActivity).
+    -->
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

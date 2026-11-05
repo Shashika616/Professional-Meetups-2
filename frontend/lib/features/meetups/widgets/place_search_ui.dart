@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/utils/location.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
@@ -117,11 +118,7 @@ class _PlaceSearchBarState extends State<PlaceSearchBar> {
 
     Widget trailing;
     if (widget.busy) {
-      trailing = SizedBox(
-        width: 16,
-        height: 16,
-        child: CircularProgressIndicator(strokeWidth: 2, color: accent),
-      );
+      trailing = const BrandLoader(size: 22);
     } else if (hasText) {
       trailing = IconButton(
         key: const Key('placeSearchClear'),
@@ -458,25 +455,7 @@ class _FindingYouButtonState extends State<_FindingYouButton>
           return Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(
-                width: 20,
-                height: 20,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Transform.rotate(
-                      angle: t * 2 * math.pi,
-                      child: CircularProgressIndicator(
-                        value: 0.28,
-                        strokeWidth: 2,
-                        color: color,
-                        backgroundColor: color.withValues(alpha: 0.18),
-                      ),
-                    ),
-                    AppIcon(AppIcons.locate, size: 11, color: color),
-                  ],
-                ),
-              ),
+              const BrandLoader(size: 22),
               const SizedBox(width: 10),
               Text(
                 'Finding you',

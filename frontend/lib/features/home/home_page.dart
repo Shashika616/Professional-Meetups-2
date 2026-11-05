@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
@@ -245,13 +246,18 @@ class _HomePageState extends ConsumerState<HomePage>
             // avatar are the page's chrome, and chrome that scrolls off with
             // the feed leaves the bell unreachable mid-browse. The hairline
             // under it is what makes the content visibly pass beneath.
-            HomeHeader(userName: displayName, imageUrl: imageUrl),
+            HomeHeader(
+              userName: displayName,
+              imageUrl: imageUrl,
+              hasNewNotifications:
+                  ref.watch(hasNewNotificationsProvider).value ?? false,
+            ),
             Divider(height: 1, thickness: 1, color: AppPalette.hairline),
             Expanded(
               // Pull-to-refresh for the whole page. Scoped to
               // activeMeetupsProvider plus every open-meetups instance —
               // the two things on this page backed by a network read.
-              child: RefreshIndicator(
+              child: BrandRefreshIndicator(
                 onRefresh: () async {
                   // Two independent refreshes run together: the active
                   // list, and a fresh position for the browse list (a pull

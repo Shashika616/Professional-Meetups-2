@@ -6,6 +6,7 @@ import 'package:geolocator_platform_interface/geolocator_platform_interface.dart
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/features/meetups/widgets/android_map_location_step.dart';
 
 import 'support/fake_geolocator_platform.dart';
@@ -656,24 +657,12 @@ void main() {
         expect(busy, findsOneWidget);
         expect(find.text('Finding you'), findsOneWidget);
         expect(
-          find.descendant(
-            of: busy,
-            matching: find.byType(CircularProgressIndicator),
-          ),
+          find.descendant(of: busy, matching: find.byType(BrandLoader)),
           findsOneWidget,
         );
-        // It keeps animating while waiting: the ring's angle differs
-        // between two frames.
-        double angleOf() => tester
-            .widget<Transform>(
-              find.descendant(of: busy, matching: find.byType(Transform)).first,
-            )
-            .transform
-            .getRotation()
-            .entry(0, 0);
-        final before = angleOf();
+        // It keeps animating while waiting.
         await tester.pump(const Duration(milliseconds: 350));
-        expect(angleOf(), isNot(closeTo(before, 0.01)));
+        expect(tester.hasRunningAnimations, isTrue);
         await tester.tap(busy, warnIfMissed: false);
         await tester.pump(const Duration(seconds: 3));
 

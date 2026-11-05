@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
 import 'package:professional_connections_platform/core/models/credits.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -265,13 +266,7 @@ class _BuyCreditsPageState extends ConsumerState<BuyCreditsPage> {
       if (_controller.busy)
         const Padding(
           padding: EdgeInsets.only(top: 6),
-          child: Center(
-            child: SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
+          child: Center(child: BrandLoader(size: 28)),
         ),
     ];
   }

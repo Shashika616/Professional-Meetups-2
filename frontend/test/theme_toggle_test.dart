@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
@@ -120,4 +121,26 @@ void main() {
       expect(container.read(themeModeProvider), AppThemeMode.dark);
     },
   );
+
+  testWidgets('the home screen icon follows the theme', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final calls = <String>[];
+    const channel = MethodChannel('tiehere/app_icon');
+    final messenger = tester.binding.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add('${call.method}:${call.arguments}');
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    addTearDown(() => AppPalette.setMode(AppThemeMode.dark));
+
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container.read(themeModeProvider);
+    await tester.pump();
+    await container.read(themeModeProvider.notifier).toggle();
+    await container.read(themeModeProvider.notifier).toggle();
+
+    expect(calls, containsAllInOrder(['set:light', 'set:dark']));
+  });
 }

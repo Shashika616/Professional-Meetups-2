@@ -20,16 +20,19 @@ import 'package:professional_connections_platform/features/verification/widgets/
 /// `company_domain` — passed when this screen is opened to *change* an
 /// already-verified work email (`ProfilePage`), null/empty for a genuine
 /// first-time verification. There is no raw work email to pre-fill (ADR-003
-/// — it was never stored past the original verification), so the
-/// company-name field is pre-filled with a best-effort guess: the domain
-/// itself, since no known-company display-name-by-domain lookup is exposed
-/// to any client today (only name-to-domain, the reverse direction, and
-/// only inside the auth service's own verification RPC). The screen always
+/// — it was never stored past the original verification). [currentCompanyName]
+/// is the name the user saved, which fills the company field; the domain is
+/// only the fallback for an account with no saved name. The screen always
 /// ends in a fresh OTP round-trip against whatever new email is entered.
 class CorporateEmailVerificationPage extends ConsumerStatefulWidget {
-  const CorporateEmailVerificationPage({super.key, this.currentDomainHint});
+  const CorporateEmailVerificationPage({
+    super.key,
+    this.currentDomainHint,
+    this.currentCompanyName,
+  });
 
   final String? currentDomainHint;
+  final String? currentCompanyName;
 
   @override
   ConsumerState<CorporateEmailVerificationPage> createState() =>
@@ -44,11 +47,17 @@ class _CorporateEmailVerificationPageState
 
   bool get _isChangingExisting => (widget.currentDomainHint ?? '').isNotEmpty;
 
+  /// What the user called their company, or the domain if nothing was saved.
+  String get _currentCompany {
+    final name = widget.currentCompanyName ?? '';
+    return name.isNotEmpty ? name : widget.currentDomainHint ?? '';
+  }
+
   @override
   void initState() {
     super.initState();
     if (_isChangingExisting) {
-      _companyNameController.text = widget.currentDomainHint!;
+      _companyNameController.text = _currentCompany;
     }
     _emailController.addListener(_onFieldChanged);
     _companyNameController.addListener(_onFieldChanged);
@@ -152,7 +161,7 @@ class _CorporateEmailVerificationPageState
               children: [
                 if (_isChangingExisting) ...[
                   Text(
-                    'Currently verified: ${widget.currentDomainHint}',
+                    'Currently verified: $_currentCompany',
                     style: TextStyle(
                       fontSize: 11,
                       color: AppPalette.textSecondary,

@@ -58,8 +58,8 @@ class BrandMarkTile extends StatelessWidget {
               ]
             : null,
       ),
-      // The current mark, green with white on a dark tile and green with
-      // onyx on a light one — the same pair as the launcher icons. Drawn
+      // The current mark in blue and green, the same pair as the launcher
+      // icons. Drawn
       // from the brand SVGs rather than a bitmap: sharp at every size from
       // 48 to 170, and nothing to decode on the splash. The artwork already
       // sits inside its own margin, so it fills the tile.

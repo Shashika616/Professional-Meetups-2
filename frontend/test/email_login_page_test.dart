@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
 
 import 'package:professional_connections_platform/app_shell.dart';
@@ -282,6 +283,7 @@ void main() {
     'the method step offers the same one-tap providers as sign-up plus '
     'email, under a plain "Welcome back" with no explanatory paragraph',
     (tester) async {
+      _phoneSized(tester);
       await tester.pumpWidget(_appWith(_FakeAuthService()));
       await tester.pumpAndSettle();
 
@@ -300,6 +302,7 @@ void main() {
   testWidgets('iOS shows Apple, then Google, then LinkedIn (Plan 21)', (
     tester,
   ) async {
+    _phoneSized(tester);
     await tester.pumpWidget(_appWith(_FakeAuthService()));
     await tester.pumpAndSettle();
 
@@ -322,6 +325,7 @@ void main() {
         'button spins, the other dims, and nothing underneath takes taps', (
       tester,
     ) async {
+      _phoneSized(tester);
       final auth = _FakeAuthService(hang: true);
       await tester.pumpWidget(_appWith(auth));
       await tester.pumpAndSettle();
@@ -360,14 +364,14 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const Key('signingInOverlay')),
-          matching: find.byType(CircularProgressIndicator),
+          matching: find.byType(BrandLoader),
         ),
         findsWidgets,
       );
       expect(
         find.descendant(
           of: find.byType(PrimaryButton),
-          matching: find.byType(CircularProgressIndicator),
+          matching: find.byType(BrandLoader),
         ),
         findsNothing,
       );
@@ -391,6 +395,7 @@ void main() {
 
   testWidgets('a returning member signing in with a provider goes straight to '
       'AppShell, with no profile-setup detour', (tester) async {
+    _phoneSized(tester);
     final auth = _FakeAuthService(linkedInSession: _session(isNewUser: false));
     await tester.pumpWidget(_appWith(auth));
     await tester.pumpAndSettle();
@@ -408,6 +413,7 @@ void main() {
     'a provider identity the server has never seen is a new account and '
     'still gets the profile-setup screen before AppShell',
     (tester) async {
+      _phoneSized(tester);
       final auth = _FakeAuthService(linkedInSession: _session(isNewUser: true));
       await tester.pumpWidget(_appWith(auth));
       await tester.pumpAndSettle();
@@ -426,6 +432,7 @@ void main() {
     'box is checked, and the call then carries the user\'s own confirmation, '
     'never a constant (Plan 18, Fix 2)',
     (tester) async {
+      _phoneSized(tester);
       final auth = _FakeAuthService(linkedInSession: _session(isNewUser: true));
       await tester.pumpWidget(_appWith(auth));
       await tester.pumpAndSettle();
@@ -452,6 +459,7 @@ void main() {
   testWidgets('the 18+ box on sign-in gates CONTINUE WITH EMAIL too: one '
       'gate over every way in, so the screen never shows two locked doors '
       'and one open one', (tester) async {
+    _phoneSized(tester);
     final auth = _FakeAuthService();
     await tester.pumpWidget(_appWith(auth));
     await tester.pumpAndSettle();
@@ -476,6 +484,7 @@ void main() {
   testWidgets('back from the email form returns to the method step', (
     tester,
   ) async {
+    _phoneSized(tester);
     await tester.pumpWidget(_appWith(_FakeAuthService()));
     await tester.pumpAndSettle();
     await _openEmailForm(tester);
@@ -491,6 +500,7 @@ void main() {
   testWidgets('SEND CODE is disabled until an email is entered', (
     tester,
   ) async {
+    _phoneSized(tester);
     final auth = _FakeAuthService();
     await tester.pumpWidget(_appWith(auth));
     await tester.pumpAndSettle();
@@ -513,6 +523,7 @@ void main() {
     'full flow: email → OTP entry → loginWithEmail carries the entered '
     'code, no password anywhere (ADR-019 §1)',
     (tester) async {
+      _phoneSized(tester);
       final auth = _FakeAuthService();
       await tester.pumpWidget(_appWith(auth));
       await tester.pumpAndSettle();
@@ -537,6 +548,7 @@ void main() {
   testWidgets('invalid credentials shows the mapped error and stays put', (
     tester,
   ) async {
+    _phoneSized(tester);
     final auth = _FakeAuthService(
       error: const InvalidCredentialsException('invalid email or code'),
     );
@@ -558,4 +570,11 @@ void main() {
     expect(find.byType(EmailLoginPage), findsOneWidget);
     expect(find.byType(AppShell), findsNothing);
   });
+}
+
+/// A phone's height: the sign-in form is taller than the test default.
+void _phoneSized(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1170, 2532);
+  tester.view.devicePixelRatio = 3;
+  addTearDown(tester.view.reset);
 }

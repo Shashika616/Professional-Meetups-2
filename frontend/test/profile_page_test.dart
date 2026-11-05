@@ -971,7 +971,7 @@ void main() {
       await tester.tap(findAppIcon(AppIcons.edit));
       await tester.pumpAndSettle();
 
-      expect(find.text('Edit name'), findsOneWidget);
+      expect(find.text('Edit display name'), findsOneWidget);
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         'Ada Lovelace',

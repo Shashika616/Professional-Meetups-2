@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/empty_section.dart';
@@ -360,13 +361,7 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
               if (index >= _items.length) {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  ),
+                  child: Center(child: BrandLoader(size: 28)),
                 );
               }
               return _builtRows[index] ??= widget.itemBuilder(
@@ -381,6 +376,6 @@ class PaginatedMeetupListState extends State<PaginatedMeetupList> {
     // RefreshIndicator here would be unreachable (no scroll of its own to
     // detect an overscroll on) while quietly swallowing the parent's.
     if (widget.shrinkWrap) return list;
-    return RefreshIndicator(onRefresh: widget.onRefresh, child: list);
+    return BrandRefreshIndicator(onRefresh: widget.onRefresh, child: list);
   }
 }

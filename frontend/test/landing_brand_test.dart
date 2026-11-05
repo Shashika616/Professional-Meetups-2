@@ -96,14 +96,12 @@ void _splashTests() {
       });
     }
 
-    expect(texts, contains('Tie'));
-    expect(texts, contains('Here'));
+    expect(find.bySemanticsLabel('TieHere'), findsOneWidget);
     expect(find.textContaining('PROFESSIONAL'), findsNothing);
     expect(find.textContaining('Connect Beyond'), findsNothing);
 
-    // The maker's mark: middle dots (U+00B7), not full stops.
     expect(texts, contains('From '));
-    expect(texts, contains('·SAI·'));
+    expect(texts, contains('AshiruLabs'));
 
     // Let the 2s navigation timer drain so the test does not end with one
     // pending.

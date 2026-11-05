@@ -19,7 +19,7 @@ void main() {
       const ProviderScope(child: ProfessionalConnectionsApp()),
     );
 
-    // LandingPage (OrbitingIntents) and SplashScreen (CircularProgressIndicator)
+    // LandingPage (OrbitingIntents) and SplashScreen (BrandLoader)
     // both run indefinitely-repeating animations, so pumpAndSettle would never
     // converge here — advance time with bounded pumps instead.
 

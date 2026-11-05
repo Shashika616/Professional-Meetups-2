@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ draws its own launch screen from these. -->
+    <style name="LaunchThemeDark" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/launch_ground_dark</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_ground_dark</item>
+    </style>
+    <style name="LaunchThemeLight" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/launch_ground_light</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_ground_light</item>
+    </style>
+</resources>

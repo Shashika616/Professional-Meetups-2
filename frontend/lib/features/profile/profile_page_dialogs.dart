@@ -55,7 +55,7 @@ class _EditNameDialogState extends State<_EditNameDialog> {
   @override
   Widget build(BuildContext context) {
     return AppConfirmDialog(
-      title: 'Edit name',
+      title: 'Edit display name',
       confirmLabel: 'Save',
       cancelLabel: 'Cancel',
       onConfirm: () => Navigator.pop(context, _controller.text.trim()),

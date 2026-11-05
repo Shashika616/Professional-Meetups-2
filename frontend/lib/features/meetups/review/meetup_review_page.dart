@@ -261,6 +261,7 @@ class _MeetupReviewPageState extends ConsumerState<MeetupReviewPage> {
               const SizedBox(height: 16),
               PrimaryButton(
                 label: 'Try again',
+                icon: AppIcons.refresh,
                 height: 44,
                 onPressed: () {
                   setState(() {

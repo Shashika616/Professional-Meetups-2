@@ -24,6 +24,8 @@ import 'package:professional_connections_platform/core/services/http_subscriptio
 import 'package:professional_connections_platform/core/services/push_notification_service.dart';
 import 'package:professional_connections_platform/core/services/subscription_service.dart';
 import 'package:professional_connections_platform/core/analytics/analytics.dart';
+import 'package:professional_connections_platform/core/services/app_icon_service.dart';
+import 'package:professional_connections_platform/core/services/legal_service.dart';
 import 'package:professional_connections_platform/core/services/token_refresher.dart';
 import 'package:professional_connections_platform/core/storage/session_storage.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -64,6 +66,9 @@ final _authBundleProvider = Provider<_AuthBundle>((ref) {
   final appConfigService = HttpAppConfigService(
     getAccessToken: refresher.getValidAccessToken,
   );
+  final legalService = HttpLegalService(
+    getAccessToken: refresher.getValidAccessToken,
+  );
   return _AuthBundle(
     service: authService,
     refresher: refresher,
@@ -71,6 +76,7 @@ final _authBundleProvider = Provider<_AuthBundle>((ref) {
     subscriptionService: subscriptionService,
     creditService: creditService,
     appConfigService: appConfigService,
+    legalService: legalService,
   );
 });
 
@@ -111,6 +117,44 @@ final subscriptionStatusProvider = FutureProvider<SubscriptionStatus>((ref) {
   return ref.read(subscriptionServiceProvider).currentStatus();
 });
 
+/// Whether something has arrived since this person last opened Notifications,
+/// for the dot on the bell. The last-seen time is kept on the phone, per
+/// account, so it needs no server state. A failed read shows no dot.
+/// Invalidated on resume and when a push arrives.
+final hasNewNotificationsProvider = FutureProvider<bool>((ref) async {
+  final userId = ref.watch(
+    authSessionProvider.select((s) => s.value?.profile?.id),
+  );
+  if (userId == null) return false;
+  try {
+    final rows = await ref.read(meetupServiceProvider).listNotifications();
+    if (rows.isEmpty) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final seen = prefs.getInt(_notificationsSeenKey(userId)) ?? 0;
+    return _newest(rows) > seen;
+  } catch (_) {
+    return false;
+  }
+});
+
+String _notificationsSeenKey(String userId) => 'notifications_seen_at.$userId';
+
+int _newest(List<AppNotification> rows) => rows
+    .map((n) => n.createdAt.millisecondsSinceEpoch)
+    .reduce((a, b) => a > b ? a : b);
+
+/// Clears the dot: everything in [rows] has now been seen.
+Future<void> markNotificationsSeen(
+  WidgetRef ref,
+  List<AppNotification> rows,
+) async {
+  final userId = ref.read(authSessionProvider).value?.profile?.id;
+  if (userId == null || rows.isEmpty) return;
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setInt(_notificationsSeenKey(userId), _newest(rows));
+  ref.invalidate(hasNewNotificationsProvider);
+}
+
 /// Makes a provider of the caller's own data start over when the signed-in
 /// account changes (sign-in, sign-out, a different account). Without it a
 /// fresh sign-in kept the previous session's answer, failed or not, and a
@@ -124,6 +168,33 @@ void _watchSignedInUser(Ref ref) {
 final creditServiceProvider = Provider<CreditService>(
   (ref) => ref.read(_authBundleProvider).creditService,
 );
+
+final legalServiceProvider = Provider<LegalService>(
+  (ref) => ref.read(_authBundleProvider).legalService,
+);
+
+/// The current terms and privacy policy.
+///
+/// No automatic retry: the page has its own Try again, and retrying would leave
+/// the loader on screen with no way to tell the read failed.
+final legalDocumentsProvider = FutureProvider<LegalDocuments>(
+  (ref) => ref.read(legalServiceProvider).documents(),
+  retry: (_, _) => null,
+);
+
+/// True while a signed-in person still has to agree to the current documents.
+/// A failed check lets them in: it is asked again on the next launch, and a
+/// slow network must not lock anyone out of an SOS.
+final legalAcceptancePendingProvider = FutureProvider<bool>((ref) async {
+  _watchSignedInUser(ref);
+  final config = await ref.watch(appConfigProvider.future);
+  if (!config.legalAcceptanceRequired) return false;
+  try {
+    return !await ref.read(legalServiceProvider).hasAccepted();
+  } catch (_) {
+    return false;
+  }
+});
 
 final appConfigServiceProvider = Provider<AppConfigService>(
   (ref) => ref.read(_authBundleProvider).appConfigService,
@@ -195,6 +266,7 @@ class _AuthBundle {
   const _AuthBundle({
     required this.service,
     required this.refresher,
+    required this.legalService,
     required this.meetupService,
     required this.subscriptionService,
     required this.creditService,
@@ -203,6 +275,7 @@ class _AuthBundle {
 
   final HttpAuthService service;
   final TokenRefresher refresher;
+  final LegalService legalService;
   final HttpMeetupService meetupService;
   final HttpSubscriptionService subscriptionService;
   final HttpCreditService creditService;
@@ -819,13 +892,30 @@ class ThemeModeNotifier extends Notifier<AppThemeMode> {
   @override
   AppThemeMode build() {
     _load();
-    return AppThemeMode.dark;
+    return AppPalette.mode;
+  }
+
+  /// Reads the saved theme before the first frame, so a light-theme launch
+  /// does not draw dark and rebuild, which would restart the splash.
+  static Future<void> preload() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(_themeModePrefsKey) == 'light') {
+        AppPalette.setMode(AppThemeMode.light);
+      }
+    } catch (_) {
+      // Stays dark; _load tries again.
+    }
   }
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
     if (prefs.getString(_themeModePrefsKey) == 'light') {
-      _apply(AppThemeMode.light);
+      if (state != AppThemeMode.light) _apply(AppThemeMode.light);
+      unawaited(AppIconService.apply(AppThemeMode.light));
+    } else {
+      // A launch can follow a toggle the app never got to finish.
+      unawaited(AppIconService.apply(AppThemeMode.dark));
     }
   }
 
@@ -849,6 +939,7 @@ class ThemeModeNotifier extends Notifier<AppThemeMode> {
   void _apply(AppThemeMode mode) {
     AppPalette.setMode(mode);
     state = mode;
+    unawaited(AppIconService.apply(mode));
   }
 }
 

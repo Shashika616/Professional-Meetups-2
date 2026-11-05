@@ -19,6 +19,29 @@ import UIKit
     // code, not something that belongs in its own plugin package.
     LocalSearchChannel.register(with: engineBridge.applicationRegistrar.messenger())
     SecureScreenChannel.register(with: engineBridge.applicationRegistrar.messenger())
+    AppIconChannel.register(with: engineBridge.applicationRegistrar.messenger())
+  }
+}
+
+/// The home screen icon follows the app's theme (app_icon_service.dart): onyx
+/// by default, white in the light theme. iOS shows its own alert when an app
+/// changes its icon, so nothing is called when the icon is already right.
+final class AppIconChannel {
+  static func register(with messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "tiehere/app_icon", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "set", let mode = call.arguments as? String else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let wanted: String? = mode == "light" ? "AppIconLight" : nil
+      let app = UIApplication.shared
+      guard app.supportsAlternateIcons, app.alternateIconName != wanted else {
+        result(nil)
+        return
+      }
+      app.setAlternateIconName(wanted) { _ in result(nil) }
+    }
   }
 }
 

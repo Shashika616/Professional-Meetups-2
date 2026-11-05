@@ -5,6 +5,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:professional_connections_platform/core/config/update_required.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
+import 'package:professional_connections_platform/core/services/app_config_service.dart';
+import 'package:professional_connections_platform/core/services/client_info_http_client.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 import 'package:professional_connections_platform/core/widgets/primary_button.dart';
@@ -49,14 +51,20 @@ class _UpdateGateState extends ConsumerState<UpdateGate>
 
   @override
   Widget build(BuildContext context) {
-    final minimum = ref.watch(
-      appConfigProvider.select((c) => c.value?.minSupportedAppVersion ?? ''),
-    );
+    final config = ref.watch(appConfigProvider).value;
+    final forced = config?.forceUpdate ?? ForceUpdate.none;
+    final platform = ClientInfoHttpClient.currentPlatform();
+    final blocked =
+        isBelowMinimumVersion(config?.minSupportedAppVersion ?? '') ||
+        (forced.enabled &&
+            isBelowMinimumVersion(forced.minVersions[platform] ?? ''));
     return ValueListenableBuilder<bool>(
       valueListenable: UpdateRequired.signalled,
-      builder: (context, signalled, child) =>
-          signalled || isBelowMinimumVersion(minimum)
-          ? const UpdateRequiredPage()
+      builder: (context, signalled, child) => signalled || blocked
+          ? UpdateRequiredPage(
+              message: forced.message,
+              storeUrl: forced.storeUrls[platform] ?? '',
+            )
           : child!,
       child: widget.child,
     );
@@ -64,14 +72,27 @@ class _UpdateGateState extends ConsumerState<UpdateGate>
 }
 
 class UpdateRequiredPage extends StatelessWidget {
-  const UpdateRequiredPage({super.key, this.open});
+  const UpdateRequiredPage({
+    super.key,
+    this.open,
+    this.message = '',
+    this.storeUrl = '',
+  });
 
   /// Opens the store; replaced in tests.
   final Future<void> Function(Uri uri)? open;
 
+  /// The operator's reason, or the standard sentence when empty.
+  final String message;
+
+  /// This platform's store page, or the built-in one when empty.
+  final String storeUrl;
+
   Future<void> _openStore() async {
     final android = defaultTargetPlatform == TargetPlatform.android;
-    final uri = Uri.parse(android ? _playUrl : _appStoreUrl);
+    final uri = Uri.tryParse(storeUrl)?.hasScheme == true
+        ? Uri.parse(storeUrl)
+        : Uri.parse(android ? _playUrl : _appStoreUrl);
     final launch =
         open ?? (Uri u) => launchUrl(u, mode: LaunchMode.externalApplication);
     await launch(uri);
@@ -101,8 +122,10 @@ class UpdateRequiredPage extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                'This version is no longer supported. Update to keep using '
-                'the app.',
+                message.isNotEmpty
+                    ? message
+                    : 'This version is no longer supported. Update to keep '
+                          'using the app.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: AppPalette.textSecondary,

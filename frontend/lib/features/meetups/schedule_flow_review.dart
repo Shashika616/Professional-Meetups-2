@@ -267,6 +267,7 @@ extension on _ReviewStep {
       return PrimaryButton(
         key: const Key('reviewConfirm'),
         label: quoteFailed ? 'Try again' : 'Confirm & schedule',
+        icon: quoteFailed ? AppIcons.refresh : null,
         isLoading: quoting,
         onPressed: quoteFailed ? onRetryQuote : null,
       );

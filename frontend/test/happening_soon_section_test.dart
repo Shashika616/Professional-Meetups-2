@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
@@ -436,7 +437,7 @@ void main() {
         expect(find.text('Retry'), findsNothing);
         expect(find.byType(LoadFailedState), findsNothing);
         expect(find.textContaining('Could not load'), findsNothing);
-        expect(find.byType(CircularProgressIndicator), findsNothing);
+        expect(find.byType(BrandLoader), findsNothing);
       },
     );
 

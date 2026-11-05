@@ -15,4 +15,12 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+    <!-- The launch window of each launcher entry (AndroidManifest.xml), so the
+         first thing on screen already matches the app's theme. -->
+    <style name="LaunchThemeDark" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@color/launch_ground_dark</item>
+    </style>
+    <style name="LaunchThemeLight" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">@color/launch_ground_light</item>
+    </style>
 </resources>

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
@@ -750,14 +751,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppPalette.danger,
-              ),
-            ),
+            BrandLoader(size: 22, color: AppPalette.danger),
             const SizedBox(width: 12),
             Expanded(
               child: Text(

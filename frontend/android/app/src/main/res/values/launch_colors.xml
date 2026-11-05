@@ -10,4 +10,8 @@
 -->
 <resources>
     <color name="launch_ground">#FFF0F4F8</color>
+    <!-- Fixed, not theme-selected: each launcher entry follows the app's own
+         theme, which the system setting knows nothing about. -->
+    <color name="launch_ground_dark">#FF070D15</color>
+    <color name="launch_ground_light">#FFF0F4F8</color>
 </resources>

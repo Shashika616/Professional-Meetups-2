@@ -85,14 +85,7 @@ class ConnectLinkedInBannerState extends ConsumerState<ConnectLinkedInBanner> {
           title: 'Connect LinkedIn',
           message: 'Your account is view only until you connect it.',
           trailing: _busy
-              ? SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppPalette.candyBlue,
-                  ),
-                )
+              ? const BrandLoader(size: 24)
               : AppIcon(
                   AppIcons.forward,
                   size: 20,

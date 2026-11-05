@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/user_profile.dart';
@@ -27,6 +28,7 @@ import 'package:professional_connections_platform/core/widgets/verification_badg
 import 'package:professional_connections_platform/features/credits/credits_format.dart';
 import 'package:professional_connections_platform/features/credits/credits_page.dart';
 import 'package:professional_connections_platform/features/landing/landing_page.dart';
+import 'package:professional_connections_platform/features/legal/legal_document_page.dart';
 import 'package:professional_connections_platform/features/onboarding/onboarding_flow.dart';
 import 'package:professional_connections_platform/features/profile/profile_photo_sheet.dart';
 import 'package:professional_connections_platform/features/notifications/notifications_page.dart';
@@ -215,6 +217,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                   screen: ScreenNames.corporateEmailVerification,
                   buildScreen: (context) => CorporateEmailVerificationPage(
                     currentDomainHint: profile?.companyDomain,
+                    currentCompanyName: profile?.companyName,
                   ),
                 ),
               ],
@@ -293,6 +296,29 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                       builder: (context) => const SafetyPage(),
                     ),
                   ),
+                ),
+                const _Divider(),
+                _Row(
+                  icon: AppIcons.document,
+                  title: LegalDocument.terms.title,
+                  trailing: AppIcon(
+                    AppIcons.forward,
+                    size: 18,
+                    color: AppPalette.textSecondary,
+                  ),
+                  onTap: () => openLegalDocument(context, LegalDocument.terms),
+                ),
+                const _Divider(),
+                _Row(
+                  icon: AppIcons.document,
+                  title: LegalDocument.privacy.title,
+                  trailing: AppIcon(
+                    AppIcons.forward,
+                    size: 18,
+                    color: AppPalette.textSecondary,
+                  ),
+                  onTap: () =>
+                      openLegalDocument(context, LegalDocument.privacy),
                 ),
                 const _Divider(),
                 _Row(

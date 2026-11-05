@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
 
@@ -141,13 +142,9 @@ class _PrimaryButtonState extends State<PrimaryButton> {
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: widget.isLoading
-                    ? SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: widget.foregroundColor ?? _fg(isEnabled),
-                        ),
+                    ? BrandLoader(
+                        size: 28,
+                        color: widget.foregroundColor ?? _fg(isEnabled),
                       )
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.center,

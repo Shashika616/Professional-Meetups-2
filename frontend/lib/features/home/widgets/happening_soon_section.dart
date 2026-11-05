@@ -432,7 +432,7 @@ class _LocationBlockedState extends StatelessWidget {
             reason.message,
           ),
           retryLabel: 'Open location settings',
-          retryIcon: AppIcons.settings,
+          retryIcon: AppIcons.locate,
           onRetry: () =>
               reason.reason == LocationUnavailableReason.permissionDenied
               ? Geolocator.openAppSettings()
@@ -441,6 +441,7 @@ class _LocationBlockedState extends StatelessWidget {
             width: 200,
             child: SecondaryButton(
               label: 'Try again',
+              icon: AppIcons.refresh,
               height: 42,
               onPressed: onRetry,
             ),

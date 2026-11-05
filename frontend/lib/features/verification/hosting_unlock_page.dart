@@ -183,6 +183,7 @@ class HostingUnlockPage extends ConsumerWidget {
         ),
         builder: (_) => CorporateEmailVerificationPage(
           currentDomainHint: profile?.companyDomain as String?,
+          currentCompanyName: profile?.companyName,
         ),
       ),
     );

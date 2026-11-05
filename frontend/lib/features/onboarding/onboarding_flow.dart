@@ -75,6 +75,7 @@ List<VerificationStep> pendingVerificationSteps(UserProfile? profile) {
         screen: ScreenNames.corporateEmailVerification,
         build: (context) => CorporateEmailVerificationPage(
           currentDomainHint: profile?.companyDomain,
+          currentCompanyName: profile?.companyName,
         ),
       ),
   ];

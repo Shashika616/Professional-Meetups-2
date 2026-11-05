@@ -118,4 +118,68 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(UpdateRequiredPage), findsOneWidget);
   });
+
+  group('forced update', () {
+    Map<String, dynamic> config({bool on = true, String min = '99.0.0'}) => {
+      'flags': {'app.force_update': on},
+      'values': {
+        'app.force_update': {
+          'min_version': {'android': min, 'ios': min},
+          'message': 'A security fix needs this update.',
+          'store_url': {'android': 'https://example.com/play'},
+        },
+      },
+    };
+
+    Widget app(RemoteAppConfig remote) => ProviderScope(
+      overrides: [appConfigProvider.overrideWith((ref) async => remote)],
+      child: const MaterialApp(home: UpdateGate(child: Text('The app'))),
+    );
+
+    testWidgets('shows the operator\'s message and blocks the app', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app(RemoteAppConfig.fromJson(config())));
+      await tester.pumpAndSettle();
+      expect(find.text('A security fix needs this update.'), findsOneWidget);
+      expect(find.text('The app'), findsNothing);
+    });
+
+    testWidgets('does nothing while the flag is off', (tester) async {
+      await tester.pumpWidget(app(RemoteAppConfig.fromJson(config(on: false))));
+      await tester.pumpAndSettle();
+      expect(find.text('The app'), findsOneWidget);
+    });
+
+    testWidgets('a current build is not blocked', (tester) async {
+      await tester.pumpWidget(
+        app(RemoteAppConfig.fromJson(config(min: '1.0.0'))),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('The app'), findsOneWidget);
+    });
+
+    testWidgets('Update opens the store page the operator set', (tester) async {
+      Uri? opened;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UpdateRequiredPage(
+            storeUrl: 'https://example.com/play',
+            open: (uri) async => opened = uri,
+          ),
+        ),
+      );
+      await tester.tap(find.text('Update'));
+      await tester.pump();
+      expect(opened.toString(), 'https://example.com/play');
+    });
+
+    test('a malformed value forces nobody', () {
+      final remote = RemoteAppConfig.fromJson({
+        'flags': {'app.force_update': true},
+        'values': {'app.force_update': 3},
+      });
+      expect(remote.forceUpdate.enabled, isFalse);
+    });
+  });
 }

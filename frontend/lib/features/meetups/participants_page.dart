@@ -127,6 +127,7 @@ class _ParticipantsPageState extends ConsumerState<ParticipantsPage> {
               const SizedBox(height: 16),
               PrimaryButton(
                 label: 'Try again',
+                icon: AppIcons.refresh,
                 height: 44,
                 // Invalidate rather than re-calling the service: it clears
                 // the cached failure so the strip on the page behind this one

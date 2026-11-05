@@ -62,10 +62,6 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
             <!-- LinkedIn OAuth redirect deep link (ADR-011 frontend slice) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
@@ -87,6 +83,42 @@
                 android:name="flutter_deeplinking_enabled"
                 android:value="false" />
         </activity>
+        <!-- The launcher entries. One is enabled at a time, so the home
+             screen icon follows the app's theme: onyx by default, white in
+             the light theme. MainActivity swaps them when the app leaves
+             the screen. Declared after the activity they target. -->
+        <activity-alias
+            android:name=".LauncherDark"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher"
+            android:roundIcon="@mipmap/ic_launcher"
+            android:targetActivity=".MainActivity"
+            android:theme="@style/LaunchThemeDark">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherLight"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_light"
+            android:roundIcon="@mipmap/ic_launcher_light"
+            android:targetActivity=".MainActivity"
+            android:theme="@style/LaunchThemeLight">
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity-alias>
         <!-- Push notifications rendered by the system (app in the
              background or closed) take their status-bar icon and accent
              from here. Android draws the small icon as a single-colour

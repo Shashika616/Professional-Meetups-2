@@ -98,6 +98,11 @@ PODS:
   - GTMSessionFetcher/Core (3.5.0)
   - GTMSessionFetcher/Full (3.5.0):
     - GTMSessionFetcher/Core
+  - image_cropper (0.0.5):
+    - Flutter
+    - TOCropViewController (~> 3.1.2)
+  - image_picker_ios (0.0.1):
+    - Flutter
   - in_app_purchase_storekit (0.0.1):
     - Flutter
     - FlutterMacOS
@@ -124,6 +129,7 @@ PODS:
   - sign_in_with_apple (0.0.1):
     - Flutter
     - FlutterMacOS
+  - TOCropViewController (3.1.2)
   - url_launcher_ios (0.0.1):
     - Flutter
 
@@ -136,6 +142,8 @@ DEPENDENCIES:
   - flutter_secure_storage (from `.symlinks/plugins/flutter_secure_storage/ios`)
   - geolocator_apple (from `.symlinks/plugins/geolocator_apple/darwin`)
   - google_sign_in_ios (from `.symlinks/plugins/google_sign_in_ios/darwin`)
+  - image_cropper (from `.symlinks/plugins/image_cropper/ios`)
+  - image_picker_ios (from `.symlinks/plugins/image_picker_ios/ios`)
   - in_app_purchase_storekit (from `.symlinks/plugins/in_app_purchase_storekit/darwin`)
   - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - maplibre_gl (from `.symlinks/plugins/maplibre_gl/ios`)
@@ -163,6 +171,7 @@ SPEC REPOS:
     - PromisesObjC
     - PromisesSwift
     - RecaptchaInterop
+    - TOCropViewController
 
 EXTERNAL SOURCES:
   app_links:
@@ -181,6 +190,10 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/geolocator_apple/darwin"
   google_sign_in_ios:
     :path: ".symlinks/plugins/google_sign_in_ios/darwin"
+  image_cropper:
+    :path: ".symlinks/plugins/image_cropper/ios"
+  image_picker_ios:
+    :path: ".symlinks/plugins/image_picker_ios/ios"
   in_app_purchase_storekit:
     :path: ".symlinks/plugins/in_app_purchase_storekit/darwin"
   integration_test:
@@ -217,6 +230,8 @@ SPEC CHECKSUMS:
   GoogleUtilities: 766ace00c6b10d8148408f329d10c4f051931850
   GTMAppAuth: 217a876b249c3c585a54fd6f73e6b58c4f5c4238
   GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
+  image_cropper: fca51f94982730acae168c4b5d691e0f11aeb259
+  image_picker_ios: 9285ee31b06d6e15629dd5713b890f0c457a0a8b
   in_app_purchase_storekit: 22cca7d08eebca9babdf4d07d0baccb73325d3c8
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
   MapLibre: 96726270455ffd183688cf0bd2a3881b0212a57e
@@ -228,6 +243,7 @@ SPEC CHECKSUMS:
   RecaptchaInterop: 11e0b637842dfb48308d242afc3f448062325aba
   shared_preferences_foundation: 7036424c3d8ec98dfe75ff1667cb0cd531ec82bb
   sign_in_with_apple: 5e34677a4e74c5f42760f41b3bbe05343e84d171
+  TOCropViewController: a916930c465b5d9445a74d95e0c0da931771b4df
   url_launcher_ios: 7a95fa5b60cc718a708b8f2966718e93db0cef1b
 
 PODFILE CHECKSUM: 3ba3a73b1b12adcf321a227a745625fe0888cc82

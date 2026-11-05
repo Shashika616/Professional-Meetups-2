@@ -12,10 +12,8 @@
     <foreground android:drawable="@drawable/ic_launcher_foreground" />
     <!--
       Android 13+ themed icons. The launcher tints this layer from the
-      wallpaper palette, so it is a silhouette, not a colourway - which is
-      also why Android cannot do what iOS does here and swap between the
-      black-ground and white-ground icons by theme. There is one Android
-      icon; only its monochrome variant reacts to the system theme.
+      wallpaper palette, so it is a silhouette, not a colourway. The app's own
+      theme picks between this icon and ic_launcher_light (MainActivity).
     -->
     <monochrome android:drawable="@drawable/ic_launcher_foreground" />
 </adaptive-icon>
