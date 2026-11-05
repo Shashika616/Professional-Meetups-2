@@ -90,8 +90,10 @@ class UpdateRequiredPage extends StatelessWidget {
 
   Future<void> _openStore() async {
     final android = defaultTargetPlatform == TargetPlatform.android;
-    final uri = Uri.tryParse(storeUrl)?.hasScheme == true
-        ? Uri.parse(storeUrl)
+    // Only ever a web link, whatever the server sends.
+    final custom = Uri.tryParse(storeUrl);
+    final uri = custom?.scheme == 'https'
+        ? custom!
         : Uri.parse(android ? _playUrl : _appStoreUrl);
     final launch =
         open ?? (Uri u) => launchUrl(u, mode: LaunchMode.externalApplication);

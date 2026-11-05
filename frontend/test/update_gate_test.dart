@@ -174,6 +174,23 @@ void main() {
       expect(opened.toString(), 'https://example.com/play');
     });
 
+    testWidgets('anything but https falls back to the built-in store page', (
+      tester,
+    ) async {
+      Uri? opened;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: UpdateRequiredPage(
+            storeUrl: 'tel:+94770000000',
+            open: (uri) async => opened = uri,
+          ),
+        ),
+      );
+      await tester.tap(find.text('Update'));
+      await tester.pump();
+      expect(opened?.scheme, 'https');
+    });
+
     test('a malformed value forces nobody', () {
       final remote = RemoteAppConfig.fromJson({
         'flags': {'app.force_update': true},
