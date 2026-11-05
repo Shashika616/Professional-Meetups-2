@@ -30,7 +30,6 @@ import (
 
 	"professional-meetups-monolith/backend/internal/eventbus"
 	"professional-meetups-monolith/backend/internal/modules/meetup"
-	"professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	meetuprepo "professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 	"professional-meetups-monolith/backend/internal/platform/db"
@@ -2827,7 +2826,7 @@ func TestEndedMeetup_LeavesBrowseButStaysOnParticipantSurfaces(t *testing.T) {
 
 	// 3. Still in the host's own list. EventsPage is built from this, so a
 	// host who cannot find a finished meetup here cannot review it either.
-	hosted, _, err := h.meetups.ListByHost(ctx, host, repository.MeetupListFilter{}, nil, 0)
+	hosted, _, err := h.meetups.ListByHost(ctx, host, meetuprepo.MeetupListFilter{}, nil, 0)
 	if err != nil {
 		t.Fatalf("ListByHost: %v", err)
 	}
