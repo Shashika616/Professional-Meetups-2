@@ -72,6 +72,39 @@ Afterwards, remove the old secrets and values, and add the provider to the priva
 4. Review and approve the deployment.
 5. Check `/readyz`, the logs, and one real sign-in.
 
+## Forcing an app update
+
+Use this when a build must stop being used, such as a security fix. Backend changes stay compatible with old builds; this is the override. It needs no deploy and reaches running apps within about a minute, on their next start or return to the foreground.
+
+1. Release the fixed build in the stores and wait until it is live. Forcing first would send people to an update that does not exist.
+2. Set the `app.force_update` flag with `billingadmin`, or with this SQL, over the session connection:
+
+```sql
+UPDATE ops.feature_flags
+SET enabled = true,
+    value = '{"min_version":{"ios":"1.2.0","android":"1.2.0"},
+              "message":"This update contains an important security fix.",
+              "store_url":{"ios":"https://apps.apple.com/app/idNNNNNNNNN",
+                           "android":"https://play.google.com/store/apps/details?id=com.profconn.professional_connections_platform"}}'
+WHERE key = 'app.force_update';
+```
+
+Each platform has its own minimum, so one store's slower review does not lock people out. An empty minimum blocks nobody on that platform. Builds below the minimum see a full-screen message with an Update button and cannot reach the app. Set `enabled = false` to undo it.
+
+Only builds that include this screen can be forced. Older builds ignore the flag.
+
+## Terms and privacy acceptance
+
+The documents live in the database (`ops.legal_documents`), so changing them needs no deploy and no app release. Publish a new version from Markdown files:
+
+```bash
+DATABASE_URL=... go run ./cmd/legaladmin --version 2026-12-01 --terms terms.md --privacy privacy.md
+```
+
+The newest version is live at once. If acceptance is on, everyone is asked to agree to it. The command refuses text that still contains `[FILL IN]`.
+
+Asking is off until `legal.acceptance.required` is enabled. **Publish final documents first.** Each acceptance is stored with its version, time, app version and platform in `auth.legal_acceptances`.
+
 ## Undoing a release
 
 **No schema change:** move traffic back, then fix forward.

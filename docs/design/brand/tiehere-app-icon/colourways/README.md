@@ -35,7 +35,8 @@ figures share one colour.
 Green-on-blue pairings are left out on purpose: the two brand colours are too
 close in brightness (about 2:1 contrast) for one to read on the other.
 
-## Not wired into the app
+## In the app
 
-These are design options. The launcher icons in `android/app/src/main/res/`
-and `ios/Runner/Assets.xcassets/` are unchanged.
+The app ships `tiehere-icon-blue-green-on-onyx` as its default icon and
+`tiehere-icon-blue-green-on-white` as the light-theme icon. The home screen
+icon follows the in-app theme. The rest here are design assets.

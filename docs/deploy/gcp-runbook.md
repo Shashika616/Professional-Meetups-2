@@ -33,7 +33,7 @@ as `service.yaml.template` (the real `backend/service.yaml` is gitignored).
 | Cloud SQL connection name | `project-285b9289-549d-4fef-92c:asia-south1:meetups-db` |
 | Databases / users | database `monolith_db`; users `app` (application), `postgres` (admin) |
 | Postgres extensions | `pgcrypto`, `postgis` (created by migrations 0001/0002) |
-| Schema | golang-migrate, `backend/migrations/`, versions 0001-**0037** in the repository. The monolith refuses to start below the version it was built for (`cmd/monolith/schema_check.go`). Production was last recorded at 16 (r34, 2026-10-01); check the live version before each deploy (§3a) rather than trusting this row. Migrations go over the SESSION connection (port 5432), never the transaction pooler (6543), which breaks golang-migrate's advisory lock |
+| Schema | golang-migrate, `backend/migrations/`, versions 0001-**0038** in the repository. The monolith refuses to start below the version it was built for (`cmd/monolith/schema_check.go`). Production was last recorded at 16 (r34, 2026-10-01); check the live version before each deploy (§3a) rather than trusting this row. Migrations go over the SESSION connection (port 5432), never the transaction pooler (6543), which breaks golang-migrate's advisory lock |
 | Auth bridge page | LinkedIn redirect `https://professional-meetups-976d2.web.app` (Firebase Hosting, project `professional-meetups-976d2`) — separate from this GCP project |
 
 ### Secret Manager secrets (names; values live only in Secret Manager and the owner's password manager)
@@ -159,7 +159,7 @@ itself. By hand, the same order:
 
 1. **Check the live schema version** over the session connection:
    `migrate -path migrations -database "$SUPABASE_DIRECT_URL" version`.
-   Everything above it up to 0037 is pending.
+   Everything above it up to 0038 is pending.
 2. **Pre-flight the two migrations that can fail on real data** (read-only):
 
    ```sql
@@ -199,7 +199,7 @@ itself. By hand, the same order:
    0030-0032 analytics, the meetup activity outbox, the report; 0033 OTP
    budgets and shared rate counters, 0034 the company-claim review status,
    0035 the meetup creation request hash (plan 30B); 0036 reshapes trusted
-   contacts (plan 30C); 0037 the photos table (plan 30D, additive). All are additive except 0017 and 0019, covered by
+   contacts (plan 30C); 0037 the photos table (plan 30D, additive); 0038 legal acceptances and the force-update flag (additive, both flags off). All are additive except 0017 and 0019, covered by
    step 2, and **0036, which is destructive**: it deletes contact emails,
    email-only contacts, duplicate numbers, pending invitations and the
    live-location flags, and the down migration restores the columns, not the

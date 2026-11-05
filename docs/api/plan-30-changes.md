@@ -73,3 +73,13 @@ Sign-in no longer copies a LinkedIn photo over a user's own. It is captured once
 
 The app now treats `426` from any `/v1/billing/*` route as "update required", the same as a build below `min_supported_app_version`.
 
+## Legal and forced updates
+
+| Route | Behaviour |
+|---|---|
+| `GET /v1/legal` | Open to everyone. `{version, terms, privacy}`, the text as Markdown, or 404 before the first publish. |
+| `GET /v1/legal/acceptance` | Signed in. `{accepted}` for the current version. |
+| `POST /v1/legal/acceptance` | Signed in. Body `{"version": "..."}`. 204, or 409 if that is no longer the current version. |
+
+`GET /v1/app-config` adds two flags: `legal.acceptance.required`, and `app.force_update`, whose value in `values` holds `min_version`, `message` and `store_url`. Old builds ignore both.
+
