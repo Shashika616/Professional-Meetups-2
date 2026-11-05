@@ -18,7 +18,7 @@ Status: **complete** (2026-11-04). Working tree only, nothing committed, pushed 
 
 | Item | Change |
 |---|---|
-| N1-D1 location | Uploads are rounded to 3 decimals on the phone. `OtherMeetupsNearby` reads a known location and never starts a read. An explanation screen comes before the first prompt. The iOS Always text is removed. The map picker opens at the rounded location when known. |
+| N1-D1 location | Uploads are rounded to 3 decimals on the phone. `OtherMeetupsNearby` reads a known location and never starts a read. An explanation screen comes before the first prompt. The iOS Always text was removed, then restored because Apple requires it (ITMS-90683): the location plugin references that API. The app still only asks for while-in-use access. The map picker opens at the rounded location when known. |
 | N1-D2 purchases | One listener per signed-in user, started by `AppShell`. It waits for the catalog, routes by product id, and leaves anything it cannot place pending. |
 | N1-D3 version | `UpdateGate` blocks the whole app below the minimum, at start and on resume. |
 | N1-D4 426 | The credit client brings up the same screen. |

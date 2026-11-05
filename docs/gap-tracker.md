@@ -400,3 +400,7 @@ Plan: `docs/plans/30-review-fixes-photos-sos-reviews.md`, prompts 30A-30E. Cover
 - **130. New (30E): photos show initials while the access token is expired — Low, accepted.** `Image.network` uses the token last saved. It lasts 15 minutes, and the next API call refreshes it, so an idle screen can draw initials until then.
 - **131. New (30E): the iOS update link is a store search — Low, open.** The App Store id does not exist yet. Replace `_appStoreUrl` in `update_gate.dart` once the app is listed.
 - **132. New (30E): a transaction for a withdrawn plan stays pending — Low, watch.** Routing follows the catalog, so a redelivered purchase of a plan no longer in it is never verified. The plan's subscription still reaches the server through store notifications.
+
+## Round 13 — legal, code and design review (2026-11-05)
+
+Report: `docs/review-2026-11-05-legal-code-design.md`. #100-#121 confirmed fixed in code. New #122-#140, all **OPEN**: no real Terms/Privacy live (#122), no recorded assent (#123), report/block missing (#124, Apple 1.2), Terms gaps (#125), website claims untrue (#126), paywall links env-dependent (#127), web deletion page (#128), credits forfeiture warning (#129), names (#130), iOS privacy manifest (#131), credit x15 balances (#132), OTP budget lockout (#133), photo decode memory (#134), legal acceptance server-side (#135), per-meetup average (#136), location report limit (#137), guess budget target (#138), doc/format leftovers (#139), design and accessibility batch (#140).

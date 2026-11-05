@@ -175,9 +175,12 @@ void main() {
     expect(find.text('Browse meetups'), findsOneWidget);
   });
 
-  test('iOS asks for while-in-use only, and says what it is for', () {
+  // Apple rejects the build without the Always text (ITMS-90683), because the
+  // location plugin references that API. The app itself never asks for it.
+  test('iOS has both location texts, and neither claims background use', () {
     final plist = File('ios/Runner/Info.plist').readAsStringSync();
-    expect(plist, isNot(contains('NSLocationAlways')));
+    expect(plist, contains('NSLocationAlwaysAndWhenInUseUsageDescription'));
+    expect(plist, contains('does not track your location in the background'));
     expect(plist, contains('NSLocationWhenInUseUsageDescription'));
     expect(plist, contains('an SOS you send'));
     expect(plist, isNot(contains('one-time lookup')));
