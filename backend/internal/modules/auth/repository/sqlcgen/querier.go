@@ -109,6 +109,7 @@ type Querier interface {
 	// '' and the second would fail on a uniqueness rule neither of them meant to
 	// be part of.
 	CreateUser(ctx context.Context, arg CreateUserParams) (AuthUser, error)
+	CurrentLegalDocuments(ctx context.Context) (CurrentLegalDocumentsRow, error)
 	// Guest-account cleanup (plan 14 Part B). A guest signs up, never verifies,
 	// eventually signs out — and the row sits there forever with no way to reach
 	// it again, since a guest account has no email, phone or LinkedIn to sign
@@ -271,9 +272,11 @@ type Querier interface {
 	GetUserPhotoEtag(ctx context.Context, userID uuid.UUID) (string, error)
 	GetVerificationCode(ctx context.Context, arg GetVerificationCodeParams) (AuthVerificationCode, error)
 	GetVerificationCodeByTarget(ctx context.Context, arg GetVerificationCodeByTargetParams) (AuthVerificationCode, error)
+	HasLegalAcceptance(ctx context.Context, arg HasLegalAcceptanceParams) (bool, error)
 	IncrementVerificationAttempts(ctx context.Context, arg IncrementVerificationAttemptsParams) (AuthVerificationCode, error)
 	IncrementVerificationAttemptsByTarget(ctx context.Context, arg IncrementVerificationAttemptsByTargetParams) (AuthVerificationCode, error)
 	InsertIdentity(ctx context.Context, arg InsertIdentityParams) (AuthUserIdentity, error)
+	InsertLegalAcceptance(ctx context.Context, arg InsertLegalAcceptanceParams) error
 	// Minimal real SOS + trusted contacts (ADR-026, Slice H).
 	InsertTrustedContact(ctx context.Context, arg InsertTrustedContactParams) (AuthTrustedContact, error)
 	// Flags an unknown-company (name, domain) pair for the not-yet-assigned
@@ -316,6 +319,7 @@ type Querier interface {
 	MarkUserDeletedDeadLettered(ctx context.Context, arg MarkUserDeletedDeadLetteredParams) error
 	MarkUserDeletedFailed(ctx context.Context, arg MarkUserDeletedFailedParams) error
 	MarkUserDeletedProcessed(ctx context.Context, id uuid.UUID) error
+	PublishLegalDocuments(ctx context.Context, arg PublishLegalDocumentsParams) error
 	RefundOTPGuess(ctx context.Context, arg RefundOTPGuessParams) error
 	// The reuse-detection response (docs/plans/03-hardening-pass.md §B1): when a
 	// refresh token that has already been rotated or revoked is presented again,

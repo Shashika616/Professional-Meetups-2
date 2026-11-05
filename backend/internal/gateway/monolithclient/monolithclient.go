@@ -144,6 +144,13 @@ type Client interface {
 	StartCorporateEmailVerification(ctx context.Context, userID, email string) (resendAfterSeconds int32, err error)
 	VerifyCorporateEmailCode(ctx context.Context, userID, email, code, companyName string) (Session, error)
 	GetProfile(ctx context.Context, userID string) (Profile, error)
+	// GetLegalDocuments returns the current terms and privacy policy.
+	GetLegalDocuments(ctx context.Context) (LegalDocuments, error)
+	// AcceptLegal records agreement to the given version of the documents.
+	AcceptLegal(ctx context.Context, userID, version string) error
+	// HasAcceptedLegal says whether the caller agreed to the current version.
+	HasAcceptedLegal(ctx context.Context, userID string) (bool, error)
+
 	// SetProfilePhoto stores the caller's picture and returns its path.
 	SetProfilePhoto(ctx context.Context, userID string, image []byte) (path string, err error)
 	DeleteProfilePhoto(ctx context.Context, userID string) error
@@ -608,6 +615,34 @@ func (c *grpcClient) VerifyCorporateEmailCode(ctx context.Context, userID, email
 		return Session{}, err
 	}
 	return sessionFromProto(resp), nil
+}
+
+// LegalDocuments is the current terms and privacy policy.
+type LegalDocuments struct {
+	Version string `json:"version"`
+	Terms   string `json:"terms"`
+	Privacy string `json:"privacy"`
+}
+
+func (c *grpcClient) GetLegalDocuments(ctx context.Context) (LegalDocuments, error) {
+	resp, err := c.auth.GetLegalDocuments(ctx, &authv1.GetLegalDocumentsRequest{})
+	if err != nil {
+		return LegalDocuments{}, err
+	}
+	return LegalDocuments{Version: resp.GetVersion(), Terms: resp.GetTerms(), Privacy: resp.GetPrivacy()}, nil
+}
+
+func (c *grpcClient) AcceptLegal(ctx context.Context, userID, version string) error {
+	_, err := c.auth.AcceptLegal(ctx, &authv1.AcceptLegalRequest{UserId: userID, Version: version})
+	return err
+}
+
+func (c *grpcClient) HasAcceptedLegal(ctx context.Context, userID string) (bool, error) {
+	resp, err := c.auth.HasAcceptedLegal(ctx, &authv1.HasAcceptedLegalRequest{UserId: userID})
+	if err != nil {
+		return false, err
+	}
+	return resp.GetAccepted(), nil
 }
 
 func (c *grpcClient) SetProfilePhoto(ctx context.Context, userID string, image []byte) (string, error) {

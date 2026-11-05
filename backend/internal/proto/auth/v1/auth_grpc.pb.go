@@ -42,6 +42,9 @@ const (
 	AuthService_CompleteProfileSetup_FullMethodName            = "/auth.v1.AuthService/CompleteProfileSetup"
 	AuthService_UpdateLastKnownLocation_FullMethodName         = "/auth.v1.AuthService/UpdateLastKnownLocation"
 	AuthService_DeleteAccount_FullMethodName                   = "/auth.v1.AuthService/DeleteAccount"
+	AuthService_GetLegalDocuments_FullMethodName               = "/auth.v1.AuthService/GetLegalDocuments"
+	AuthService_AcceptLegal_FullMethodName                     = "/auth.v1.AuthService/AcceptLegal"
+	AuthService_HasAcceptedLegal_FullMethodName                = "/auth.v1.AuthService/HasAcceptedLegal"
 	AuthService_SetProfilePhoto_FullMethodName                 = "/auth.v1.AuthService/SetProfilePhoto"
 	AuthService_DeleteProfilePhoto_FullMethodName              = "/auth.v1.AuthService/DeleteProfilePhoto"
 	AuthService_GetProfilePhoto_FullMethodName                 = "/auth.v1.AuthService/GetProfilePhoto"
@@ -227,6 +230,9 @@ type AuthServiceClient interface {
 	DeleteAccount(ctx context.Context, in *DeleteAccountRequest, opts ...grpc.CallOption) (*DeleteAccountResponse, error)
 	// A user's own photo (plan 2.1): one small JPEG, re-encoded here. The
 	// gateway decides who may see it.
+	GetLegalDocuments(ctx context.Context, in *GetLegalDocumentsRequest, opts ...grpc.CallOption) (*GetLegalDocumentsResponse, error)
+	AcceptLegal(ctx context.Context, in *AcceptLegalRequest, opts ...grpc.CallOption) (*AcceptLegalResponse, error)
+	HasAcceptedLegal(ctx context.Context, in *HasAcceptedLegalRequest, opts ...grpc.CallOption) (*HasAcceptedLegalResponse, error)
 	SetProfilePhoto(ctx context.Context, in *SetProfilePhotoRequest, opts ...grpc.CallOption) (*SetProfilePhotoResponse, error)
 	DeleteProfilePhoto(ctx context.Context, in *DeleteProfilePhotoRequest, opts ...grpc.CallOption) (*DeleteProfilePhotoResponse, error)
 	GetProfilePhoto(ctx context.Context, in *GetProfilePhotoRequest, opts ...grpc.CallOption) (*GetProfilePhotoResponse, error)
@@ -475,6 +481,36 @@ func (c *authServiceClient) DeleteAccount(ctx context.Context, in *DeleteAccount
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeleteAccountResponse)
 	err := c.cc.Invoke(ctx, AuthService_DeleteAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) GetLegalDocuments(ctx context.Context, in *GetLegalDocumentsRequest, opts ...grpc.CallOption) (*GetLegalDocumentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetLegalDocumentsResponse)
+	err := c.cc.Invoke(ctx, AuthService_GetLegalDocuments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) AcceptLegal(ctx context.Context, in *AcceptLegalRequest, opts ...grpc.CallOption) (*AcceptLegalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AcceptLegalResponse)
+	err := c.cc.Invoke(ctx, AuthService_AcceptLegal_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) HasAcceptedLegal(ctx context.Context, in *HasAcceptedLegalRequest, opts ...grpc.CallOption) (*HasAcceptedLegalResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HasAcceptedLegalResponse)
+	err := c.cc.Invoke(ctx, AuthService_HasAcceptedLegal_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -736,6 +772,9 @@ type AuthServiceServer interface {
 	DeleteAccount(context.Context, *DeleteAccountRequest) (*DeleteAccountResponse, error)
 	// A user's own photo (plan 2.1): one small JPEG, re-encoded here. The
 	// gateway decides who may see it.
+	GetLegalDocuments(context.Context, *GetLegalDocumentsRequest) (*GetLegalDocumentsResponse, error)
+	AcceptLegal(context.Context, *AcceptLegalRequest) (*AcceptLegalResponse, error)
+	HasAcceptedLegal(context.Context, *HasAcceptedLegalRequest) (*HasAcceptedLegalResponse, error)
 	SetProfilePhoto(context.Context, *SetProfilePhotoRequest) (*SetProfilePhotoResponse, error)
 	DeleteProfilePhoto(context.Context, *DeleteProfilePhotoRequest) (*DeleteProfilePhotoResponse, error)
 	GetProfilePhoto(context.Context, *GetProfilePhotoRequest) (*GetProfilePhotoResponse, error)
@@ -828,6 +867,15 @@ func (UnimplementedAuthServiceServer) UpdateLastKnownLocation(context.Context, *
 }
 func (UnimplementedAuthServiceServer) DeleteAccount(context.Context, *DeleteAccountRequest) (*DeleteAccountResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAccount not implemented")
+}
+func (UnimplementedAuthServiceServer) GetLegalDocuments(context.Context, *GetLegalDocumentsRequest) (*GetLegalDocumentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetLegalDocuments not implemented")
+}
+func (UnimplementedAuthServiceServer) AcceptLegal(context.Context, *AcceptLegalRequest) (*AcceptLegalResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcceptLegal not implemented")
+}
+func (UnimplementedAuthServiceServer) HasAcceptedLegal(context.Context, *HasAcceptedLegalRequest) (*HasAcceptedLegalResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HasAcceptedLegal not implemented")
 }
 func (UnimplementedAuthServiceServer) SetProfilePhoto(context.Context, *SetProfilePhotoRequest) (*SetProfilePhotoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetProfilePhoto not implemented")
@@ -1288,6 +1336,60 @@ func _AuthService_DeleteAccount_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_GetLegalDocuments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetLegalDocumentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).GetLegalDocuments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_GetLegalDocuments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).GetLegalDocuments(ctx, req.(*GetLegalDocumentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_AcceptLegal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcceptLegalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).AcceptLegal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_AcceptLegal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).AcceptLegal(ctx, req.(*AcceptLegalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_HasAcceptedLegal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HasAcceptedLegalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).HasAcceptedLegal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_HasAcceptedLegal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).HasAcceptedLegal(ctx, req.(*HasAcceptedLegalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AuthService_SetProfilePhoto_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SetProfilePhotoRequest)
 	if err := dec(in); err != nil {
@@ -1530,6 +1632,18 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteAccount",
 			Handler:    _AuthService_DeleteAccount_Handler,
+		},
+		{
+			MethodName: "GetLegalDocuments",
+			Handler:    _AuthService_GetLegalDocuments_Handler,
+		},
+		{
+			MethodName: "AcceptLegal",
+			Handler:    _AuthService_AcceptLegal_Handler,
+		},
+		{
+			MethodName: "HasAcceptedLegal",
+			Handler:    _AuthService_HasAcceptedLegal_Handler,
 		},
 		{
 			MethodName: "SetProfilePhoto",

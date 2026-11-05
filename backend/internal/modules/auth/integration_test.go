@@ -286,6 +286,7 @@ func newHarness(t *testing.T) *harness {
 		OTPBudgets:              repository.NewOTPBudgetRepository(pool),
 		Retention:               repository.NewRetentionRepository(pool),
 		Photos:                  repository.NewUserPhotoRepository(pool),
+		Legal:                   repository.NewLegalRepository(pool),
 		KnownCompanies:          repository.NewKnownCompanyRepository(pool),
 		UnverifiedCompanyClaims: repository.NewUnverifiedCompanyClaimRepository(pool),
 		TrustedContacts:         repository.NewTrustedContactRepository(pool),

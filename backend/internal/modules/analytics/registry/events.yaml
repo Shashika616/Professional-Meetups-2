@@ -32,6 +32,8 @@ screens:
   - meetup_detail
   - location_view
   - location_explanation
+  - legal_acceptance
+  - legal_document
   - participants
   - schedule_meetup
   - meetup_review

@@ -35,13 +35,16 @@ import (
 type fakeMonolith struct {
 	monolithclient.Client // embedded: any method a test doesn't need panics loudly rather than silently no-op'ing
 
-	activity            monolithclient.MemberActivity
-	activityErr         error
-	gotViewerID         string
-	gotViewerTrustLevel int32
-	gotFix              monolithclient.SOSFix
-	gotPhoto            []byte
-	gotTargetID         string
+	activity             monolithclient.MemberActivity
+	activityErr          error
+	gotViewerID          string
+	acceptedLegalVersion string
+	legalAccepted        bool
+	legalDocuments       monolithclient.LegalDocuments
+	gotViewerTrustLevel  int32
+	gotFix               monolithclient.SOSFix
+	gotPhoto             []byte
+	gotTargetID          string
 
 	session monolithclient.Session
 	profile monolithclient.Profile
@@ -106,6 +109,19 @@ func (f *fakeMonolith) GetMemberActivity(_ context.Context, viewerID string, vie
 	f.gotViewerID, f.gotTargetID = viewerID, targetID
 	f.gotViewerTrustLevel = viewerTrustLevel
 	return f.activity, f.activityErr
+}
+
+func (f *fakeMonolith) GetLegalDocuments(context.Context) (monolithclient.LegalDocuments, error) {
+	return f.legalDocuments, f.err
+}
+
+func (f *fakeMonolith) AcceptLegal(_ context.Context, userID, version string) error {
+	f.gotViewerID, f.acceptedLegalVersion = userID, version
+	return f.err
+}
+
+func (f *fakeMonolith) HasAcceptedLegal(context.Context, string) (bool, error) {
+	return f.legalAccepted, f.err
 }
 
 func (f *fakeMonolith) SetProfilePhoto(_ context.Context, userID string, image []byte) (string, error) {

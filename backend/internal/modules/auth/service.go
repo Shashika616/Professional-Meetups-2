@@ -148,6 +148,13 @@ type Service interface {
 	// for why none of the message content comes from the client.
 	NotifyMeetupShare(ctx context.Context, userID string, share MeetupShare) (notifiedContactIDs []string, err error)
 
+	// GetLegalDocuments returns the current terms and privacy policy.
+	GetLegalDocuments(ctx context.Context) (repository.LegalDocuments, error)
+	// AcceptLegal records agreement to the current terms and privacy policy.
+	AcceptLegal(ctx context.Context, userID, version, appVersion, platform string) error
+	// HasAcceptedLegal says whether userID agreed to the current documents.
+	HasAcceptedLegal(ctx context.Context, userID string) (bool, error)
+
 	// SetProfilePhoto stores the caller's own picture and returns its path.
 	SetProfilePhoto(ctx context.Context, userID string, raw []byte) (path string, err error)
 	DeleteProfilePhoto(ctx context.Context, userID string) error
@@ -175,6 +182,7 @@ type service struct {
 	otpBudgets              repository.OTPBudgetRepository
 	retention               repository.RetentionRepository
 	photos                  repository.UserPhotoRepository
+	legal                   repository.LegalRepository
 	photoFetcher            PhotoFetcher
 	limits                  *ratelimit.Shared
 	knownCompanies          repository.KnownCompanyRepository
@@ -205,6 +213,7 @@ type Deps struct {
 	// Photos stores users' pictures, and PhotoFetcher takes a new LinkedIn
 	// account's picture once (plan 2.1).
 	Photos       repository.UserPhotoRepository
+	Legal        repository.LegalRepository
 	PhotoFetcher PhotoFetcher
 	// OTPBudgets enforces the daily per-target send and failed-guess caps
 	// (#106). Nil disables them (unit tests); cmd/monolith always sets it.
@@ -245,6 +254,7 @@ func New(deps Deps) Service {
 		otpBudgets:              deps.OTPBudgets,
 		retention:               deps.Retention,
 		photos:                  deps.Photos,
+		legal:                   deps.Legal,
 		photoFetcher:            deps.PhotoFetcher,
 		limits:                  deps.Limits,
 		knownCompanies:          deps.KnownCompanies,

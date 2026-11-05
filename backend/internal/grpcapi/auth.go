@@ -24,6 +24,7 @@ import (
 
 	"professional-meetups-monolith/backend/internal/modules/auth"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
+	"professional-meetups-monolith/backend/internal/platform/clientinfo"
 	authv1 "professional-meetups-monolith/backend/internal/proto/auth/v1"
 )
 
@@ -387,6 +388,30 @@ func (s *AuthServer) DeleteAccount(ctx context.Context, req *authv1.DeleteAccoun
 		return nil, apperror.ToGRPCStatus(err)
 	}
 	return &authv1.DeleteAccountResponse{}, nil
+}
+
+func (s *AuthServer) GetLegalDocuments(ctx context.Context, _ *authv1.GetLegalDocumentsRequest) (*authv1.GetLegalDocumentsResponse, error) {
+	docs, err := s.svc.GetLegalDocuments(ctx)
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.GetLegalDocumentsResponse{Version: docs.Version, Terms: docs.Terms, Privacy: docs.Privacy}, nil
+}
+
+func (s *AuthServer) AcceptLegal(ctx context.Context, req *authv1.AcceptLegalRequest) (*authv1.AcceptLegalResponse, error) {
+	info := clientinfo.From(ctx)
+	if err := s.svc.AcceptLegal(ctx, req.GetUserId(), req.GetVersion(), info.AppVersion, info.Platform); err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.AcceptLegalResponse{}, nil
+}
+
+func (s *AuthServer) HasAcceptedLegal(ctx context.Context, req *authv1.HasAcceptedLegalRequest) (*authv1.HasAcceptedLegalResponse, error) {
+	accepted, err := s.svc.HasAcceptedLegal(ctx, req.GetUserId())
+	if err != nil {
+		return nil, apperror.ToGRPCStatus(err)
+	}
+	return &authv1.HasAcceptedLegalResponse{Accepted: accepted}, nil
 }
 
 func (s *AuthServer) SetProfilePhoto(ctx context.Context, req *authv1.SetProfilePhotoRequest) (*authv1.SetProfilePhotoResponse, error) {

@@ -2293,6 +2293,278 @@ func (x *TriggerSOSResponse) GetContactsNotified() int32 {
 	return 0
 }
 
+type GetLegalDocumentsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLegalDocumentsRequest) Reset() {
+	*x = GetLegalDocumentsRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLegalDocumentsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLegalDocumentsRequest) ProtoMessage() {}
+
+func (x *GetLegalDocumentsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLegalDocumentsRequest.ProtoReflect.Descriptor instead.
+func (*GetLegalDocumentsRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{32}
+}
+
+type GetLegalDocumentsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       string                 `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
+	Terms         string                 `protobuf:"bytes,2,opt,name=terms,proto3" json:"terms,omitempty"`
+	Privacy       string                 `protobuf:"bytes,3,opt,name=privacy,proto3" json:"privacy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetLegalDocumentsResponse) Reset() {
+	*x = GetLegalDocumentsResponse{}
+	mi := &file_auth_v1_auth_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetLegalDocumentsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetLegalDocumentsResponse) ProtoMessage() {}
+
+func (x *GetLegalDocumentsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetLegalDocumentsResponse.ProtoReflect.Descriptor instead.
+func (*GetLegalDocumentsResponse) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *GetLegalDocumentsResponse) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *GetLegalDocumentsResponse) GetTerms() string {
+	if x != nil {
+		return x.Terms
+	}
+	return ""
+}
+
+func (x *GetLegalDocumentsResponse) GetPrivacy() string {
+	if x != nil {
+		return x.Privacy
+	}
+	return ""
+}
+
+type AcceptLegalRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptLegalRequest) Reset() {
+	*x = AcceptLegalRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptLegalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptLegalRequest) ProtoMessage() {}
+
+func (x *AcceptLegalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptLegalRequest.ProtoReflect.Descriptor instead.
+func (*AcceptLegalRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *AcceptLegalRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AcceptLegalRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+type AcceptLegalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcceptLegalResponse) Reset() {
+	*x = AcceptLegalResponse{}
+	mi := &file_auth_v1_auth_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcceptLegalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcceptLegalResponse) ProtoMessage() {}
+
+func (x *AcceptLegalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcceptLegalResponse.ProtoReflect.Descriptor instead.
+func (*AcceptLegalResponse) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{35}
+}
+
+type HasAcceptedLegalRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HasAcceptedLegalRequest) Reset() {
+	*x = HasAcceptedLegalRequest{}
+	mi := &file_auth_v1_auth_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HasAcceptedLegalRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HasAcceptedLegalRequest) ProtoMessage() {}
+
+func (x *HasAcceptedLegalRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HasAcceptedLegalRequest.ProtoReflect.Descriptor instead.
+func (*HasAcceptedLegalRequest) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *HasAcceptedLegalRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type HasAcceptedLegalResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Accepted      bool                   `protobuf:"varint,1,opt,name=accepted,proto3" json:"accepted,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HasAcceptedLegalResponse) Reset() {
+	*x = HasAcceptedLegalResponse{}
+	mi := &file_auth_v1_auth_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HasAcceptedLegalResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HasAcceptedLegalResponse) ProtoMessage() {}
+
+func (x *HasAcceptedLegalResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auth_v1_auth_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HasAcceptedLegalResponse.ProtoReflect.Descriptor instead.
+func (*HasAcceptedLegalResponse) Descriptor() ([]byte, []int) {
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *HasAcceptedLegalResponse) GetAccepted() bool {
+	if x != nil {
+		return x.Accepted
+	}
+	return false
+}
+
 type SetProfilePhotoRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"` // set by the gateway from the verified JWT
@@ -2303,7 +2575,7 @@ type SetProfilePhotoRequest struct {
 
 func (x *SetProfilePhotoRequest) Reset() {
 	*x = SetProfilePhotoRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[32]
+	mi := &file_auth_v1_auth_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2315,7 +2587,7 @@ func (x *SetProfilePhotoRequest) String() string {
 func (*SetProfilePhotoRequest) ProtoMessage() {}
 
 func (x *SetProfilePhotoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[32]
+	mi := &file_auth_v1_auth_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2328,7 +2600,7 @@ func (x *SetProfilePhotoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetProfilePhotoRequest.ProtoReflect.Descriptor instead.
 func (*SetProfilePhotoRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{32}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *SetProfilePhotoRequest) GetUserId() string {
@@ -2354,7 +2626,7 @@ type SetProfilePhotoResponse struct {
 
 func (x *SetProfilePhotoResponse) Reset() {
 	*x = SetProfilePhotoResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[33]
+	mi := &file_auth_v1_auth_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2366,7 +2638,7 @@ func (x *SetProfilePhotoResponse) String() string {
 func (*SetProfilePhotoResponse) ProtoMessage() {}
 
 func (x *SetProfilePhotoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[33]
+	mi := &file_auth_v1_auth_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2379,7 +2651,7 @@ func (x *SetProfilePhotoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetProfilePhotoResponse.ProtoReflect.Descriptor instead.
 func (*SetProfilePhotoResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{33}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *SetProfilePhotoResponse) GetPhotoPath() string {
@@ -2398,7 +2670,7 @@ type DeleteProfilePhotoRequest struct {
 
 func (x *DeleteProfilePhotoRequest) Reset() {
 	*x = DeleteProfilePhotoRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[34]
+	mi := &file_auth_v1_auth_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2410,7 +2682,7 @@ func (x *DeleteProfilePhotoRequest) String() string {
 func (*DeleteProfilePhotoRequest) ProtoMessage() {}
 
 func (x *DeleteProfilePhotoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[34]
+	mi := &file_auth_v1_auth_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2423,7 +2695,7 @@ func (x *DeleteProfilePhotoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProfilePhotoRequest.ProtoReflect.Descriptor instead.
 func (*DeleteProfilePhotoRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{34}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *DeleteProfilePhotoRequest) GetUserId() string {
@@ -2441,7 +2713,7 @@ type DeleteProfilePhotoResponse struct {
 
 func (x *DeleteProfilePhotoResponse) Reset() {
 	*x = DeleteProfilePhotoResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[35]
+	mi := &file_auth_v1_auth_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2453,7 +2725,7 @@ func (x *DeleteProfilePhotoResponse) String() string {
 func (*DeleteProfilePhotoResponse) ProtoMessage() {}
 
 func (x *DeleteProfilePhotoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[35]
+	mi := &file_auth_v1_auth_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2466,7 +2738,7 @@ func (x *DeleteProfilePhotoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProfilePhotoResponse.ProtoReflect.Descriptor instead.
 func (*DeleteProfilePhotoResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{35}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{41}
 }
 
 type GetProfilePhotoRequest struct {
@@ -2480,7 +2752,7 @@ type GetProfilePhotoRequest struct {
 
 func (x *GetProfilePhotoRequest) Reset() {
 	*x = GetProfilePhotoRequest{}
-	mi := &file_auth_v1_auth_proto_msgTypes[36]
+	mi := &file_auth_v1_auth_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2492,7 +2764,7 @@ func (x *GetProfilePhotoRequest) String() string {
 func (*GetProfilePhotoRequest) ProtoMessage() {}
 
 func (x *GetProfilePhotoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[36]
+	mi := &file_auth_v1_auth_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2505,7 +2777,7 @@ func (x *GetProfilePhotoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProfilePhotoRequest.ProtoReflect.Descriptor instead.
 func (*GetProfilePhotoRequest) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{36}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *GetProfilePhotoRequest) GetUserId() string {
@@ -2532,7 +2804,7 @@ type GetProfilePhotoResponse struct {
 
 func (x *GetProfilePhotoResponse) Reset() {
 	*x = GetProfilePhotoResponse{}
-	mi := &file_auth_v1_auth_proto_msgTypes[37]
+	mi := &file_auth_v1_auth_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2544,7 +2816,7 @@ func (x *GetProfilePhotoResponse) String() string {
 func (*GetProfilePhotoResponse) ProtoMessage() {}
 
 func (x *GetProfilePhotoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_auth_v1_auth_proto_msgTypes[37]
+	mi := &file_auth_v1_auth_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2557,7 +2829,7 @@ func (x *GetProfilePhotoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetProfilePhotoResponse.ProtoReflect.Descriptor instead.
 func (*GetProfilePhotoResponse) Descriptor() ([]byte, []int) {
-	return file_auth_v1_auth_proto_rawDescGZIP(), []int{37}
+	return file_auth_v1_auth_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *GetProfilePhotoResponse) GetJpeg() []byte {
@@ -2723,7 +2995,20 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"_longitudeB\x1b\n" +
 	"\x19_captured_at_unix_seconds\"A\n" +
 	"\x12TriggerSOSResponse\x12+\n" +
-	"\x11contacts_notified\x18\x01 \x01(\x05R\x10contactsNotified\"G\n" +
+	"\x11contacts_notified\x18\x01 \x01(\x05R\x10contactsNotified\"\x1a\n" +
+	"\x18GetLegalDocumentsRequest\"e\n" +
+	"\x19GetLegalDocumentsResponse\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\tR\aversion\x12\x14\n" +
+	"\x05terms\x18\x02 \x01(\tR\x05terms\x12\x18\n" +
+	"\aprivacy\x18\x03 \x01(\tR\aprivacy\"G\n" +
+	"\x12AcceptLegalRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\x15\n" +
+	"\x13AcceptLegalResponse\"2\n" +
+	"\x17HasAcceptedLegalRequest\x12\x17\n" +
+	"\auser_id\x18\x01 \x01(\tR\x06userId\"6\n" +
+	"\x18HasAcceptedLegalResponse\x12\x1a\n" +
+	"\baccepted\x18\x01 \x01(\bR\baccepted\"G\n" +
 	"\x16SetProfilePhotoRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x14\n" +
 	"\x05image\x18\x02 \x01(\fR\x05image\"8\n" +
@@ -2751,7 +3036,7 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"#VERIFICATION_PURPOSE_PERSONAL_EMAIL\x10\x02\x12(\n" +
 	"$VERIFICATION_PURPOSE_CORPORATE_EMAIL\x10\x03\x12%\n" +
 	"!VERIFICATION_PURPOSE_EMAIL_SIGNUP\x10\x04\x12$\n" +
-	" VERIFICATION_PURPOSE_EMAIL_LOGIN\x10\x052\xb3\x15\n" +
+	" VERIFICATION_PURPOSE_EMAIL_LOGIN\x10\x052\xb2\x17\n" +
 	"\vAuthService\x12\\\n" +
 	"\x17CompleteFederatedSignup\x12'.auth.v1.CompleteFederatedSignupRequest\x1a\x18.auth.v1.SessionResponse\x12b\n" +
 	"\x1aCompleteLinkedInOnboarding\x12*.auth.v1.CompleteLinkedInOnboardingRequest\x1a\x18.auth.v1.SessionResponse\x12F\n" +
@@ -2776,7 +3061,10 @@ const file_auth_v1_auth_proto_rawDesc = "" +
 	"GetProfile\x12\x1a.auth.v1.GetProfileRequest\x1a\x18.auth.v1.ProfileResponse\x12V\n" +
 	"\x14CompleteProfileSetup\x12$.auth.v1.CompleteProfileSetupRequest\x1a\x18.auth.v1.ProfileResponse\x12l\n" +
 	"\x17UpdateLastKnownLocation\x12'.auth.v1.UpdateLastKnownLocationRequest\x1a(.auth.v1.UpdateLastKnownLocationResponse\x12N\n" +
-	"\rDeleteAccount\x12\x1d.auth.v1.DeleteAccountRequest\x1a\x1e.auth.v1.DeleteAccountResponse\x12T\n" +
+	"\rDeleteAccount\x12\x1d.auth.v1.DeleteAccountRequest\x1a\x1e.auth.v1.DeleteAccountResponse\x12Z\n" +
+	"\x11GetLegalDocuments\x12!.auth.v1.GetLegalDocumentsRequest\x1a\".auth.v1.GetLegalDocumentsResponse\x12H\n" +
+	"\vAcceptLegal\x12\x1b.auth.v1.AcceptLegalRequest\x1a\x1c.auth.v1.AcceptLegalResponse\x12W\n" +
+	"\x10HasAcceptedLegal\x12 .auth.v1.HasAcceptedLegalRequest\x1a!.auth.v1.HasAcceptedLegalResponse\x12T\n" +
 	"\x0fSetProfilePhoto\x12\x1f.auth.v1.SetProfilePhotoRequest\x1a .auth.v1.SetProfilePhotoResponse\x12]\n" +
 	"\x12DeleteProfilePhoto\x12\".auth.v1.DeleteProfilePhotoRequest\x1a#.auth.v1.DeleteProfilePhotoResponse\x12T\n" +
 	"\x0fGetProfilePhoto\x12\x1f.auth.v1.GetProfilePhotoRequest\x1a .auth.v1.GetProfilePhotoResponse\x12W\n" +
@@ -2800,7 +3088,7 @@ func file_auth_v1_auth_proto_rawDescGZIP() []byte {
 }
 
 var file_auth_v1_auth_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_auth_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_auth_v1_auth_proto_goTypes = []any{
 	(IdentityProviderProto)(0),                // 0: auth.v1.IdentityProviderProto
 	(VerificationPurpose)(0),                  // 1: auth.v1.VerificationPurpose
@@ -2836,12 +3124,18 @@ var file_auth_v1_auth_proto_goTypes = []any{
 	(*RemoveTrustedContactResponse)(nil),      // 31: auth.v1.RemoveTrustedContactResponse
 	(*TriggerSOSRequest)(nil),                 // 32: auth.v1.TriggerSOSRequest
 	(*TriggerSOSResponse)(nil),                // 33: auth.v1.TriggerSOSResponse
-	(*SetProfilePhotoRequest)(nil),            // 34: auth.v1.SetProfilePhotoRequest
-	(*SetProfilePhotoResponse)(nil),           // 35: auth.v1.SetProfilePhotoResponse
-	(*DeleteProfilePhotoRequest)(nil),         // 36: auth.v1.DeleteProfilePhotoRequest
-	(*DeleteProfilePhotoResponse)(nil),        // 37: auth.v1.DeleteProfilePhotoResponse
-	(*GetProfilePhotoRequest)(nil),            // 38: auth.v1.GetProfilePhotoRequest
-	(*GetProfilePhotoResponse)(nil),           // 39: auth.v1.GetProfilePhotoResponse
+	(*GetLegalDocumentsRequest)(nil),          // 34: auth.v1.GetLegalDocumentsRequest
+	(*GetLegalDocumentsResponse)(nil),         // 35: auth.v1.GetLegalDocumentsResponse
+	(*AcceptLegalRequest)(nil),                // 36: auth.v1.AcceptLegalRequest
+	(*AcceptLegalResponse)(nil),               // 37: auth.v1.AcceptLegalResponse
+	(*HasAcceptedLegalRequest)(nil),           // 38: auth.v1.HasAcceptedLegalRequest
+	(*HasAcceptedLegalResponse)(nil),          // 39: auth.v1.HasAcceptedLegalResponse
+	(*SetProfilePhotoRequest)(nil),            // 40: auth.v1.SetProfilePhotoRequest
+	(*SetProfilePhotoResponse)(nil),           // 41: auth.v1.SetProfilePhotoResponse
+	(*DeleteProfilePhotoRequest)(nil),         // 42: auth.v1.DeleteProfilePhotoRequest
+	(*DeleteProfilePhotoResponse)(nil),        // 43: auth.v1.DeleteProfilePhotoResponse
+	(*GetProfilePhotoRequest)(nil),            // 44: auth.v1.GetProfilePhotoRequest
+	(*GetProfilePhotoResponse)(nil),           // 45: auth.v1.GetProfilePhotoResponse
 }
 var file_auth_v1_auth_proto_depIdxs = []int32{
 	0,  // 0: auth.v1.CompleteFederatedSignupRequest.provider:type_name -> auth.v1.IdentityProviderProto
@@ -2872,47 +3166,53 @@ var file_auth_v1_auth_proto_depIdxs = []int32{
 	20, // 25: auth.v1.AuthService.CompleteProfileSetup:input_type -> auth.v1.CompleteProfileSetupRequest
 	23, // 26: auth.v1.AuthService.UpdateLastKnownLocation:input_type -> auth.v1.UpdateLastKnownLocationRequest
 	21, // 27: auth.v1.AuthService.DeleteAccount:input_type -> auth.v1.DeleteAccountRequest
-	34, // 28: auth.v1.AuthService.SetProfilePhoto:input_type -> auth.v1.SetProfilePhotoRequest
-	36, // 29: auth.v1.AuthService.DeleteProfilePhoto:input_type -> auth.v1.DeleteProfilePhotoRequest
-	38, // 30: auth.v1.AuthService.GetProfilePhoto:input_type -> auth.v1.GetProfilePhotoRequest
-	25, // 31: auth.v1.AuthService.AddTrustedContact:input_type -> auth.v1.AddTrustedContactRequest
-	28, // 32: auth.v1.AuthService.ListTrustedContacts:input_type -> auth.v1.ListTrustedContactsRequest
-	26, // 33: auth.v1.AuthService.UpdateTrustedContact:input_type -> auth.v1.UpdateTrustedContactRequest
-	30, // 34: auth.v1.AuthService.RemoveTrustedContact:input_type -> auth.v1.RemoveTrustedContactRequest
-	32, // 35: auth.v1.AuthService.TriggerSOS:input_type -> auth.v1.TriggerSOSRequest
-	7,  // 36: auth.v1.AuthService.CompleteFederatedSignup:output_type -> auth.v1.SessionResponse
-	7,  // 37: auth.v1.AuthService.CompleteLinkedInOnboarding:output_type -> auth.v1.SessionResponse
-	7,  // 38: auth.v1.AuthService.LinkIdentity:output_type -> auth.v1.SessionResponse
-	12, // 39: auth.v1.AuthService.StartEmailSignup:output_type -> auth.v1.StartVerificationResponse
-	7,  // 40: auth.v1.AuthService.CompleteEmailSignup:output_type -> auth.v1.SessionResponse
-	7,  // 41: auth.v1.AuthService.GuestSignup:output_type -> auth.v1.SessionResponse
-	12, // 42: auth.v1.AuthService.StartEmailLogin:output_type -> auth.v1.StartVerificationResponse
-	7,  // 43: auth.v1.AuthService.CompleteEmailLogin:output_type -> auth.v1.SessionResponse
-	7,  // 44: auth.v1.AuthService.CompleteAccountClaim:output_type -> auth.v1.SessionResponse
-	12, // 45: auth.v1.AuthService.ResendAccountClaimCode:output_type -> auth.v1.StartVerificationResponse
-	7,  // 46: auth.v1.AuthService.RefreshSession:output_type -> auth.v1.SessionResponse
-	10, // 47: auth.v1.AuthService.RevokeSession:output_type -> auth.v1.RevokeSessionResponse
-	12, // 48: auth.v1.AuthService.StartPhoneVerification:output_type -> auth.v1.StartVerificationResponse
-	7,  // 49: auth.v1.AuthService.VerifyPhoneCode:output_type -> auth.v1.SessionResponse
-	12, // 50: auth.v1.AuthService.StartPersonalEmailVerification:output_type -> auth.v1.StartVerificationResponse
-	7,  // 51: auth.v1.AuthService.VerifyPersonalEmailCode:output_type -> auth.v1.SessionResponse
-	7,  // 52: auth.v1.AuthService.SubmitPersonalDetails:output_type -> auth.v1.SessionResponse
-	12, // 53: auth.v1.AuthService.StartCorporateEmailVerification:output_type -> auth.v1.StartVerificationResponse
-	7,  // 54: auth.v1.AuthService.VerifyCorporateEmailCode:output_type -> auth.v1.SessionResponse
-	19, // 55: auth.v1.AuthService.GetProfile:output_type -> auth.v1.ProfileResponse
-	19, // 56: auth.v1.AuthService.CompleteProfileSetup:output_type -> auth.v1.ProfileResponse
-	24, // 57: auth.v1.AuthService.UpdateLastKnownLocation:output_type -> auth.v1.UpdateLastKnownLocationResponse
-	22, // 58: auth.v1.AuthService.DeleteAccount:output_type -> auth.v1.DeleteAccountResponse
-	35, // 59: auth.v1.AuthService.SetProfilePhoto:output_type -> auth.v1.SetProfilePhotoResponse
-	37, // 60: auth.v1.AuthService.DeleteProfilePhoto:output_type -> auth.v1.DeleteProfilePhotoResponse
-	39, // 61: auth.v1.AuthService.GetProfilePhoto:output_type -> auth.v1.GetProfilePhotoResponse
-	27, // 62: auth.v1.AuthService.AddTrustedContact:output_type -> auth.v1.TrustedContactResponse
-	29, // 63: auth.v1.AuthService.ListTrustedContacts:output_type -> auth.v1.ListTrustedContactsResponse
-	27, // 64: auth.v1.AuthService.UpdateTrustedContact:output_type -> auth.v1.TrustedContactResponse
-	31, // 65: auth.v1.AuthService.RemoveTrustedContact:output_type -> auth.v1.RemoveTrustedContactResponse
-	33, // 66: auth.v1.AuthService.TriggerSOS:output_type -> auth.v1.TriggerSOSResponse
-	36, // [36:67] is the sub-list for method output_type
-	5,  // [5:36] is the sub-list for method input_type
+	34, // 28: auth.v1.AuthService.GetLegalDocuments:input_type -> auth.v1.GetLegalDocumentsRequest
+	36, // 29: auth.v1.AuthService.AcceptLegal:input_type -> auth.v1.AcceptLegalRequest
+	38, // 30: auth.v1.AuthService.HasAcceptedLegal:input_type -> auth.v1.HasAcceptedLegalRequest
+	40, // 31: auth.v1.AuthService.SetProfilePhoto:input_type -> auth.v1.SetProfilePhotoRequest
+	42, // 32: auth.v1.AuthService.DeleteProfilePhoto:input_type -> auth.v1.DeleteProfilePhotoRequest
+	44, // 33: auth.v1.AuthService.GetProfilePhoto:input_type -> auth.v1.GetProfilePhotoRequest
+	25, // 34: auth.v1.AuthService.AddTrustedContact:input_type -> auth.v1.AddTrustedContactRequest
+	28, // 35: auth.v1.AuthService.ListTrustedContacts:input_type -> auth.v1.ListTrustedContactsRequest
+	26, // 36: auth.v1.AuthService.UpdateTrustedContact:input_type -> auth.v1.UpdateTrustedContactRequest
+	30, // 37: auth.v1.AuthService.RemoveTrustedContact:input_type -> auth.v1.RemoveTrustedContactRequest
+	32, // 38: auth.v1.AuthService.TriggerSOS:input_type -> auth.v1.TriggerSOSRequest
+	7,  // 39: auth.v1.AuthService.CompleteFederatedSignup:output_type -> auth.v1.SessionResponse
+	7,  // 40: auth.v1.AuthService.CompleteLinkedInOnboarding:output_type -> auth.v1.SessionResponse
+	7,  // 41: auth.v1.AuthService.LinkIdentity:output_type -> auth.v1.SessionResponse
+	12, // 42: auth.v1.AuthService.StartEmailSignup:output_type -> auth.v1.StartVerificationResponse
+	7,  // 43: auth.v1.AuthService.CompleteEmailSignup:output_type -> auth.v1.SessionResponse
+	7,  // 44: auth.v1.AuthService.GuestSignup:output_type -> auth.v1.SessionResponse
+	12, // 45: auth.v1.AuthService.StartEmailLogin:output_type -> auth.v1.StartVerificationResponse
+	7,  // 46: auth.v1.AuthService.CompleteEmailLogin:output_type -> auth.v1.SessionResponse
+	7,  // 47: auth.v1.AuthService.CompleteAccountClaim:output_type -> auth.v1.SessionResponse
+	12, // 48: auth.v1.AuthService.ResendAccountClaimCode:output_type -> auth.v1.StartVerificationResponse
+	7,  // 49: auth.v1.AuthService.RefreshSession:output_type -> auth.v1.SessionResponse
+	10, // 50: auth.v1.AuthService.RevokeSession:output_type -> auth.v1.RevokeSessionResponse
+	12, // 51: auth.v1.AuthService.StartPhoneVerification:output_type -> auth.v1.StartVerificationResponse
+	7,  // 52: auth.v1.AuthService.VerifyPhoneCode:output_type -> auth.v1.SessionResponse
+	12, // 53: auth.v1.AuthService.StartPersonalEmailVerification:output_type -> auth.v1.StartVerificationResponse
+	7,  // 54: auth.v1.AuthService.VerifyPersonalEmailCode:output_type -> auth.v1.SessionResponse
+	7,  // 55: auth.v1.AuthService.SubmitPersonalDetails:output_type -> auth.v1.SessionResponse
+	12, // 56: auth.v1.AuthService.StartCorporateEmailVerification:output_type -> auth.v1.StartVerificationResponse
+	7,  // 57: auth.v1.AuthService.VerifyCorporateEmailCode:output_type -> auth.v1.SessionResponse
+	19, // 58: auth.v1.AuthService.GetProfile:output_type -> auth.v1.ProfileResponse
+	19, // 59: auth.v1.AuthService.CompleteProfileSetup:output_type -> auth.v1.ProfileResponse
+	24, // 60: auth.v1.AuthService.UpdateLastKnownLocation:output_type -> auth.v1.UpdateLastKnownLocationResponse
+	22, // 61: auth.v1.AuthService.DeleteAccount:output_type -> auth.v1.DeleteAccountResponse
+	35, // 62: auth.v1.AuthService.GetLegalDocuments:output_type -> auth.v1.GetLegalDocumentsResponse
+	37, // 63: auth.v1.AuthService.AcceptLegal:output_type -> auth.v1.AcceptLegalResponse
+	39, // 64: auth.v1.AuthService.HasAcceptedLegal:output_type -> auth.v1.HasAcceptedLegalResponse
+	41, // 65: auth.v1.AuthService.SetProfilePhoto:output_type -> auth.v1.SetProfilePhotoResponse
+	43, // 66: auth.v1.AuthService.DeleteProfilePhoto:output_type -> auth.v1.DeleteProfilePhotoResponse
+	45, // 67: auth.v1.AuthService.GetProfilePhoto:output_type -> auth.v1.GetProfilePhotoResponse
+	27, // 68: auth.v1.AuthService.AddTrustedContact:output_type -> auth.v1.TrustedContactResponse
+	29, // 69: auth.v1.AuthService.ListTrustedContacts:output_type -> auth.v1.ListTrustedContactsResponse
+	27, // 70: auth.v1.AuthService.UpdateTrustedContact:output_type -> auth.v1.TrustedContactResponse
+	31, // 71: auth.v1.AuthService.RemoveTrustedContact:output_type -> auth.v1.RemoveTrustedContactResponse
+	33, // 72: auth.v1.AuthService.TriggerSOS:output_type -> auth.v1.TriggerSOSResponse
+	39, // [39:73] is the sub-list for method output_type
+	5,  // [5:39] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -2930,7 +3230,7 @@ func file_auth_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auth_v1_auth_proto_rawDesc), len(file_auth_v1_auth_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   38,
+			NumMessages:   44,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

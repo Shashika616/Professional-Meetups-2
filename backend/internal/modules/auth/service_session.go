@@ -69,6 +69,12 @@ func (s *service) handleRefreshTokenReuse(ctx context.Context, userID string) er
 
 func (s *service) RefreshSession(ctx context.Context, refreshToken string) (SessionResult, error) {
 	old, err := s.refreshTokens.FindByHash(ctx, hashToken(refreshToken))
+	if errors.Is(err, apperror.ErrNotFound) {
+		// Unknown to us: the session is over, the same as an expired token.
+		// As a 404 it read to the app as a network problem, so the app stayed
+		// signed in and retried on every call.
+		return SessionResult{}, fmt.Errorf("invalid refresh token: %w", apperror.ErrUnauthorized)
+	}
 	if err != nil {
 		return SessionResult{}, err
 	}

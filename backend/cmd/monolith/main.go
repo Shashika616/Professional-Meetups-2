@@ -278,6 +278,7 @@ func run(logger *slog.Logger) error {
 		OTPBudgets:              repository.NewOTPBudgetRepository(pool),
 		Retention:               repository.NewRetentionRepository(pool),
 		Photos:                  repository.NewUserPhotoRepository(pool),
+		Legal:                   repository.NewLegalRepository(pool),
 		PhotoFetcher:            photo.NewFetcher(),
 		Limits:                  sharedLimits,
 		KnownCompanies:          repository.NewKnownCompanyRepository(pool),

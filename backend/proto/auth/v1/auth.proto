@@ -186,6 +186,9 @@ service AuthService {
 
   // A user's own photo (plan 2.1): one small JPEG, re-encoded here. The
   // gateway decides who may see it.
+  rpc GetLegalDocuments(GetLegalDocumentsRequest) returns (GetLegalDocumentsResponse);
+  rpc AcceptLegal(AcceptLegalRequest) returns (AcceptLegalResponse);
+  rpc HasAcceptedLegal(HasAcceptedLegalRequest) returns (HasAcceptedLegalResponse);
   rpc SetProfilePhoto(SetProfilePhotoRequest) returns (SetProfilePhotoResponse);
   rpc DeleteProfilePhoto(DeleteProfilePhotoRequest) returns (DeleteProfilePhotoResponse);
   rpc GetProfilePhoto(GetProfilePhotoRequest) returns (GetProfilePhotoResponse);
@@ -618,6 +621,29 @@ message TriggerSOSResponse {
   // individual send failures don't fail the whole call (ADR-026 §4), so
   // this may be less than the caller's total contact count.
   int32 contacts_notified = 1;
+}
+
+message GetLegalDocumentsRequest {}
+
+message GetLegalDocumentsResponse {
+  string version = 1;
+  string terms = 2;
+  string privacy = 3;
+}
+
+message AcceptLegalRequest {
+  string user_id = 1;
+  string version = 2;
+}
+
+message AcceptLegalResponse {}
+
+message HasAcceptedLegalRequest {
+  string user_id = 1;
+}
+
+message HasAcceptedLegalResponse {
+  bool accepted = 1;
 }
 
 message SetProfilePhotoRequest {

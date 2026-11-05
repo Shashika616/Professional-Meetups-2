@@ -149,6 +149,11 @@ func (h *Handler) Register(mux *http.ServeMux) {
 	// only call site on the frontend; no periodic timer.
 	mux.Handle("POST /v1/users/me/location", h.requireAuth(http.HandlerFunc(h.updateLastKnownLocation)))
 
+	// The terms and the privacy policy. See legal.go.
+	mux.HandleFunc("GET /v1/legal", h.getLegalDocuments)
+	mux.Handle("GET /v1/legal/acceptance", h.requireAuth(http.HandlerFunc(h.getLegalAcceptance)))
+	mux.Handle("POST /v1/legal/acceptance", h.requireAuth(http.HandlerFunc(h.acceptLegal)))
+
 	// A user's own photo (plan 2.1). See photo.go.
 	mux.Handle("PUT /v1/users/me/photo", h.requireAuth(http.HandlerFunc(h.putPhoto)))
 	mux.Handle("DELETE /v1/users/me/photo", h.requireAuth(http.HandlerFunc(h.deletePhoto)))

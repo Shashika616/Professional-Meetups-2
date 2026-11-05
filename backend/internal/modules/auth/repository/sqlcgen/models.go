@@ -440,6 +440,14 @@ type AuthKnownCompany struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type AuthLegalAcceptance struct {
+	UserID     uuid.UUID          `json:"user_id"`
+	Version    string             `json:"version"`
+	AppVersion string             `json:"app_version"`
+	Platform   string             `json:"platform"`
+	AcceptedAt pgtype.Timestamptz `json:"accepted_at"`
+}
+
 type AuthOtpBudget struct {
 	TargetHash    []byte      `json:"target_hash"`
 	Purpose       string      `json:"purpose"`
@@ -952,6 +960,13 @@ type OpsFeatureFlagAudit struct {
 	Operator  string             `json:"operator"`
 	Reason    string             `json:"reason"`
 	ChangedAt pgtype.Timestamptz `json:"changed_at"`
+}
+
+type OpsLegalDocument struct {
+	Version     string             `json:"version"`
+	Terms       string             `json:"terms"`
+	Privacy     string             `json:"privacy"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
 }
 
 type OpsRateCounter struct {

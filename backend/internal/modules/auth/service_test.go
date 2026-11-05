@@ -729,15 +729,17 @@ func TestRefreshSession_RejectsExpiredToken(t *testing.T) {
 	}
 }
 
-func TestRefreshSession_UnknownTokenNotFound(t *testing.T) {
+// An unknown token ends the session. As a 404 the app read it as a network
+// problem, stayed signed in and retried on every call.
+func TestRefreshSession_UnknownTokenIsUnauthorized(t *testing.T) {
 	svc, _ := newFederatedTestService(t)
 
 	_, err := svc.RefreshSession(context.Background(), "never-issued")
 	if err == nil {
 		t.Fatal("RefreshSession() returned nil error for an unknown token, want error")
 	}
-	if !errors.Is(err, apperror.ErrNotFound) {
-		t.Errorf("error = %v, want %v", err, apperror.ErrNotFound)
+	if !errors.Is(err, apperror.ErrUnauthorized) {
+		t.Errorf("error = %v, want %v", err, apperror.ErrUnauthorized)
 	}
 }
 
