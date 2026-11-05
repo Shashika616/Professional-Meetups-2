@@ -3,6 +3,7 @@ import 'dart:ui' show PathMetric;
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/utils/reduced_motion.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/tiehere_mark_paths.dart';
 
@@ -65,8 +66,26 @@ class TieHereMarkPaths {
   }
 }
 
-/// The app's one loading indicator: the two figures of the mark draw
-/// themselves, fill, and unwind, the same movement as the splash.
+/// How far each part of the loader has got, each from 0 to 1.
+typedef BrandLoaderFrame = ({double blue, double green, double fill});
+
+/// One frame of the loop at [time], from 0 to 1. The blue figure draws, then
+/// the green, then the mark fills and holds. The second half of the loop is
+/// the same thing played backwards.
+BrandLoaderFrame brandLoaderFrame(double time) {
+  final wave = 1 - (2 * time - 1).abs();
+  double stage(double start, double end) => Curves.easeInOut.transform(
+    ((wave - start) / (end - start)).clamp(0.0, 1.0),
+  );
+  return (
+    blue: stage(0, 0.4),
+    green: stage(0.36, 0.76),
+    fill: stage(0.74, 0.92),
+  );
+}
+
+/// The app's one loading indicator: the mark draws itself blue, then green,
+/// fills, and unwinds the same way.
 ///
 /// [color] draws both figures in one colour, for a surface the brand colours
 /// would vanish on, such as the green primary button. With reduce motion on,
@@ -85,13 +104,13 @@ class _BrandLoaderState extends State<BrandLoader>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 1500),
+    duration: const Duration(milliseconds: 2400),
   );
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+    if (reducedMotion(context)) {
       _controller
         ..stop()
         ..value = 0.5;
@@ -132,28 +151,21 @@ class _LoaderPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final mark = TieHereMarkPaths.instance;
-    // Out and back: 0 at the start of the loop, 1 at the middle.
-    final wave = 1 - (2 * time.value - 1).abs();
-    final built = Curves.easeInOutCubic.transform(wave);
-    final trace = (built / 0.72).clamp(0.0, 1.0);
-    final fill = ((built - 0.62) / 0.38).clamp(0.0, 1.0);
+    final frame = brandLoaderFrame(time.value);
     final scale = size.width / _markSpan;
     // Thin enough to read as a line at 16, never finer than a hairline.
     final stroke = math.max(size.width * 0.07, 1.6) / scale;
-    final apart = (1 - built) * 60;
 
     canvas.save();
     canvas.translate(size.width / 2, size.height / 2);
     canvas.scale(scale);
     canvas.translate(-512, -512);
-    for (final (path, outline, brand, shift) in [
-      (mark.blue, mark.blueOutline, AppPalette.brandBlue, -apart),
-      (mark.green, mark.greenOutline, AppPalette.brandGreen, apart),
+    for (final (path, outline, brand, trace) in [
+      (mark.blue, mark.blueOutline, AppPalette.brandBlue, frame.blue),
+      (mark.green, mark.greenOutline, AppPalette.brandGreen, frame.green),
     ]) {
       final colour = color ?? brand;
-      canvas.save();
-      canvas.translate(shift, 0);
-      if (fill < 1 && trace > 0) {
+      if (frame.fill < 1 && trace > 0) {
         canvas.drawPath(
           TieHereMarkPaths.trace(outline, trace),
           Paint()
@@ -164,10 +176,12 @@ class _LoaderPainter extends CustomPainter {
             ..color = colour,
         );
       }
-      if (fill > 0) {
-        canvas.drawPath(path, Paint()..color = colour.withValues(alpha: fill));
+      if (frame.fill > 0) {
+        canvas.drawPath(
+          path,
+          Paint()..color = colour.withValues(alpha: frame.fill),
+        );
       }
-      canvas.restore();
     }
     canvas.restore();
   }

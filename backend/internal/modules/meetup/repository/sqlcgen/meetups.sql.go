@@ -1045,16 +1045,22 @@ LEFT JOIN LATERAL (
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
 WHERE m.host_user_id = $1
-  AND (m.created_at, m.id) < ($3::timestamptz, $4::uuid)
+  AND ($3::meetup.intent_type IS NULL OR m.intent = $3::meetup.intent_type)
+  AND ($4::timestamptz IS NULL OR m.window_end > $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR m.window_start < $5::timestamptz)
+  AND (m.created_at, m.id) < ($6::timestamptz, $7::uuid)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
 `
 
 type ListMeetupsByHostAfterCursorParams struct {
-	HostUserID      uuid.UUID          `json:"host_user_id"`
-	Limit           int32              `json:"limit"`
-	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
-	CursorID        uuid.UUID          `json:"cursor_id"`
+	HostUserID      uuid.UUID            `json:"host_user_id"`
+	Limit           int32                `json:"limit"`
+	Intent          NullMeetupIntentType `json:"intent"`
+	WindowFrom      pgtype.Timestamptz   `json:"window_from"`
+	WindowTo        pgtype.Timestamptz   `json:"window_to"`
+	CursorCreatedAt pgtype.Timestamptz   `json:"cursor_created_at"`
+	CursorID        uuid.UUID            `json:"cursor_id"`
 }
 
 type ListMeetupsByHostAfterCursorRow struct {
@@ -1092,6 +1098,9 @@ func (q *Queries) ListMeetupsByHostAfterCursor(ctx context.Context, arg ListMeet
 	rows, err := q.db.Query(ctx, listMeetupsByHostAfterCursor,
 		arg.HostUserID,
 		arg.Limit,
+		arg.Intent,
+		arg.WindowFrom,
+		arg.WindowTo,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 	)
@@ -1155,13 +1164,19 @@ LEFT JOIN LATERAL (
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
 WHERE m.host_user_id = $1
+  AND ($3::meetup.intent_type IS NULL OR m.intent = $3::meetup.intent_type)
+  AND ($4::timestamptz IS NULL OR m.window_end > $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR m.window_start < $5::timestamptz)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
 `
 
 type ListMeetupsByHostFirstPageParams struct {
-	HostUserID uuid.UUID `json:"host_user_id"`
-	Limit      int32     `json:"limit"`
+	HostUserID uuid.UUID            `json:"host_user_id"`
+	Limit      int32                `json:"limit"`
+	Intent     NullMeetupIntentType `json:"intent"`
+	WindowFrom pgtype.Timestamptz   `json:"window_from"`
+	WindowTo   pgtype.Timestamptz   `json:"window_to"`
 }
 
 type ListMeetupsByHostFirstPageRow struct {
@@ -1200,7 +1215,13 @@ type ListMeetupsByHostFirstPageRow struct {
 // stable sort a plain created_at DESC alone doesn't guarantee when two
 // rows share a timestamp).
 func (q *Queries) ListMeetupsByHostFirstPage(ctx context.Context, arg ListMeetupsByHostFirstPageParams) ([]ListMeetupsByHostFirstPageRow, error) {
-	rows, err := q.db.Query(ctx, listMeetupsByHostFirstPage, arg.HostUserID, arg.Limit)
+	rows, err := q.db.Query(ctx, listMeetupsByHostFirstPage,
+		arg.HostUserID,
+		arg.Limit,
+		arg.Intent,
+		arg.WindowFrom,
+		arg.WindowTo,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1269,16 +1290,22 @@ LEFT JOIN LATERAL (
   SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
-WHERE (m.created_at, m.id) < ($3::timestamptz, $4::uuid)
+WHERE ($3::meetup.intent_type IS NULL OR m.intent = $3::meetup.intent_type)
+  AND ($4::timestamptz IS NULL OR m.window_end > $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR m.window_start < $5::timestamptz)
+  AND (m.created_at, m.id) < ($6::timestamptz, $7::uuid)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
 `
 
 type ListMeetupsRequestedByUserAfterCursorParams struct {
-	RequesterID     uuid.UUID          `json:"requester_id"`
-	Limit           int32              `json:"limit"`
-	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
-	CursorID        uuid.UUID          `json:"cursor_id"`
+	RequesterID     uuid.UUID            `json:"requester_id"`
+	Limit           int32                `json:"limit"`
+	Intent          NullMeetupIntentType `json:"intent"`
+	WindowFrom      pgtype.Timestamptz   `json:"window_from"`
+	WindowTo        pgtype.Timestamptz   `json:"window_to"`
+	CursorCreatedAt pgtype.Timestamptz   `json:"cursor_created_at"`
+	CursorID        uuid.UUID            `json:"cursor_id"`
 }
 
 type ListMeetupsRequestedByUserAfterCursorRow struct {
@@ -1316,6 +1343,9 @@ func (q *Queries) ListMeetupsRequestedByUserAfterCursor(ctx context.Context, arg
 	rows, err := q.db.Query(ctx, listMeetupsRequestedByUserAfterCursor,
 		arg.RequesterID,
 		arg.Limit,
+		arg.Intent,
+		arg.WindowFrom,
+		arg.WindowTo,
 		arg.CursorCreatedAt,
 		arg.CursorID,
 	)
@@ -1389,13 +1419,19 @@ LEFT JOIN LATERAL (
   SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
+WHERE ($3::meetup.intent_type IS NULL OR m.intent = $3::meetup.intent_type)
+  AND ($4::timestamptz IS NULL OR m.window_end > $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR m.window_start < $5::timestamptz)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2
 `
 
 type ListMeetupsRequestedByUserFirstPageParams struct {
-	RequesterID uuid.UUID `json:"requester_id"`
-	Limit       int32     `json:"limit"`
+	RequesterID uuid.UUID            `json:"requester_id"`
+	Limit       int32                `json:"limit"`
+	Intent      NullMeetupIntentType `json:"intent"`
+	WindowFrom  pgtype.Timestamptz   `json:"window_from"`
+	WindowTo    pgtype.Timestamptz   `json:"window_to"`
 }
 
 type ListMeetupsRequestedByUserFirstPageRow struct {
@@ -1438,7 +1474,13 @@ type ListMeetupsRequestedByUserFirstPageRow struct {
 // reasoning as ListMeetupsByHostFirstPage above, applied to the
 // requested-meetups side of the same pre-existing completeness ceiling.
 func (q *Queries) ListMeetupsRequestedByUserFirstPage(ctx context.Context, arg ListMeetupsRequestedByUserFirstPageParams) ([]ListMeetupsRequestedByUserFirstPageRow, error) {
-	rows, err := q.db.Query(ctx, listMeetupsRequestedByUserFirstPage, arg.RequesterID, arg.Limit)
+	rows, err := q.db.Query(ctx, listMeetupsRequestedByUserFirstPage,
+		arg.RequesterID,
+		arg.Limit,
+		arg.Intent,
+		arg.WindowFrom,
+		arg.WindowTo,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1501,19 +1543,23 @@ WITH page AS (
     AND ($2::meetup.intent_type IS NULL OR m.intent = $2::meetup.intent_type)
     AND ($3::int = 0
          OR m.window_start <= now() + ($3::int * INTERVAL '1 day'))
+    -- Both optional: a meetup matches when any part of its window falls inside
+    -- the range, so one already underway still counts for today.
+    AND ($4::timestamptz IS NULL OR m.window_end > $4::timestamptz)
+    AND ($5::timestamptz IS NULL OR m.window_start < $5::timestamptz)
     -- A host always sees their own meetups; everyone else only within the
     -- 50 km browse radius (ADR-027).
     AND (
       m.host_user_id = $1
       OR ST_DWithin(
         m.location,
-        ST_SetSRID(ST_MakePoint($4::float8, $5::float8), 4326)::geography,
+        ST_SetSRID(ST_MakePoint($6::float8, $7::float8), 4326)::geography,
         50000
       )
     )
-    AND (m.created_at, m.id) < ($6::timestamptz, $7::uuid)
+    AND (m.created_at, m.id) < ($8::timestamptz, $9::uuid)
   ORDER BY m.created_at DESC, m.id DESC
-  LIMIT $8
+  LIMIT $10
 )
 SELECT
   p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location, p.creation_key, p.charge_hold_id, p.creation_request_hash,
@@ -1543,6 +1589,8 @@ type ListOpenMeetupsAfterCursorParams struct {
 	RequesterID     uuid.UUID            `json:"requester_id"`
 	Intent          NullMeetupIntentType `json:"intent"`
 	WithinDays      int32                `json:"within_days"`
+	WindowFrom      pgtype.Timestamptz   `json:"window_from"`
+	WindowTo        pgtype.Timestamptz   `json:"window_to"`
 	ViewerLng       float64              `json:"viewer_lng"`
 	ViewerLat       float64              `json:"viewer_lat"`
 	CursorCreatedAt pgtype.Timestamptz   `json:"cursor_created_at"`
@@ -1605,6 +1653,8 @@ func (q *Queries) ListOpenMeetupsAfterCursor(ctx context.Context, arg ListOpenMe
 		arg.RequesterID,
 		arg.Intent,
 		arg.WithinDays,
+		arg.WindowFrom,
+		arg.WindowTo,
 		arg.ViewerLng,
 		arg.ViewerLat,
 		arg.CursorCreatedAt,
@@ -1672,18 +1722,22 @@ WITH page AS (
     AND ($2::meetup.intent_type IS NULL OR m.intent = $2::meetup.intent_type)
     AND ($3::int = 0
          OR m.window_start <= now() + ($3::int * INTERVAL '1 day'))
+    -- Both optional: a meetup matches when any part of its window falls inside
+    -- the range, so one already underway still counts for today.
+    AND ($4::timestamptz IS NULL OR m.window_end > $4::timestamptz)
+    AND ($5::timestamptz IS NULL OR m.window_start < $5::timestamptz)
     -- A host always sees their own meetups; everyone else only within the
     -- 50 km browse radius (ADR-027).
     AND (
       m.host_user_id = $1
       OR ST_DWithin(
         m.location,
-        ST_SetSRID(ST_MakePoint($4::float8, $5::float8), 4326)::geography,
+        ST_SetSRID(ST_MakePoint($6::float8, $7::float8), 4326)::geography,
         50000
       )
     )
   ORDER BY m.created_at DESC, m.id DESC
-  LIMIT $6
+  LIMIT $8
 )
 SELECT
   p.id, p.host_user_id, p.intent, p.location_lat, p.location_lng, p.location_label, p.capacity, p.status, p.created_at, p.cancelled_at, p.window_start, p.window_end, p.closed_at, p.cancellation_reason, p.starting_soon_notified_at, p.location, p.creation_key, p.charge_hold_id, p.creation_request_hash,
@@ -1713,6 +1767,8 @@ type ListOpenMeetupsFirstPageParams struct {
 	RequesterID uuid.UUID            `json:"requester_id"`
 	Intent      NullMeetupIntentType `json:"intent"`
 	WithinDays  int32                `json:"within_days"`
+	WindowFrom  pgtype.Timestamptz   `json:"window_from"`
+	WindowTo    pgtype.Timestamptz   `json:"window_to"`
 	ViewerLng   float64              `json:"viewer_lng"`
 	ViewerLat   float64              `json:"viewer_lat"`
 	PageLimit   int32                `json:"page_limit"`
@@ -1795,6 +1851,8 @@ func (q *Queries) ListOpenMeetupsFirstPage(ctx context.Context, arg ListOpenMeet
 		arg.RequesterID,
 		arg.Intent,
 		arg.WithinDays,
+		arg.WindowFrom,
+		arg.WindowTo,
 		arg.ViewerLng,
 		arg.ViewerLat,
 		arg.PageLimit,

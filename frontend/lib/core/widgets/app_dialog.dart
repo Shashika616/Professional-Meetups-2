@@ -177,7 +177,7 @@ class AppConfirmDialog extends StatelessWidget {
               label: confirmLabel,
               height: 48,
               isLoading: isLoading,
-              fillColor: danger ? AppPalette.danger : null,
+              fillColor: danger ? AppPalette.sos : null,
               // Only while it is live. PrimaryButton mutes its own label
               // when disabled, and an explicit white overrode that — on
               // light, a white label on the disabled neutral fill was

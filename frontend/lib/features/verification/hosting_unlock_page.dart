@@ -245,23 +245,27 @@ class _LevelTwoPrerequisite extends StatelessWidget {
             style: TextStyle(color: AppPalette.textSecondary, fontSize: 12),
           ),
           const SizedBox(height: 12),
-          GestureDetector(
-            key: const Key('hostingUnlockLevelTwoLink'),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                settings: const RouteSettings(
-                  name: ScreenNames.verificationChecklist,
+          Semantics(
+            container: true,
+            button: true,
+            child: GestureDetector(
+              key: const Key('hostingUnlockLevelTwoLink'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  settings: const RouteSettings(
+                    name: ScreenNames.verificationChecklist,
+                  ),
+                  builder: (_) => const VerificationChecklistPage(),
                 ),
-                builder: (_) => const VerificationChecklistPage(),
               ),
-            ),
-            child: Text(
-              'Unlock joining meetups →',
-              style: TextStyle(
-                color: AppPalette.candyBlue,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+              child: Text(
+                'Unlock joining meetups →',
+                style: TextStyle(
+                  color: AppPalette.candyBlue,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ),

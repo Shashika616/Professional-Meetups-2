@@ -12,6 +12,7 @@ import (
 const (
 	recentMeetupsOnProfile = 5
 	reviewsOnProfile       = 20
+	minReviewsForAverage   = 3
 )
 
 // colombo is the app's one time zone. A profile's dates and months are
@@ -109,6 +110,10 @@ func (s *service) GetMemberActivity(ctx context.Context, viewerID string, viewer
 		Reviews:       make([]MemberReview, 0, len(reviews)),
 	}
 	for _, r := range rows {
+		// With one or two reviews the average is close to someone's own score.
+		if r.ReviewCount < minReviewsForAverage {
+			r.OverallAverage, r.ReviewCount = 0, 0
+		}
 		out.RecentMeetups = append(out.RecentMeetups, MemberMeetup{
 			Intent:           Intent(r.Intent),
 			Status:           Status(r.Status),

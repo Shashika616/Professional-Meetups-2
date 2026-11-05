@@ -60,6 +60,14 @@ class HttpMeetupService implements MeetupService {
     return Meetup.fromJson(_decodeOrThrow(response));
   }
 
+  Map<String, String> _dateRangeQuery(DateTime? from, DateTime? to) {
+    String seconds(DateTime t) => (t.millisecondsSinceEpoch ~/ 1000).toString();
+    return {
+      if (from != null) 'from': seconds(from),
+      if (to != null) 'to': seconds(to),
+    };
+  }
+
   @override
   Future<PagedResult<Meetup>> listOpenMeetups({
     IntentType? intent,
@@ -67,6 +75,8 @@ class HttpMeetupService implements MeetupService {
     required double viewerLng,
     String? cursor,
     int withinDays = 0,
+    DateTime? from,
+    DateTime? to,
   }) async {
     // Both new filters are OMITTED from the query when unset rather than
     // sent as an empty/zero value: the gateway reads an absent parameter as
@@ -78,6 +88,7 @@ class HttpMeetupService implements MeetupService {
       'viewer_lng': viewerLng.toString(),
       if (cursor != null && cursor.isNotEmpty) 'cursor': cursor,
       if (withinDays > 0) 'within_days': withinDays.toString(),
+      ..._dateRangeQuery(from, to),
     };
     final response = await _authenticatedGet('/v1/meetups', query: query);
     final decoded = _decodeOrThrow(response);
@@ -109,8 +120,16 @@ class HttpMeetupService implements MeetupService {
       bool requestedHasMore,
     })
   >
-  listMyMeetups({String? hostedCursor, String? requestedCursor}) async {
+  listMyMeetups({
+    String? hostedCursor,
+    String? requestedCursor,
+    IntentType? intent,
+    DateTime? from,
+    DateTime? to,
+  }) async {
     final query = {
+      if (intent != null) 'intent': intent.wireValue,
+      ..._dateRangeQuery(from, to),
       if (hostedCursor != null && hostedCursor.isNotEmpty)
         'hosted_cursor': hostedCursor,
       if (requestedCursor != null && requestedCursor.isNotEmpty)

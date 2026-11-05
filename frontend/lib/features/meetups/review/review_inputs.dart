@@ -38,26 +38,30 @@ class StarRow extends StatelessWidget {
     return Row(
       children: [
         for (var i = 1; i <= 5; i++)
-          GestureDetector(
-            onTap: () => onScore(i),
-            behavior: HitTestBehavior.opaque,
-            child: Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: TweenAnimationBuilder<double>(
-                duration: const Duration(milliseconds: 220),
-                curve: Curves.easeOutBack,
-                tween: Tween(end: (score ?? 0) >= i ? 1.0 : 0.0),
-                builder: (context, t, _) => Transform.scale(
-                  // Filled stars pop very slightly, so tapping a score
-                  // registers as an action rather than a repaint.
-                  scale: 1 + (t * 0.12),
-                  child: AppIcon(
-                    t > 0.5 ? AppIcons.star : AppIcons.star,
-                    size: size,
-                    color: Color.lerp(
-                      AppPalette.textSecondary.withValues(alpha: 0.55),
-                      AppPalette.gold,
-                      t,
+          Semantics(
+            container: true,
+            button: true,
+            child: GestureDetector(
+              onTap: () => onScore(i),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: TweenAnimationBuilder<double>(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutBack,
+                  tween: Tween(end: (score ?? 0) >= i ? 1.0 : 0.0),
+                  builder: (context, t, _) => Transform.scale(
+                    // Filled stars pop very slightly, so tapping a score
+                    // registers as an action rather than a repaint.
+                    scale: 1 + (t * 0.12),
+                    child: AppIcon(
+                      t > 0.5 ? AppIcons.star : AppIcons.star,
+                      size: size,
+                      color: Color.lerp(
+                        AppPalette.textSecondary.withValues(alpha: 0.55),
+                        AppPalette.gold,
+                        t,
+                      ),
                     ),
                   ),
                 ),
@@ -266,7 +270,7 @@ class _TraitSegment extends StatelessWidget {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               curve: Curves.easeOut,
-              height: 42,
+              height: 44,
               decoration: BoxDecoration(
                 color: AppPalette.card,
                 borderRadius: BorderRadius.circular(12),
@@ -340,37 +344,42 @@ class _TraitChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: dimmed ? null : onTap,
-      child: AnimatedOpacity(
-        duration: const Duration(milliseconds: 180),
-        opacity: dimmed ? 0.4 : 1,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            color: selected ? tone.withValues(alpha: 0.2) : AppPalette.card,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: selected ? tone : AppPalette.hairline,
-              width: selected ? 1.5 : 1,
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(trait.emoji, style: const TextStyle(fontSize: 13)),
-              const SizedBox(width: 6),
-              Text(
-                trait.label,
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontSize: 12.5,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                ),
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: !dimmed,
+      child: GestureDetector(
+        onTap: dimmed ? null : onTap,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          opacity: dimmed ? 0.4 : 1,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: selected ? tone.withValues(alpha: 0.2) : AppPalette.card,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: selected ? tone : AppPalette.hairline,
+                width: selected ? 1.5 : 1,
               ),
-            ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(trait.emoji, style: const TextStyle(fontSize: 13)),
+                const SizedBox(width: 6),
+                Text(
+                  trait.label,
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 12.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

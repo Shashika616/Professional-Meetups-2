@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/models/meetup_date_filter.dart';
+import 'package:professional_connections_platform/core/widgets/empty_section.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/intent_filter_fab.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/meetup_date_filter_bar.dart';
 import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
@@ -303,7 +307,10 @@ class _EventsPageState extends ConsumerState<EventsPage>
 /// mirrors the card shape [_MeetupList] renders once data actually
 /// arrives, so the list doesn't visibly "pop" from blank to content.
 class _MyMeetupsSkeleton extends StatelessWidget {
-  const _MyMeetupsSkeleton();
+  const _MyMeetupsSkeleton({this.withAction = false});
+
+  /// Draws the View requests button that live hosted cards carry.
+  final bool withAction;
 
   @override
   Widget build(BuildContext context) =>
@@ -335,33 +342,49 @@ class _MyMeetupsSkeleton extends StatelessWidget {
                   const SizedBox(width: 10),
                   const SkeletonBox(width: 96, height: 12, opacity: 0.08),
                   const Spacer(),
-                  const SkeletonBox(width: 62, height: 20, radius: 10),
+                  // The trust pill.
+                  const SkeletonBox(width: 62, height: 22, radius: 11),
                 ],
               ),
-              const SizedBox(height: 14),
-              // Time, then the address line with its pin.
-              const SkeletonBox(width: 150, height: 15, opacity: 0.08),
-              const SizedBox(height: 8),
-              const SkeletonBox(width: 210, height: 11),
               const SizedBox(height: 12),
-              // The two tags.
-              Row(
-                children: const [
-                  SkeletonBox(width: 86, height: 24, radius: 12),
+              // The time as the headline, then the address with its pin.
+              const SkeletonBox(width: 180, height: 20, opacity: 0.08),
+              const SizedBox(height: 5),
+              const Row(
+                children: [
+                  SkeletonBox(width: 13, height: 13, radius: 4),
+                  SizedBox(width: 4),
+                  SkeletonBox(width: 190, height: 14),
+                ],
+              ),
+              const SizedBox(height: 10),
+              // The verification badges.
+              const Row(
+                children: [
+                  SkeletonBox(width: 92, height: 24, radius: 12),
                   SizedBox(width: 8),
                   SkeletonBox(width: 70, height: 24, radius: 12),
                 ],
               ),
               const SizedBox(height: 12),
               Divider(height: 1, color: AppPalette.hairline),
-              const SizedBox(height: 12),
-              Row(
-                children: const [
-                  SkeletonBox(width: 58, height: 11),
+              const SizedBox(height: 10),
+              // The rating and the status.
+              const Row(
+                children: [
+                  SkeletonBox(width: 76, height: 14),
                   Spacer(),
-                  SkeletonBox(width: 92, height: 11),
+                  SkeletonBox(width: 72, height: 14),
                 ],
               ),
+              if (withAction) ...[
+                const SizedBox(height: 12),
+                const SkeletonBox(
+                  width: double.infinity,
+                  height: 40,
+                  radius: 12,
+                ),
+              ],
             ],
           ),
         ),
@@ -410,8 +433,18 @@ class _MeetupList extends ConsumerStatefulWidget {
 }
 
 class _MeetupListState extends ConsumerState<_MeetupList>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late final TabController _subTabs;
+
+  /// The intent applies to both sub-tabs. Each keeps its own date, since one
+  /// looks forward and the other back. Null means no filter.
+  IntentType? _intent;
+  MeetupDateFilter? _openDate;
+  MeetupDateFilter? _historyDate;
+
+  // The filters survive a switch between My meetings and Requested meetings.
+  @override
+  bool get wantKeepAlive => true;
 
   static bool _isOpen(Meetup m) =>
       m.status == MeetupStatus.open || m.status == MeetupStatus.full;
@@ -440,13 +473,19 @@ class _MeetupListState extends ConsumerState<_MeetupList>
   /// source is correct — the alternative (per-tab cursors) would ask the
   /// server to filter by a status split it does not model.
   Future<({List<Meetup> items, String? nextCursor, bool hasMore})> _loadMore(
-    String cursor,
-  ) async {
+    String cursor, {
+    IntentType? intent,
+    DateTime? from,
+    DateTime? to,
+  }) async {
     final result = await ref
         .read(meetupServiceProvider)
         .listMyMeetups(
           hostedCursor: widget.isHosted ? cursor : null,
           requestedCursor: widget.isHosted ? null : cursor,
+          intent: intent,
+          from: from,
+          to: to,
         );
     return (
       items: widget.isHosted ? result.hosted : result.requested,
@@ -462,32 +501,144 @@ class _MeetupListState extends ConsumerState<_MeetupList>
     await ref.read(myMeetupsProvider.future).then((_) {});
   }
 
+  void _clearFilters() => setState(() {
+    _intent = null;
+    _openDate = null;
+    _historyDate = null;
+  });
+
   @override
   Widget build(BuildContext context) {
-    return Column(
+    // Required by the keep-alive mixin.
+    super.build(context);
+    return Stack(
       children: [
-        _SubTabSelector(controller: _subTabs),
-        Expanded(
-          child: TabBarView(
-            controller: _subTabs,
-            physics: _noSwipeInsideAppShell,
-            children: [
-              _buildList(_isOpen, widget.emptyState),
-              _buildList(_isHistory, widget.historyEmptyState),
-            ],
+        Column(
+          children: [
+            _SubTabSelector(controller: _subTabs),
+            Expanded(
+              child: TabBarView(
+                controller: _subTabs,
+                physics: _noSwipeInsideAppShell,
+                children: [
+                  _buildTab(_isOpen, widget.emptyState, past: false),
+                  _buildTab(_isHistory, widget.historyEmptyState, past: true),
+                ],
+              ),
+            ),
+          ],
+        ),
+        Positioned(
+          right: 16,
+          bottom: 16,
+          child: IntentFilterFab(
+            selected: _intent,
+            onSelect: (picked) => setState(() => _intent = picked),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildList(bool Function(Meetup) filter, Widget emptyState) {
+  Widget _buildTab(
+    bool Function(Meetup) filter,
+    Widget emptyState, {
+    required bool past,
+  }) {
+    final date = past ? _historyDate : _openDate;
+    return Column(
+      children: [
+        MeetupDateFilterBar(
+          selected: date,
+          past: past,
+          clearable: true,
+          onChanged: (picked) => setState(() {
+            if (past) {
+              _historyDate = picked;
+            } else {
+              _openDate = picked;
+            }
+          }),
+        ),
+        Expanded(
+          child: _intent == null && date == null
+              ? _buildList(
+                  filter: filter,
+                  emptyState: emptyState,
+                  items: widget.initialItems,
+                  nextCursor: widget.initialNextCursor,
+                  hasMore: widget.initialHasMore,
+                  loadMore: _loadMore,
+                )
+              : _buildFilteredList(filter, date, past: past),
+        ),
+      ],
+    );
+  }
+
+  /// The server does this filtering, because the list is paged and matches
+  /// may be on pages not fetched yet. Open and History still split here.
+  Widget _buildFilteredList(
+    bool Function(Meetup) filter,
+    MeetupDateFilter? date, {
+    required bool past,
+  }) {
+    final range = date?.range(DateTime.now(), past: past);
+    final key = (intent: _intent, from: range?.from, to: range?.to);
+    return ref
+        .watch(filteredMyMeetupsProvider(key))
+        .when(
+          loading: () =>
+              _MyMeetupsSkeleton(withAction: widget.isHosted && !past),
+          error: (error, _) => ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              LoadFailedState(
+                failure: LoadFailure.of(error),
+                onRetry: () => ref.invalidate(filteredMyMeetupsProvider(key)),
+              ),
+            ],
+          ),
+          data: (result) => _buildList(
+            // Fresh pagination state for each filter.
+            key: ValueKey(key),
+            filter: filter,
+            emptyState: _NoFilterMatches(onClear: _clearFilters),
+            items: widget.isHosted ? result.hosted : result.requested,
+            nextCursor: widget.isHosted
+                ? result.hostedNextCursor
+                : result.requestedNextCursor,
+            hasMore: widget.isHosted
+                ? result.hostedHasMore
+                : result.requestedHasMore,
+            loadMore: (cursor) => _loadMore(
+              cursor,
+              intent: key.intent,
+              from: key.from,
+              to: key.to,
+            ),
+          ),
+        );
+  }
+
+  Widget _buildList({
+    Key? key,
+    required bool Function(Meetup) filter,
+    required Widget emptyState,
+    required List<Meetup> items,
+    required String? nextCursor,
+    required bool hasMore,
+    required Future<({List<Meetup> items, String? nextCursor, bool hasMore})>
+    Function(String cursor)
+    loadMore,
+  }) {
     return PaginatedMeetupList(
-      items: widget.initialItems.where(filter).toList(),
-      nextCursor: widget.initialNextCursor,
-      hasMore: widget.initialHasMore,
+      key: key,
+      items: items.where(filter).toList(),
+      nextCursor: nextCursor,
+      hasMore: hasMore,
       loadMore: (cursor) async {
-        final next = await _loadMore(cursor);
+        final next = await loadMore(cursor);
         // The filter is applied to appended pages too — without this, a
         // page-2 fetch would append history rows into the open tab.
         return (
@@ -513,6 +664,32 @@ class _MeetupListState extends ConsumerState<_MeetupList>
             ? () => widget.onTap(meetup)
             : null,
       ),
+    );
+  }
+}
+
+class _NoFilterMatches extends StatelessWidget {
+  const _NoFilterMatches({required this.onClear});
+
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const EmptySection(
+          icon: AppIcons.calendar,
+          title: 'No meetups match these filters',
+        ),
+        const SizedBox(height: 12),
+        SecondaryButton(
+          key: const Key('clear-filters'),
+          label: 'Clear filters',
+          height: 44,
+          onPressed: onClear,
+        ),
+      ],
     );
   }
 }

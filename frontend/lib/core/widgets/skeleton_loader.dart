@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/utils/reduced_motion.dart';
 import 'package:professional_connections_platform/core/widgets/ambient_animation.dart';
 
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -138,8 +139,7 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
     // system for less animation should get a still placeholder, not an
     // exception to their own preference — and it keeps the placeholder
     // fully legible either way.
-    if (debugDisableAmbientAnimations ||
-        (MediaQuery.maybeDisableAnimationsOf(context) ?? false)) {
+    if (debugDisableAmbientAnimations || reducedMotion(context)) {
       return widget.child;
     }
 

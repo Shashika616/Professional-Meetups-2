@@ -98,10 +98,14 @@ class _Row extends StatelessWidget {
     // chevron leaves most of its width as transparent padding, and
     // deferToChild only hit-tests the painted children — so the row only
     // responded on the label or the arrow, with dead space between them.
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: row,
+    return Semantics(
+      container: true,
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: row,
+      ),
     );
   }
 }

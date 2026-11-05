@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:professional_connections_platform/core/utils/reduced_motion.dart';
 
 /// Press feedback for a whole card, row or tile the user taps to go
 /// somewhere (Plan 23, Finding 1).
@@ -64,25 +65,29 @@ class _PressableState extends State<Pressable> {
     // on purpose: someone who asked the OS for less motion gets the tap and
     // the card, just not the movement. One pattern for reduced motion in
     // this codebase, not two.
-    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final reduceMotion = reducedMotion(context);
 
-    return GestureDetector(
-      onTapDown: _onTapDown,
-      onTapUp: _onTapUp,
-      onTapCancel: _onTapCancel,
-      // Plain `onTap`, unchanged semantics: it still fires on release inside
-      // the bounds and not at all if the finger slides off first. This
-      // widget adds a visual response to the press; it does not move when a
-      // tap counts as a tap.
-      onTap: widget.onTap,
-      child: reduceMotion
-          ? widget.child
-          : AnimatedScale(
-              scale: _isPressed ? 0.98 : 1.0,
-              duration: const Duration(milliseconds: 120),
-              curve: Curves.easeOut,
-              child: widget.child,
-            ),
+    return Semantics(
+      container: true,
+      button: widget.onTap != null,
+      child: GestureDetector(
+        onTapDown: _onTapDown,
+        onTapUp: _onTapUp,
+        onTapCancel: _onTapCancel,
+        // Plain `onTap`, unchanged semantics: it still fires on release inside
+        // the bounds and not at all if the finger slides off first. This
+        // widget adds a visual response to the press; it does not move when a
+        // tap counts as a tap.
+        onTap: widget.onTap,
+        child: reduceMotion
+            ? widget.child
+            : AnimatedScale(
+                scale: _isPressed ? 0.98 : 1.0,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOut,
+                child: widget.child,
+              ),
+      ),
     );
   }
 }

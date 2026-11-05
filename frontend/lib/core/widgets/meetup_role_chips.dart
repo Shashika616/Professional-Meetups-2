@@ -48,7 +48,7 @@ class MeetupRoleChips extends StatelessWidget {
         _RoleChip(
           icon: AppIcons.star,
           label: concluded ? 'You hosted' : 'You\'re hosting',
-          tone: AppPalette.brandGreen,
+          tone: AppPalette.verifiedText,
           compact: compact,
         ),
       );
@@ -74,7 +74,7 @@ class MeetupRoleChips extends StatelessWidget {
           MeetupRequestStatus.accepted => (
             concluded ? 'You joined' : 'You\'re in',
             AppIcons.checkCircle,
-            AppPalette.verified,
+            AppPalette.verifiedText,
           ),
           // A request nobody answered before the meetup ended or was
           // called off is no longer pending anything.

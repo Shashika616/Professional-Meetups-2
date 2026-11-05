@@ -347,7 +347,7 @@ func (c *grpcClient) CreateMeetup(
 // withinDays 0 means unrestricted.
 func (c *grpcClient) ListOpenMeetups(
 	ctx context.Context, userID, intent, cursor string, pageSize int32,
-	viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32,
+	viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32, windowFrom, windowTo int64,
 ) ([]Meetup, string, error) {
 	intentProto := meetupv1.Intent_INTENT_UNSPECIFIED
 	if intent != "" {
@@ -358,14 +358,16 @@ func (c *grpcClient) ListOpenMeetups(
 		intentProto = resolved
 	}
 	resp, err := c.meetup.ListOpenMeetups(ctx, &meetupv1.ListOpenMeetupsRequest{
-		UserId:           userID,
-		Intent:           intentProto,
-		Cursor:           cursor,
-		PageSize:         pageSize,
-		ViewerLat:        viewerLat,
-		ViewerLng:        viewerLng,
-		ViewerTrustLevel: viewerTrustLevel,
-		WithinDays:       withinDays,
+		UserId:                userID,
+		Intent:                intentProto,
+		Cursor:                cursor,
+		PageSize:              pageSize,
+		ViewerLat:             viewerLat,
+		ViewerLng:             viewerLng,
+		ViewerTrustLevel:      viewerTrustLevel,
+		WithinDays:            withinDays,
+		WindowFromUnixSeconds: windowFrom,
+		WindowToUnixSeconds:   windowTo,
 	})
 	if err != nil {
 		return nil, "", err
@@ -383,11 +385,20 @@ func (c *grpcClient) GetMeetup(ctx context.Context, meetupID, userID string, vie
 	return meetupFromProto(resp), nil
 }
 
-func (c *grpcClient) ListMyMeetups(ctx context.Context, userID, hostedCursor, requestedCursor string) (
+func (c *grpcClient) ListMyMeetups(ctx context.Context, userID, hostedCursor, requestedCursor, intent string, windowFrom, windowTo int64) (
 	hosted, requested []Meetup, hostedNextCursor string, hostedHasMore bool, requestedNextCursor string, requestedHasMore bool, err error,
 ) {
+	intentProto := meetupv1.Intent_INTENT_UNSPECIFIED
+	if intent != "" {
+		resolved, ok := intentFromWire[intent]
+		if !ok {
+			return nil, nil, "", false, "", false, status.Errorf(codes.InvalidArgument, "unknown intent %q", intent)
+		}
+		intentProto = resolved
+	}
 	resp, err := c.meetup.ListMyMeetups(ctx, &meetupv1.ListMyMeetupsRequest{
 		UserId: userID, HostedCursor: hostedCursor, RequestedCursor: requestedCursor,
+		Intent: intentProto, WindowFromUnixSeconds: windowFrom, WindowToUnixSeconds: windowTo,
 	})
 	if err != nil {
 		return nil, nil, "", false, "", false, err

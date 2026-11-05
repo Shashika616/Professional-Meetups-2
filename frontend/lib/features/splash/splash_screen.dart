@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/utils/reduced_motion.dart';
 import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/app_shell.dart';
@@ -97,7 +98,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     _started = true;
     // Reduce motion: the finished mark from the first frame, and a plain fade
     // out of it.
-    final still = MediaQuery.disableAnimationsOf(context);
+    final still = reducedMotion(context);
     if (still) {
       _assemble.value = 1;
     } else {

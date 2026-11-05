@@ -29,8 +29,12 @@ const (
 	MaxFetchedBytes = 2 << 20
 	// MaxSide bounds the dimensions read from the header, before any pixel
 	// is decoded, so a small file declaring a huge image cannot exhaust
-	// memory.
-	MaxSide = 4096
+	// memory. The app sends 640 px, and 16-bit RGBA at this size is 32 MB.
+	MaxSide = 2048
+	// maxDecoding is how many pictures may be decoded at once. The server
+	// that decodes them also sends SOS alerts, so a burst of uploads waits
+	// its turn rather than filling memory.
+	maxDecoding = 2
 	// Side is the stored size: the largest avatar is 96 pt at 3x.
 	Side = 320
 	// MaxStoredBytes matches the CHECK on auth.user_photos.
@@ -40,6 +44,8 @@ const (
 	// fallbackQuality is for the rare noisy picture that does not fit.
 	fallbackQuality = 55
 )
+
+var decoding = make(chan struct{}, maxDecoding)
 
 // ErrNotAnImage is the one refusal a user sees for any unusable picture.
 var ErrNotAnImage = fmt.Errorf("photo: use a JPEG, PNG or WebP picture: %w", apperror.ErrInvalidInput)
@@ -89,6 +95,8 @@ func normalize(raw []byte, maxBytes int) ([]byte, int, int, error) {
 	if cfg.Width < 1 || cfg.Height < 1 || cfg.Width > MaxSide || cfg.Height > MaxSide {
 		return nil, 0, 0, ErrTooLarge
 	}
+	decoding <- struct{}{}
+	defer func() { <-decoding }()
 	src, err := decode(bytes.NewReader(raw))
 	if err != nil {
 		return nil, 0, 0, ErrNotAnImage

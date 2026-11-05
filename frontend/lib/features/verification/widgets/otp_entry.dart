@@ -226,18 +226,23 @@ class _OtpEntryState extends State<OtpEntry> {
         ),
         const SizedBox(height: 14),
         Center(
-          child: GestureDetector(
-            onTap: canResend ? _resend : null,
-            child: Text(
-              canResend
-                  ? 'Resend code'
-                  : 'Resend code in ${_secondsRemaining}s',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: canResend
-                    ? AppPalette.candyBlue
-                    : AppPalette.textSecondary.withValues(alpha: 0.6),
+          child: Semantics(
+            container: true,
+            button: true,
+            enabled: canResend,
+            child: GestureDetector(
+              onTap: canResend ? _resend : null,
+              child: Text(
+                canResend
+                    ? 'Resend code'
+                    : 'Resend code in ${_secondsRemaining}s',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: canResend
+                      ? AppPalette.candyBlue
+                      : AppPalette.textSecondary.withValues(alpha: 0.6),
+                ),
               ),
             ),
           ),

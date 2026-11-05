@@ -228,51 +228,58 @@ class _ContactRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
-      child: InkWell(
-        onTap: alreadyShared ? null : onToggle,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-          child: Row(
-            children: [
-              AppIcon(
-                alreadyShared
-                    ? AppIcons.checkCircle
-                    : (selected ? AppIcons.checkboxChecked : AppIcons.checkbox),
-                size: 22,
-                color: alreadyShared
-                    ? AppPalette.verified
-                    : (selected
-                          ? AppPalette.candyBlue
-                          : AppPalette.textSecondary),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      contact.name,
-                      style: TextStyle(
-                        color: alreadyShared
-                            ? AppPalette.textSecondary
-                            : AppPalette.textPrimary,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    if (subtitle.isNotEmpty)
+      child: Semantics(
+        container: true,
+        button: true,
+        enabled: !alreadyShared,
+        child: InkWell(
+          onTap: alreadyShared ? null : onToggle,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            child: Row(
+              children: [
+                AppIcon(
+                  alreadyShared
+                      ? AppIcons.checkCircle
+                      : (selected
+                            ? AppIcons.checkboxChecked
+                            : AppIcons.checkbox),
+                  size: 22,
+                  color: alreadyShared
+                      ? AppPalette.verified
+                      : (selected
+                            ? AppPalette.candyBlue
+                            : AppPalette.textSecondary),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        subtitle,
+                        contact.name,
                         style: TextStyle(
-                          color: AppPalette.textSecondary,
-                          fontSize: 11,
+                          color: alreadyShared
+                              ? AppPalette.textSecondary
+                              : AppPalette.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                  ],
+                      if (subtitle.isNotEmpty)
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            color: AppPalette.textSecondary,
+                            fontSize: 11,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -344,7 +351,7 @@ class _ErrorRow extends StatelessWidget {
           style: TextStyle(color: AppPalette.textPrimary, fontSize: 13),
         ),
         const SizedBox(height: 12),
-        SecondaryButton(label: 'Retry', height: 42, onPressed: onRetry),
+        SecondaryButton(label: 'Retry', height: 44, onPressed: onRetry),
       ],
     );
   }

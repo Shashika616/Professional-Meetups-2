@@ -39,6 +39,8 @@ type meetupRecorder struct {
 	gotFCMToken           string
 	gotUnregisteredToken  string
 	gotWithinDays         int32
+	gotWindowFrom         int64
+	gotWindowTo           int64
 }
 
 // The fake in handlers_test.go embeds monolithclient.Client, so these
@@ -49,10 +51,11 @@ func (f *fakeMonolith) CreateMeetup(_ context.Context, hostUserID string, hostTr
 	return monolithclient.Meetup{ID: "meetup-1", HostUserID: hostUserID}, f.err
 }
 
-func (f *fakeMonolith) ListOpenMeetups(_ context.Context, userID, intent, cursor string, _ int32, viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32) ([]monolithclient.Meetup, string, error) {
+func (f *fakeMonolith) ListOpenMeetups(_ context.Context, userID, intent, cursor string, _ int32, viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32, windowFrom, windowTo int64) ([]monolithclient.Meetup, string, error) {
 	f.meetup.gotUserID, f.meetup.gotIntent, f.meetup.gotCursor = userID, intent, cursor
 	f.meetup.gotViewerLat, f.meetup.gotViewerLng, f.meetup.gotTrustLevel = viewerLat, viewerLng, viewerTrustLevel
 	f.meetup.gotWithinDays = withinDays
+	f.meetup.gotWindowFrom, f.meetup.gotWindowTo = windowFrom, windowTo
 	return []monolithclient.Meetup{{ID: "meetup-1"}}, "next-cursor", f.err
 }
 
@@ -64,8 +67,9 @@ func (f *fakeMonolith) GetMeetup(_ context.Context, meetupID, userID string, vie
 	return monolithclient.Meetup{ID: meetupID}, f.err
 }
 
-func (f *fakeMonolith) ListMyMeetups(_ context.Context, userID, hostedCursor, requestedCursor string) ([]monolithclient.Meetup, []monolithclient.Meetup, string, bool, string, bool, error) {
-	f.meetup.gotUserID = userID
+func (f *fakeMonolith) ListMyMeetups(_ context.Context, userID, hostedCursor, requestedCursor, intent string, windowFrom, windowTo int64) ([]monolithclient.Meetup, []monolithclient.Meetup, string, bool, string, bool, error) {
+	f.meetup.gotUserID, f.meetup.gotIntent = userID, intent
+	f.meetup.gotWindowFrom, f.meetup.gotWindowTo = windowFrom, windowTo
 	return nil, nil, "", false, "", false, f.err
 }
 
@@ -474,5 +478,31 @@ func TestListOpenMeetups_TrustLevelStillComesFromTheJWT(t *testing.T) {
 	}
 	if got := s.monolith.meetup.gotTrustLevel; got != 1 {
 		t.Errorf("forwarded trust level = %d, want 1 from the JWT — a query parameter must never override it", got)
+	}
+}
+
+// The date range reaches the monolith on both lists, and a typo is a 400
+// rather than a silently unfiltered list.
+func TestMeetupLists_ForwardTheDateRange(t *testing.T) {
+	for name, path := range map[string]string{
+		"open": "/v1/meetups?viewer_lat=6.9&viewer_lng=79.8&from=1000&to=2000",
+		"mine": "/v1/meetups/mine?intent=coffee&from=1000&to=2000",
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newTestServer(t)
+			rec := s.do(http.MethodGet, path, "", s.tokenFor(t, "user-1", 3))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", rec.Code)
+			}
+			if s.monolith.meetup.gotWindowFrom != 1000 || s.monolith.meetup.gotWindowTo != 2000 {
+				t.Errorf("forwarded %d to %d, want 1000 to 2000", s.monolith.meetup.gotWindowFrom, s.monolith.meetup.gotWindowTo)
+			}
+		})
+	}
+	for _, query := range []string{"from=soon", "to=-5"} {
+		s := newTestServer(t)
+		if rec := s.do(http.MethodGet, "/v1/meetups/mine?"+query, "", s.tokenFor(t, "user-1", 3)); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", query, rec.Code)
+		}
 	}
 }

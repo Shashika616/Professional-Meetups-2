@@ -205,6 +205,8 @@ func (s *MeetupServer) ListOpenMeetups(ctx context.Context, req *meetupv1.ListOp
 		UserID:           req.GetUserId(),
 		Intent:           intent,
 		WithinDays:       req.GetWithinDays(),
+		WindowFrom:       timeFromUnix(req.GetWindowFromUnixSeconds()),
+		WindowTo:         timeFromUnix(req.GetWindowToUnixSeconds()),
 		Cursor:           req.GetCursor(),
 		PageSize:         int(req.GetPageSize()),
 		ViewerLat:        req.GetViewerLat(),
@@ -233,10 +235,18 @@ func (s *MeetupServer) GetMeetup(ctx context.Context, req *meetupv1.GetMeetupReq
 }
 
 func (s *MeetupServer) ListMyMeetups(ctx context.Context, req *meetupv1.ListMyMeetupsRequest) (*meetupv1.ListMyMeetupsResponse, error) {
+	var intent *meetup.Intent
+	if req.GetIntent() != meetupv1.Intent_INTENT_UNSPECIFIED {
+		resolved := intentFromProto[req.GetIntent()]
+		intent = &resolved
+	}
 	result, err := s.svc.ListMyMeetups(ctx, meetup.ListMyMeetupsRequest{
 		UserID:          req.GetUserId(),
 		HostedCursor:    req.GetHostedCursor(),
 		RequestedCursor: req.GetRequestedCursor(),
+		Intent:          intent,
+		WindowFrom:      timeFromUnix(req.GetWindowFromUnixSeconds()),
+		WindowTo:        timeFromUnix(req.GetWindowToUnixSeconds()),
 	})
 	if err != nil {
 		return nil, apperror.ToGRPCStatus(err)
@@ -599,4 +609,13 @@ func (s *MeetupServer) CheckAccountDeletable(ctx context.Context, req *meetupv1.
 		return nil, apperror.ToGRPCStatus(err)
 	}
 	return &meetupv1.CheckAccountDeletableResponse{}, nil
+}
+
+// timeFromUnix reads an optional timestamp, where 0 means unset.
+func timeFromUnix(seconds int64) *time.Time {
+	if seconds == 0 {
+		return nil
+	}
+	t := time.Unix(seconds, 0)
+	return &t
 }

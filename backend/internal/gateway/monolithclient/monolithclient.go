@@ -181,10 +181,11 @@ type Client interface {
 
 	// --- meetup module (Phase 2) — same connection, same interceptor ---
 	CreateMeetup(ctx context.Context, hostUserID string, hostTrustLevel int32, intent string, windowStart, windowEnd int64, lat, lng float64, label string, capacity int32, charge CreateCharge) (Meetup, error)
-	// intent "" means every intent; withinDays 0 means no time restriction.
-	ListOpenMeetups(ctx context.Context, userID, intent, cursor string, pageSize int32, viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32) ([]Meetup, string, error)
+	// intent "" means every intent; withinDays 0 means no time restriction;
+	// windowFrom and windowTo are unix seconds, 0 for no limit on that side.
+	ListOpenMeetups(ctx context.Context, userID, intent, cursor string, pageSize int32, viewerLat, viewerLng float64, viewerTrustLevel, withinDays int32, windowFrom, windowTo int64) ([]Meetup, string, error)
 	GetMeetup(ctx context.Context, meetupID, userID string, viewerTrustLevel int32) (Meetup, error)
-	ListMyMeetups(ctx context.Context, userID, hostedCursor, requestedCursor string) (hosted, requested []Meetup, hostedNextCursor string, hostedHasMore bool, requestedNextCursor string, requestedHasMore bool, err error)
+	ListMyMeetups(ctx context.Context, userID, hostedCursor, requestedCursor, intent string, windowFrom, windowTo int64) (hosted, requested []Meetup, hostedNextCursor string, hostedHasMore bool, requestedNextCursor string, requestedHasMore bool, err error)
 	ListActiveMeetups(ctx context.Context, userID string) ([]Meetup, error)
 	// CheckSchedule returns the meetup userID is already committed to in
 	// the window, and false when it is free (ADR-005, advisory).

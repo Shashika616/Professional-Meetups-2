@@ -3,10 +3,16 @@ package auth
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 	"professional-meetups-monolith/backend/internal/platform/geo"
+	"professional-meetups-monolith/backend/internal/platform/ratelimit"
 )
+
+// locationReportRule: the app reports at most about hourly or when the phone
+// moves, so 60 a day is generous. Failing open costs one small write.
+var locationReportRule = ratelimit.Rule{Name: "auth:location-report", Limit: 60, Window: 24 * time.Hour}
 
 // UpdateLastKnownLocation records the browse screen's on-demand location
 // read — self-only data, no participant/trust-level gate needed. Publishing
@@ -20,6 +26,9 @@ import (
 func (s *service) UpdateLastKnownLocation(ctx context.Context, req UpdateLastKnownLocationRequest) error {
 	if err := geo.ValidateLatLng(req.Lat, req.Lng); err != nil {
 		return fmt.Errorf("auth: %v: %w", err, apperror.ErrInvalidInput)
+	}
+	if err := s.limits.Check(ctx, locationReportRule, req.UserID); err != nil {
+		return err
 	}
 	// Kept to about 110 m (plan 30B, 3.3), whatever the app sends: enough
 	// for a 50 km radius, too coarse to find a house. The published event,

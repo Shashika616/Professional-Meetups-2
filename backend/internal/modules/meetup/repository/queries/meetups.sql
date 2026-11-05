@@ -114,6 +114,10 @@ WITH page AS (
     AND (sqlc.narg(intent)::meetup.intent_type IS NULL OR m.intent = sqlc.narg(intent)::meetup.intent_type)
     AND (sqlc.arg(within_days)::int = 0
          OR m.window_start <= now() + (sqlc.arg(within_days)::int * INTERVAL '1 day'))
+    -- Both optional: a meetup matches when any part of its window falls inside
+    -- the range, so one already underway still counts for today.
+    AND (sqlc.narg(window_from)::timestamptz IS NULL OR m.window_end > sqlc.narg(window_from)::timestamptz)
+    AND (sqlc.narg(window_to)::timestamptz IS NULL OR m.window_start < sqlc.narg(window_to)::timestamptz)
     -- A host always sees their own meetups; everyone else only within the
     -- 50 km browse radius (ADR-027).
     AND (
@@ -187,6 +191,10 @@ WITH page AS (
     AND (sqlc.narg(intent)::meetup.intent_type IS NULL OR m.intent = sqlc.narg(intent)::meetup.intent_type)
     AND (sqlc.arg(within_days)::int = 0
          OR m.window_start <= now() + (sqlc.arg(within_days)::int * INTERVAL '1 day'))
+    -- Both optional: a meetup matches when any part of its window falls inside
+    -- the range, so one already underway still counts for today.
+    AND (sqlc.narg(window_from)::timestamptz IS NULL OR m.window_end > sqlc.narg(window_from)::timestamptz)
+    AND (sqlc.narg(window_to)::timestamptz IS NULL OR m.window_start < sqlc.narg(window_to)::timestamptz)
     -- A host always sees their own meetups; everyone else only within the
     -- 50 km browse radius (ADR-027).
     AND (
@@ -259,6 +267,9 @@ LEFT JOIN LATERAL (
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
 WHERE m.host_user_id = $1
+  AND (sqlc.narg(intent)::meetup.intent_type IS NULL OR m.intent = sqlc.narg(intent)::meetup.intent_type)
+  AND (sqlc.narg(window_from)::timestamptz IS NULL OR m.window_end > sqlc.narg(window_from)::timestamptz)
+  AND (sqlc.narg(window_to)::timestamptz IS NULL OR m.window_start < sqlc.narg(window_to)::timestamptz)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2;
 
@@ -281,6 +292,9 @@ LEFT JOIN LATERAL (
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
 WHERE m.host_user_id = $1
+  AND (sqlc.narg(intent)::meetup.intent_type IS NULL OR m.intent = sqlc.narg(intent)::meetup.intent_type)
+  AND (sqlc.narg(window_from)::timestamptz IS NULL OR m.window_end > sqlc.narg(window_from)::timestamptz)
+  AND (sqlc.narg(window_to)::timestamptz IS NULL OR m.window_start < sqlc.narg(window_to)::timestamptz)
   AND (m.created_at, m.id) < (sqlc.arg(cursor_created_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2;
@@ -318,6 +332,9 @@ LEFT JOIN LATERAL (
   SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
+WHERE (sqlc.narg(intent)::meetup.intent_type IS NULL OR m.intent = sqlc.narg(intent)::meetup.intent_type)
+  AND (sqlc.narg(window_from)::timestamptz IS NULL OR m.window_end > sqlc.narg(window_from)::timestamptz)
+  AND (sqlc.narg(window_to)::timestamptz IS NULL OR m.window_start < sqlc.narg(window_to)::timestamptz)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2;
 
@@ -346,7 +363,10 @@ LEFT JOIN LATERAL (
   SELECT ROUND(AVG(score), 2) AS rating_average, count(*) AS rating_count
   FROM meetup.meetup_user_ratings mr WHERE mr.rated_user_id = m.host_user_id
 ) ratings ON true
-WHERE (m.created_at, m.id) < (sqlc.arg(cursor_created_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
+WHERE (sqlc.narg(intent)::meetup.intent_type IS NULL OR m.intent = sqlc.narg(intent)::meetup.intent_type)
+  AND (sqlc.narg(window_from)::timestamptz IS NULL OR m.window_end > sqlc.narg(window_from)::timestamptz)
+  AND (sqlc.narg(window_to)::timestamptz IS NULL OR m.window_start < sqlc.narg(window_to)::timestamptz)
+  AND (m.created_at, m.id) < (sqlc.arg(cursor_created_at)::timestamptz, sqlc.arg(cursor_id)::uuid)
 ORDER BY m.created_at DESC, m.id DESC
 LIMIT $2;
 

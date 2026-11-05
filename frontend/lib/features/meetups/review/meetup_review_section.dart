@@ -382,13 +382,13 @@ class _RatedPersonRow extends StatelessWidget {
                       AppIcon(
                         AppIcons.star,
                         size: 12,
-                        color: AppPalette.brandGreen,
+                        color: AppPalette.verifiedText,
                       ),
                       const SizedBox(width: 4),
                       Text(
                         'Host',
                         style: TextStyle(
-                          color: AppPalette.brandGreen,
+                          color: AppPalette.verifiedText,
                           fontSize: 9.5,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 1.1,

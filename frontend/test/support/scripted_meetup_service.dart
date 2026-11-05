@@ -130,6 +130,8 @@ class ScriptedMeetupService implements MeetupService {
   IntentType? lastListOpenMeetupsIntent;
   int? lastListOpenMeetupsWithinDays;
   int listOpenMeetupsCallCount = 0;
+  DateTime? lastListOpenMeetupsFrom;
+  DateTime? lastListOpenMeetupsTo;
   final List<String?> listOpenMeetupsCursors = [];
 
   @override
@@ -166,12 +168,16 @@ class ScriptedMeetupService implements MeetupService {
     required double viewerLng,
     String? cursor,
     int withinDays = 0,
+    DateTime? from,
+    DateTime? to,
   }) async {
     listOpenMeetupsCallCount++;
     lastListOpenMeetupsViewerLat = viewerLat;
     lastListOpenMeetupsViewerLng = viewerLng;
     lastListOpenMeetupsIntent = intent;
     lastListOpenMeetupsWithinDays = withinDays;
+    lastListOpenMeetupsFrom = from;
+    lastListOpenMeetupsTo = to;
     listOpenMeetupsCursors.add(cursor);
     if (_openMeetupsGate != null) {
       await _openMeetupsGate;
@@ -213,7 +219,13 @@ class ScriptedMeetupService implements MeetupService {
       bool requestedHasMore,
     })
   >
-  listMyMeetups({String? hostedCursor, String? requestedCursor}) async {
+  listMyMeetups({
+    String? hostedCursor,
+    String? requestedCursor,
+    IntentType? intent,
+    DateTime? from,
+    DateTime? to,
+  }) async {
     listMyMeetupsCallCount++;
     listMyMeetupsCalls.add((
       hostedCursor: hostedCursor,

@@ -95,24 +95,28 @@ class _StepperButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onTap != null;
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: enabled
-              ? AppPalette.tintedSurface(
-                  AppPalette.candyBlue.withValues(alpha: 0.15),
-                )
-              : AppPalette.tintedSurface(
-                  AppPalette.textPrimary.withValues(alpha: 0.05),
-                ),
-        ),
-        child: AppIcon(
-          icon,
-          color: enabled ? AppPalette.candyBlue : AppPalette.textSecondary,
+    return Semantics(
+      container: true,
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: enabled
+                ? AppPalette.tintedSurface(
+                    AppPalette.candyBlue.withValues(alpha: 0.15),
+                  )
+                : AppPalette.tintedSurface(
+                    AppPalette.textPrimary.withValues(alpha: 0.05),
+                  ),
+          ),
+          child: AppIcon(
+            icon,
+            color: enabled ? AppPalette.candyBlue : AppPalette.textSecondary,
+          ),
         ),
       ),
     );

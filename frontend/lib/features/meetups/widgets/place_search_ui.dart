@@ -130,7 +130,7 @@ class _PlaceSearchBarState extends State<PlaceSearchBar> {
           color: AppPalette.textSecondary,
         ),
         padding: EdgeInsets.zero,
-        constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+        constraints: const BoxConstraints.tightFor(width: 44, height: 44),
       );
     } else {
       trailing = const SizedBox.shrink();
@@ -172,7 +172,7 @@ class _PlaceSearchBarState extends State<PlaceSearchBar> {
             ),
           ),
           const SizedBox(width: 6),
-          SizedBox(width: 32, height: 32, child: Center(child: trailing)),
+          SizedBox(width: 44, height: 44, child: Center(child: trailing)),
         ],
       ),
     );

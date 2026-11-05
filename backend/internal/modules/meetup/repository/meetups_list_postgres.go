@@ -3,9 +3,12 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"professional-meetups-monolith/backend/internal/modules/meetup/repository/sqlcgen"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func (r *postgresMeetupRepository) ListOpen(
@@ -19,13 +22,7 @@ func (r *postgresMeetupRepository) ListOpen(
 	// A nil Intent becomes a NULL bind, which the query reads as "every
 	// intent" — see its WHERE clause. Building the sqlc null wrapper here
 	// rather than in the service keeps pgtype/sqlc types out of the module.
-	intentArg := sqlcgen.NullMeetupIntentType{}
-	if filter.Intent != nil {
-		intentArg = sqlcgen.NullMeetupIntentType{
-			MeetupIntentType: sqlcgen.MeetupIntentType(*filter.Intent),
-			Valid:            true,
-		}
-	}
+	intentArg := intentOrNull(filter.Intent)
 
 	limit := int32(pageSize)
 	if limit <= 0 {
@@ -42,6 +39,8 @@ func (r *postgresMeetupRepository) ListOpen(
 		rows, err := r.q.ListOpenMeetupsFirstPage(ctx, sqlcgen.ListOpenMeetupsFirstPageParams{
 			Intent:      intentArg,
 			WithinDays:  filter.WithinDays,
+			WindowFrom:  timestamptzOrNull(filter.WindowFrom),
+			WindowTo:    timestamptzOrNull(filter.WindowTo),
 			RequesterID: viewer,
 			PageLimit:   fetchLimit,
 			ViewerLat:   viewerLat,
@@ -79,6 +78,8 @@ func (r *postgresMeetupRepository) ListOpen(
 		rows, err := r.q.ListOpenMeetupsAfterCursor(ctx, sqlcgen.ListOpenMeetupsAfterCursorParams{
 			Intent:          intentArg,
 			WithinDays:      filter.WithinDays,
+			WindowFrom:      timestamptzOrNull(filter.WindowFrom),
+			WindowTo:        timestamptzOrNull(filter.WindowTo),
 			RequesterID:     viewer,
 			PageLimit:       fetchLimit,
 			CursorCreatedAt: toTimestamptz(cursor.CreatedAt),
@@ -127,7 +128,7 @@ func (r *postgresMeetupRepository) ListOpen(
 }
 
 func (r *postgresMeetupRepository) ListByHost(
-	ctx context.Context, hostID string, cursor *Cursor, pageSize int,
+	ctx context.Context, hostID string, filter MeetupListFilter, cursor *Cursor, pageSize int,
 ) ([]Meetup, *Cursor, error) {
 	host, err := parseUUID(hostID)
 	if err != nil {
@@ -146,7 +147,8 @@ func (r *postgresMeetupRepository) ListByHost(
 	if cursor == nil {
 		rows, err := r.q.ListMeetupsByHostFirstPage(ctx, sqlcgen.ListMeetupsByHostFirstPageParams{
 			HostUserID: host,
-			Limit:      fetchLimit,
+			Intent:     intentOrNull(filter.Intent), WindowFrom: timestamptzOrNull(filter.WindowFrom), WindowTo: timestamptzOrNull(filter.WindowTo),
+			Limit: fetchLimit,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("repository: list meetups by host: %w", err)
@@ -177,7 +179,8 @@ func (r *postgresMeetupRepository) ListByHost(
 		}
 	} else {
 		rows, err := r.q.ListMeetupsByHostAfterCursor(ctx, sqlcgen.ListMeetupsByHostAfterCursorParams{
-			HostUserID:      host,
+			HostUserID: host,
+			Intent:     intentOrNull(filter.Intent), WindowFrom: timestamptzOrNull(filter.WindowFrom), WindowTo: timestamptzOrNull(filter.WindowTo),
 			Limit:           fetchLimit,
 			CursorCreatedAt: toTimestamptz(cursor.CreatedAt),
 			CursorID:        mustParseUUID(cursor.ID),
@@ -221,7 +224,7 @@ func (r *postgresMeetupRepository) ListByHost(
 }
 
 func (r *postgresMeetupRepository) ListRequestedByUser(
-	ctx context.Context, userID string, cursor *Cursor, pageSize int,
+	ctx context.Context, userID string, filter MeetupListFilter, cursor *Cursor, pageSize int,
 ) ([]Meetup, *Cursor, error) {
 	requester, err := parseUUID(userID)
 	if err != nil {
@@ -240,7 +243,8 @@ func (r *postgresMeetupRepository) ListRequestedByUser(
 	if cursor == nil {
 		rows, err := r.q.ListMeetupsRequestedByUserFirstPage(ctx, sqlcgen.ListMeetupsRequestedByUserFirstPageParams{
 			RequesterID: requester,
-			Limit:       fetchLimit,
+			Intent:      intentOrNull(filter.Intent), WindowFrom: timestamptzOrNull(filter.WindowFrom), WindowTo: timestamptzOrNull(filter.WindowTo),
+			Limit: fetchLimit,
 		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("repository: list meetups requested by user: %w", err)
@@ -274,7 +278,8 @@ func (r *postgresMeetupRepository) ListRequestedByUser(
 		}
 	} else {
 		rows, err := r.q.ListMeetupsRequestedByUserAfterCursor(ctx, sqlcgen.ListMeetupsRequestedByUserAfterCursorParams{
-			RequesterID:     requester,
+			RequesterID: requester,
+			Intent:      intentOrNull(filter.Intent), WindowFrom: timestamptzOrNull(filter.WindowFrom), WindowTo: timestamptzOrNull(filter.WindowTo),
 			Limit:           fetchLimit,
 			CursorCreatedAt: toTimestamptz(cursor.CreatedAt),
 			CursorID:        mustParseUUID(cursor.ID),
@@ -318,4 +323,18 @@ func (r *postgresMeetupRepository) ListRequestedByUser(
 		meetups = meetups[:limit]
 	}
 	return meetups, next, nil
+}
+
+func intentOrNull(intent *Intent) sqlcgen.NullMeetupIntentType {
+	if intent == nil {
+		return sqlcgen.NullMeetupIntentType{}
+	}
+	return sqlcgen.NullMeetupIntentType{MeetupIntentType: sqlcgen.MeetupIntentType(*intent), Valid: true}
+}
+
+func timestamptzOrNull(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return toTimestamptz(*t)
 }

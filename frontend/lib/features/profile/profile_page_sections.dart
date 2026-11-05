@@ -315,13 +315,17 @@ extension _ProfileSections on _ProfilePageState {
     if (locked) return row;
     // Same reasoning as _PrefRow's: the whole row is the target, not just
     // the glyphs painted on it.
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () {
-        track(Cta.startVerification);
-        Navigator.push(context, screenRoute(screen, buildScreen));
-      },
-      child: row,
+    return Semantics(
+      container: true,
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () {
+          track(Cta.startVerification);
+          Navigator.push(context, screenRoute(screen, buildScreen));
+        },
+        child: row,
+      ),
     );
   }
 

@@ -2,7 +2,9 @@ import 'dart:async' show unawaited;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
+import 'package:professional_connections_platform/core/utils/reduced_motion.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -384,7 +386,7 @@ class ProfessionalConnectionsApp extends ConsumerWidget {
         pageTransitionsTheme: const PageTransitionsTheme(
           builders: {
             TargetPlatform.android: _ZoomPageTransitionsBuilder(),
-            TargetPlatform.iOS: _ZoomPageTransitionsBuilder(),
+            TargetPlatform.iOS: _IosPageTransitionsBuilder(),
           },
         ),
       ),
@@ -406,10 +408,48 @@ class _ZoomPageTransitionsBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
+    if (reducedMotion(context)) {
+      return FadeTransition(opacity: animation, child: child);
+    }
     return _ZoomPageTransition(
       animation: animation,
       secondaryAnimation: secondaryAnimation,
       child: child,
+    );
+  }
+}
+
+// The system transition, which is what gives iOS its swipe back. With Reduce
+// Motion the page fades instead of sliding, and the swipe still works.
+class _IosPageTransitionsBuilder extends CupertinoPageTransitionsBuilder {
+  const _IosPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (!reducedMotion(context)) {
+      return super.buildTransitions(
+        route,
+        context,
+        animation,
+        secondaryAnimation,
+        child,
+      );
+    }
+    return FadeTransition(
+      opacity: animation,
+      child: super.buildTransitions(
+        route,
+        context,
+        kAlwaysCompleteAnimation,
+        kAlwaysDismissedAnimation,
+        child,
+      ),
     );
   }
 }

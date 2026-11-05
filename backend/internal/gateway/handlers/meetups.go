@@ -204,6 +204,27 @@ type listOpenMeetupsResponse struct {
 	NextCursor string           `json:"next_cursor"`
 }
 
+// parseDateRange reads the optional from and to parameters, in unix seconds.
+// Absent means no limit on that side. Parsed strictly, so a typo is a 400
+// rather than a silently unfiltered list.
+func parseDateRange(r *http.Request) (from, to int64, ok bool) {
+	for _, field := range []struct {
+		name string
+		out  *int64
+	}{{"from", &from}, {"to", &to}} {
+		raw := r.URL.Query().Get(field.name)
+		if raw == "" {
+			continue
+		}
+		parsed, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || parsed <= 0 {
+			return 0, 0, false
+		}
+		*field.out = parsed
+	}
+	return from, to, true
+}
+
 func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 	// intent is now OPTIONAL: omitted (or empty) means every intent, backing
 	// the browse screen's "All" filter. It was required before, so no
@@ -226,6 +247,11 @@ func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		withinDays = int32(parsed)
+	}
+	windowFrom, windowTo, ok := parseDateRange(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, msgCouldNotLoad)
+		return
 	}
 	pageSize := int32(0)
 	if raw := r.URL.Query().Get("page_size"); raw != "" {
@@ -261,7 +287,7 @@ func (h *Handler) listOpenMeetups(w http.ResponseWriter, r *http.Request) {
 	// request's own query params/body, even if a client sends one under
 	// that name (nothing here does — TrustLevelFromContext is the only
 	// source wired up).
-	meetups, nextCursor, err := h.monolith.ListOpenMeetups(ctx, middleware.UserIDFromContext(ctx), intent, cursor, pageSize, viewerLat, viewerLng, int32(middleware.TrustLevelFromContext(ctx)), withinDays)
+	meetups, nextCursor, err := h.monolith.ListOpenMeetups(ctx, middleware.UserIDFromContext(ctx), intent, cursor, pageSize, viewerLat, viewerLng, int32(middleware.TrustLevelFromContext(ctx)), withinDays, windowFrom, windowTo)
 	if err != nil {
 		writeGRPCError(w, err)
 		return
@@ -295,8 +321,13 @@ func (h *Handler) listMyMeetups(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	hostedCursor := r.URL.Query().Get("hosted_cursor")
 	requestedCursor := r.URL.Query().Get("requested_cursor")
+	windowFrom, windowTo, ok := parseDateRange(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, msgCouldNotLoad)
+		return
+	}
 	hosted, requested, hostedNextCursor, hostedHasMore, requestedNextCursor, requestedHasMore, err :=
-		h.monolith.ListMyMeetups(ctx, middleware.UserIDFromContext(ctx), hostedCursor, requestedCursor)
+		h.monolith.ListMyMeetups(ctx, middleware.UserIDFromContext(ctx), hostedCursor, requestedCursor, r.URL.Query().Get("intent"), windowFrom, windowTo)
 	if err != nil {
 		writeGRPCError(w, err)
 		return

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart' show Geolocator;
 
+import 'package:professional_connections_platform/core/models/meetup_date_filter.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/meetup_date_filter_bar.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
@@ -21,7 +23,6 @@ import 'package:professional_connections_platform/core/widgets/section_heading.d
 import 'package:professional_connections_platform/core/widgets/section_label.dart';
 import 'package:professional_connections_platform/core/widgets/slow_load_notice.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
-import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 
@@ -72,7 +73,8 @@ class HappeningSoonSection extends ConsumerStatefulWidget {
     super.key,
     required this.intent,
     required this.trustLevel,
-    required this.onSelectIntent,
+    required this.dateFilter,
+    required this.onSelectDate,
     required this.outerScrollController,
   });
 
@@ -84,10 +86,9 @@ class HappeningSoonSection extends ConsumerStatefulWidget {
   /// mid-frame — the page uses the same value for its host-side gate.
   final int trustLevel;
 
-  /// Called with the tapped intent, or null for "All". Home owns what a
-  /// locked chip does (a toast plus the verification checklist), because
-  /// that is a navigation decision, not a list concern.
-  final void Function(IntentType? intent) onSelectIntent;
+  /// Which days to show. Home owns it, beside the intent.
+  final MeetupDateFilter dateFilter;
+  final ValueChanged<MeetupDateFilter> onSelectDate;
 
   /// The scroll position of the page this section is embedded in — see the
   /// class comment. Required, not optional: a null here is exactly the bug
@@ -139,7 +140,8 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
   @override
   void didUpdateWidget(HappeningSoonSection oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.intent != widget.intent) {
+    if (oldWidget.intent != widget.intent ||
+        oldWidget.dateFilter != widget.dateFilter) {
       // A new filter starts a new wait. The timer is what decides whether
       // this swap gets the quiet dim or the full placeholder.
       _slowSwap = false;
@@ -174,10 +176,11 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
         // state — a user whose location is blocked, or whose current filter
         // is empty, still needs to be able to change it. Rendering it only
         // alongside a populated list would strand them.
-        IntentFilterBar(
-          selected: widget.intent,
-          trustLevel: widget.trustLevel,
-          onSelect: widget.onSelectIntent,
+        MeetupDateFilterBar(
+          selected: widget.dateFilter,
+          onChanged: (picked) {
+            if (picked != null) widget.onSelectDate(picked);
+          },
         ),
         const SizedBox(height: 4),
         _buildBody(context, trustLevel),
@@ -216,11 +219,15 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
       case ViewerLocationStatus.ready:
         final viewerLat = location.lat!;
         final viewerLng = location.lng!;
+        // The server filters on the viewer's own day boundaries.
+        final range = widget.dateFilter.range(DateTime.now());
         final key = (
           intent: widget.intent,
           viewerLat: viewerLat,
           viewerLng: viewerLng,
-          withinDays: happeningSoonWithinDays,
+          withinDays: 0,
+          from: range.from,
+          to: range.to,
         );
         final meetupsAsync = ref.watch(openMeetupsProvider(key));
 
@@ -342,10 +349,11 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
               // Kept as the plain-text fallback for anything that renders
               // this list without an emptyState; `emptyState` is what actually
               // shows here.
-              emptyMessage: widget.intent == null
-                  ? 'No meetups happening near you in the next week yet.'
-                  : 'No ${widget.intent!.label.toLowerCase()} meetups near you in the next week yet.',
-              emptyState: _NoMeetupsYet(intent: widget.intent),
+              emptyMessage: '',
+              emptyState: _NoMeetupsYet(
+                intent: widget.intent,
+                when: _emptyWhen(widget.dateFilter),
+              ),
               onRefresh: _refreshLocation,
               loadMore: (cursor) async {
                 final next = await ref
@@ -355,7 +363,8 @@ class _HappeningSoonSectionState extends ConsumerState<HappeningSoonSection> {
                       viewerLat: viewerLat,
                       viewerLng: viewerLng,
                       cursor: cursor,
-                      withinDays: happeningSoonWithinDays,
+                      from: range.from,
+                      to: range.to,
                     );
                 return (
                   items: next.items,
@@ -442,7 +451,7 @@ class _LocationBlockedState extends StatelessWidget {
             child: SecondaryButton(
               label: 'Try again',
               icon: AppIcons.refresh,
-              height: 42,
+              height: 44,
               onPressed: onRetry,
             ),
           ),
@@ -463,10 +472,19 @@ class _LocationBlockedState extends StatelessWidget {
 /// screen a few centimetres below this card and carries the host-side trust
 /// gate (ADR-002 §4). A second entry point here would either duplicate that
 /// gate or, worse, skip it.
+String _emptyWhen(MeetupDateFilter filter) => switch (filter.kind) {
+  MeetupDateKind.today => 'today',
+  MeetupDateKind.thisWeek => 'this week',
+  MeetupDateKind.day => 'on ${formatMeetupDay(filter.day!)}',
+};
+
 class _NoMeetupsYet extends StatelessWidget {
-  const _NoMeetupsYet({required this.intent});
+  const _NoMeetupsYet({required this.intent, required this.when});
 
   final IntentType? intent;
+
+  /// How the heading names the days, such as "this week".
+  final String when;
 
   @override
   Widget build(BuildContext context) {
@@ -485,7 +503,7 @@ class _NoMeetupsYet extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'No $scope near you this week',
+            'No $scope near you $when',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 16,

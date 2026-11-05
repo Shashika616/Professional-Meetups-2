@@ -304,31 +304,35 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
                 // The window and the address are on the hero now;
                 // repeating them here was the first thing that
                 // looked wrong once the photo moved up.
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => PublicProfilePage.open(
-                    context,
-                    userId: meetup.hostUserId,
-                    initialName: meetup.hostFullName,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: Text(
-                          'Hosted by ${meetup.hostFullName!} • L${meetup.hostTrustLevel} Trust',
-                          style: TextStyle(
-                            color: AppPalette.textSecondary,
-                            fontSize: 12,
+                Semantics(
+                  container: true,
+                  button: true,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => PublicProfilePage.open(
+                      context,
+                      userId: meetup.hostUserId,
+                      initialName: meetup.hostFullName,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'Hosted by ${meetup.hostFullName!} • L${meetup.hostTrustLevel} Trust',
+                            style: TextStyle(
+                              color: AppPalette.textSecondary,
+                              fontSize: 12,
+                            ),
                           ),
                         ),
-                      ),
-                      AppIcon(
-                        AppIcons.forward,
-                        size: 16,
-                        color: AppPalette.textSecondary,
-                      ),
-                    ],
+                        AppIcon(
+                          AppIcons.forward,
+                          size: 16,
+                          color: AppPalette.textSecondary,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -465,7 +469,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
               if (meetup.myRequestStatus == MeetupRequestStatus.pending)
                 SecondaryButton(
                   label: 'Cancel request',
-                  height: 40,
+                  height: 44,
                   color: AppPalette.cancelled,
                   borderColor: AppPalette.cancelled.withValues(alpha: 0.55),
                   onPressed: () =>
@@ -474,7 +478,7 @@ class _MeetupDetailPageState extends ConsumerState<MeetupDetailPage> {
               else
                 SecondaryButton(
                   label: 'Withdraw request',
-                  height: 40,
+                  height: 44,
                   color: AppPalette.danger,
                   borderColor: AppPalette.danger,
                   onPressed: () =>

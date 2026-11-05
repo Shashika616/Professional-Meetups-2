@@ -374,6 +374,11 @@ message ListOpenMeetupsRequest {
   // (redactForViewer) and the join/host trust gates are untouched by it and
   // continue to run exactly as before on whatever it returns.
   int32 within_days = 8;
+  // 0 (unset) means no limit on that side. When set, only meetups with some
+  // part of their window inside [from, to) are returned. The client sends its
+  // own local day boundaries, so "today" follows the viewer's clock.
+  int64 window_from_unix_seconds = 9;
+  int64 window_to_unix_seconds = 10;
 }
 
 message ListOpenMeetupsResponse {
@@ -401,6 +406,11 @@ message ListMyMeetupsRequest {
   // first page, same convention as ListOpenMeetupsRequest.cursor.
   string hosted_cursor = 2;
   string requested_cursor = 3;
+  // All optional, and they narrow both lists. INTENT_UNSPECIFIED means every
+  // intent; the window works as on ListOpenMeetupsRequest.
+  Intent intent = 4;
+  int64 window_from_unix_seconds = 5;
+  int64 window_to_unix_seconds = 6;
 }
 
 message ListMyMeetupsResponse {

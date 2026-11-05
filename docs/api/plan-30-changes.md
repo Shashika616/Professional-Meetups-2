@@ -83,3 +83,7 @@ The app now treats `426` from any `/v1/billing/*` route as "update required", th
 
 `GET /v1/app-config` adds two flags: `legal.acceptance.required`, and `app.force_update`, whose value in `values` holds `min_version`, `message` and `store_url`. Old builds ignore both.
 
+## Meetup list filters
+
+`GET /v1/meetups` and `GET /v1/meetups/mine` accept optional `from` and `to`, in unix seconds. A meetup is returned when any part of its window falls inside `[from, to)`. `/mine` also accepts `intent`, and its filters apply to both the hosted and requested lists. A value that is not a positive whole number returns 400, and a range that ends before it starts is refused as invalid input.
+

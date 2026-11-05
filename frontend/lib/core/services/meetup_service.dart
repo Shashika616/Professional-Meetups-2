@@ -40,6 +40,8 @@ abstract interface class MeetupService {
     required double viewerLng,
     String? cursor,
     int withinDays = 0,
+    DateTime? from,
+    DateTime? to,
   });
 
   Future<Meetup> getMeetup(String meetupId);
@@ -59,7 +61,13 @@ abstract interface class MeetupService {
       bool requestedHasMore,
     })
   >
-  listMyMeetups({String? hostedCursor, String? requestedCursor});
+  listMyMeetups({
+    String? hostedCursor,
+    String? requestedCursor,
+    IntentType? intent,
+    DateTime? from,
+    DateTime? to,
+  });
 
   /// Meetups where the caller is host or an accepted participant, merged
   /// and server-sorted soonest-`windowStart`-first (ADR-025 §2) — backs
@@ -453,6 +461,8 @@ class MockMeetupService implements MeetupService {
     required double viewerLng,
     String? cursor,
     int withinDays = 0,
+    DateTime? from,
+    DateTime? to,
   }) async {
     // viewerLat/viewerLng/withinDays ignored — mock data is small/static,
     // same no-op-but-accepts-the-parameter treatment MockAuthService gives
@@ -492,7 +502,13 @@ class MockMeetupService implements MeetupService {
       bool requestedHasMore,
     })
   >
-  listMyMeetups({String? hostedCursor, String? requestedCursor}) async {
+  listMyMeetups({
+    String? hostedCursor,
+    String? requestedCursor,
+    IntentType? intent,
+    DateTime? from,
+    DateTime? to,
+  }) async {
     await Future<void>.delayed(latency);
     // Mock data is small/static — always a single complete page for both
     // sides, same no-pagination-needed treatment this mock already gives

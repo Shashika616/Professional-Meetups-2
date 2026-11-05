@@ -30,6 +30,7 @@ import (
 
 	"professional-meetups-monolith/backend/internal/eventbus"
 	"professional-meetups-monolith/backend/internal/modules/meetup"
+	"professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	meetuprepo "professional-meetups-monolith/backend/internal/modules/meetup/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
 	"professional-meetups-monolith/backend/internal/platform/db"
@@ -2826,7 +2827,7 @@ func TestEndedMeetup_LeavesBrowseButStaysOnParticipantSurfaces(t *testing.T) {
 
 	// 3. Still in the host's own list. EventsPage is built from this, so a
 	// host who cannot find a finished meetup here cannot review it either.
-	hosted, _, err := h.meetups.ListByHost(ctx, host, nil, 0)
+	hosted, _, err := h.meetups.ListByHost(ctx, host, repository.MeetupListFilter{}, nil, 0)
 	if err != nil {
 		t.Fatalf("ListByHost: %v", err)
 	}
@@ -3209,5 +3210,71 @@ func TestActiveMeetupForSOS_Integration(t *testing.T) {
 	}
 	if _, ok, _ := h.svc.ActiveMeetup(ctx, host, start.Add(time.Minute)); ok {
 		t.Error("a cancelled meetup was mentioned")
+	}
+}
+
+// One day's range keeps a meetup that overlaps it and drops those on other
+// days, on the browse list and on both of the viewer's own lists.
+func TestMeetupLists_DateRangeAndIntentFilter_Integration(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	host := newUserID(t, h)
+	viewer := newUserID(t, h)
+	seedDisplay(t, h, host, "Host")
+
+	day := time.Now().Add(72 * time.Hour).Truncate(24 * time.Hour)
+	next := day.Add(24 * time.Hour)
+	place := func(intent meetup.Intent, start, end time.Time) string {
+		m := h.createMeetup(t, host, intent, colomboLat, colomboLng)
+		if _, err := h.pool.Exec(ctx, `UPDATE meetup.meetups SET window_start = $2, window_end = $3 WHERE id = $1`, m.ID, start, end); err != nil {
+			t.Fatalf("place the meetup: %v", err)
+		}
+		return m.ID
+	}
+	inside := place(meetup.IntentCoffee, day.Add(10*time.Hour), day.Add(11*time.Hour))
+	overnight := place(meetup.IntentCoffee, day.Add(-time.Hour), day.Add(time.Hour))
+	place(meetup.IntentCoffee, next, next.Add(time.Hour))  // starts exactly at the end of the range
+	place(meetup.IntentCoffee, day.Add(-2*time.Hour), day) // ends exactly at the start of the range
+	otherIntent := place(meetup.IntentLunch, day.Add(12*time.Hour), day.Add(13*time.Hour))
+
+	ids := func(list []meetup.Meetup) map[string]bool {
+		out := map[string]bool{}
+		for _, m := range list {
+			out[m.ID] = true
+		}
+		return out
+	}
+	open, err := h.svc.ListOpenMeetups(ctx, meetup.ListOpenMeetupsRequest{
+		UserID: viewer, WindowFrom: &day, WindowTo: &next,
+		ViewerLat: colomboLat, ViewerLng: colomboLng, ViewerTrustLevel: 4,
+	})
+	if err != nil {
+		t.Fatalf("ListOpenMeetups: %v", err)
+	}
+	got := ids(open.Meetups)
+	if len(got) != 3 || !got[inside] || !got[overnight] || !got[otherIntent] {
+		t.Errorf("browse list = %v, want the three that overlap the day", got)
+	}
+
+	mine, err := h.svc.ListMyMeetups(ctx, meetup.ListMyMeetupsRequest{
+		UserID: host, Intent: intentPtr(meetup.IntentCoffee), WindowFrom: &day, WindowTo: &next,
+	})
+	if err != nil {
+		t.Fatalf("ListMyMeetups: %v", err)
+	}
+	got = ids(mine.Hosted)
+	if len(got) != 2 || !got[inside] || !got[overnight] {
+		t.Errorf("hosted list = %v, want the two coffee meetups on the day", got)
+	}
+
+	if _, err := h.svc.ListMyMeetups(ctx, meetup.ListMyMeetupsRequest{UserID: host, WindowFrom: &next, WindowTo: &day}); !errors.Is(err, apperror.ErrInvalidInput) {
+		t.Errorf("a backwards range: %v, want invalid input", err)
+	}
+	all, err := h.svc.ListMyMeetups(ctx, meetup.ListMyMeetupsRequest{UserID: host})
+	if err != nil {
+		t.Fatalf("ListMyMeetups unfiltered: %v", err)
+	}
+	if len(all.Hosted) != 5 {
+		t.Errorf("no filter returned %d meetups, want all 5", len(all.Hosted))
 	}
 }

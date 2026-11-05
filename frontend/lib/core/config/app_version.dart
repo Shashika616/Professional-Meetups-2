@@ -10,7 +10,7 @@
 /// 29 D11), because an older build cannot show what it costs.
 abstract final class AppVersion {
   static const String name = '1.1.0';
-  static const int build = 11;
+  static const int build = 12;
 
   /// What `X-App-Version` carries: `1.1.0+11`.
   static const String header = '$name+$build';

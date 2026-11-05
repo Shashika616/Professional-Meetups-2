@@ -225,8 +225,8 @@ func TestGetMemberActivity_HostMeetupsAndAnonymousReviews_Integration(t *testing
 		t.Fatalf("recent = %d, want 1", len(first.RecentMeetups))
 	}
 	mm := first.RecentMeetups[0]
-	if mm.ParticipantCount != 2 || mm.ReviewCount != 1 || mm.OverallAverage != 3 {
-		t.Errorf("meetup = people:%d reviews:%d avg:%v, want 2, 1, 3: the host's own review does not count", mm.ParticipantCount, mm.ReviewCount, mm.OverallAverage)
+	if mm.ParticipantCount != 2 || mm.ReviewCount != 0 || mm.OverallAverage != 0 {
+		t.Errorf("meetup = people:%d reviews:%d avg:%v, want 2, 0, 0: one guest's score must not show", mm.ParticipantCount, mm.ReviewCount, mm.OverallAverage)
 	}
 	wantDay := time.Date(2026, 9, 1, 6, 30, 0, 0, time.UTC) // noon in Colombo
 	if !mm.Day.Equal(wantDay) {

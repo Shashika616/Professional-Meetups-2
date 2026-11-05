@@ -217,3 +217,13 @@ func TestFetchNormalizesAndCaps(t *testing.T) {
 		t.Errorf("timeout %v", fetchTimeout)
 	}
 }
+
+// #134: a small file that decodes large is refused before any pixel is read.
+func TestTheDecodeCapBoundsMemory(t *testing.T) {
+	if MaxSide*MaxSide*8 > 40<<20 {
+		t.Errorf("a %d px picture can decode to %d MB", MaxSide, MaxSide*MaxSide*8>>20)
+	}
+	if maxDecoding*MaxSide*MaxSide*8 > 80<<20 {
+		t.Errorf("%d decodes at once can use %d MB", maxDecoding, maxDecoding*MaxSide*MaxSide*8>>20)
+	}
+}

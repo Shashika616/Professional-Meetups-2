@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/fill_scroll_view.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
@@ -26,7 +27,7 @@ class LocationExplanationPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Padding(
+        child: FillScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

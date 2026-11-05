@@ -36,32 +36,36 @@ class AgeConfirmationCheckbox extends StatelessWidget {
   }
 
   Widget _checkbox() {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      behavior: HitTestBehavior.opaque,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Checkbox(
-            value: value,
-            onChanged: (checked) => onChanged(checked ?? false),
-            activeColor: AppPalette.candyBlue,
-            checkColor: AppPalette.onyx,
-            side: BorderSide(
-              color: AppPalette.textSecondary.withValues(alpha: 0.6),
-            ),
-          ),
-          Flexible(
-            child: Text(
-              statement,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: AppPalette.textPrimary,
+    return Semantics(
+      container: true,
+      checked: value,
+      child: GestureDetector(
+        onTap: () => onChanged(!value),
+        behavior: HitTestBehavior.opaque,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Checkbox(
+              value: value,
+              onChanged: (checked) => onChanged(checked ?? false),
+              activeColor: AppPalette.candyBlue,
+              checkColor: AppPalette.onyx,
+              side: BorderSide(
+                color: AppPalette.textSecondary.withValues(alpha: 0.6),
               ),
             ),
-          ),
-        ],
+            Flexible(
+              child: Text(
+                statement,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppPalette.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -83,11 +87,15 @@ class _LegalLinks extends StatelessWidget {
       spacing: 16,
       children: [
         for (final document in LegalDocument.values)
-          GestureDetector(
-            onTap: () => openLegalDocument(context, document),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Text(document.title, style: style),
+          Semantics(
+            container: true,
+            button: true,
+            child: GestureDetector(
+              onTap: () => openLegalDocument(context, document),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(document.title, style: style),
+              ),
             ),
           ),
       ],

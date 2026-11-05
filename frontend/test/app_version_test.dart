@@ -32,7 +32,7 @@ void main() {
       platform: 'ios',
     );
     await client.get(Uri.parse('http://localhost/v1/app-config'));
-    expect(seen.headers['X-App-Version'], '1.1.0+11');
+    expect(seen.headers['X-App-Version'], '1.1.0+12');
     expect(seen.headers['X-Platform'], 'ios');
   });
 

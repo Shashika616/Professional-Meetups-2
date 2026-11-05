@@ -503,17 +503,21 @@ class _ContactsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      // opaque so the whole card is the target, not just the painted rows.
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: FlatCard(
-        radius: 18,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: children,
+    return Semantics(
+      container: true,
+      button: true,
+      child: GestureDetector(
+        // opaque so the whole card is the target, not just the painted rows.
+        behavior: HitTestBehavior.opaque,
+        onTap: onTap,
+        child: FlatCard(
+          radius: 18,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: children,
+          ),
         ),
       ),
     );
@@ -837,7 +841,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
           PrimaryButton(
             label: 'Confirm',
             height: 50,
-            fillColor: AppPalette.danger,
+            fillColor: AppPalette.sos,
             foregroundColor: Colors.white,
             onPressed: _confirm,
           ),
@@ -863,7 +867,7 @@ class _SosConfirmDialogState extends State<_SosConfirmDialog> {
           PrimaryButton(
             label: 'Retry',
             height: 50,
-            fillColor: AppPalette.danger,
+            fillColor: AppPalette.sos,
             foregroundColor: Colors.white,
             onPressed: _confirm,
           ),

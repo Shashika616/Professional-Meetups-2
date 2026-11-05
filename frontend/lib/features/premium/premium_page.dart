@@ -549,7 +549,7 @@ class _TierRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tint = AppPalette.tintedSurface(
-      AppPalette.brandGreen.withValues(alpha: 0.12),
+      AppPalette.candyBlue.withValues(alpha: 0.12),
     );
     final highlighted = selected || isCurrent;
     final badge = isCurrent
@@ -557,90 +557,97 @@ class _TierRow extends StatelessWidget {
         : plan.featured
         ? 'Popular'
         : null;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-        decoration: BoxDecoration(
-          color: highlighted ? tint : AppPalette.card,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: highlighted
-                ? AppPalette.brandGreen.withValues(alpha: 0.5)
-                : AppPalette.hairline,
+    return Semantics(
+      container: true,
+      button: true,
+      selected: selected,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+          decoration: BoxDecoration(
+            color: highlighted ? tint : AppPalette.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: highlighted
+                  ? AppPalette.candyBlue.withValues(alpha: 0.5)
+                  : AppPalette.hairline,
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: highlighted ? AppPalette.brandGreen : Colors.transparent,
-                border: Border.all(
-                  color: highlighted
-                      ? AppPalette.brandGreen
-                      : AppPalette.hairline,
-                  width: 1.5,
-                ),
-              ),
-              child: highlighted
-                  ? const AppIcon(AppIcons.check, size: 14, color: Colors.white)
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Text(
-              plan.periodLabel,
-              style: TextStyle(
-                color: AppPalette.textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                product.price,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppPalette.textPrimary,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            if (badge != null)
+          child: Row(
+            children: [
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
+                width: 22,
+                height: 22,
                 decoration: BoxDecoration(
-                  color: AppPalette.card,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: AppPalette.hairline),
-                ),
-                child: Text(
-                  badge,
-                  style: TextStyle(
-                    color: AppPalette.textPrimary,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
+                  shape: BoxShape.circle,
+                  color: highlighted
+                      ? AppPalette.candyBlue
+                      : Colors.transparent,
+                  border: Border.all(
+                    color: highlighted
+                        ? AppPalette.candyBlue
+                        : AppPalette.hairline,
+                    width: 1.5,
                   ),
                 ),
-              )
-            else
+                child: highlighted
+                    ? AppIcon(AppIcons.check, size: 14, color: AppPalette.onyx)
+                    : null,
+              ),
+              const SizedBox(width: 12),
               Text(
-                plan.billingLabel,
+                plan.periodLabel,
                 style: TextStyle(
-                  color: AppPalette.textSecondary,
-                  fontSize: 12.5,
+                  color: AppPalette.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-          ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  product.price,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppPalette.textPrimary,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (badge != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppPalette.card,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppPalette.hairline),
+                  ),
+                  child: Text(
+                    badge,
+                    style: TextStyle(
+                      color: AppPalette.textPrimary,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                )
+              else
+                Text(
+                  plan.billingLabel,
+                  style: TextStyle(
+                    color: AppPalette.textSecondary,
+                    fontSize: 12.5,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

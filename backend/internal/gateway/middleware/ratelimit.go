@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"professional-meetups-monolith/backend/internal/platform/clientinfo"
 	"strconv"
 	"strings"
 	"time"
@@ -429,6 +430,21 @@ func WithTrustedProxyHops(n int) RateLimitOption {
 // is not an IP, the request did not come through the expected proxy chain
 // and the header is not evidence of anything; the TCP peer is used instead.
 func clientIPFor(r *http.Request, hops int) string {
+	return resolveClientIP(r, hops)
+}
+
+// Requester records who is calling, hashed, for the OTP budgets (#133): one
+// caller must not be able to spend another person's allowance.
+func Requester(hops int) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := clientinfo.WithRequester(r.Context(), resolveClientIP(r, hops))
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func resolveClientIP(r *http.Request, hops int) string {
 	if hops > 0 {
 		var entries []string
 		for _, header := range r.Header.Values("X-Forwarded-For") {

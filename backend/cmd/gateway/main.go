@@ -153,6 +153,7 @@ func run(logger *slog.Logger) error {
 	handler = middleware.MaxBytes(handler)
 	// X-App-Version / X-Platform into the request context, from where the
 	// monolith client forwards them on every call (plan 29 §2).
+	handler = middleware.Requester(cfg.TrustedProxyHops)(handler)
 	handler = clientinfo.Middleware(handler)
 	// Metrics sit inside rate limiting so a 429 is still counted — knowing
 	// that a route is shedding load is the whole reason to have the metric.

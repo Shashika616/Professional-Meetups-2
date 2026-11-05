@@ -271,61 +271,65 @@ class _NotificationRow extends StatelessWidget {
     return Column(
       children: [
         if (!first) Divider(height: 1, color: AppPalette.hairline),
-        GestureDetector(
-          // opaque so the whole row is the target, not just the painted
-          // glyphs — the same fix the Profile rows needed.
-          behavior: HitTestBehavior.opaque,
-          onTap: tappable ? () => _open(context) : null,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppPalette.tintedSurface(
-                      colour.withValues(alpha: 0.14),
+        Semantics(
+          container: true,
+          button: tappable,
+          child: GestureDetector(
+            // opaque so the whole row is the target, not just the painted
+            // glyphs — the same fix the Profile rows needed.
+            behavior: HitTestBehavior.opaque,
+            onTap: tappable ? () => _open(context) : null,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppPalette.tintedSurface(
+                        colour.withValues(alpha: 0.14),
+                      ),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    borderRadius: BorderRadius.circular(10),
+                    child: AppIcon(icon, size: 17, color: colour),
                   ),
-                  child: AppIcon(icon, size: 17, color: colour),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        notification.title,
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w700,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          notification.title,
+                          style: TextStyle(
+                            color: AppPalette.textPrimary,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        notification.body,
-                        style: TextStyle(
-                          color: AppPalette.textSecondary,
-                          fontSize: 12.5,
-                          height: 1.35,
+                        const SizedBox(height: 3),
+                        Text(
+                          notification.body,
+                          style: TextStyle(
+                            color: AppPalette.textSecondary,
+                            fontSize: 12.5,
+                            height: 1.35,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  formatNotificationTime(notification.createdAt),
-                  style: TextStyle(
-                    color: AppPalette.textSecondary,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                  const SizedBox(width: 10),
+                  Text(
+                    formatNotificationTime(notification.createdAt),
+                    style: TextStyle(
+                      color: AppPalette.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

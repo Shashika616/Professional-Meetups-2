@@ -78,54 +78,62 @@ class ParticipantsStrip extends ConsumerWidget {
     final shown = data.participants.take(_maxFaces).toList();
     final overflow = data.totalCount - shown.length;
 
-    return GestureDetector(
-      onTap: () =>
-          ParticipantsPage.open(context, meetupId: meetupId, meetup: meetup),
-      behavior: HitTestBehavior.opaque,
-      child: Row(
-        children: [
-          SizedBox(
-            height: 30,
-            width: (shown.length + (overflow > 0 ? 1 : 0)) * 21.0 + 9,
-            child: Stack(
-              children: [
-                for (var i = 0; i < shown.length; i++)
-                  Positioned(
-                    left: i * 21.0,
-                    child: _Face(
-                      participant: shown[i],
-                      redacted: data.redacted && shown[i].fullName.isEmpty,
+    return Semantics(
+      container: true,
+      button: true,
+      child: GestureDetector(
+        onTap: () =>
+            ParticipantsPage.open(context, meetupId: meetupId, meetup: meetup),
+        behavior: HitTestBehavior.opaque,
+        child: Row(
+          children: [
+            SizedBox(
+              height: 30,
+              width: (shown.length + (overflow > 0 ? 1 : 0)) * 21.0 + 9,
+              child: Stack(
+                children: [
+                  for (var i = 0; i < shown.length; i++)
+                    Positioned(
+                      left: i * 21.0,
+                      child: _Face(
+                        participant: shown[i],
+                        redacted: data.redacted && shown[i].fullName.isEmpty,
+                      ),
                     ),
-                  ),
-                if (overflow > 0)
-                  Positioned(
-                    left: shown.length * 21.0,
-                    child: _OverflowBubble(count: overflow),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              data.redacted
-                  // Says the number, withholds the names, and says why in
-                  // the one place someone would ask — the reason depends on
-                  // whether the viewer is unverified or just not on it.
-                  ? (viewerTrustLevel < 2
-                        ? '${data.totalCount} $verb · verify to see who'
-                        : '${data.totalCount} $verb · join to see who')
-                  : '${data.totalCount} $verb',
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: AppPalette.textSecondary,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+                  if (overflow > 0)
+                    Positioned(
+                      left: shown.length * 21.0,
+                      child: _OverflowBubble(count: overflow),
+                    ),
+                ],
               ),
             ),
-          ),
-          AppIcon(AppIcons.forward, size: 18, color: AppPalette.textSecondary),
-        ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                data.redacted
+                    // Says the number, withholds the names, and says why in
+                    // the one place someone would ask — the reason depends on
+                    // whether the viewer is unverified or just not on it.
+                    ? (viewerTrustLevel < 2
+                          ? '${data.totalCount} $verb · verify to see who'
+                          : '${data.totalCount} $verb · join to see who')
+                    : '${data.totalCount} $verb',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppPalette.textSecondary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            AppIcon(
+              AppIcons.forward,
+              size: 18,
+              color: AppPalette.textSecondary,
+            ),
+          ],
+        ),
       ),
     );
   }

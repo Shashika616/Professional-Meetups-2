@@ -69,24 +69,28 @@ class _Option extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
-        child: Row(
-          children: [
-            AppIcon(icon, size: 20, color: color ?? AppPalette.candyBlue),
-            const SizedBox(width: 14),
-            Text(
-              label,
-              style: TextStyle(
-                color: color ?? AppPalette.textPrimary,
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
+    return Semantics(
+      container: true,
+      button: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 4),
+          child: Row(
+            children: [
+              AppIcon(icon, size: 20, color: color ?? AppPalette.candyBlue),
+              const SizedBox(width: 14),
+              Text(
+                label,
+                style: TextStyle(
+                  color: color ?? AppPalette.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

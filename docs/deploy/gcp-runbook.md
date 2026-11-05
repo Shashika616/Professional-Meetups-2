@@ -798,7 +798,7 @@ below the latest migration it ships (29 after plan 29B, §13).
 
 Credits have **no flag**. From the moment this revision serves, creating a
 meetup costs credits (or plan quota), a hosting-level user's first billing call
-grants the 60 welcome credits, and the free limits are 20 people and 14 days
+grants the 1000 welcome credits, and the free limits are 20 people and 14 days
 ahead. Only subscription plans are switched, by `billing.plans.visible`
 (off, on for the seeded `@meetups.test` accounts).
 

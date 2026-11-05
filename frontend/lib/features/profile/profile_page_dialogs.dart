@@ -282,7 +282,7 @@ class _DeleteAccountSheetState extends ConsumerState<_DeleteAccountSheet> {
       PrimaryButton(
         label: 'Delete my account',
         height: 50,
-        fillColor: AppPalette.danger,
+        fillColor: AppPalette.sos,
         foregroundColor: Colors.white,
         isLoading: deleting,
         onPressed: deleting ? null : _delete,

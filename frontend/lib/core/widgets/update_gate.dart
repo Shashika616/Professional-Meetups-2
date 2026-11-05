@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'package:professional_connections_platform/core/widgets/fill_scroll_view.dart';
 import 'package:professional_connections_platform/core/config/update_required.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/app_config_service.dart';
@@ -105,7 +106,7 @@ class UpdateRequiredPage extends StatelessWidget {
     return Material(
       color: AppPalette.onyx,
       child: SafeArea(
-        child: Padding(
+        child: FillScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,

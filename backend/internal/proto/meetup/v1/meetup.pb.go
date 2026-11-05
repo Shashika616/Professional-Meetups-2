@@ -706,9 +706,14 @@ type ListOpenMeetupsRequest struct {
 	// This filter changes only WHICH rows come back. Redaction
 	// (redactForViewer) and the join/host trust gates are untouched by it and
 	// continue to run exactly as before on whatever it returns.
-	WithinDays    int32 `protobuf:"varint,8,opt,name=within_days,json=withinDays,proto3" json:"within_days,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	WithinDays int32 `protobuf:"varint,8,opt,name=within_days,json=withinDays,proto3" json:"within_days,omitempty"`
+	// 0 (unset) means no limit on that side. When set, only meetups with some
+	// part of their window inside [from, to) are returned. The client sends its
+	// own local day boundaries, so "today" follows the viewer's clock.
+	WindowFromUnixSeconds int64 `protobuf:"varint,9,opt,name=window_from_unix_seconds,json=windowFromUnixSeconds,proto3" json:"window_from_unix_seconds,omitempty"`
+	WindowToUnixSeconds   int64 `protobuf:"varint,10,opt,name=window_to_unix_seconds,json=windowToUnixSeconds,proto3" json:"window_to_unix_seconds,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ListOpenMeetupsRequest) Reset() {
@@ -793,6 +798,20 @@ func (x *ListOpenMeetupsRequest) GetViewerTrustLevel() int32 {
 func (x *ListOpenMeetupsRequest) GetWithinDays() int32 {
 	if x != nil {
 		return x.WithinDays
+	}
+	return 0
+}
+
+func (x *ListOpenMeetupsRequest) GetWindowFromUnixSeconds() int64 {
+	if x != nil {
+		return x.WindowFromUnixSeconds
+	}
+	return 0
+}
+
+func (x *ListOpenMeetupsRequest) GetWindowToUnixSeconds() int64 {
+	if x != nil {
+		return x.WindowToUnixSeconds
 	}
 	return 0
 }
@@ -924,8 +943,13 @@ type ListMyMeetupsRequest struct {
 	// first page, same convention as ListOpenMeetupsRequest.cursor.
 	HostedCursor    string `protobuf:"bytes,2,opt,name=hosted_cursor,json=hostedCursor,proto3" json:"hosted_cursor,omitempty"`
 	RequestedCursor string `protobuf:"bytes,3,opt,name=requested_cursor,json=requestedCursor,proto3" json:"requested_cursor,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// All optional, and they narrow both lists. INTENT_UNSPECIFIED means every
+	// intent; the window works as on ListOpenMeetupsRequest.
+	Intent                Intent `protobuf:"varint,4,opt,name=intent,proto3,enum=meetup.v1.Intent" json:"intent,omitempty"`
+	WindowFromUnixSeconds int64  `protobuf:"varint,5,opt,name=window_from_unix_seconds,json=windowFromUnixSeconds,proto3" json:"window_from_unix_seconds,omitempty"`
+	WindowToUnixSeconds   int64  `protobuf:"varint,6,opt,name=window_to_unix_seconds,json=windowToUnixSeconds,proto3" json:"window_to_unix_seconds,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ListMyMeetupsRequest) Reset() {
@@ -977,6 +1001,27 @@ func (x *ListMyMeetupsRequest) GetRequestedCursor() string {
 		return x.RequestedCursor
 	}
 	return ""
+}
+
+func (x *ListMyMeetupsRequest) GetIntent() Intent {
+	if x != nil {
+		return x.Intent
+	}
+	return Intent_INTENT_UNSPECIFIED
+}
+
+func (x *ListMyMeetupsRequest) GetWindowFromUnixSeconds() int64 {
+	if x != nil {
+		return x.WindowFromUnixSeconds
+	}
+	return 0
+}
+
+func (x *ListMyMeetupsRequest) GetWindowToUnixSeconds() int64 {
+	if x != nil {
+		return x.WindowToUnixSeconds
+	}
+	return 0
 }
 
 type ListMyMeetupsResponse struct {
@@ -4254,7 +4299,7 @@ const file_meetup_v1_meetup_proto_rawDesc = "" +
 	"\x14_cancellation_reasonB\x10\n" +
 	"\x0e_my_request_id\"E\n" +
 	"\x10ScheduleConflict\x121\n" +
-	"\x06meetup\x18\x01 \x01(\v2\x19.meetup.v1.MeetupResponseR\x06meetup\"\x9e\x02\n" +
+	"\x06meetup\x18\x01 \x01(\v2\x19.meetup.v1.MeetupResponseR\x06meetup\"\x8c\x03\n" +
 	"\x16ListOpenMeetupsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12)\n" +
 	"\x06intent\x18\x02 \x01(\x0e2\x11.meetup.v1.IntentR\x06intent\x12\x16\n" +
@@ -4266,7 +4311,10 @@ const file_meetup_v1_meetup_proto_rawDesc = "" +
 	"viewer_lng\x18\x06 \x01(\x01R\tviewerLng\x12,\n" +
 	"\x12viewer_trust_level\x18\a \x01(\x05R\x10viewerTrustLevel\x12\x1f\n" +
 	"\vwithin_days\x18\b \x01(\x05R\n" +
-	"withinDays\"o\n" +
+	"withinDays\x127\n" +
+	"\x18window_from_unix_seconds\x18\t \x01(\x03R\x15windowFromUnixSeconds\x123\n" +
+	"\x16window_to_unix_seconds\x18\n" +
+	" \x01(\x03R\x13windowToUnixSeconds\"o\n" +
 	"\x17ListOpenMeetupsResponse\x123\n" +
 	"\ameetups\x18\x01 \x03(\v2\x19.meetup.v1.MeetupResponseR\ameetups\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -4274,11 +4322,14 @@ const file_meetup_v1_meetup_proto_rawDesc = "" +
 	"\x10GetMeetupRequest\x12\x1b\n" +
 	"\tmeetup_id\x18\x01 \x01(\tR\bmeetupId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12,\n" +
-	"\x12viewer_trust_level\x18\x03 \x01(\x05R\x10viewerTrustLevel\"\x7f\n" +
+	"\x12viewer_trust_level\x18\x03 \x01(\x05R\x10viewerTrustLevel\"\x98\x02\n" +
 	"\x14ListMyMeetupsRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12#\n" +
 	"\rhosted_cursor\x18\x02 \x01(\tR\fhostedCursor\x12)\n" +
-	"\x10requested_cursor\x18\x03 \x01(\tR\x0frequestedCursor\"\xbb\x02\n" +
+	"\x10requested_cursor\x18\x03 \x01(\tR\x0frequestedCursor\x12)\n" +
+	"\x06intent\x18\x04 \x01(\x0e2\x11.meetup.v1.IntentR\x06intent\x127\n" +
+	"\x18window_from_unix_seconds\x18\x05 \x01(\x03R\x15windowFromUnixSeconds\x123\n" +
+	"\x16window_to_unix_seconds\x18\x06 \x01(\x03R\x13windowToUnixSeconds\"\xbb\x02\n" +
 	"\x15ListMyMeetupsResponse\x121\n" +
 	"\x06hosted\x18\x01 \x03(\v2\x19.meetup.v1.MeetupResponseR\x06hosted\x127\n" +
 	"\trequested\x18\x02 \x03(\v2\x19.meetup.v1.MeetupResponseR\trequested\x12,\n" +
@@ -4656,84 +4707,85 @@ var file_meetup_v1_meetup_proto_depIdxs = []int32{
 	4,  // 4: meetup.v1.ScheduleConflict.meetup:type_name -> meetup.v1.MeetupResponse
 	0,  // 5: meetup.v1.ListOpenMeetupsRequest.intent:type_name -> meetup.v1.Intent
 	4,  // 6: meetup.v1.ListOpenMeetupsResponse.meetups:type_name -> meetup.v1.MeetupResponse
-	4,  // 7: meetup.v1.ListMyMeetupsResponse.hosted:type_name -> meetup.v1.MeetupResponse
-	4,  // 8: meetup.v1.ListMyMeetupsResponse.requested:type_name -> meetup.v1.MeetupResponse
-	4,  // 9: meetup.v1.CheckScheduleResponse.conflict:type_name -> meetup.v1.MeetupResponse
-	4,  // 10: meetup.v1.ListActiveMeetupsResponse.meetups:type_name -> meetup.v1.MeetupResponse
-	20, // 11: meetup.v1.ListMeetupRequestsResponse.requests:type_name -> meetup.v1.MeetupRequestResponse
-	2,  // 12: meetup.v1.MeetupRequestResponse.status:type_name -> meetup.v1.MeetupRequestStatus
-	38, // 13: meetup.v1.ListNotificationsResponse.notifications:type_name -> meetup.v1.UserNotification
-	45, // 14: meetup.v1.ListMeetupParticipantsResponse.participants:type_name -> meetup.v1.MeetupParticipant
-	43, // 15: meetup.v1.GetMemberActivityResponse.recent_meetups:type_name -> meetup.v1.MemberMeetup
-	44, // 16: meetup.v1.GetMemberActivityResponse.reviews:type_name -> meetup.v1.MemberReview
-	0,  // 17: meetup.v1.MemberMeetup.intent:type_name -> meetup.v1.Intent
-	1,  // 18: meetup.v1.MemberMeetup.status:type_name -> meetup.v1.MeetupStatus
-	47, // 19: meetup.v1.ListRatableParticipantsResponse.participants:type_name -> meetup.v1.RatableParticipant
-	49, // 20: meetup.v1.ListRatableParticipantsResponse.available_traits:type_name -> meetup.v1.RatingTrait
-	51, // 21: meetup.v1.SubmitMeetupReviewRequest.participants:type_name -> meetup.v1.ReviewParticipant
-	55, // 22: meetup.v1.GetMeetupReviewResponse.participants:type_name -> meetup.v1.ReviewedParticipant
-	4,  // 23: meetup.v1.CloseMeetupResponse.meetup:type_name -> meetup.v1.MeetupResponse
-	3,  // 24: meetup.v1.MeetupService.CreateMeetup:input_type -> meetup.v1.CreateMeetupRequest
-	6,  // 25: meetup.v1.MeetupService.ListOpenMeetups:input_type -> meetup.v1.ListOpenMeetupsRequest
-	8,  // 26: meetup.v1.MeetupService.GetMeetup:input_type -> meetup.v1.GetMeetupRequest
-	9,  // 27: meetup.v1.MeetupService.ListMyMeetups:input_type -> meetup.v1.ListMyMeetupsRequest
-	11, // 28: meetup.v1.MeetupService.ListActiveMeetups:input_type -> meetup.v1.ListActiveMeetupsRequest
-	14, // 29: meetup.v1.MeetupService.CheckSchedule:input_type -> meetup.v1.CheckScheduleRequest
-	17, // 30: meetup.v1.MeetupService.ListMeetupRequests:input_type -> meetup.v1.ListMeetupRequestsRequest
-	19, // 31: meetup.v1.MeetupService.RequestToJoin:input_type -> meetup.v1.RequestToJoinRequest
-	21, // 32: meetup.v1.MeetupService.WithdrawRequest:input_type -> meetup.v1.WithdrawRequestRequest
-	23, // 33: meetup.v1.MeetupService.RespondToRequest:input_type -> meetup.v1.RespondToRequestRequest
-	24, // 34: meetup.v1.MeetupService.RegisterDeviceToken:input_type -> meetup.v1.RegisterDeviceTokenRequest
-	26, // 35: meetup.v1.MeetupService.UnregisterDeviceToken:input_type -> meetup.v1.UnregisterDeviceTokenRequest
-	28, // 36: meetup.v1.MeetupService.GetSafetyState:input_type -> meetup.v1.GetSafetyStateRequest
-	29, // 37: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:input_type -> meetup.v1.AcknowledgeSafetyChecklistRequest
-	30, // 38: meetup.v1.MeetupService.ShareWithContacts:input_type -> meetup.v1.ShareWithContactsRequest
-	31, // 39: meetup.v1.MeetupService.CheckIn:input_type -> meetup.v1.CheckInRequest
-	32, // 40: meetup.v1.MeetupService.DeclineCheckIn:input_type -> meetup.v1.DeclineCheckInRequest
-	34, // 41: meetup.v1.MeetupService.SubmitMeetupFeedback:input_type -> meetup.v1.SubmitMeetupFeedbackRequest
-	39, // 42: meetup.v1.MeetupService.ListMeetupParticipants:input_type -> meetup.v1.ListMeetupParticipantsRequest
-	41, // 43: meetup.v1.MeetupService.GetMemberActivity:input_type -> meetup.v1.GetMemberActivityRequest
-	36, // 44: meetup.v1.MeetupService.ListNotifications:input_type -> meetup.v1.ListNotificationsRequest
-	46, // 45: meetup.v1.MeetupService.ListRatableParticipants:input_type -> meetup.v1.ListRatableParticipantsRequest
-	56, // 46: meetup.v1.MeetupService.SubmitRating:input_type -> meetup.v1.SubmitRatingRequest
-	50, // 47: meetup.v1.MeetupService.SubmitMeetupReview:input_type -> meetup.v1.SubmitMeetupReviewRequest
-	53, // 48: meetup.v1.MeetupService.GetMeetupReview:input_type -> meetup.v1.GetMeetupReviewRequest
-	58, // 49: meetup.v1.MeetupService.CloseMeetup:input_type -> meetup.v1.CloseMeetupRequest
-	60, // 50: meetup.v1.MeetupService.CancelMeetup:input_type -> meetup.v1.CancelMeetupRequest
-	12, // 51: meetup.v1.MeetupService.CheckAccountDeletable:input_type -> meetup.v1.CheckAccountDeletableRequest
-	4,  // 52: meetup.v1.MeetupService.CreateMeetup:output_type -> meetup.v1.MeetupResponse
-	7,  // 53: meetup.v1.MeetupService.ListOpenMeetups:output_type -> meetup.v1.ListOpenMeetupsResponse
-	4,  // 54: meetup.v1.MeetupService.GetMeetup:output_type -> meetup.v1.MeetupResponse
-	10, // 55: meetup.v1.MeetupService.ListMyMeetups:output_type -> meetup.v1.ListMyMeetupsResponse
-	16, // 56: meetup.v1.MeetupService.ListActiveMeetups:output_type -> meetup.v1.ListActiveMeetupsResponse
-	15, // 57: meetup.v1.MeetupService.CheckSchedule:output_type -> meetup.v1.CheckScheduleResponse
-	18, // 58: meetup.v1.MeetupService.ListMeetupRequests:output_type -> meetup.v1.ListMeetupRequestsResponse
-	20, // 59: meetup.v1.MeetupService.RequestToJoin:output_type -> meetup.v1.MeetupRequestResponse
-	22, // 60: meetup.v1.MeetupService.WithdrawRequest:output_type -> meetup.v1.WithdrawRequestResponse
-	20, // 61: meetup.v1.MeetupService.RespondToRequest:output_type -> meetup.v1.MeetupRequestResponse
-	25, // 62: meetup.v1.MeetupService.RegisterDeviceToken:output_type -> meetup.v1.RegisterDeviceTokenResponse
-	27, // 63: meetup.v1.MeetupService.UnregisterDeviceToken:output_type -> meetup.v1.UnregisterDeviceTokenResponse
-	33, // 64: meetup.v1.MeetupService.GetSafetyState:output_type -> meetup.v1.SafetyStateResponse
-	33, // 65: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:output_type -> meetup.v1.SafetyStateResponse
-	33, // 66: meetup.v1.MeetupService.ShareWithContacts:output_type -> meetup.v1.SafetyStateResponse
-	33, // 67: meetup.v1.MeetupService.CheckIn:output_type -> meetup.v1.SafetyStateResponse
-	33, // 68: meetup.v1.MeetupService.DeclineCheckIn:output_type -> meetup.v1.SafetyStateResponse
-	35, // 69: meetup.v1.MeetupService.SubmitMeetupFeedback:output_type -> meetup.v1.SubmitMeetupFeedbackResponse
-	40, // 70: meetup.v1.MeetupService.ListMeetupParticipants:output_type -> meetup.v1.ListMeetupParticipantsResponse
-	42, // 71: meetup.v1.MeetupService.GetMemberActivity:output_type -> meetup.v1.GetMemberActivityResponse
-	37, // 72: meetup.v1.MeetupService.ListNotifications:output_type -> meetup.v1.ListNotificationsResponse
-	48, // 73: meetup.v1.MeetupService.ListRatableParticipants:output_type -> meetup.v1.ListRatableParticipantsResponse
-	57, // 74: meetup.v1.MeetupService.SubmitRating:output_type -> meetup.v1.SubmitRatingResponse
-	52, // 75: meetup.v1.MeetupService.SubmitMeetupReview:output_type -> meetup.v1.SubmitMeetupReviewResponse
-	54, // 76: meetup.v1.MeetupService.GetMeetupReview:output_type -> meetup.v1.GetMeetupReviewResponse
-	59, // 77: meetup.v1.MeetupService.CloseMeetup:output_type -> meetup.v1.CloseMeetupResponse
-	61, // 78: meetup.v1.MeetupService.CancelMeetup:output_type -> meetup.v1.CancelMeetupResponse
-	13, // 79: meetup.v1.MeetupService.CheckAccountDeletable:output_type -> meetup.v1.CheckAccountDeletableResponse
-	52, // [52:80] is the sub-list for method output_type
-	24, // [24:52] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	0,  // 7: meetup.v1.ListMyMeetupsRequest.intent:type_name -> meetup.v1.Intent
+	4,  // 8: meetup.v1.ListMyMeetupsResponse.hosted:type_name -> meetup.v1.MeetupResponse
+	4,  // 9: meetup.v1.ListMyMeetupsResponse.requested:type_name -> meetup.v1.MeetupResponse
+	4,  // 10: meetup.v1.CheckScheduleResponse.conflict:type_name -> meetup.v1.MeetupResponse
+	4,  // 11: meetup.v1.ListActiveMeetupsResponse.meetups:type_name -> meetup.v1.MeetupResponse
+	20, // 12: meetup.v1.ListMeetupRequestsResponse.requests:type_name -> meetup.v1.MeetupRequestResponse
+	2,  // 13: meetup.v1.MeetupRequestResponse.status:type_name -> meetup.v1.MeetupRequestStatus
+	38, // 14: meetup.v1.ListNotificationsResponse.notifications:type_name -> meetup.v1.UserNotification
+	45, // 15: meetup.v1.ListMeetupParticipantsResponse.participants:type_name -> meetup.v1.MeetupParticipant
+	43, // 16: meetup.v1.GetMemberActivityResponse.recent_meetups:type_name -> meetup.v1.MemberMeetup
+	44, // 17: meetup.v1.GetMemberActivityResponse.reviews:type_name -> meetup.v1.MemberReview
+	0,  // 18: meetup.v1.MemberMeetup.intent:type_name -> meetup.v1.Intent
+	1,  // 19: meetup.v1.MemberMeetup.status:type_name -> meetup.v1.MeetupStatus
+	47, // 20: meetup.v1.ListRatableParticipantsResponse.participants:type_name -> meetup.v1.RatableParticipant
+	49, // 21: meetup.v1.ListRatableParticipantsResponse.available_traits:type_name -> meetup.v1.RatingTrait
+	51, // 22: meetup.v1.SubmitMeetupReviewRequest.participants:type_name -> meetup.v1.ReviewParticipant
+	55, // 23: meetup.v1.GetMeetupReviewResponse.participants:type_name -> meetup.v1.ReviewedParticipant
+	4,  // 24: meetup.v1.CloseMeetupResponse.meetup:type_name -> meetup.v1.MeetupResponse
+	3,  // 25: meetup.v1.MeetupService.CreateMeetup:input_type -> meetup.v1.CreateMeetupRequest
+	6,  // 26: meetup.v1.MeetupService.ListOpenMeetups:input_type -> meetup.v1.ListOpenMeetupsRequest
+	8,  // 27: meetup.v1.MeetupService.GetMeetup:input_type -> meetup.v1.GetMeetupRequest
+	9,  // 28: meetup.v1.MeetupService.ListMyMeetups:input_type -> meetup.v1.ListMyMeetupsRequest
+	11, // 29: meetup.v1.MeetupService.ListActiveMeetups:input_type -> meetup.v1.ListActiveMeetupsRequest
+	14, // 30: meetup.v1.MeetupService.CheckSchedule:input_type -> meetup.v1.CheckScheduleRequest
+	17, // 31: meetup.v1.MeetupService.ListMeetupRequests:input_type -> meetup.v1.ListMeetupRequestsRequest
+	19, // 32: meetup.v1.MeetupService.RequestToJoin:input_type -> meetup.v1.RequestToJoinRequest
+	21, // 33: meetup.v1.MeetupService.WithdrawRequest:input_type -> meetup.v1.WithdrawRequestRequest
+	23, // 34: meetup.v1.MeetupService.RespondToRequest:input_type -> meetup.v1.RespondToRequestRequest
+	24, // 35: meetup.v1.MeetupService.RegisterDeviceToken:input_type -> meetup.v1.RegisterDeviceTokenRequest
+	26, // 36: meetup.v1.MeetupService.UnregisterDeviceToken:input_type -> meetup.v1.UnregisterDeviceTokenRequest
+	28, // 37: meetup.v1.MeetupService.GetSafetyState:input_type -> meetup.v1.GetSafetyStateRequest
+	29, // 38: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:input_type -> meetup.v1.AcknowledgeSafetyChecklistRequest
+	30, // 39: meetup.v1.MeetupService.ShareWithContacts:input_type -> meetup.v1.ShareWithContactsRequest
+	31, // 40: meetup.v1.MeetupService.CheckIn:input_type -> meetup.v1.CheckInRequest
+	32, // 41: meetup.v1.MeetupService.DeclineCheckIn:input_type -> meetup.v1.DeclineCheckInRequest
+	34, // 42: meetup.v1.MeetupService.SubmitMeetupFeedback:input_type -> meetup.v1.SubmitMeetupFeedbackRequest
+	39, // 43: meetup.v1.MeetupService.ListMeetupParticipants:input_type -> meetup.v1.ListMeetupParticipantsRequest
+	41, // 44: meetup.v1.MeetupService.GetMemberActivity:input_type -> meetup.v1.GetMemberActivityRequest
+	36, // 45: meetup.v1.MeetupService.ListNotifications:input_type -> meetup.v1.ListNotificationsRequest
+	46, // 46: meetup.v1.MeetupService.ListRatableParticipants:input_type -> meetup.v1.ListRatableParticipantsRequest
+	56, // 47: meetup.v1.MeetupService.SubmitRating:input_type -> meetup.v1.SubmitRatingRequest
+	50, // 48: meetup.v1.MeetupService.SubmitMeetupReview:input_type -> meetup.v1.SubmitMeetupReviewRequest
+	53, // 49: meetup.v1.MeetupService.GetMeetupReview:input_type -> meetup.v1.GetMeetupReviewRequest
+	58, // 50: meetup.v1.MeetupService.CloseMeetup:input_type -> meetup.v1.CloseMeetupRequest
+	60, // 51: meetup.v1.MeetupService.CancelMeetup:input_type -> meetup.v1.CancelMeetupRequest
+	12, // 52: meetup.v1.MeetupService.CheckAccountDeletable:input_type -> meetup.v1.CheckAccountDeletableRequest
+	4,  // 53: meetup.v1.MeetupService.CreateMeetup:output_type -> meetup.v1.MeetupResponse
+	7,  // 54: meetup.v1.MeetupService.ListOpenMeetups:output_type -> meetup.v1.ListOpenMeetupsResponse
+	4,  // 55: meetup.v1.MeetupService.GetMeetup:output_type -> meetup.v1.MeetupResponse
+	10, // 56: meetup.v1.MeetupService.ListMyMeetups:output_type -> meetup.v1.ListMyMeetupsResponse
+	16, // 57: meetup.v1.MeetupService.ListActiveMeetups:output_type -> meetup.v1.ListActiveMeetupsResponse
+	15, // 58: meetup.v1.MeetupService.CheckSchedule:output_type -> meetup.v1.CheckScheduleResponse
+	18, // 59: meetup.v1.MeetupService.ListMeetupRequests:output_type -> meetup.v1.ListMeetupRequestsResponse
+	20, // 60: meetup.v1.MeetupService.RequestToJoin:output_type -> meetup.v1.MeetupRequestResponse
+	22, // 61: meetup.v1.MeetupService.WithdrawRequest:output_type -> meetup.v1.WithdrawRequestResponse
+	20, // 62: meetup.v1.MeetupService.RespondToRequest:output_type -> meetup.v1.MeetupRequestResponse
+	25, // 63: meetup.v1.MeetupService.RegisterDeviceToken:output_type -> meetup.v1.RegisterDeviceTokenResponse
+	27, // 64: meetup.v1.MeetupService.UnregisterDeviceToken:output_type -> meetup.v1.UnregisterDeviceTokenResponse
+	33, // 65: meetup.v1.MeetupService.GetSafetyState:output_type -> meetup.v1.SafetyStateResponse
+	33, // 66: meetup.v1.MeetupService.AcknowledgeSafetyChecklist:output_type -> meetup.v1.SafetyStateResponse
+	33, // 67: meetup.v1.MeetupService.ShareWithContacts:output_type -> meetup.v1.SafetyStateResponse
+	33, // 68: meetup.v1.MeetupService.CheckIn:output_type -> meetup.v1.SafetyStateResponse
+	33, // 69: meetup.v1.MeetupService.DeclineCheckIn:output_type -> meetup.v1.SafetyStateResponse
+	35, // 70: meetup.v1.MeetupService.SubmitMeetupFeedback:output_type -> meetup.v1.SubmitMeetupFeedbackResponse
+	40, // 71: meetup.v1.MeetupService.ListMeetupParticipants:output_type -> meetup.v1.ListMeetupParticipantsResponse
+	42, // 72: meetup.v1.MeetupService.GetMemberActivity:output_type -> meetup.v1.GetMemberActivityResponse
+	37, // 73: meetup.v1.MeetupService.ListNotifications:output_type -> meetup.v1.ListNotificationsResponse
+	48, // 74: meetup.v1.MeetupService.ListRatableParticipants:output_type -> meetup.v1.ListRatableParticipantsResponse
+	57, // 75: meetup.v1.MeetupService.SubmitRating:output_type -> meetup.v1.SubmitRatingResponse
+	52, // 76: meetup.v1.MeetupService.SubmitMeetupReview:output_type -> meetup.v1.SubmitMeetupReviewResponse
+	54, // 77: meetup.v1.MeetupService.GetMeetupReview:output_type -> meetup.v1.GetMeetupReviewResponse
+	59, // 78: meetup.v1.MeetupService.CloseMeetup:output_type -> meetup.v1.CloseMeetupResponse
+	61, // 79: meetup.v1.MeetupService.CancelMeetup:output_type -> meetup.v1.CancelMeetupResponse
+	13, // 80: meetup.v1.MeetupService.CheckAccountDeletable:output_type -> meetup.v1.CheckAccountDeletableResponse
+	53, // [53:81] is the sub-list for method output_type
+	25, // [25:53] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_meetup_v1_meetup_proto_init() }

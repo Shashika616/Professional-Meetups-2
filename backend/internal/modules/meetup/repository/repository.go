@@ -164,6 +164,19 @@ type OpenMeetupFilter struct {
 	// window_start falls within that many days from now are returned —
 	// what makes a "Happening Soon" view possible.
 	WithinDays int32
+	// WindowFrom and WindowTo nil mean no limit on that side. See
+	// MeetupListFilter.
+	WindowFrom *time.Time
+	WindowTo   *time.Time
+}
+
+// MeetupListFilter narrows ListByHost and ListRequestedByUser. The zero value
+// means no filter. A meetup matches when any part of its window falls inside
+// [WindowFrom, WindowTo).
+type MeetupListFilter struct {
+	Intent     *Intent
+	WindowFrom *time.Time
+	WindowTo   *time.Time
 }
 
 // ScheduleGuard runs inside a create's own transaction, after that
@@ -264,12 +277,12 @@ type MeetupRepository interface {
 	// same cursor nil-means-first-page/next-page-cursor contract as
 	// ListOpen). MyRequestStatus is always nil on these rows (see Meetup's
 	// doc comment).
-	ListByHost(ctx context.Context, hostID string, cursor *Cursor, pageSize int) ([]Meetup, *Cursor, error)
+	ListByHost(ctx context.Context, hostID string, filter MeetupListFilter, cursor *Cursor, pageSize int) ([]Meetup, *Cursor, error)
 	// ListRequestedByUser returns one row per meetup userID has an active
 	// or historical request on, newest-meetup first, cursor-paginated
 	// (same shape as ListByHost above), MyRequestStatus always populated
 	// (the requester's latest request status for that meetup).
-	ListRequestedByUser(ctx context.Context, userID string, cursor *Cursor, pageSize int) ([]Meetup, *Cursor, error)
+	ListRequestedByUser(ctx context.Context, userID string, filter MeetupListFilter, cursor *Cursor, pageSize int) ([]Meetup, *Cursor, error)
 	// Cancel returns apperror.ErrNotFound (wrapped) if id doesn't exist or
 	// isn't hosted by hostUserID. Host-ownership is checked by the service
 	// layer before calling this (Round 11: also now checked in the query

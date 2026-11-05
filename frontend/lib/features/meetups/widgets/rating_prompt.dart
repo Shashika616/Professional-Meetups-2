@@ -209,7 +209,7 @@ class _RatingPromptState extends ConsumerState<RatingPrompt> {
                         Text(
                           'Rated',
                           style: TextStyle(
-                            color: AppPalette.verified,
+                            color: AppPalette.verifiedText,
                             fontWeight: FontWeight.w800,
                             fontSize: 11,
                             letterSpacing: 0.6,
@@ -256,11 +256,15 @@ class _StarPicker extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: List.generate(
         5,
-        (i) => GestureDetector(
-          onTap: () => onRate(i + 1),
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 1),
-            child: AppIcon(AppIcons.star, size: 22, color: AppPalette.gold),
+        (i) => Semantics(
+          container: true,
+          button: true,
+          child: GestureDetector(
+            onTap: () => onRate(i + 1),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 1),
+              child: AppIcon(AppIcons.star, size: 22, color: AppPalette.gold),
+            ),
           ),
         ),
       ),

@@ -37,7 +37,7 @@ class MeetupCard extends StatelessWidget {
   /// ADR-028 § 2 — a locked meetup's card tap redirects here instead of
   /// reaching [onTap]: a toast
   /// (same wording pattern as the locked-intent toast Home shows for a
-  /// locked chip on `IntentFilterBar`), then the focused checklist. The tap
+  /// locked chip on `IntentFilterFab`), then the focused checklist. The tap
   /// never reaches RequestToJoin while locked, same as the disabled-button
   /// pattern this replaces — only the destination changes, from a dead end
   /// to somewhere that actually helps.
@@ -428,53 +428,46 @@ class MeetupsSkeleton extends StatelessWidget {
           : const EdgeInsets.fromLTRB(20, 4, 20, 100),
       itemCount: cardCount ?? (shrinkWrap ? 2 : 3),
       itemBuilder: (context, index) => Padding(
-        padding: const EdgeInsets.only(bottom: 14),
-        // The placeholder traces THIS card, not a generic one.
-        //
-        // It used to be a 48px circle and two bars: the wrong radius, the
-        // wrong surface radius, the wrong number of lines, and a round
-        // avatar where the card has a 62px rounded-square photo. The whole
-        // point of a skeleton is that the real content lands where the
-        // grey was; one that does not match is just a flash of noise in a
-        // different shape, and the eye has to re-find everything.
+        padding: const EdgeInsets.only(bottom: 12),
+        // The placeholder traces THIS card, row for row: the tags, then
+        // when, where and who. Real content should land where the grey was;
+        // when the two drift apart the list jumps as it loads.
         child: FlatCard(
           radius: 22,
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // The thumbnail: 62 square, radius 16, same as _Thumb.
-                  const SkeletonBox(width: 62, height: 62, radius: 16),
-                  const SizedBox(width: 11),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              // The thumbnail: 62 square, radius 16, same as _Thumb.
+              const SkeletonBox(width: 62, height: 62, radius: 16),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    Row(
                       children: [
-                        // Title.
-                        const SkeletonBox(
-                          width: 150,
-                          height: 13,
-                          opacity: 0.08,
-                        ),
-                        const SizedBox(height: 8),
-                        // The host line: 20px avatar, name, trust, rating.
-                        Row(
-                          children: const [
-                            SkeletonBox(width: 20, height: 20, radius: 10),
-                            SizedBox(width: 7),
-                            SkeletonBox(width: 96, height: 10),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        // When and where.
-                        const SkeletonBox(width: 124, height: 10),
+                        SkeletonBox(width: 58, height: 18, radius: 9),
+                        SizedBox(width: 6),
+                        SkeletonBox(width: 82, height: 18, radius: 9),
                       ],
                     ),
-                  ),
-                ],
+                    SizedBox(height: 6),
+                    SkeletonBox(width: 170, height: 18, opacity: 0.08),
+                    SizedBox(height: 2),
+                    SkeletonBox(width: 136, height: 15),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        SkeletonBox(width: 20, height: 20, radius: 10),
+                        SizedBox(width: 6),
+                        SkeletonBox(width: 84, height: 11),
+                        Spacer(),
+                        SkeletonBox(width: 50, height: 11),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),

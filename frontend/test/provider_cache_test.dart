@@ -26,6 +26,8 @@ class _CountingMeetupService extends ScriptedMeetupService {
     required double viewerLng,
     String? cursor,
     int withinDays = 0,
+    DateTime? from,
+    DateTime? to,
   }) {
     listOpenCalls++;
     return super.listOpenMeetups(
@@ -44,9 +46,22 @@ class _CountingMeetupService extends ScriptedMeetupService {
   }
 }
 
-({IntentType? intent, double viewerLat, double viewerLng, int withinDays}) _key(
+({
   IntentType? intent,
-) => (intent: intent, viewerLat: 6.871, viewerLng: 79.908, withinDays: 28);
+  double viewerLat,
+  double viewerLng,
+  int withinDays,
+  DateTime? from,
+  DateTime? to,
+})
+_key(IntentType? intent) => (
+  intent: intent,
+  viewerLat: 6.871,
+  viewerLng: 79.908,
+  withinDays: 28,
+  from: null,
+  to: null,
+);
 
 void main() {
   _retryPolicyTests();

@@ -31,6 +31,8 @@ class ImmediateMeetupService implements MeetupService {
     required double viewerLng,
     String? cursor,
     int withinDays = 0,
+    DateTime? from,
+    DateTime? to,
   }) async => const PagedResult(items: []);
 
   @override
@@ -47,7 +49,13 @@ class ImmediateMeetupService implements MeetupService {
       bool requestedHasMore,
     })
   >
-  listMyMeetups({String? hostedCursor, String? requestedCursor}) async => (
+  listMyMeetups({
+    String? hostedCursor,
+    String? requestedCursor,
+    IntentType? intent,
+    DateTime? from,
+    DateTime? to,
+  }) async => (
     hosted: <Meetup>[],
     requested: <Meetup>[],
     hostedNextCursor: null,

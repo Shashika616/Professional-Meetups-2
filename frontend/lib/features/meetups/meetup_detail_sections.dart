@@ -68,7 +68,7 @@ class _RequestStatusBanner extends StatelessWidget {
         'You\'re in',
         'The host accepted your request. See you there.',
         AppIcons.checkCircle,
-        AppPalette.verified,
+        AppPalette.verifiedText,
       ),
       // Not red and not "declined": hosts keep groups small, so a no is
       // about fit, and the section under this banner points at what is
@@ -483,58 +483,62 @@ class _ActionTile extends StatelessWidget {
       color: AppPalette.card,
       borderRadius: BorderRadius.circular(14),
       clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        // A visible press state. The old bordered bars gave none, which is
-        // half of why they did not read as buttons.
-        splashColor: accent.withValues(alpha: 0.12),
-        highlightColor: accent.withValues(alpha: 0.06),
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: accent.withValues(alpha: 0.45)),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.14),
-                    shape: BoxShape.circle,
+      child: Semantics(
+        container: true,
+        button: true,
+        child: InkWell(
+          onTap: onTap,
+          // A visible press state. The old bordered bars gave none, which is
+          // half of why they did not read as buttons.
+          splashColor: accent.withValues(alpha: 0.12),
+          highlightColor: accent.withValues(alpha: 0.06),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: accent.withValues(alpha: 0.45)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.14),
+                      shape: BoxShape.circle,
+                    ),
+                    child: AppIcon(icon, size: 20, color: accent),
                   ),
-                  child: AppIcon(icon, size: 20, color: accent),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        label,
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.3,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            color: AppPalette.textPrimary,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.3,
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        detail,
-                        style: TextStyle(
-                          color: AppPalette.textSecondary,
-                          fontSize: 12,
+                        const SizedBox(height: 2),
+                        Text(
+                          detail,
+                          style: TextStyle(
+                            color: AppPalette.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                AppIcon(AppIcons.forward, size: 22, color: accent),
-              ],
+                  const SizedBox(width: 8),
+                  AppIcon(AppIcons.forward, size: 22, color: accent),
+                ],
+              ),
             ),
           ),
         ),

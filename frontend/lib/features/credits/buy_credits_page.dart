@@ -325,89 +325,97 @@ class _PackRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: enabled ? onTap : null,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
-        decoration: BoxDecoration(
-          color: AppPalette.card,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppPalette.hairline),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        formatCredits(pack.credits),
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+    return Semantics(
+      container: true,
+      button: true,
+      enabled: enabled,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: enabled ? onTap : null,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+          decoration: BoxDecoration(
+            color: AppPalette.card,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppPalette.hairline),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          formatCredits(pack.credits),
+                          style: TextStyle(
+                            color: AppPalette.textPrimary,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
-                      if (pack.badgeLabel.isNotEmpty) ...[
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(color: AppPalette.hairline),
-                          ),
-                          child: Text(
-                            pack.badgeLabel,
-                            style: TextStyle(
-                              color: AppPalette.textPrimary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
+                        if (pack.badgeLabel.isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: AppPalette.hairline),
+                            ),
+                            child: Text(
+                              pack.badgeLabel,
+                              style: TextStyle(
+                                color: AppPalette.textPrimary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
-                        ),
+                        ],
                       ],
-                    ],
-                  ),
-                  if (pack.bonus > 0) ...[
-                    const SizedBox(height: 3),
-                    Text(
-                      'Includes ${formatCredits(pack.bonus)} bonus',
-                      style: TextStyle(
-                        color: AppPalette.brandGreen,
-                        fontSize: 12,
-                      ),
                     ),
+                    if (pack.bonus > 0) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        'Includes ${formatCredits(pack.bonus)} bonus',
+                        style: TextStyle(
+                          color: AppPalette.verifiedText,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-              decoration: BoxDecoration(
-                color: AppPalette.candyBlue.withValues(
-                  alpha: enabled ? 0.14 : 0.06,
-                ),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                product.price,
-                style: TextStyle(
-                  color: AppPalette.candyBlue,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
                 ),
               ),
-            ),
-          ],
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: AppPalette.candyBlue.withValues(
+                    alpha: enabled ? 0.14 : 0.06,
+                  ),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  product.price,
+                  style: TextStyle(
+                    color: AppPalette.candyBlue,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

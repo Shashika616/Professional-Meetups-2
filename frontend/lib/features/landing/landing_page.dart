@@ -135,37 +135,41 @@ class _LandingPageState extends State<LandingPage> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  GestureDetector(
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        settings: const RouteSettings(
-                          name: ScreenNames.emailSignIn,
+                  Semantics(
+                    container: true,
+                    button: true,
+                    child: GestureDetector(
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          settings: const RouteSettings(
+                            name: ScreenNames.emailSignIn,
+                          ),
+                          builder: (context) => const EmailLoginPage(),
                         ),
-                        builder: (context) => const EmailLoginPage(),
                       ),
-                    ),
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: 'Already a member?   ',
-                            style: TextStyle(
-                              fontSize: 10,
-                              letterSpacing: 0.3,
-                              fontWeight: FontWeight.w700,
-                              color: AppPalette.textSecondary,
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: 'Already a member?   ',
+                              style: TextStyle(
+                                fontSize: 10,
+                                letterSpacing: 0.3,
+                                fontWeight: FontWeight.w700,
+                                color: AppPalette.textSecondary,
+                              ),
                             ),
-                          ),
-                          TextSpan(
-                            text: 'Sign in',
-                            style: TextStyle(
-                              fontSize: 10,
-                              letterSpacing: 0.3,
-                              fontWeight: FontWeight.w900,
-                              color: AppPalette.candyBlue,
+                            TextSpan(
+                              text: 'Sign in',
+                              style: TextStyle(
+                                fontSize: 10,
+                                letterSpacing: 0.3,
+                                fontWeight: FontWeight.w900,
+                                color: AppPalette.candyBlue,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:professional_connections_platform/core/widgets/pressable.dart';
 import 'package:professional_connections_platform/core/analytics/screen_names.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/app_icons.dart';
@@ -12,6 +13,7 @@ class HomeHeader extends StatelessWidget {
     required this.userName,
     this.imageUrl,
     this.hasNewNotifications = false,
+    this.onOpenProfile,
   });
 
   final String userName;
@@ -19,6 +21,9 @@ class HomeHeader extends StatelessWidget {
 
   /// Shows the dot on the bell.
   final bool hasNewNotifications;
+
+  /// Called when the avatar is tapped. Null leaves it inert.
+  final VoidCallback? onOpenProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -72,14 +77,27 @@ class HomeHeader extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 10),
-              ProfessionalAvatar(
-                size: 40,
-                name: userName,
-                imageUrl: imageUrl,
-                // The one avatar in the app that is unambiguously the
-                // viewer's own, which is what the ring and the dot mean.
-                ring: true,
-                showPresenceDot: true,
+              Pressable(
+                key: const Key('home-avatar'),
+                onTap: onOpenProfile,
+                child: Semantics(
+                  label: 'Open your profile',
+                  excludeSemantics: true,
+                  child: Padding(
+                    // Takes the 40px avatar to the 44px tap size.
+                    padding: const EdgeInsets.all(2),
+                    child: ProfessionalAvatar(
+                      size: 40,
+                      name: userName,
+                      imageUrl: imageUrl,
+                      // The one avatar in the app that is unambiguously the
+                      // viewer's own, which is what the ring and the dot
+                      // mean.
+                      ring: true,
+                      showPresenceDot: true,
+                    ),
+                  ),
+                ),
               ),
             ],
           ),

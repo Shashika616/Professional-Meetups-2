@@ -421,126 +421,130 @@ class _ParticipantRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: redacted
-          ? null
-          : () => PublicProfilePage.open(
-              context,
-              userId: participant.userId,
-              initialName: participant.fullName,
-            ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        // IntrinsicHeight so the vertical rule spans whatever height the
-        // wrapped name and badges make the left side.
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              if (redacted)
-                const RedactedFace(size: 44)
-              else
-                ProfessionalAvatar(
-                  name: participant.fullName,
-                  imageUrl: participant.profilePhotoUrl.isEmpty
-                      ? null
-                      : participant.profilePhotoUrl,
-                  size: 44,
-                ),
-              const SizedBox(width: 12),
-              // Left: who they are. Never truncated — the name wraps.
-              Expanded(
-                child: redacted
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _bar(128, 12),
-                          const SizedBox(height: 8),
-                          _bar(72, 9),
-                        ],
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            participant.fullName,
-                            softWrap: true,
-                            style: TextStyle(
-                              color: AppPalette.textPrimary,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 15,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              TrustLevelBadge(
-                                trustLevel: participant.trustLevel,
-                              ),
-                              VerificationBadges(
-                                trustLevel: participant.trustLevel,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+    return Semantics(
+      container: true,
+      button: !redacted,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: redacted
+            ? null
+            : () => PublicProfilePage.open(
+                context,
+                userId: participant.userId,
+                initialName: participant.fullName,
               ),
-              // Right: their role on this meetup, divided from the identity
-              // by a rule, then the chevron at the very edge. The column has
-              // a FIXED width and every pill fills it, so the rule and the
-              // pills sit at the same x on every row — a column that sized
-              // to its content put the rule wherever the widest pill ended.
-              // Every named row has at least one pill (HOST or JOINED), so
-              // the column is never empty. A redacted HOST row keeps its
-              // pill too — which chair is the host's is part of the shape
-              // of the list that survives redaction (ADR-028).
-              if (!redacted || participant.isHost) ...[
-                const SizedBox(width: 10),
-                Container(width: 1, color: AppPalette.hairline),
-                const SizedBox(width: 10),
-                SizedBox(
-                  width: _roleColumnWidth,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (participant.isHost)
-                        const _RolePill(
-                          icon: AppIcons.star,
-                          label: 'Host',
-                          tone: _RoleTone.host,
-                        )
-                      else if (!redacted)
-                        const _RolePill(
-                          icon: AppIcons.check,
-                          label: 'Joined',
-                          tone: _RoleTone.joined,
-                        ),
-                      if (isViewer) ...[
-                        const SizedBox(height: 6),
-                        const _RolePill(
-                          icon: AppIcons.person,
-                          label: 'You',
-                          tone: _RoleTone.you,
-                        ),
-                      ],
-                    ],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          // IntrinsicHeight so the vertical rule spans whatever height the
+          // wrapped name and badges make the left side.
+          child: IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (redacted)
+                  const RedactedFace(size: 44)
+                else
+                  ProfessionalAvatar(
+                    name: participant.fullName,
+                    imageUrl: participant.profilePhotoUrl.isEmpty
+                        ? null
+                        : participant.profilePhotoUrl,
+                    size: 44,
                   ),
+                const SizedBox(width: 12),
+                // Left: who they are. Never truncated — the name wraps.
+                Expanded(
+                  child: redacted
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _bar(128, 12),
+                            const SizedBox(height: 8),
+                            _bar(72, 9),
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              participant.fullName,
+                              softWrap: true,
+                              style: TextStyle(
+                                color: AppPalette.textPrimary,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                TrustLevelBadge(
+                                  trustLevel: participant.trustLevel,
+                                ),
+                                VerificationBadges(
+                                  trustLevel: participant.trustLevel,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                 ),
+                // Right: their role on this meetup, divided from the identity
+                // by a rule, then the chevron at the very edge. The column has
+                // a FIXED width and every pill fills it, so the rule and the
+                // pills sit at the same x on every row — a column that sized
+                // to its content put the rule wherever the widest pill ended.
+                // Every named row has at least one pill (HOST or JOINED), so
+                // the column is never empty. A redacted HOST row keeps its
+                // pill too — which chair is the host's is part of the shape
+                // of the list that survives redaction (ADR-028).
+                if (!redacted || participant.isHost) ...[
+                  const SizedBox(width: 10),
+                  Container(width: 1, color: AppPalette.hairline),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: _roleColumnWidth,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (participant.isHost)
+                          const _RolePill(
+                            icon: AppIcons.star,
+                            label: 'Host',
+                            tone: _RoleTone.host,
+                          )
+                        else if (!redacted)
+                          const _RolePill(
+                            icon: AppIcons.check,
+                            label: 'Joined',
+                            tone: _RoleTone.joined,
+                          ),
+                        if (isViewer) ...[
+                          const SizedBox(height: 6),
+                          const _RolePill(
+                            icon: AppIcons.person,
+                            label: 'You',
+                            tone: _RoleTone.you,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+                if (!redacted) ...[
+                  const SizedBox(width: 6),
+                  AppIcon(
+                    AppIcons.forward,
+                    size: 20,
+                    color: AppPalette.textSecondary,
+                  ),
+                ],
               ],
-              if (!redacted) ...[
-                const SizedBox(width: 6),
-                AppIcon(
-                  AppIcons.forward,
-                  size: 20,
-                  color: AppPalette.textSecondary,
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       ),
@@ -573,7 +577,7 @@ class _RolePill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (tone) {
-      _RoleTone.host => AppPalette.brandGreen,
+      _RoleTone.host => AppPalette.verifiedText,
       _RoleTone.joined => AppPalette.textSecondary,
       _RoleTone.you => AppPalette.candyBlue,
     };

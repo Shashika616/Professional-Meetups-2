@@ -152,7 +152,11 @@ type ListOpenMeetupsRequest struct {
 	// WithinDays 0 means unrestricted. When > 0, only meetups starting
 	// within that many days are returned — what backs the "Happening Soon"
 	// section. Validated below rather than trusted: it reaches SQL.
-	WithinDays       int32
+	WithinDays int32
+	// WindowFrom and WindowTo nil mean no limit on that side. See
+	// ListMyMeetupsRequest.
+	WindowFrom       *time.Time
+	WindowTo         *time.Time
 	Cursor           string // empty for the first page
 	PageSize         int    // clamped to a sane default/cap
 	ViewerLat        float64
@@ -183,6 +187,12 @@ type ListMyMeetupsRequest struct {
 	UserID          string
 	HostedCursor    string
 	RequestedCursor string
+	// Optional filters, applied to both lists. Intent nil means every intent.
+	// A meetup matches when any part of its window falls inside
+	// [WindowFrom, WindowTo); nil means no limit on that side.
+	Intent     *Intent
+	WindowFrom *time.Time
+	WindowTo   *time.Time
 }
 
 // ListMyMeetupsResult carries both lists and their independent cursors.

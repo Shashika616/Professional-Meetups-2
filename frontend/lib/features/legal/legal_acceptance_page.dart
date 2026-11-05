@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/core/widgets/fill_scroll_view.dart';
 import 'package:professional_connections_platform/core/providers/app_providers.dart';
 import 'package:professional_connections_platform/core/services/legal_service.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
@@ -55,7 +56,7 @@ class _LegalAcceptancePageState extends ConsumerState<LegalAcceptancePage> {
       child: Scaffold(
         body: AppBackground(
           child: SafeArea(
-            child: Padding(
+            child: FillScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -82,40 +83,45 @@ class _LegalAcceptancePageState extends ConsumerState<LegalAcceptancePage> {
                   for (final document in LegalDocument.values)
                     _DocumentLink(document: document),
                   const SizedBox(height: 12),
-                  GestureDetector(
-                    key: const Key('legal-agree'),
-                    behavior: HitTestBehavior.opaque,
-                    onTap: _saving
-                        ? null
-                        : () => setState(() => _agreed = !_agreed),
-                    child: Row(
-                      children: [
-                        Checkbox(
-                          value: _agreed,
-                          onChanged: _saving
-                              ? null
-                              : (value) =>
-                                    setState(() => _agreed = value ?? false),
-                          activeColor: AppPalette.candyBlue,
-                          checkColor: AppPalette.onyx,
-                          side: BorderSide(
-                            color: AppPalette.textSecondary.withValues(
-                              alpha: 0.6,
+                  Semantics(
+                    container: true,
+                    checked: _agreed,
+                    enabled: !_saving,
+                    child: GestureDetector(
+                      key: const Key('legal-agree'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _saving
+                          ? null
+                          : () => setState(() => _agreed = !_agreed),
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            value: _agreed,
+                            onChanged: _saving
+                                ? null
+                                : (value) =>
+                                      setState(() => _agreed = value ?? false),
+                            activeColor: AppPalette.candyBlue,
+                            checkColor: AppPalette.onyx,
+                            side: BorderSide(
+                              color: AppPalette.textSecondary.withValues(
+                                alpha: 0.6,
+                              ),
                             ),
                           ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            'I have read and agree to the Terms and Conditions '
-                            'and the Privacy Policy.',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: AppPalette.textPrimary,
+                          Expanded(
+                            child: Text(
+                              'I have read and agree to the Terms and Conditions '
+                              'and the Privacy Policy.',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppPalette.textPrimary,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                   const Spacer(flex: 2),
@@ -154,29 +160,33 @@ class _DocumentLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => openLegalDocument(context, document),
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 4),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                document.title,
-                style: TextStyle(
-                  color: AppPalette.candyBlue,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
+    return Semantics(
+      container: true,
+      button: true,
+      child: InkWell(
+        onTap: () => openLegalDocument(context, document),
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  document.title,
+                  style: TextStyle(
+                    color: AppPalette.candyBlue,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-            ),
-            AppIcon(
-              AppIcons.forward,
-              size: 18,
-              color: AppPalette.textSecondary,
-            ),
-          ],
+              AppIcon(
+                AppIcons.forward,
+                size: 18,
+                color: AppPalette.textSecondary,
+              ),
+            ],
+          ),
         ),
       ),
     );

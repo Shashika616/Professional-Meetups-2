@@ -392,7 +392,7 @@ class _HistoryRow extends StatelessWidget {
           Text(
             '${gain ? '+' : '−'}${formatCreditNumber(entry.delta.abs())}',
             style: TextStyle(
-              color: gain ? AppPalette.brandGreen : AppPalette.textPrimary,
+              color: gain ? AppPalette.verifiedText : AppPalette.textPrimary,
               fontSize: 15,
               fontWeight: FontWeight.w700,
             ),

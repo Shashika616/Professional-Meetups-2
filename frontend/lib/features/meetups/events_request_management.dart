@@ -317,64 +317,68 @@ class _RequestCard extends StatelessWidget {
             // host is deciding whether to let this person in, and a name
             // plus a level badge is not enough to decide on. Only the row
             // is tappable, so ACCEPT/DECLINE below stay unambiguous.
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => PublicProfilePage.open(
-                context,
-                userId: request.requesterId,
-                initialName: request.requesterFullName,
-              ),
-              child: Row(
-                children: [
-                  ProfessionalAvatar(
-                    name: request.requesterFullName,
-                    imageUrl: request.requesterProfilePhotoUrl.isEmpty
-                        ? null
-                        : request.requesterProfilePhotoUrl,
-                    size: 40,
-                  ),
-                  const SizedBox(width: 12),
-                  // Name on its own line(s), never cut; badge and rating
-                  // under it — same stack as the Home card's host header.
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          request.requesterFullName,
-                          softWrap: true,
-                          style: TextStyle(
-                            color: AppPalette.textPrimary,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                            height: 1.2,
-                          ),
-                        ),
-                        const SizedBox(height: 5),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            TrustLevelBadge(
-                              trustLevel: request.requesterTrustLevel,
-                            ),
-                            StarRating(
-                              average: request.requesterRatingAverage,
-                              count: request.requesterRatingCount,
-                            ),
-                          ],
-                        ),
-                      ],
+            Semantics(
+              container: true,
+              button: true,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => PublicProfilePage.open(
+                  context,
+                  userId: request.requesterId,
+                  initialName: request.requesterFullName,
+                ),
+                child: Row(
+                  children: [
+                    ProfessionalAvatar(
+                      name: request.requesterFullName,
+                      imageUrl: request.requesterProfilePhotoUrl.isEmpty
+                          ? null
+                          : request.requesterProfilePhotoUrl,
+                      size: 40,
                     ),
-                  ),
-                  const SizedBox(width: 4),
-                  AppIcon(
-                    AppIcons.forward,
-                    size: 18,
-                    color: AppPalette.textSecondary,
-                  ),
-                ],
+                    const SizedBox(width: 12),
+                    // Name on its own line(s), never cut; badge and rating
+                    // under it — same stack as the Home card's host header.
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            request.requesterFullName,
+                            softWrap: true,
+                            style: TextStyle(
+                              color: AppPalette.textPrimary,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              height: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              TrustLevelBadge(
+                                trustLevel: request.requesterTrustLevel,
+                              ),
+                              StarRating(
+                                average: request.requesterRatingAverage,
+                                count: request.requesterRatingCount,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    AppIcon(
+                      AppIcons.forward,
+                      size: 18,
+                      color: AppPalette.textSecondary,
+                    ),
+                  ],
+                ),
               ),
             ),
             // No verification chip row here. VerificationBadges takes
@@ -389,7 +393,7 @@ class _RequestCard extends StatelessWidget {
                   Expanded(
                     child: PrimaryButton(
                       label: 'Accept',
-                      height: 40,
+                      height: 44,
                       onPressed: () => onRespond(request, true),
                     ),
                   ),
@@ -402,7 +406,7 @@ class _RequestCard extends StatelessWidget {
                   Expanded(
                     child: SecondaryButton(
                       label: 'Reject',
-                      height: 40,
+                      height: 44,
                       color: AppPalette.danger,
                       fillColor: AppPalette.danger.withValues(alpha: 0.08),
                       borderColor: AppPalette.danger.withValues(alpha: 0.3),

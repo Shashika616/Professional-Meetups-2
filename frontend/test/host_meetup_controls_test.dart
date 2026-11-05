@@ -378,7 +378,7 @@ void main() {
       );
       expect(
         enabled,
-        AppPalette.danger,
+        AppPalette.sos,
         reason: 'and land on the real destructive colour once usable',
       );
     },

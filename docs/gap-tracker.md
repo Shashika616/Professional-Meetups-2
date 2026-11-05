@@ -404,3 +404,13 @@ Plan: `docs/plans/30-review-fixes-photos-sos-reviews.md`, prompts 30A-30E. Cover
 ## Round 13 — legal, code and design review (2026-11-05)
 
 Report: `docs/review-2026-11-05-legal-code-design.md`. #100-#121 confirmed fixed in code. New #122-#140, all **OPEN**: no real Terms/Privacy live (#122), no recorded assent (#123), report/block missing (#124, Apple 1.2), Terms gaps (#125), website claims untrue (#126), paywall links env-dependent (#127), web deletion page (#128), credits forfeiture warning (#129), names (#130), iOS privacy manifest (#131), credit x15 balances (#132), OTP budget lockout (#133), photo decode memory (#134), legal acceptance server-side (#135), per-meetup average (#136), location report limit (#137), guess budget target (#138), doc/format leftovers (#139), design and accessibility batch (#140).
+
+**Fixed in code on 2026-11-06, not yet deployed:** #132 (no balance impact: the one production wallet was topped up, runbook corrected), #133 (OTP budgets per caller plus a higher per-target cap of 20 sends and 50 failed guesses), #134 (2048 px limit, two decodes at once), #136 (per-meetup average hidden below 3 reviews), #137 (60 location reports a day). Design: filled red buttons, green status text, iOS swipe-back and reduced motion, button semantics, scrolling on the three fixed pages, 44 px buttons and Premium blue.
+
+**Still open from the design list:** Home stays non-lazy on purpose (a lazy list caused the scroll jump recorded in `home_page.dart`). Shared text styles not started (359 sizes, 31 values). `cancelled` text contrast, header semantics, `PrimaryButton` text scaling and `AppChip` outside the Home filter bar not changed.
+
+**Corrections to the review:** #139's `credits_120` figure is right (1800 total, 300 bonus), and the credits page grouping was already fixed in `c2a1aac`.
+
+**Added 2026-11-06, not yet deployed:** Home and Events filters. `GET /v1/meetups` and `GET /v1/meetups/mine` accept optional `from` and `to` (unix seconds), and `/mine` also accepts `intent`. A meetup matches when any part of its window is inside the range. Old apps send none of these and are unaffected. The backend must deploy before the app: on an older backend the date filters are ignored, so every date shows everything.
+
+**Changed on purpose:** Home now opens on the next 7 days. It showed the next 28 before, so meetups 8 to 28 days out appear only by picking that date.

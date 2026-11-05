@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -15,11 +16,11 @@ func TestMiddlewareReadsAndSanitisesHeaders(t *testing.T) {
 		version, platform string
 		want              Info
 	}{
-		{"1.4.0", "android", Info{"1.4.0", "android"}},
-		{"1.0.0+6", "IOS", Info{"1.0.0+6", "ios"}},
+		{"1.4.0", "android", Info{AppVersion: "1.4.0", Platform: "android"}},
+		{"1.0.0+6", "IOS", Info{AppVersion: "1.0.0+6", Platform: "ios"}},
 		{"", "", Info{}},
-		{"1.0.0; DROP TABLE", "android", Info{"", "android"}},
-		{"1.0.0", "windows-phone", Info{"1.0.0", ""}},
+		{"1.0.0; DROP TABLE", "android", Info{AppVersion: "", Platform: "android"}},
+		{"1.0.0", "windows-phone", Info{AppVersion: "1.0.0", Platform: ""}},
 	}
 	for _, tt := range tests {
 		var got Info
@@ -69,5 +70,20 @@ func TestServerInterceptorWithNoMetadataIsEmpty(t *testing.T) {
 	})
 	if got != (Info{}) {
 		t.Fatalf("got %+v, want empty", got)
+	}
+}
+
+// The requester is a hash: no address is carried, and anything else that
+// arrives in its place is dropped.
+func TestRequesterIsHashedAndSanitised(t *testing.T) {
+	got := From(WithRequester(context.Background(), "203.0.113.7")).Requester
+	if len(got) != 32 || strings.Contains(got, "203") {
+		t.Errorf("requester = %q, want a 32-character hash", got)
+	}
+	if other := From(WithRequester(context.Background(), "198.51.100.9")).Requester; other == got {
+		t.Error("two addresses gave the same requester")
+	}
+	if r := From(With(context.Background(), Info{Requester: "203.0.113.7"})).Requester; r != "" {
+		t.Errorf("a raw address survived as %q", r)
 	}
 }

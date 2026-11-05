@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator_platform_interface/geolocator_platform_interface.dart';
 
+import 'package:professional_connections_platform/core/widgets/flat_card.dart';
 import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/models/intent_type.dart';
 import 'package:professional_connections_platform/core/models/meetup.dart';
@@ -20,7 +21,7 @@ import 'package:professional_connections_platform/features/home/viewer_location_
 import 'package:professional_connections_platform/features/home/widgets/active_meetups_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/happening_soon_section.dart';
 import 'package:professional_connections_platform/features/home/widgets/meetup_card.dart';
-import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/meetup_date_filter_bar.dart';
 import 'package:professional_connections_platform/features/meetups/location_view_page.dart';
 import 'package:professional_connections_platform/features/meetups/meetup_detail_page.dart';
 import 'package:professional_connections_platform/features/verification/verification_checklist_page.dart';
@@ -40,7 +41,7 @@ import 'support/scripted_meetup_service.dart';
 /// file is the proof of that, not a rewrite. The two exceptions, both called
 /// out at their assertions:
 ///
-///   * The intent selector is Home's [IntentFilterBar] (with an "All"
+///   * The intent selector is Home's [MeetupDateFilterBar] (with an "All"
 ///     option) rather than the old page's own tab row, so the tests that
 ///     drove that row drive the chips instead.
 ///   * The list is nested inside Home's scrollable, so scroll-triggered
@@ -158,6 +159,33 @@ Future<void> _settlePastSkeletonHold(WidgetTester tester) async {
   await tester.pumpAndSettle();
   await tester.pump(const Duration(milliseconds: 1400));
   await tester.pumpAndSettle();
+}
+
+/// Opens the floating intent button and picks [intent].
+Future<void> _chooseIntent(WidgetTester tester, IntentType intent) async {
+  await tester.tap(find.byKey(const Key('intent-fab')));
+  await tester.pump(const Duration(milliseconds: 250));
+  await tester.tap(find.byKey(ValueKey('intent-${intent.name}')));
+}
+
+/// A week heading inside the list, as opposed to the This week chip above it.
+Finder _weekHeader(String label) => find.descendant(
+  of: find.byType(PaginatedMeetupList),
+  matching: find.text(label),
+);
+
+/// Home's default: today and the next six days, as a real range.
+void _expectNextSevenDays(ScriptedMeetupService service) {
+  final now = DateTime.now();
+  expect(service.lastListOpenMeetupsWithinDays, 0);
+  expect(
+    service.lastListOpenMeetupsFrom,
+    DateTime(now.year, now.month, now.day),
+  );
+  expect(
+    service.lastListOpenMeetupsTo,
+    DateTime(now.year, now.month, now.day + 7),
+  );
 }
 
 void main() {
@@ -449,7 +477,7 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text(IntentType.networking.label));
+      await _chooseIntent(tester, IntentType.networking);
       await tester.pumpAndSettle();
 
       expect(
@@ -566,7 +594,7 @@ void main() {
 
         expect(service.listOpenMeetupsCallCount, 1);
         expect(service.lastListOpenMeetupsIntent, isNull);
-        expect(service.lastListOpenMeetupsWithinDays, happeningSoonWithinDays);
+        _expectNextSevenDays(service);
       },
     );
 
@@ -580,11 +608,11 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text(IntentType.networking.label));
+        await _chooseIntent(tester, IntentType.networking);
         await tester.pumpAndSettle();
 
         expect(service.lastListOpenMeetupsIntent, IntentType.networking);
-        expect(service.lastListOpenMeetupsWithinDays, happeningSoonWithinDays);
+        _expectNextSevenDays(service);
         expect(service.listOpenMeetupsCallCount, 2);
       },
     );
@@ -602,7 +630,7 @@ void main() {
 
         expect(service.listOpenMeetupsCallCount, 1);
 
-        await tester.tap(find.text(IntentType.coffee.label));
+        await _chooseIntent(tester, IntentType.coffee);
         await tester.pumpAndSettle();
 
         expect(
@@ -664,7 +692,7 @@ void main() {
           // A rebuild (switching the browsed intent) must not re-trigger a
           // fresh location read/update — only mount and explicit
           // pull-to-refresh do.
-          await tester.tap(find.text(IntentType.networking.label));
+          await _chooseIntent(tester, IntentType.networking);
           await tester.pumpAndSettle();
 
           expect(auth.updateLastKnownLocationCallCount, 1);
@@ -1049,7 +1077,7 @@ void main() {
         );
         expect(service.listOpenMeetupsCursors.last, 'cursor-1');
         expect(service.lastListOpenMeetupsIntent, isNull);
-        expect(service.lastListOpenMeetupsWithinDays, happeningSoonWithinDays);
+        _expectNextSevenDays(service);
         expect(
           service.lastListOpenMeetupsViewerLat,
           quantiseViewerCoordinate(6.9271),
@@ -1072,14 +1100,14 @@ void main() {
         );
 
         await pumpHome(tester, service);
-        await tester.tap(find.text(IntentType.networking.label));
+        await _chooseIntent(tester, IntentType.networking);
         await _pumpAFew(tester);
 
         await scrollHomeToBottom(tester);
 
         expect(service.listOpenMeetupsCursors.last, 'cursor-1');
         expect(service.lastListOpenMeetupsIntent, IntentType.networking);
-        expect(service.lastListOpenMeetupsWithinDays, happeningSoonWithinDays);
+        _expectNextSevenDays(service);
       },
     );
 
@@ -1255,7 +1283,7 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('This week'), findsOneWidget);
+      expect(_weekHeader('This week'), findsOneWidget);
       expect(
         find.text('Next week'),
         findsOneWidget,
@@ -1279,7 +1307,7 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.text('This week'), findsOneWidget);
+      expect(_weekHeader('This week'), findsOneWidget);
       expect(find.text('Next week'), findsNothing);
     });
   });
@@ -1358,6 +1386,61 @@ void main() {
 
   /// The visible cue that a swap is underway.
   group('the loading cue while a filter is switching', () {
+    testWidgets('the skeleton card is the height of the real card', (
+      tester,
+    ) async {
+      double heightOf(Finder card) => tester.getSize(card).height;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              children: [
+                MeetupCard(
+                  meetup: _meetup(id: 'real'),
+                  onTap: () {},
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      final real = heightOf(find.byType(FlatCard));
+
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: MeetupsSkeleton())),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      final placeholder = heightOf(find.byType(FlatCard).first);
+
+      expect((real - placeholder).abs(), lessThan(4));
+    });
+
+    testWidgets('Today narrows the list to the viewer\'s own day', (
+      tester,
+    ) async {
+      _useTallViewport(tester);
+      final service = ScriptedMeetupService(
+        openMeetups: [_meetup(id: 'meetup-1')],
+      );
+      await tester.pumpWidget(_appWith(service, trustLevel: 2));
+      await tester.pumpAndSettle();
+      _expectNextSevenDays(service);
+
+      await tester.tap(find.byKey(const Key('date-today')));
+      await tester.pumpAndSettle();
+
+      final now = DateTime.now();
+      expect(
+        service.lastListOpenMeetupsFrom,
+        DateTime(now.year, now.month, now.day),
+      );
+      expect(
+        service.lastListOpenMeetupsTo,
+        DateTime(now.year, now.month, now.day + 1),
+      );
+    });
+
     testWidgets('the stale list dims, then comes back to full strength', (
       tester,
     ) async {
@@ -1380,7 +1463,7 @@ void main() {
 
       expect(opacity(), 1, reason: 'nothing is loading yet');
 
-      await tester.tap(find.text(IntentType.networking.label));
+      await _chooseIntent(tester, IntentType.networking);
       await tester.pump();
 
       expect(
@@ -1405,7 +1488,7 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text(IntentType.networking.label));
+        await _chooseIntent(tester, IntentType.networking);
         await tester.pump();
 
         // `.first` and an ancestor lookup: Flutter inserts IgnorePointers of
@@ -1440,11 +1523,11 @@ void main() {
       await tester.pumpWidget(_appWith(service, trustLevel: 2));
       await tester.pumpAndSettle();
 
-      expect(find.byType(IntentFilterBar), findsOneWidget);
+      expect(find.byType(MeetupDateFilterBar), findsOneWidget);
       expect(
         find.descendant(
           of: find.byType(HappeningSoonSection),
-          matching: find.byType(IntentFilterBar),
+          matching: find.byType(MeetupDateFilterBar),
         ),
         findsOneWidget,
         reason: 'it filters this list, so it lives with this list',
@@ -1462,7 +1545,7 @@ void main() {
         await tester.pumpAndSettle();
 
         final heading = tester.getTopLeft(find.text('Happening soon')).dy;
-        final chips = tester.getTopLeft(find.byType(IntentFilterBar)).dy;
+        final chips = tester.getTopLeft(find.byType(MeetupDateFilterBar)).dy;
         expect(chips, greaterThan(heading));
       },
     );
@@ -1486,7 +1569,7 @@ void main() {
           findsOneWidget,
         );
         expect(
-          find.byType(IntentFilterBar),
+          find.byType(MeetupDateFilterBar),
           findsOneWidget,
           reason:
               'rendering it only alongside a populated list would strand '
@@ -1503,7 +1586,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('No meetups near you this week'), findsOneWidget);
-      expect(find.byType(IntentFilterBar), findsOneWidget);
+      expect(find.byType(MeetupDateFilterBar), findsOneWidget);
     });
   });
 
@@ -1593,7 +1676,7 @@ void main() {
       final before = scrollable.position.pixels;
       expect(before, 120);
 
-      await tester.tap(find.text(IntentType.networking.label));
+      await _chooseIntent(tester, IntentType.networking);
       // One frame — the collapse happened immediately on tap.
       await tester.pump();
 
@@ -1619,7 +1702,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Grace Hopper'), findsOneWidget);
 
-        await tester.tap(find.text(IntentType.networking.label));
+        await _chooseIntent(tester, IntentType.networking);
         await tester.pump();
 
         expect(
@@ -1653,7 +1736,7 @@ void main() {
         await tester.pumpWidget(_appWith(service, trustLevel: 2));
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text(IntentType.networking.label));
+        await _chooseIntent(tester, IntentType.networking);
         await tester.pumpAndSettle();
 
         expect(find.byType(MeetupsSkeleton), findsNothing);
@@ -1678,7 +1761,7 @@ void main() {
       await tester.pumpWidget(_appWith(slowService, trustLevel: 2));
       await tester.pump();
 
-      await tester.tap(find.text(IntentType.networking.label));
+      await _chooseIntent(tester, IntentType.networking);
       await tester.pump();
 
       // Just after the tap: still the stale list, dimmed.
@@ -1717,7 +1800,7 @@ void main() {
         await tester.pumpWidget(_appWith(slowService, trustLevel: 2));
         await tester.pump();
 
-        await tester.tap(find.text(IntentType.networking.label));
+        await _chooseIntent(tester, IntentType.networking);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
 

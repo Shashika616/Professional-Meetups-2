@@ -224,7 +224,7 @@ class _MyMeetupTile extends StatelessWidget {
         meetup.myRequestStatus == MeetupRequestStatus.withdrawn) {
       return (label: 'Withdrawn', color: AppPalette.textSecondary);
     }
-    return (label: 'Completed', color: AppPalette.verified);
+    return (label: 'Completed', color: AppPalette.verifiedText);
   }
 
   @override
@@ -403,7 +403,7 @@ class _MyMeetupTile extends StatelessWidget {
     }
     final (label, color) = switch (status) {
       MeetupRequestStatus.pending => ('Request pending', AppPalette.gold),
-      MeetupRequestStatus.accepted => ('You\'re in', AppPalette.verified),
+      MeetupRequestStatus.accepted => ('You\'re in', AppPalette.verifiedText),
       // The requester's own list never says rejected or declined; both
       // outcomes read as timing, in the same muted tone.
       MeetupRequestStatus.rejected =>

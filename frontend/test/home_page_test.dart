@@ -47,6 +47,19 @@ void main() {
   });
 
   group('HomeHeader (frontend/PLAN.md Step 13)', () {
+    testWidgets('tapping the avatar opens the profile', (tester) async {
+      var opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: HomeHeader(userName: 'Ada', onOpenProfile: () => opened++),
+          ),
+        ),
+      );
+      await tester.tap(find.byKey(const Key('home-avatar')));
+      expect(opened, 1);
+    });
+
     testWidgets(
       'renders the profile photo via ProfessionalAvatar when imageUrl is provided',
       (tester) async {

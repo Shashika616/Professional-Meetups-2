@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:professional_connections_platform/core/models/intent_type.dart';
+import 'package:professional_connections_platform/core/models/meetup_date_filter.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 import 'package:professional_connections_platform/core/widgets/flat_card.dart';
-import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
+import 'package:professional_connections_platform/features/meetups/widgets/meetup_date_filter_bar.dart';
 
 /// Surfaces must be OPAQUE, in both themes.
 ///
@@ -98,17 +98,16 @@ void main() {
         },
       );
 
-      testWidgets('intent filter chips are opaque in both states', (
+      testWidgets('date filter chips are opaque in both states', (
         tester,
       ) async {
         AppPalette.setMode(mode);
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
-              body: IntentFilterBar(
-                selected: IntentType.coffee,
-                trustLevel: 4,
-                onSelect: (_) {},
+              body: MeetupDateFilterBar(
+                selected: MeetupDateFilter.today,
+                onChanged: (_) {},
               ),
             ),
           ),
@@ -116,7 +115,7 @@ void main() {
         await tester.pump();
 
         final containers = find.descendant(
-          of: find.byType(IntentFilterBar),
+          of: find.byType(MeetupDateFilterBar),
           matching: find.byType(Container),
         );
         expect(containers, findsWidgets);

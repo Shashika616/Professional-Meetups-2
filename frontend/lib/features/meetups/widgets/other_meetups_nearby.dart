@@ -70,6 +70,8 @@ class OtherMeetupsNearby extends ConsumerWidget {
       viewerLat: known.lat,
       viewerLng: known.lng,
       withinDays: happeningSoonWithinDays,
+      from: null,
+      to: null,
     );
     final page = ref.watch(openMeetupsProvider(key));
     // Whatever the async state, a value beats a spinner and a fallback
@@ -103,7 +105,7 @@ class OtherMeetupsNearby extends ConsumerWidget {
           const SizedBox(height: 4),
           SecondaryButton(
             label: 'See all nearby',
-            height: 40,
+            height: 44,
             onPressed: () => _browse(context, ref),
           ),
         ],
@@ -156,73 +158,77 @@ class _SuggestionRow extends StatelessWidget {
       child: FlatCard(
         radius: 18,
         padding: EdgeInsets.zero,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: AppPalette.brandGreen.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
+        child: Semantics(
+          container: true,
+          button: true,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: AppPalette.brandGreen.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: AppIcon(
+                      meetup.intent.iconPath,
+                      size: 20,
+                      color: AppPalette.brandGreen,
+                    ),
                   ),
-                  child: AppIcon(
-                    meetup.intent.iconPath,
-                    size: 20,
-                    color: AppPalette.brandGreen,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          meetup.intentLabel,
+                          style: TextStyle(
+                            fontSize: 10,
+                            letterSpacing: 0.3,
+                            fontWeight: FontWeight.w700,
+                            color: AppPalette.textSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          meetup.hostFullName ?? 'A host near you',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: AppPalette.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          place == null || place.isEmpty
+                              ? when
+                              : '$when at $place',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppPalette.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        meetup.intentLabel,
-                        style: TextStyle(
-                          fontSize: 10,
-                          letterSpacing: 0.3,
-                          fontWeight: FontWeight.w700,
-                          color: AppPalette.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        meetup.hostFullName ?? 'A host near you',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: AppPalette.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        place == null || place.isEmpty
-                            ? when
-                            : '$when at $place',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppPalette.textSecondary,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(width: 8),
+                  AppIcon(
+                    AppIcons.forward,
+                    size: 22,
+                    color: AppPalette.textSecondary,
                   ),
-                ),
-                const SizedBox(width: 8),
-                AppIcon(
-                  AppIcons.forward,
-                  size: 22,
-                  color: AppPalette.textSecondary,
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -296,7 +302,7 @@ class _Fallback extends StatelessWidget {
           const SizedBox(height: 12),
           SecondaryButton(
             label: 'Browse meetups',
-            height: 40,
+            height: 44,
             onPressed: onBrowse,
           ),
         ],

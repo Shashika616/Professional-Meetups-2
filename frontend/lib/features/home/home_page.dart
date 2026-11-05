@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:professional_connections_platform/features/meetups/widgets/intent_filter_fab.dart';
 import 'package:professional_connections_platform/core/widgets/brand_loader.dart';
 import 'package:professional_connections_platform/core/analytics/analytics.dart';
 import 'package:professional_connections_platform/core/analytics/event_names.g.dart';
@@ -19,7 +20,6 @@ import 'package:professional_connections_platform/features/home/widgets/happenin
 import 'package:professional_connections_platform/features/home/location_explanation_page.dart';
 import 'package:professional_connections_platform/features/home/viewer_location_provider.dart';
 import 'package:professional_connections_platform/features/home/widgets/home_header.dart';
-import 'package:professional_connections_platform/features/home/widgets/intent_filter_bar.dart';
 import 'package:professional_connections_platform/features/home/widgets/safety_tip_card.dart';
 import 'package:professional_connections_platform/features/meetups/schedule_flow.dart';
 import 'package:professional_connections_platform/features/verification/hosting_unlock_page.dart';
@@ -37,7 +37,7 @@ import 'package:professional_connections_platform/features/verification/verifica
 ///
 ///   * FIND MATCHES is REMOVED, not hidden — with browsing on this page
 ///     there is nowhere for it to navigate to. Its handler went with it.
-///   * The intent grid became a one-row [IntentFilterBar] with an "All"
+///   * The intent grid became a one-row filter (now [IntentFilterFab]) with an "All"
 ///     option, sitting directly above the list it filters.
 ///   * "Your Stats" (NetworkInsightsRow) is deleted outright.
 ///   * HOST YOUR OWN MEETUP is now the only bottom CTA and takes the full
@@ -146,6 +146,7 @@ class _HomePageState extends ConsumerState<HomePage>
 
     // Null = "All" (every intent). See homeIntentFilterProvider.
     final intentFilter = ref.watch(homeIntentFilterProvider);
+    final dateFilter = ref.watch(homeDateFilterProvider);
 
     // Same pattern ProfilePage uses — fullName/profilePhotoUrl come from the
     // cached session, "Member" is the fallback while loading or genuinely
@@ -251,90 +252,114 @@ class _HomePageState extends ConsumerState<HomePage>
               imageUrl: imageUrl,
               hasNewNotifications:
                   ref.watch(hasNewNotificationsProvider).value ?? false,
+              onOpenProfile: () =>
+                  ref.read(currentTabIndexProvider.notifier).state = 3,
             ),
             Divider(height: 1, thickness: 1, color: AppPalette.hairline),
             Expanded(
               // Pull-to-refresh for the whole page. Scoped to
               // activeMeetupsProvider plus every open-meetups instance —
               // the two things on this page backed by a network read.
-              child: BrandRefreshIndicator(
-                onRefresh: () async {
-                  // Two independent refreshes run together: the active
-                  // list, and a fresh position for the browse list (a pull
-                  // after moving across town should re-centre the radius).
-                  // Neither waits on, or is failed by, the other.
-                  //
-                  // The browse list is refetched ONCE: a moved position is
-                  // a new provider key and fetches on its own, so only an
-                  // unchanged one needs the explicit invalidation. The
-                  // position read is bounded by its own deadline.
-                  final location = ref.read(viewerLocationProvider.notifier);
-                  final before = ref.read(viewerLocationProvider);
-                  await Future.wait<void>([
-                    location.refresh().then((_) {
-                      final after = ref.read(viewerLocationProvider);
-                      if (after.lat == before.lat && after.lng == before.lng) {
-                        ref.invalidate(openMeetupsProvider);
-                      }
-                    }),
-                    // The awaited value is discarded on purpose: awaiting
-                    // is what makes RefreshIndicator hold its spinner until
-                    // the refetch lands; the data reaches the UI through
-                    // the provider's own watchers. A failure here is the
-                    // provider's error state, not the pull's.
-                    ref
-                        .refresh(activeMeetupsProvider.future)
-                        .then((_) {}, onError: (_) {}),
-                  ]);
-                },
-                // A SingleChildScrollView, NOT a ListView. Home is three
-                // sections, and a ListView lays them out lazily: scroll to
-                // the bottom and the ACTIVE MEETUPS section at the top
-                // leaves the keep-alive range and is disposed; scroll back
-                // up and it is rebuilt from scratch, its carousels and
-                // timers reset, and its real height differs from the
-                // estimate the viewport used while it was gone. Flutter
-                // corrects the scroll offset for that difference, which the
-                // user saw as the page jumping to the top halfway through
-                // the Happening Soon cards. Nothing on this page is long
-                // enough to need laziness; everything stays built.
-                child: SingleChildScrollView(
-                  controller: _scrollController,
-                  // A RefreshIndicator can only fire on an overscroll, and a
-                  // page shorter than its viewport does not scroll at all
-                  // under the default physics — so pull-to-refresh silently
-                  // did nothing whenever Home was short: a new account with
-                  // no active meetups and nothing nearby, or one whose
-                  // location is blocked. Exactly the state in which a user
-                  // is most likely to pull.
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: EdgeInsets.zero,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const SizedBox(height: 4),
-                      const ActiveMeetupsSection(),
-                      // The intent filter lives INSIDE this section now, not
-                      // at the top of the page. It only ever filtered this
-                      // list, so sitting above ActiveMeetupsSection — which
-                      // it does not filter — read as a page-wide control and
-                      // implied the active-meetups strip was being filtered
-                      // too.
-                      HappeningSoonSection(
-                        intent: intentFilter,
-                        trustLevel: trustLevel,
-                        onSelectIntent: onIntentSelected,
-                        // The bridge: this page scrolls, that section's list
-                        // does not, so the section watches this controller
-                        // to know when to fetch the next page.
-                        outerScrollController: _scrollController,
+              child: Stack(
+                children: [
+                  BrandRefreshIndicator(
+                    onRefresh: () async {
+                      // Two independent refreshes run together: the active
+                      // list, and a fresh position for the browse list (a pull
+                      // after moving across town should re-centre the radius).
+                      // Neither waits on, or is failed by, the other.
+                      //
+                      // The browse list is refetched ONCE: a moved position is
+                      // a new provider key and fetches on its own, so only an
+                      // unchanged one needs the explicit invalidation. The
+                      // position read is bounded by its own deadline.
+                      final location = ref.read(
+                        viewerLocationProvider.notifier,
+                      );
+                      final before = ref.read(viewerLocationProvider);
+                      await Future.wait<void>([
+                        location.refresh().then((_) {
+                          final after = ref.read(viewerLocationProvider);
+                          if (after.lat == before.lat &&
+                              after.lng == before.lng) {
+                            ref.invalidate(openMeetupsProvider);
+                          }
+                        }),
+                        // The awaited value is discarded on purpose: awaiting
+                        // is what makes RefreshIndicator hold its spinner until
+                        // the refetch lands; the data reaches the UI through
+                        // the provider's own watchers. A failure here is the
+                        // provider's error state, not the pull's.
+                        ref
+                            .refresh(activeMeetupsProvider.future)
+                            .then((_) {}, onError: (_) {}),
+                      ]);
+                    },
+                    // A SingleChildScrollView, NOT a ListView. Home is three
+                    // sections, and a ListView lays them out lazily: scroll to
+                    // the bottom and the ACTIVE MEETUPS section at the top
+                    // leaves the keep-alive range and is disposed; scroll back
+                    // up and it is rebuilt from scratch, its carousels and
+                    // timers reset, and its real height differs from the
+                    // estimate the viewport used while it was gone. Flutter
+                    // corrects the scroll offset for that difference, which the
+                    // user saw as the page jumping to the top halfway through
+                    // the Happening Soon cards. Nothing on this page is long
+                    // enough to need laziness; everything stays built.
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      // A RefreshIndicator can only fire on an overscroll, and a
+                      // page shorter than its viewport does not scroll at all
+                      // under the default physics — so pull-to-refresh silently
+                      // did nothing whenever Home was short: a new account with
+                      // no active meetups and nothing nearby, or one whose
+                      // location is blocked. Exactly the state in which a user
+                      // is most likely to pull.
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          const SizedBox(height: 4),
+                          const ActiveMeetupsSection(),
+                          // The intent filter lives INSIDE this section now, not
+                          // at the top of the page. It only ever filtered this
+                          // list, so sitting above ActiveMeetupsSection — which
+                          // it does not filter — read as a page-wide control and
+                          // implied the active-meetups strip was being filtered
+                          // too.
+                          HappeningSoonSection(
+                            intent: intentFilter,
+                            trustLevel: trustLevel,
+                            dateFilter: dateFilter,
+                            onSelectDate: (picked) =>
+                                ref
+                                        .read(homeDateFilterProvider.notifier)
+                                        .state =
+                                    picked,
+                            // The bridge: this page scrolls, that section's list
+                            // does not, so the section watches this controller
+                            // to know when to fetch the next page.
+                            outerScrollController: _scrollController,
+                          ),
+                          const SafetyTipCard(),
+                          // Clearance for the floating intent button, so it
+                          // never sits on the end of the page.
+                          const SizedBox(height: 80),
+                        ],
                       ),
-                      const SafetyTipCard(),
-                      // Clearance above the fixed CTA block below.
-                      const SizedBox(height: 16),
-                    ],
+                    ),
                   ),
-                ),
+                  Positioned(
+                    right: 16,
+                    bottom: 12,
+                    child: IntentFilterFab(
+                      selected: intentFilter,
+                      trustLevel: trustLevel,
+                      onSelect: onIntentSelected,
+                    ),
+                  ),
+                ],
               ),
             ),
             Padding(

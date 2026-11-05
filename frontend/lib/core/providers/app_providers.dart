@@ -1,3 +1,4 @@
+import 'package:professional_connections_platform/core/models/meetup_date_filter.dart';
 import 'package:professional_connections_platform/core/services/photo_picker.dart';
 import 'dart:async' show unawaited;
 
@@ -293,6 +294,11 @@ class _AuthBundle {
 /// a first-time user is best served by.
 final homeIntentFilterProvider = StateProvider<IntentType?>((ref) => null);
 
+/// Home's date filter. Opens on This week, the next 7 days.
+final homeDateFilterProvider = StateProvider<MeetupDateFilter>(
+  (ref) => MeetupDateFilter.thisWeek,
+);
+
 /// AppShell's bottom-nav tab index — a provider rather than AppShell's own
 /// local `setState` so a page can switch tabs too, not just the bottom nav
 /// bar itself.
@@ -316,7 +322,14 @@ final currentTabIndexProvider = StateProvider<int>((ref) => 0);
 final openMeetupsProvider = FutureProvider.autoDispose
     .family<
       PagedResult<Meetup>,
-      ({IntentType? intent, double viewerLat, double viewerLng, int withinDays})
+      ({
+        IntentType? intent,
+        double viewerLat,
+        double viewerLng,
+        int withinDays,
+        DateTime? from,
+        DateTime? to,
+      })
     >((ref, key) {
       return ref
           .watch(meetupServiceProvider)
@@ -325,6 +338,8 @@ final openMeetupsProvider = FutureProvider.autoDispose
             viewerLat: key.viewerLat,
             viewerLng: key.viewerLng,
             withinDays: key.withinDays,
+            from: key.from,
+            to: key.to,
           );
     });
 
@@ -371,6 +386,27 @@ final myMeetupsProvider =
         bool requestedHasMore,
       })
     >((ref) => ref.read(meetupServiceProvider).listMyMeetups());
+
+/// The Events lists with a filter on. Separate from [myMeetupsProvider] so the
+/// unfiltered list keeps working as it did, and tied to it so anything that
+/// refreshes that list refreshes this one too.
+final filteredMyMeetupsProvider = FutureProvider.autoDispose
+    .family<
+      ({
+        List<Meetup> hosted,
+        List<Meetup> requested,
+        String? hostedNextCursor,
+        bool hostedHasMore,
+        String? requestedNextCursor,
+        bool requestedHasMore,
+      }),
+      ({IntentType? intent, DateTime? from, DateTime? to})
+    >((ref, key) async {
+      await ref.watch(myMeetupsProvider.future);
+      return ref
+          .read(meetupServiceProvider)
+          .listMyMeetups(intent: key.intent, from: key.from, to: key.to);
+    });
 
 /// Meetups where the caller is host or an accepted participant, merged and
 /// server-sorted soonest-first (ADR-025 §2) — backs HomePage's "Active

@@ -90,6 +90,10 @@ func (s *service) ListOpenMeetups(ctx context.Context, req ListOpenMeetupsReques
 		return ListOpenMeetupsResult{}, fmt.Errorf("meetup: within_days must be between 0 and %d: %w", maxWithinDays, apperror.ErrInvalidInput)
 	}
 
+	if err := validateWindowFilter(req.WindowFrom, req.WindowTo); err != nil {
+		return ListOpenMeetupsResult{}, err
+	}
+
 	cursor, err := decodeCursor(req.Cursor)
 	if err != nil {
 		return ListOpenMeetupsResult{}, fmt.Errorf("meetup: invalid cursor: %w", apperror.ErrInvalidInput)
@@ -101,7 +105,7 @@ func (s *service) ListOpenMeetups(ctx context.Context, req ListOpenMeetupsReques
 		return ListOpenMeetupsResult{}, fmt.Errorf("meetup: %v: %w", err, apperror.ErrInvalidInput)
 	}
 
-	filter := repository.OpenMeetupFilter{WithinDays: req.WithinDays}
+	filter := repository.OpenMeetupFilter{WithinDays: req.WithinDays, WindowFrom: req.WindowFrom, WindowTo: req.WindowTo}
 	if req.Intent != nil {
 		intent := repository.Intent(*req.Intent)
 		filter.Intent = &intent
@@ -124,7 +128,28 @@ func (s *service) ListOpenMeetups(ctx context.Context, req ListOpenMeetupsReques
 	return ListOpenMeetupsResult{Meetups: out, NextCursor: encodeCursor(next)}, nil
 }
 
+// validateWindowFilter refuses a range that ends before it starts, which is a
+// client bug rather than an empty result.
+func validateWindowFilter(from, to *time.Time) error {
+	if from != nil && to != nil && !to.After(*from) {
+		return fmt.Errorf("meetup: the date range must end after it starts: %w", apperror.ErrInvalidInput)
+	}
+	return nil
+}
+
 func (s *service) ListMyMeetups(ctx context.Context, req ListMyMeetupsRequest) (ListMyMeetupsResult, error) {
+	if req.Intent != nil && !validIntent(*req.Intent) {
+		return ListMyMeetupsResult{}, fmt.Errorf("meetup: unrecognized intent: %w", apperror.ErrInvalidInput)
+	}
+	if err := validateWindowFilter(req.WindowFrom, req.WindowTo); err != nil {
+		return ListMyMeetupsResult{}, err
+	}
+	filter := repository.MeetupListFilter{WindowFrom: req.WindowFrom, WindowTo: req.WindowTo}
+	if req.Intent != nil {
+		intent := repository.Intent(*req.Intent)
+		filter.Intent = &intent
+	}
+
 	// Hosted and requested paginate independently — unrelated sets, separate
 	// cursors.
 	hostedCursor, err := decodeCursor(req.HostedCursor)
@@ -136,11 +161,11 @@ func (s *service) ListMyMeetups(ctx context.Context, req ListMyMeetupsRequest) (
 		return ListMyMeetupsResult{}, fmt.Errorf("meetup: invalid requested_cursor: %w", apperror.ErrInvalidInput)
 	}
 
-	hosted, hostedNext, err := s.meetups.ListByHost(ctx, req.UserID, hostedCursor, 0)
+	hosted, hostedNext, err := s.meetups.ListByHost(ctx, req.UserID, filter, hostedCursor, 0)
 	if err != nil {
 		return ListMyMeetupsResult{}, err
 	}
-	requested, requestedNext, err := s.meetups.ListRequestedByUser(ctx, req.UserID, requestedCursor, 0)
+	requested, requestedNext, err := s.meetups.ListRequestedByUser(ctx, req.UserID, filter, requestedCursor, 0)
 	if err != nil {
 		return ListMyMeetupsResult{}, err
 	}
@@ -162,11 +187,11 @@ func (s *service) ListMyMeetups(ctx context.Context, req ListMyMeetupsRequest) (
 // the decision of what counts as active stays entirely server-side (the
 // filter below); only the merge-and-sort happens in Go.
 func (s *service) ListActiveMeetups(ctx context.Context, userID string) ([]Meetup, error) {
-	hosted, _, err := s.meetups.ListByHost(ctx, userID, nil, 0)
+	hosted, _, err := s.meetups.ListByHost(ctx, userID, repository.MeetupListFilter{}, nil, 0)
 	if err != nil {
 		return nil, err
 	}
-	requested, _, err := s.meetups.ListRequestedByUser(ctx, userID, nil, 0)
+	requested, _, err := s.meetups.ListRequestedByUser(ctx, userID, repository.MeetupListFilter{}, nil, 0)
 	if err != nil {
 		return nil, err
 	}

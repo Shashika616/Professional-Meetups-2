@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
+import 'package:professional_connections_platform/core/utils/reduced_motion.dart';
 import 'package:professional_connections_platform/core/theme/app_palette.dart';
 
 /// The landing page's moving backdrop: columns of scene cards drifting
@@ -205,7 +206,7 @@ class _LandingCollageState extends State<LandingCollage>
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final reduceMotion = reducedMotion(context);
     if (reduceMotion && _ticker.isActive) {
       _ticker.stop();
     } else if (!reduceMotion && !_ticker.isActive) {

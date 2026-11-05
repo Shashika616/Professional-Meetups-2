@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"professional-meetups-monolith/backend/internal/modules/auth"
 	"professional-meetups-monolith/backend/internal/modules/auth/repository"
 	"professional-meetups-monolith/backend/internal/platform/apperror"
+	"professional-meetups-monolith/backend/internal/platform/clientinfo"
 )
 
 // skipCooldown deletes the pending code, which is all the one-minute
@@ -140,9 +142,9 @@ func TestACorrectCodeDoesNotCountAsAFailure_Integration(t *testing.T) {
 	}
 	var failed int
 	_ = h.pool.QueryRow(context.Background(),
-		`SELECT coalesce(sum(failed_guesses), 0) FROM auth.otp_budgets WHERE purpose = 'email_login'`).Scan(&failed)
+		`SELECT coalesce(max(failed_guesses), 0) FROM auth.otp_budgets WHERE purpose = 'email_login'`).Scan(&failed)
 	if failed != 1 {
-		t.Errorf("failed guesses recorded: %d, want 1", failed)
+		t.Errorf("failed guesses on a budget: %d, want 1: the correct code must be handed back to both", failed)
 	}
 }
 
@@ -276,5 +278,87 @@ func TestPhotoUploadsAreCappedPerHour_Integration(t *testing.T) {
 	_ = h.pool.QueryRow(ctx, `SELECT count(*) FROM auth.user_photos WHERE user_id = $1 AND bytes <= 102400 AND width = 320`, user.UserID).Scan(&rows)
 	if rows != 1 {
 		t.Errorf("%d photo rows, want the one", rows)
+	}
+}
+
+// #133: a stranger who knows someone's address spends only their own
+// allowance, so the owner can still sign in.
+func TestOTPBudget_AStrangerCannotLockSomeoneOut_Integration(t *testing.T) {
+	h := newHarness(t)
+	const address = "victim@example.com"
+	h.signUpByEmail(t, address)
+	attacker := clientinfo.WithRequester(context.Background(), "203.0.113.7")
+	owner := clientinfo.WithRequester(context.Background(), "198.51.100.9")
+	start := auth.StartVerificationRequest{Purpose: auth.VerificationPurposeEmailLogin, Target: address}
+	guess := func(ctx context.Context, code string) error {
+		_, err := h.svc.CompleteEmailLogin(ctx, auth.VerifyCodeRequest{
+			Purpose: auth.VerificationPurposeEmailLogin, Target: address, Code: code,
+		})
+		return err
+	}
+
+	for i := range 6 {
+		h.skipCooldown(t)
+		_, err := h.svc.StartEmailLogin(attacker, start)
+		if limited := errors.Is(err, apperror.ErrRateLimited); limited != (i == 5) {
+			t.Fatalf("send %d from the attacker: %v", i+1, err)
+		}
+	}
+	h.skipCooldown(t)
+	if _, err := h.svc.StartEmailLogin(owner, start); err != nil {
+		t.Fatalf("the owner could not get a code: %v", err)
+	}
+	for range 11 {
+		_ = guess(attacker, "000000")
+	}
+	if err := guess(attacker, h.emailer.lastCode()); !errors.Is(err, apperror.ErrRateLimited) {
+		t.Fatalf("the attacker's guess after ten failures: %v, want the daily limit", err)
+	}
+	// Wrong guesses still use up that one code, so the owner asks for another.
+	h.skipCooldown(t)
+	if _, err := h.svc.StartEmailLogin(owner, start); err != nil {
+		t.Fatalf("the owner could not get a new code: %v", err)
+	}
+	if err := guess(owner, h.emailer.lastCode()); err != nil {
+		t.Fatalf("the owner could not sign in: %v", err)
+	}
+}
+
+// #133: spreading requests over many callers still stops at the per-target
+// cap, which is what bounds guessing.
+func TestOTPBudget_ManyCallersStopAtTheTargetCap_Integration(t *testing.T) {
+	h := newHarness(t)
+	const address = "target@example.com"
+	h.signUpByEmail(t, address)
+	sent := 0
+	for i := range 25 {
+		h.skipCooldown(t)
+		ctx := clientinfo.WithRequester(context.Background(), fmt.Sprintf("203.0.113.%d", i))
+		if _, err := h.svc.StartEmailLogin(ctx, auth.StartVerificationRequest{
+			Purpose: auth.VerificationPurposeEmailLogin, Target: address,
+		}); err == nil {
+			sent++
+		}
+	}
+	if sent != 20 {
+		t.Errorf("%d codes sent to one address, want 20", sent)
+	}
+}
+
+// #137: the app reports about hourly, so a client that floods the endpoint is
+// refused rather than writing without limit.
+func TestLocationReportsAreCappedPerDay_Integration(t *testing.T) {
+	h := newHarness(t)
+	u := h.signUpByEmail(t, "mover@example.com")
+	refused := 0
+	for range 62 {
+		if err := h.svc.UpdateLastKnownLocation(context.Background(), auth.UpdateLastKnownLocationRequest{
+			UserID: u.UserID, Lat: 6.9, Lng: 79.9,
+		}); errors.Is(err, apperror.ErrRateLimited) {
+			refused++
+		}
+	}
+	if refused != 2 {
+		t.Errorf("%d of 62 reports refused, want 2", refused)
 	}
 }

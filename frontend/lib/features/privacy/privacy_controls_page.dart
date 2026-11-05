@@ -166,71 +166,76 @@ class _FactState extends State<_Fact> {
     return Column(
       children: [
         if (!widget.first) Divider(height: 1, color: AppPalette.hairline),
-        GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: () => setState(() => _open = !_open),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: AppPalette.tintedSurface(
-                          AppPalette.textPrimary.withValues(alpha: 0.05),
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: AppIcon(
-                        widget.icon,
-                        size: 18,
-                        color: AppPalette.candyBlue,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        widget.title,
-                        style: TextStyle(
-                          color: AppPalette.textPrimary,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    AnimatedRotation(
-                      turns: _open ? 0.25 : 0,
-                      duration: const Duration(milliseconds: 160),
-                      child: AppIcon(
-                        AppIcons.forward,
-                        size: 17,
-                        color: AppPalette.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 160),
-                  curve: Curves.easeOut,
-                  alignment: Alignment.topCenter,
-                  child: _open
-                      ? Padding(
-                          padding: const EdgeInsets.only(top: 10, left: 46),
-                          child: Text(
-                            widget.body,
-                            style: TextStyle(
-                              color: AppPalette.textSecondary,
-                              fontSize: 12.5,
-                              height: 1.45,
-                            ),
+        Semantics(
+          container: true,
+          button: true,
+          expanded: _open,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppPalette.tintedSurface(
+                            AppPalette.textPrimary.withValues(alpha: 0.05),
                           ),
-                        )
-                      : const SizedBox(width: double.infinity),
-                ),
-              ],
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: AppIcon(
+                          widget.icon,
+                          size: 18,
+                          color: AppPalette.candyBlue,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          widget.title,
+                          style: TextStyle(
+                            color: AppPalette.textPrimary,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      AnimatedRotation(
+                        turns: _open ? 0.25 : 0,
+                        duration: const Duration(milliseconds: 160),
+                        child: AppIcon(
+                          AppIcons.forward,
+                          size: 17,
+                          color: AppPalette.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeOut,
+                    alignment: Alignment.topCenter,
+                    child: _open
+                        ? Padding(
+                            padding: const EdgeInsets.only(top: 10, left: 46),
+                            child: Text(
+                              widget.body,
+                              style: TextStyle(
+                                color: AppPalette.textSecondary,
+                                fontSize: 12.5,
+                                height: 1.45,
+                              ),
+                            ),
+                          )
+                        : const SizedBox(width: double.infinity),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

@@ -19,6 +19,8 @@ package clientinfo
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"net/http"
 	"regexp"
 	"strings"
@@ -33,6 +35,7 @@ const (
 	HeaderPlatform     = "X-Platform"
 	metadataAppVersion = "x-app-version"
 	metadataPlatform   = "x-platform"
+	metadataRequester  = "x-requester"
 )
 
 // Info is one request's client build. Both fields are empty for a client
@@ -40,6 +43,9 @@ const (
 type Info struct {
 	AppVersion string
 	Platform   string
+	// Requester is a hash of the caller's address, set by the gateway. It
+	// tells one caller from another without the monolith holding an address.
+	Requester string
 }
 
 type ctxKey struct{}
@@ -47,6 +53,15 @@ type ctxKey struct{}
 // With returns ctx carrying info, after sanitising it.
 func With(ctx context.Context, info Info) context.Context {
 	return context.WithValue(ctx, ctxKey{}, sanitize(info))
+}
+
+// WithRequester returns ctx with the caller's address, hashed, added to its
+// Info.
+func WithRequester(ctx context.Context, address string) context.Context {
+	info := From(ctx)
+	sum := sha256.Sum256([]byte(address))
+	info.Requester = hex.EncodeToString(sum[:16])
+	return With(ctx, info)
 }
 
 // From returns the request's client build, or the zero Info.
@@ -60,6 +75,8 @@ func From(ctx context.Context) Info {
 // label could be abused with.
 var versionPattern = regexp.MustCompile(`^[0-9]{1,6}(\.[0-9]{1,6}){0,2}(\+[0-9A-Za-z.]{1,16})?$`)
 
+var requesterPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
+
 func sanitize(info Info) Info {
 	v := strings.TrimSpace(info.AppVersion)
 	if !versionPattern.MatchString(v) {
@@ -71,7 +88,11 @@ func sanitize(info Info) Info {
 	default:
 		p = ""
 	}
-	return Info{AppVersion: v, Platform: p}
+	r := info.Requester
+	if !requesterPattern.MatchString(r) {
+		r = ""
+	}
+	return Info{AppVersion: v, Platform: p, Requester: r}
 }
 
 // Middleware reads the two headers into the request context. Applied to the
@@ -97,6 +118,9 @@ func UnaryClientInterceptor() grpc.UnaryClientInterceptor {
 		if info.Platform != "" {
 			ctx = metadata.AppendToOutgoingContext(ctx, metadataPlatform, info.Platform)
 		}
+		if info.Requester != "" {
+			ctx = metadata.AppendToOutgoingContext(ctx, metadataRequester, info.Requester)
+		}
 		return invoker(ctx, method, req, reply, cc, opts...)
 	}
 }
@@ -112,7 +136,11 @@ func UnaryServerInterceptor() grpc.UnaryServerInterceptor {
 			}
 			return ""
 		}
-		ctx = With(ctx, Info{AppVersion: first(metadataAppVersion), Platform: first(metadataPlatform)})
+		ctx = With(ctx, Info{
+			AppVersion: first(metadataAppVersion),
+			Platform:   first(metadataPlatform),
+			Requester:  first(metadataRequester),
+		})
 		return handler(ctx, req)
 	}
 }

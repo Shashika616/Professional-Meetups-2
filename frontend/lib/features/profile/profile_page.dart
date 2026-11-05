@@ -368,38 +368,42 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
             const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onTap: () => _confirmSignOut(context, ref),
-                // Red, by the product owner's call. The screen set draws
-                // this one neutral and reserves red for Delete account; the
-                // decision here is that signing out should read as the hard
-                // stop on the screen. Keeping the glyph and the sentence
-                // case from the redesign, in the danger tone.
-                child: FlatCard(
-                  radius: 18,
-                  tint: AppPalette.danger.withValues(alpha: 0.08),
-                  border: AppPalette.danger.withValues(alpha: 0.3),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  child: Center(
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AppIcon(
-                          AppIcons.signOut,
-                          size: 17,
-                          color: AppPalette.danger,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Sign out',
-                          style: TextStyle(
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
+              child: Semantics(
+                container: true,
+                button: true,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _confirmSignOut(context, ref),
+                  // Red, by the product owner's call. The screen set draws
+                  // this one neutral and reserves red for Delete account; the
+                  // decision here is that signing out should read as the hard
+                  // stop on the screen. Keeping the glyph and the sentence
+                  // case from the redesign, in the danger tone.
+                  child: FlatCard(
+                    radius: 18,
+                    tint: AppPalette.danger.withValues(alpha: 0.08),
+                    border: AppPalette.danger.withValues(alpha: 0.3),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Center(
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          AppIcon(
+                            AppIcons.signOut,
+                            size: 17,
                             color: AppPalette.danger,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Text(
+                            'Sign out',
+                            style: TextStyle(
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppPalette.danger,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

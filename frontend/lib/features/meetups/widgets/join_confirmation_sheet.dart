@@ -97,7 +97,7 @@ class _JoinConfirmationSheetState
                     TextSpan(
                       text: meetup.intentLabel,
                       style: TextStyle(
-                        color: AppPalette.brandGreen,
+                        color: AppPalette.verifiedText,
                         fontSize: 13.5,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 0.3,
